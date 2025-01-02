@@ -23,6 +23,7 @@ namespace Codeji.CMS.Utility.Helpers
             var claims = new List<Claim>
             {
             new Claim(JwtRegisteredClaimNames.Sub, userId), // Subject
+            new Claim("user_id", userId),
             new Claim("company_id", companyId),
             // Add multiple roles as separate claims
         

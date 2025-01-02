@@ -1,6 +1,7 @@
 
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
+using Codeji.CMS.DTO.Employee;
 
 namespace Codeji.CMS.Services.Interface;
 
@@ -14,5 +15,5 @@ public interface IUserService
     Task<bool> IsEmailExist(string email);
     Task<bool> ResetPassword(string userId, string password,string oldPassword="");
     Task<string> GetVerificationToken(string email, string password);
-
+    Task<LoginUserViewModel> GetSignedUserDetails(string userId);
 }

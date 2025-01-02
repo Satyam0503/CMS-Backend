@@ -121,5 +121,19 @@ public class UserService : IUserService
         return string.Empty;
     }
 
+    public async Task<LoginUserViewModel> GetSignedUserDetails(string userId)
+    {
+        LoginUserViewModel returnModel = new LoginUserViewModel();
+        var user = await GetEmployeeById(userId);
+        if (user is null)
+            return null;
 
+        returnModel.UserId = user.UserId;
+        returnModel.Role = "admin";
+        returnModel.FirstName = user.FirstName;
+        returnModel.LastName = user.LastName;
+        returnModel.Permissions = [];
+        return returnModel;
+
+    }
 }

@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using AutoMapper;
+using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
@@ -92,6 +93,22 @@ namespace Codeji.CMS.API.Controllers
             return result;
         }
 
+        [HttpPost]
+        [Route("account/getUserByToken")]
+        [Authorize]
+        public async Task<Result<LoginUserViewModel>> getUserByToken()
+        {
+            var result = new Result<LoginUserViewModel>();
+            string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+            var user = await _userServices.GetSignedUserDetails(userId);
+            if (user!=null)
+            {
+                result.MethodResult = user;
+                return result;
+            }
+            result.Success = true;
+            return result;
+        }
         [HttpPost]
         [Route("applicant/applyJob")]
         [AllowAnonymous]
