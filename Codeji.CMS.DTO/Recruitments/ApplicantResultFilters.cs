@@ -1,0 +1,19 @@
+﻿using System;
+namespace Codeji.CMS.DTO.Recruitments
+{
+    public class ApplicantResultFilters
+    {
+        public ApplicantResultFilters()
+        {
+        }
+        public string Name { get; set; }
+        public DateTime? FilterFrom { get; set; }
+        public DateTime? FilterTo { get; set; }
+        public int[] Status { get; set; }
+        public int[] ActivityTypes { get; set; }
+        public string[] VacancyIds { get; set; }
+
+
+    }
+}
+

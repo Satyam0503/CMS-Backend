@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Remove="..\.editorconfig" />
+    <None Remove="Recruitments\" />
+    <None Remove="RolePermissions\" />
+    <None Remove="Employee\" />
+    <None Remove="Helpers\" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Recruitments\" />
+    <Folder Include="RolePermissions\" />
+    <Folder Include="Employee\" />
+    <Folder Include="Helpers\" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Codeji.CMS.Utility\Codeji.CMS.Utility.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,54 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 25.0.1706.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Codeji.CMS.API", "Codeji.CMS.API\Codeji.CMS.API.csproj", "{B86B2712-4496-4FEB-AAF6-8B657DE4B0CE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Codeji.CMS.Repository", "Codeji.CMS.Repository\Codeji.CMS.Repository.csproj", "{08DC4A03-BA00-4077-A820-0192ED225F30}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Codeji.CMS.Services", "Codeji.CMS.Services\Codeji.CMS.Services.csproj", "{8431F138-BB04-4864-9A42-4FED0A2C858B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Codeji.CMS.Utility", "Codeji.CMS.Utility\Codeji.CMS.Utility.csproj", "{E4C9384E-D563-49A3-AE25-17B8CEB6FB0E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Codeji.CMS.DTO", "Codeji.CMS.DTO\Codeji.CMS.DTO.csproj", "{BCBF78BC-B7F1-44B6-A8FE-DAD8789929FA}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{BBAF3FA2-4196-4404-A2FB-0F3C3CEB984F}"
+	ProjectSection(SolutionItems) = preProject
+		.editorconfig = .editorconfig
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B86B2712-4496-4FEB-AAF6-8B657DE4B0CE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B86B2712-4496-4FEB-AAF6-8B657DE4B0CE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B86B2712-4496-4FEB-AAF6-8B657DE4B0CE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B86B2712-4496-4FEB-AAF6-8B657DE4B0CE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{08DC4A03-BA00-4077-A820-0192ED225F30}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{08DC4A03-BA00-4077-A820-0192ED225F30}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{08DC4A03-BA00-4077-A820-0192ED225F30}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{08DC4A03-BA00-4077-A820-0192ED225F30}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8431F138-BB04-4864-9A42-4FED0A2C858B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8431F138-BB04-4864-9A42-4FED0A2C858B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8431F138-BB04-4864-9A42-4FED0A2C858B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8431F138-BB04-4864-9A42-4FED0A2C858B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E4C9384E-D563-49A3-AE25-17B8CEB6FB0E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E4C9384E-D563-49A3-AE25-17B8CEB6FB0E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E4C9384E-D563-49A3-AE25-17B8CEB6FB0E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E4C9384E-D563-49A3-AE25-17B8CEB6FB0E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BCBF78BC-B7F1-44B6-A8FE-DAD8789929FA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BCBF78BC-B7F1-44B6-A8FE-DAD8789929FA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BCBF78BC-B7F1-44B6-A8FE-DAD8789929FA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BCBF78BC-B7F1-44B6-A8FE-DAD8789929FA}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {65C4D587-564C-47FD-871C-4FB2316CFCDE}
+	EndGlobalSection
+EndGlobal
