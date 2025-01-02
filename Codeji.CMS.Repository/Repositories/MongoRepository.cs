@@ -90,7 +90,7 @@ namespace Codeji.CMS.GenericRepository
         }
         public async Task<TEntity?> FirstOrDefault(Expression<Func<TEntity, bool>> filter, bool WithDeletedObjects = false)
         {
-            TEntity? res = await GetQuery(filter, WithDeletedObjects).FirstOrDefaultAsync();
+            TEntity? res =  GetQuery(filter, WithDeletedObjects).FirstOrDefault();
             return res;
         }
         #region Create

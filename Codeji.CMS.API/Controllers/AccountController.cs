@@ -74,7 +74,7 @@ namespace Codeji.CMS.API.Controllers
         }
 
         [HttpPost]
-        [Route("login")]
+        [Route("account/login")]
         [AllowAnonymous]
         public async Task<Result> login([FromBody] LoginModel model)
         {

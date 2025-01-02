@@ -17,7 +17,7 @@ namespace Codeji.CMS.Utility.Helpers
             var key = Encoding.UTF8.GetBytes(jwtSettings["SecretKey"]);
             var issuer = jwtSettings["Issuer"];
             var audience = jwtSettings["Audience"];
-            var expiryDays = int.Parse(jwtSettings["ExpiryMinutes"]);
+            var expiryDays = int.Parse(jwtSettings["Expiry"]);
 
             // Define claims
             var claims = new List<Claim>

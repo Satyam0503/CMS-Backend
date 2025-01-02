@@ -24,7 +24,7 @@ builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
     builder
     .AllowCredentials()
     .WithOrigins(
-        ConfigManager.BaseUrl.TrimEnd('/'))
+        "localhost")
     .AllowAnyHeader()
     .AllowAnyMethod();
 }));
