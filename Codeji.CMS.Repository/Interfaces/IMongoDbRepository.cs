@@ -2,6 +2,7 @@ using Codeji.CMS.GenericRepository;
 using MongoDB.Driver;
 using Codeji.CMS.Domain.Models;
 using System.Linq.Expressions;
+using Codeji.CMS.Repository.Entities.RolePermissions;
 
 namespace Codeji.CMS.GenericRepository.Interfaces
 {
@@ -20,7 +21,7 @@ namespace Codeji.CMS.GenericRepository.Interfaces
         /// <param name="orderBy"></param>
         /// <param name="WithDeletedObjects"></param>
         /// <returns>It will return only query as queryable. here you can perform any operation at your method or bussiness logic, </returns>
-       IQueryable<TEntity> Get(Expression<Func<TEntity, bool>> filter = null, Func<IQueryable<TEntity>, IOrderedQueryable<TEntity>> orderBy = null, bool WithDeletedObjects = false);
+        IQueryable<TEntity> Get(Expression<Func<TEntity, bool>> filter = null, Func<IQueryable<TEntity>, IOrderedQueryable<TEntity>> orderBy = null, bool WithDeletedObjects = false);
         /// <summary>
         /// Get Data Enumerable List with filter. No support for  Single property get 
         /// </summary>
@@ -97,6 +98,7 @@ namespace Codeji.CMS.GenericRepository.Interfaces
         #region New methods
         Task<IEnumerable<TResult>> GetAggregateDataAsync<TResult>(
             Expression<Func<TEntity, bool>> filter = null, ProjectionDefinition<TEntity, TResult>? projection = null, bool WithDeletedObjects = false, bool? isAscending = null, string? orderedKey = null, int? skip = null, int? limit = null, string? hint = null);
+    
 
         #endregion
     }

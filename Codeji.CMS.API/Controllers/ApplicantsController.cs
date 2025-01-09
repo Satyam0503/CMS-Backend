@@ -33,7 +33,7 @@ namespace Codeji.CMS.API.Controllers
         public async Task<Result<ApplicantViewModel>> GetApplicantList(ApplicantResultFilters filters)
         {
             Result<ApplicantViewModel> result = new Result<ApplicantViewModel>();
-           var data= await _applicantsService.GetApplicantsList(filters);
+            var data = await _applicantsService.GetApplicantsList(filters);
             result.Success = data.Any();
             result.MethodResults = data;
             return result;
@@ -48,7 +48,7 @@ namespace Codeji.CMS.API.Controllers
         }
         [HttpPost]
         [Route("AddApplicant")]
-        [CustomAuthorize(Module ="Applicant",Role =["Create"])]
+        [CustomAuthorize(Module = "Applicant", Role = ["Create"])]
         public async Task<Result> AppApplicants([FromBody] ApplicantAddEditModel applicantAddModel)
         {
 

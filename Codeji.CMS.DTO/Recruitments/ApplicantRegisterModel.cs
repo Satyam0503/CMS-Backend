@@ -3,8 +3,8 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Codeji.CMS.DTO.Recruitments
 {
-	public class ApplicantRegisterModel
-	{
+    public class ApplicantRegisterModel
+    {
         public string ApplicantId { get; set; }
         public string CompnyId { get; set; }
         [RegularExpression("^[^=~<>;`%]*$", ErrorMessage = "One or more invalid characters")]
@@ -18,7 +18,7 @@ namespace Codeji.CMS.DTO.Recruitments
         [RegularExpression(@"^[6-9]\d{9}$", ErrorMessage = "Invalid Indian phone number.")]
         public required string Phone { get; set; }
         public string VacanyId { get; set; }
-        public decimal Exprience  { get; set; }
+        public decimal Exprience { get; set; }
 
     }
 }

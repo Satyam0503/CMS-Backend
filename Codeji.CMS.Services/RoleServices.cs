@@ -4,7 +4,6 @@ using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Employees;
-using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
@@ -19,7 +18,7 @@ using System.Reflection;
 using Module = Codeji.CMS.Repository.Entities.RolePermissions.Module;
 
 namespace Codeji.CMS.Services;
-    public class RoleBusiness : IRoleBusiness
+public class RoleServices : IRoleService
 {
     private readonly IMongoDbRepository<CompanyRole> _companyRoleRepository;
     private readonly IMongoDbRepository<RolePermission> _rolePermissionRepository;
@@ -30,7 +29,7 @@ namespace Codeji.CMS.Services;
     private readonly IMapper _mapper;
     private readonly IMiddlewareService _middleware;
 
-    public RoleBusiness(
+    public RoleServices(
         IMongoDbRepository<CompanyRole> companyRoleRepository,
         IMongoDbRepository<RolePermission> rolePermissionRepository,
         IMongoDbRepository<ModulePermission> modulePermissionRepository,
@@ -48,6 +47,30 @@ namespace Codeji.CMS.Services;
         _userRepository = userRepository;
         _mapper = mapper;
         _middleware = middleware;
+    }
+
+    //Add New Roles
+    public async Task<RoleModel> AddEditRoles(RoleModel roles)
+    {
+        if (string.IsNullOrEmpty(roles.CompanyRoleId))
+        {
+            var newRole = new CompanyRole()
+            {
+                Titles = roles.Titles,
+                Description = roles.Description,
+                CreatedDate = DateTime.UtcNow,
+            };
+            await _companyRoleRepository.AddOne(newRole);
+        }
+        else
+        {
+            var currentRole = _companyRoleRepository.FirstOrDefault(x => x.CompanyRoleId == roles.CompanyRoleId);
+            if (currentRole != null)
+            {
+
+            }
+        }
+        return roles;
     }
     //Get company's all roles
     public async Task<List<RoleModel>> GetRoles(string companyId)
@@ -211,32 +234,32 @@ namespace Codeji.CMS.Services;
         return moduleWithPermissionsModel;
     }
     //Get company's all roles
-    public async Task<List<RoleModel>> GetRolesWithPagination( int pageNo, int pageSize)
+    public async Task<List<RoleModel>> GetRolesWithPagination(int pageNo, int pageSize)
     {
         int skiprecords = (pageNo - 1) * pageSize;
         Expression<Func<CompanyRole, bool>> whereCondition = x => true;
-        List <CompanyRole> roles = (await _companyRoleRepository.GetAll()).ToList();
+        List<CompanyRole> roles = (await _companyRoleRepository.GetAll()).ToList();
         return await returnRolesList(roles);
     }
     //Delete role if no user exist with it
     public async Task<bool> CheckRoleDependancyForDeletion(string roleId)
     {
         bool result = false;
-        int count =  await _userRepository.Count(x => x.RoleId == roleId );
+        int count = await _userRepository.Count(x => x.RoleId == roleId);
         if (count > 0)
         {
             result = true;
         }
         else
         {
-           await DeleteRole( roleId);
+            await DeleteRole(roleId);
         }
         return result;
     }
     private async Task<bool> DeleteRole(string roleId)
     {
         bool result = false;
-        Expression<Func<CompanyRole, bool>> whereCondition = x =>  x.CompanyRoleId == roleId && !x.IsNotEditable;
+        Expression<Func<CompanyRole, bool>> whereCondition = x => x.CompanyRoleId == roleId && !x.IsNotEditable;
         CompanyRole Role = await _companyRoleRepository.FirstOrDefault(whereCondition);
         if (Role != null)
         {
@@ -249,7 +272,7 @@ namespace Codeji.CMS.Services;
     public async Task<List<string>> GetUsersByRole(string[] roleIds, string companyId)
     {
         Expression<Func<User, bool>> whereUserCondtion = x => roleIds.Contains(x.RoleId);
-        var users =  await _userRepository.Get(whereUserCondtion).Select(x=>x.UserId).ToListAsync();
+        var users = await _userRepository.Get(whereUserCondtion).Select(x => x.UserId).ToListAsync();
         return users;
     }
 
@@ -346,7 +369,7 @@ namespace Codeji.CMS.Services;
 
     //Verify Login User with role permissions
     #endregion
-    public async Task<bool> VerifyUserAccess(string module, string[] Role, string userId,string companyId, UserEditRoleCheckModel userForEdit =null)
+    public async Task<bool> VerifyUserAccess(string module, string[] Role, string userId, string companyId, UserEditRoleCheckModel userForEdit = null)
     {
         bool hasPermission = false;
         string[] modules = Array.Empty<string>();
@@ -357,7 +380,8 @@ namespace Codeji.CMS.Services;
                 return true;
         }
 
-        if (!string.IsNullOrEmpty(userId) && !string.IsNullOrEmpty(companyId) )
+        if (!string.IsNullOrEmpty(userId) && !string.IsNullOrEmpty(companyId))
+
         {
             UserModel user = _middleware.GetUserById(userId);
             List<ModuleWithPermissionsModel> modulePremissions = await GetRoleWithPermissions(user.RoleId, companyId);

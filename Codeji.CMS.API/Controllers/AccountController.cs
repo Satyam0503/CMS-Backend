@@ -5,6 +5,8 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.Recruitments;
+using Codeji.CMS.DTO.RequestModels.Company;
+using Codeji.CMS.Services;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.Helpers;
@@ -23,12 +25,14 @@ namespace Codeji.CMS.API.Controllers
         private readonly IAntiforgery _antiforgery;
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IUserService _userServices;
+        private readonly ICompanyService _companyService;
         private readonly IApplicantsService _applicantsServices;
         private readonly IMapper _mapper;
         public AccountController(IUserService userService,
             IAntiforgery antiforgery,
             IHttpContextAccessor httpContextAccessor,
             IApplicantsService applicantsServices,
+            ICompanyService companyService,
             IMapper mapper)
         {
             _antiforgery = antiforgery;
@@ -36,6 +40,7 @@ namespace Codeji.CMS.API.Controllers
             _userServices = userService;
             _applicantsServices = applicantsServices;
             _mapper = mapper;
+            _companyService = companyService;
         }
         /// This block contains pure anonymous API
         [HttpGet]
@@ -74,6 +79,22 @@ namespace Codeji.CMS.API.Controllers
             };
         }
 
+
+        //Registering Company
+        [HttpPost]
+        [Route("account/register")]
+        public async Task<Result> register([FromBody] CompanyRequestModel companyModel)
+        {
+            var result = await _companyService.Register(companyModel);
+            return new Result()
+            {
+                Success = true,
+                StatusCode = StatusCodes.Status200OK,
+            };
+        }
+
+
+
         [HttpPost]
         [Route("account/login")]
         [AllowAnonymous]
@@ -88,22 +109,23 @@ namespace Codeji.CMS.API.Controllers
                 result.Message = "Email or Password not matched.";
                 return result;
             }
-            result.Message =token ;
+            result.Message = token;
             result.Success = true;
             return result;
         }
 
         [HttpPost]
-        [Route("account/getUserByToken")]
+        [Route("account/getSignedUserDetails")]
         [Authorize]
         public async Task<Result<LoginUserViewModel>> getUserByToken()
         {
             var result = new Result<LoginUserViewModel>();
             string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
             var user = await _userServices.GetSignedUserDetails(userId);
-            if (user!=null)
+            if (user != null)
             {
                 result.MethodResult = user;
+
                 return result;
             }
             result.Success = true;

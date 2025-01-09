@@ -7,14 +7,15 @@ namespace Codeji.CMS.Services.Registration;
 
 public static class ServicesRegistration
 {
-  public static IServiceCollection AddBusinessServices(this IServiceCollection services)
-  {
-    //   services.AddSingleton<IColleagueBusiness, ColleagueBusiness>();
-    services.AddScoped<IMiddlewareService, MiddlewareService>();
+    public static IServiceCollection AddBusinessServices(this IServiceCollection services)
+    {
+        //   services.AddSingleton<IColleagueBusiness, ColleagueBusiness>();
+        services.AddScoped<IMiddlewareService, MiddlewareService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IApplicantsService, ApplicantServices>();
-        services.AddScoped<IRoleBusiness, RoleBusiness>();
+        services.AddScoped<IRoleService, RoleServices>();
+        services.AddScoped<ICompanyService, CompanyService>();
 
         return services;
-  }
+    }
 }

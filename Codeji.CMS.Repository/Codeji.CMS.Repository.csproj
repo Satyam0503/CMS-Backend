@@ -20,7 +20,6 @@
   <ItemGroup>
     <Folder Include="Entities\Recruitments\" />
     <Folder Include="Entities\RolePermissions\" />
-    <Folder Include="Entities\Employees\" />
     <Folder Include="Entities\Company\" />
     <Folder Include="Domain\Helpers\" />
   </ItemGroup>

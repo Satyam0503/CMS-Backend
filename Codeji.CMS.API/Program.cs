@@ -144,11 +144,11 @@ app.UseCors(corsName);
 
 // Serve static files
 app.UseStaticFiles();
-app.UseStaticFiles(new StaticFileOptions
-{
-    FileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), "Upload")),
-    RequestPath = new PathString("/fs")
-});
+//app.UseStaticFiles(new StaticFileOptions
+//{
+//    FileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), "Upload")),
+//    RequestPath = new PathString("/fs")
+//});
 
 app.UseHttpsRedirection();
 app.UseAuthentication();

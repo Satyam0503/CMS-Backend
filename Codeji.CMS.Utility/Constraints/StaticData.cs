@@ -4,9 +4,10 @@ using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.Utility.Constraints
 {
-    
 
-    public class EnumsBindList {
+
+    public class EnumsBindList
+    {
         public string Name { get; set; }
         public int Value { get; set; }
 

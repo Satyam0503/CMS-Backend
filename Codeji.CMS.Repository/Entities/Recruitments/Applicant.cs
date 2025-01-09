@@ -4,13 +4,13 @@ using MongoDB.Bson.Serialization.Attributes;
 
 namespace Codeji.CMS.Repository.Entities.Recruitments
 {
-	public class Applicant:BaseClass
-	{
+    public class Applicant : BaseClass
+    {
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
         public string ApplicantId { get; set; }
         public string FirstName { get; set; }
-        public  string LastName { get; set; }
-        public  string Email { get; set; }
+        public string LastName { get; set; }
+        public string Email { get; set; }
         public required string Phone { get; set; }
         public string VacanyId { get; set; }
         /// <summary>

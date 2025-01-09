@@ -6,11 +6,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 namespace Codeji.CMS.Utility.Helpers
 {
-	public static class AuthenticationHandler
-	{
+    public static class AuthenticationHandler
+    {
         public static string HashedPassword(string pass) => BCrypt.Net.BCrypt.HashPassword(pass);
-        public static bool VerifyPassword(string toMatch, string forMatch) =>  BCrypt.Net.BCrypt.Verify(toMatch, forMatch);
-        public static string GenerateJwtToken(string userId, string companyId,string roleId, List<string> userRole)
+        public static bool VerifyPassword(string toMatch, string forMatch) => BCrypt.Net.BCrypt.Verify(toMatch, forMatch);
+        public static string GenerateJwtToken(string userId, string companyId, string roleId, List<string> userRole)
         {
             // Retrieve JWT settings from configuration
             var jwtSettings = ConfigurationHelper.config.GetSection("jwt");
