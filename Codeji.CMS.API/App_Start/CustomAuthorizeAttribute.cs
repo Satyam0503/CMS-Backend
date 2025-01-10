@@ -13,7 +13,7 @@ namespace Codeji.CMS.API.App_Start
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
     public class CustomAuthorizeAttribute : AuthorizeAttribute, IAsyncAuthorizationFilter
     {
-        UserEditRoleCheckModel userForEdit; 
+        UserEditRoleCheckModel userForEdit;
         public CustomAuthorizeAttribute()
         {
             Module = string.Empty;
@@ -58,50 +58,50 @@ namespace Codeji.CMS.API.App_Start
         /// <param name="userForEdit"></param>
         /// <param name="filterContext"></param>
         /// <returns></returns>
-        private  async Task<bool> IsValidRole(AuthorizationFilterContext filterContext)
+        private async Task<bool> IsValidRole(AuthorizationFilterContext filterContext)
         {
             IHttpContextAccessor? _httpContextAccessor = filterContext.HttpContext.RequestServices.GetService(typeof(IHttpContextAccessor)) as IHttpContextAccessor;
-            IRoleBusiness? _roleBusiness = filterContext.HttpContext.RequestServices.GetService(typeof(IRoleBusiness)) as IRoleBusiness;
+            IRoleService? _roleBusiness = filterContext.HttpContext.RequestServices.GetService(typeof(IRoleService)) as IRoleService;
 
             string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
             string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
 
-            if ( _httpContextAccessor == null ||_roleBusiness==null)
+            if (_httpContextAccessor == null || _roleBusiness == null)
                 return false;
-           return await _roleBusiness.VerifyUserAccess(Module,Role,userId,companyId,userForEdit);
-           
+            return await _roleBusiness.VerifyUserAccess(Module, Role, userId, companyId, userForEdit);
+
         }
     }
-        public class UserRoleModel
+    public class UserRoleModel
+    {
+        public UserRoleModel()
         {
-            public UserRoleModel()
-            {
-                UserId = "";
-                RoleId = "";
-                CompanyId = "";
-            }
-            public string UserId { get; set; }
-            public string RoleId { get; set; }
-            public string CompanyId { get; set; }
+            UserId = "";
+            RoleId = "";
+            CompanyId = "";
         }
-        public class FilesExtensionsAttribute : Attribute, IAsyncActionFilter
+        public string UserId { get; set; }
+        public string RoleId { get; set; }
+        public string CompanyId { get; set; }
+    }
+    public class FilesExtensionsAttribute : Attribute, IAsyncActionFilter
+    {
+        private string[] _extensions;
+        public FilesExtensionsAttribute(string[] extensions) { _extensions = extensions; }
+        public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
         {
-            private string[] _extensions;
-            public FilesExtensionsAttribute(string[] extensions) { _extensions = extensions; }
-            public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+            IFormFile? file = context.HttpContext.Request.Form.Files.Count > 0 ? context.HttpContext.Request.Form.Files[0] : null;
+            if (file != null)
             {
-                IFormFile? file = context.HttpContext.Request.Form.Files.Count > 0 ? context.HttpContext.Request.Form.Files[0] : null;
-                if (file != null)
+                string extension = Path.GetExtension(file.FileName);
+                if (!_extensions.Contains(extension.ToLower()))
                 {
-                    string extension = Path.GetExtension(file.FileName);
-                    if (!_extensions.Contains(extension.ToLower()))
-                    {
-                        context.Result = new UnsupportedMediaTypeResult();
-                    }
-                    else { await next(); }
+                    context.Result = new UnsupportedMediaTypeResult();
                 }
                 else { await next(); }
             }
+            else { await next(); }
         }
-    
+    }
+
 }

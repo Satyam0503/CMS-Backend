@@ -24,7 +24,7 @@ builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
     builder
     .AllowCredentials()
     .WithOrigins(
-        "localhost")
+        "http://127.0.0.1:5173")
     .AllowAnyHeader()
     .AllowAnyMethod();
 }));
@@ -144,11 +144,11 @@ app.UseCors(corsName);
 
 // Serve static files
 app.UseStaticFiles();
-app.UseStaticFiles(new StaticFileOptions
-{
-    FileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), "Upload")),
-    RequestPath = new PathString("/fs")
-});
+//app.UseStaticFiles(new StaticFileOptions
+//{
+//    FileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), "Upload")),
+//    RequestPath = new PathString("/fs")
+//});
 
 app.UseHttpsRedirection();
 app.UseAuthentication();

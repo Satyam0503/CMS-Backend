@@ -28,7 +28,7 @@ namespace Codeji.CMS.API.App_Start
                 string requestPath = context?.Request.Path.Value ?? "";
                 bool isPartner = CurrentContext.IsPartnerAccount(_httpContextAccessor);
                 string[] excludedUrls = new string[] { "/notificationhub", "/GetAppVersion", "/antiforgerytoken" };
-                if (!isForDebug &&!isGetRequest && !context.User.Identity.IsAuthenticated)
+                if (!isForDebug && !isGetRequest && !context.User.Identity.IsAuthenticated)
                 {
                     string requestId = new Guid().ToString();
                     _antiforgery.ValidateRequestAsync(context).GetAwaiter().GetResult();
@@ -45,7 +45,7 @@ namespace Codeji.CMS.API.App_Start
                 }
                 context.Request.Headers.TryGetValue("AppVersion", out Microsoft.Extensions.Primitives.StringValues appVersion);
                 string appVersionStr = appVersion.FirstOrDefault()?.ToString().Trim() ?? "";
-                
+
                 string normalizedRequestPath = requestPath.TrimEnd('/');
 
                 if (!isForDebug && !excludedUrls.Any(requestPath.Contains) && (string.IsNullOrEmpty(appVersionStr) || string.IsNullOrWhiteSpace(appVersionStr) || (!string.IsNullOrEmpty(appVersionStr) && appVersionStr.ToLowerInvariant() != ConfigManager.App_Version.ToLower())))
@@ -71,7 +71,7 @@ namespace Codeji.CMS.API.App_Start
             {
                 throw;
             }
-            catch (Exception )
+            catch (Exception)
             {
                 throw;
             }

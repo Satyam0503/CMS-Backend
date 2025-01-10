@@ -19,7 +19,7 @@ namespace Codeji.CMS.GenericRepository
     {
         private IMongoCollection<TEntity> _dbSet = null;
         private readonly IHttpContextAccessor _httpContextAccessor;
-        // private IMongoDbContext _mongoDbContext;
+         //private IMongoDbContext _mongoDbContext;
         public MongoRepository(IMongoDbCacheService _cacheService, IHttpContextAccessor httpContextAccessor)
         {
             MongoDbContext _mongoDbContext = new MongoDbContext(_cacheService, typeof(TEntity).Name);
@@ -36,10 +36,10 @@ namespace Codeji.CMS.GenericRepository
         private string GetCompanyId()
         {
             var companyId = _httpContextAccessor.HttpContext?.Items["CompanyId"]?.ToString();
-            if (string.IsNullOrEmpty(companyId))
-            {
-                throw new UnauthorizedAccessException("CompanyId is not available in the current context.");
-            }
+            //if (string.IsNullOrEmpty(companyId))
+            //{
+            //    throw new UnauthorizedAccessException("CompanyId is not available in the current context.");
+            //}
             return companyId;
         }
 
@@ -47,11 +47,14 @@ namespace Codeji.CMS.GenericRepository
         {
             var companyId = GetCompanyId();
 
-            // Use reflection to set the CompanyId property dynamically
-            var companyIdProperty = typeof(TEntity).GetProperty("CompanyId", BindingFlags.Public | BindingFlags.Instance);
-            if (companyIdProperty != null && companyIdProperty.CanWrite)
+            if (!string.IsNullOrEmpty(companyId))
             {
-                companyIdProperty.SetValue(entity, companyId);
+                // Use reflection to set the CompanyId property dynamically
+                var companyIdProperty = typeof(TEntity).GetProperty("CompanyId", BindingFlags.Public | BindingFlags.Instance);
+                if (companyIdProperty != null && companyIdProperty.CanWrite)
+                {
+                    companyIdProperty.SetValue(entity, companyId);
+                }
             }
         }
         #endregion
@@ -65,7 +68,7 @@ namespace Codeji.CMS.GenericRepository
 
         public IQueryable<TEntity> Get(Expression<Func<TEntity, bool>> filter = null, Func<IQueryable<TEntity>, IOrderedQueryable<TEntity>> orderBy = null, bool WithDeletedObjects = false)
         {
-            IQueryable<TEntity> query =  GetQuery(filter, WithDeletedObjects);
+            IQueryable<TEntity> query = GetQuery(filter, WithDeletedObjects);
             if (orderBy != null)
                 return orderBy(query);
             return query.AsQueryable();
@@ -75,12 +78,12 @@ namespace Codeji.CMS.GenericRepository
         {
             whereCondition = whereCondition ?? (x => true);
             IQueryable<TEntity> query = _dbSet.AsQueryable().ApplyDefaultFilters(WithDeletedObjects, GetCompanyId()).Where(whereCondition);
-            return await Task.Run( ()=>query.AsEnumerable());
+            return await Task.Run(() => query.AsEnumerable());
 
         }
-        public async Task<int> Count(Expression<Func<TEntity, bool>> filter , bool WithDeletedObjects = false)
+        public async Task<int> Count(Expression<Func<TEntity, bool>> filter, bool WithDeletedObjects = false)
         {
-            int res =  await GetQuery(filter, WithDeletedObjects).CountAsync();
+            int res = await GetQuery(filter, WithDeletedObjects).CountAsync();
             return res;
         }
         public async Task<bool> Exist(Expression<Func<TEntity, bool>> filter, bool WithDeletedObjects = false)
@@ -90,16 +93,18 @@ namespace Codeji.CMS.GenericRepository
         }
         public async Task<TEntity?> FirstOrDefault(Expression<Func<TEntity, bool>> filter, bool WithDeletedObjects = false)
         {
-            TEntity? res =  GetQuery(filter, WithDeletedObjects).FirstOrDefault();
+            TEntity? res = GetQuery(filter, WithDeletedObjects).FirstOrDefault();
             return res;
         }
         #region Create
-        public async Task<Result> AddOne(TEntity item)
+        public async Task<Result>  AddOne(TEntity item)
         {
             Result res = new Result();
             try
             {
-                SetCompanyId(item);
+                
+                    SetCompanyId(item);
+               
                 IMongoCollection<TEntity> collection = _dbSet;
                 await collection.InsertOneAsync(item);
                 res.Success = true;
@@ -274,7 +279,7 @@ namespace Codeji.CMS.GenericRepository
                 {
                     defaultFilter = defaultFilter.And(filter);
                 }
-                
+
 
                 List<IPipelineStageDefinition> pipeline = new List<IPipelineStageDefinition>        {
                     PipelineStageDefinitionBuilder.Match(Builders<TEntity>.Filter.Where(defaultFilter))

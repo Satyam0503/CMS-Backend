@@ -28,15 +28,16 @@ public class UserService : IUserService
     {
         var employee = new User()
         {
-
+            UserId=user.UserId,
             FirstName = user.FirstName,
             LastName = user.LastName,
             Email = user.Email,
             RoleId = user.RoleId
-           
+
         };
 
-        await _employeeRepository.AddOne(employee);
+        await _employeeRepository.AddOne(employee );
+
         return new Result<UserModel>
         {
             MethodResult = user,
@@ -54,7 +55,7 @@ public class UserService : IUserService
             LastName = user.LastName,
             Email = user.Email,
             RoleId = user.RoleId
-            
+
         };
         Expression<Func<User, bool>> whereCondition = x => user.UserId == x.UserId;
         await _employeeRepository.Update(whereCondition, employee);
@@ -80,7 +81,6 @@ public class UserService : IUserService
         };
 
     }
-
     public async Task<List<UserModel>> GetAllEmployees()
     {
         var list = await _employeeRepository.GetAll();
@@ -92,13 +92,14 @@ public class UserService : IUserService
         return await _employeeRepository.Exist(x => x.Email.Equals(email));
     }
 
-    public async Task<bool> ResetPassword(string userId,string password, string oldPassword="")
+    public async Task<bool> ResetPassword(string userId, string password, string oldPassword = "")
     {
         var user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
         if (user is null)
             return false;
 
-        if (!string.IsNullOrEmpty(oldPassword)) {
+        if (!string.IsNullOrEmpty(oldPassword))
+        {
             if (!AuthenticationHandler.VerifyPassword(oldPassword, user.Password))
                 return false;
         }
@@ -106,20 +107,34 @@ public class UserService : IUserService
         user.Password = AuthenticationHandler.HashedPassword(password);
         user.UpdatedDate = DateTime.Now;
         Expression<Func<User, bool>> whereCondition = x => user.UserId == x.UserId;
-         await _employeeRepository.Update(whereCondition, user);
+        await _employeeRepository.Update(whereCondition, user);
         return true;
     }
     // Logic for Login User and Applicant by Email and Password
     public async Task<string> GetVerificationToken(string email, string password)
     {
-        var user = await _employeeRepository.FirstOrDefault(x => x.Email == email.ToLower());
-       if ( user !=null && AuthenticationHandler.VerifyPassword(password,user.Password))
+        var user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+        if (user != null && AuthenticationHandler.VerifyPassword(password, user.Password))
         {
-            var roles = new List<string>(){ "admin", "employee" };
-            return AuthenticationHandler.GenerateJwtToken(user.UserId,user.CompanyId,user.RoleId,roles);
+            var roles = new List<string>() { "admin", "employee" };
+            return AuthenticationHandler.GenerateJwtToken(user.UserId, user.CompanyId, user.RoleId, roles);
         }
         return string.Empty;
     }
 
+    public async Task<LoginUserViewModel> GetSignedUserDetails(string userId)
+    {
+        LoginUserViewModel returnModel = new LoginUserViewModel();
+        var user = await GetEmployeeById(userId);
+        if (user is null)
+            return null;
 
+        returnModel.UserId = user.UserId;
+        returnModel.Role = "admin";
+        returnModel.FirstName = user.FirstName;
+        returnModel.LastName = user.LastName;
+        returnModel.Permissions = [];
+        return returnModel;
+
+    }
 }

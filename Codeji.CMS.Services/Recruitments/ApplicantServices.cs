@@ -47,7 +47,7 @@ namespace Codeji.CMS.Services.Recruitments
             //to do improvement
             Applicant entity = await _applicantRepository.FirstOrDefault(x => model.ApplicantId == x.ApplicantId);
             entity.UpdatedBy = "";
-            entity.UpdatedDate =  DateTime.Now;
+            entity.UpdatedDate = DateTime.Now;
             entity.Exprience = model.Exprience;
             entity.VacanyId = model.VacanyId;
             entity.FirstName = model.FirstName;

@@ -2,7 +2,7 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using MongoDB.Bson.Serialization;
 
 namespace Codeji.CMS.Repository.Entities;
-public class BaseClass : ISupportAuditing,ISupportSoftDelete
+public class BaseClass : ISupportAuditing, ISupportSoftDelete
 {
 
     public string CompanyId { get; set; }

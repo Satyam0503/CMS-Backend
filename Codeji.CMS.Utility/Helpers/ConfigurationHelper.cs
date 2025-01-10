@@ -1,12 +1,12 @@
 using Microsoft.Extensions.Configuration;
 namespace Codeji.CMS.Utility.Helpers
 {
-  public class ConfigurationHelper
-  {
-    public static IConfiguration config;
-    public static void Initialize(IConfiguration Configuration)
+    public class ConfigurationHelper
     {
-      config = Configuration;
+        public static IConfiguration config;
+        public static void Initialize(IConfiguration Configuration)
+        {
+            config = Configuration;
+        }
     }
-  }
 }

@@ -20,10 +20,11 @@ public class UserController : BaseApiController
     }
     [Route("AddEditEmployees")]
     [HttpPost]
-    public async Task<Result<UserModel>> AddEditEmployees([FromBody] UserModel user)
+    public async Task<Result<UserModel>> AddEditEmployees(UserModel user)
     {
         return await _userService.AddEmployee(user);
     }
+
     [Route("GetAllEmployees")]
     [HttpGet]
     public async Task<Result<UserModel>> GetAllEmployees()
@@ -42,6 +43,18 @@ public class UserController : BaseApiController
         string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
         result.Success = await _userService.ResetPassword(userId, password, oldPassword);
         return result;
+    }
+
+    [Route("GetEmployeeById")]
+    [HttpPost]
+    public async Task<Result<UserModel>> GetEmployeeById(string id)
+    {
+        var result = await _userService.GetEmployeeById(id);
+        return new Result<UserModel>()
+        {
+            Success = true,
+            MethodResult = result
+        };
     }
 }
 

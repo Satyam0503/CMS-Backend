@@ -24,11 +24,16 @@ namespace Codeji.CMS.API.App_Start
 
                 if (jwtToken != null)
                 {
+
                     var companyId = jwtToken.Claims.FirstOrDefault(c => c.Type == "companyId")?.Value;
                     context.Items["CompanyId"] = companyId; // Store it in the HttpContext for use
                 }
             }
-            context.Items["CompanyId"] = "jay123";
+            //else
+            //{
+
+            //context.Items["CompanyId"] = "jay123";
+            //}
             await _next(context);
         }
     }

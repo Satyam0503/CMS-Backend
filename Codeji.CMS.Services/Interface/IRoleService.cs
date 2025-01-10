@@ -1,8 +1,11 @@
 ﻿using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.RolePermissions;
+using Codeji.CMS.Domain.Models;
 namespace Codeji.CMS.Services.Interface;
-public interface IRoleBusiness
-    {
+using Codeji.CMS.Repository.Entities.RolePermissions;
+public interface IRoleService
+{
+
     Task<List<RoleModel>> GetRoles(string companyId);
     Task<RoleModel> GetDefaultRole(string RoleName, string companyId, bool isRoleEditable);
     Task<RoleModel> GetRoleById(string roleId);
@@ -15,4 +18,5 @@ public interface IRoleBusiness
     Task<bool> CheckRoleDependancyForDeletion(string roleId);
     Task<List<string>> GetUsersByRole(string[] roleIds, string companyId);
     Task<bool> VerifyUserAccess(string module, string[] Role, string userId, string companyId, UserEditRoleCheckModel userForEdit = null);
+    Task<RoleModel> AddEditRoles(RoleModel roles);
 }

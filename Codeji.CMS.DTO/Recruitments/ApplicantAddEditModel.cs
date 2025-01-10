@@ -3,8 +3,8 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Codeji.CMS.DTO.Recruitments
 {
-	public class ApplicantAddEditModel
-	{
+    public class ApplicantAddEditModel
+    {
         public string ApplicantId { get; set; }
         public string CompnyId { get; set; }
         [RegularExpression("^[^=~<>;`%]*$", ErrorMessage = "One or more invalid characters")]

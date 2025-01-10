@@ -5,7 +5,7 @@ using MongoDB.Driver;
 
 namespace Codeji.CMS.GenericRepository.Repositories
 {
-  
+
     public interface IMongoDbCacheService
     {
         MongoDbSettings GetDatabaseSettings(string entityName);
@@ -26,7 +26,7 @@ namespace Codeji.CMS.GenericRepository.Repositories
                 var client = new MongoClient(setting.Connection);
                 var database = client.GetDatabase(setting.DatabaseName);
                 // Fetch and cache collection names
-                setting.Collections =  database.ListCollectionNamesAsync().Result.ToList();
+                setting.Collections = database.ListCollectionNamesAsync().Result.ToList();
                 _cache[setting.DatabaseName] = setting;
             }
         }

@@ -3,7 +3,7 @@ using Codeji.CMS.Utility;
 
 namespace Codeji.CMS.DTO.RolePermissions
 {
-	public class ModuleWithPermissionsModel
+    public class ModuleWithPermissionsModel
     {
         public string ModuleName { get; set; }
         public string ModuleConstant { get; set; }
@@ -18,7 +18,7 @@ namespace Codeji.CMS.DTO.RolePermissions
         public bool HasAccess { get; set; }
         public string PermissionConstant { get; set; }
     }
-    public class RoleWithModuleAndPermissions 
+    public class RoleWithModuleAndPermissions
     {
         public string RoleId { get; set; }
         public string RoleTitle { get; set; }

@@ -29,18 +29,18 @@ namespace Codeji.CMS.API.Controllers
         }
         [HttpPost]
         [Route("GetApplicantList")]
-        [CustomAuthorizeAttribute]
+        [CustomAuthorize(Module = "Applicant", Role = ["View"])]
         public async Task<Result<ApplicantViewModel>> GetApplicantList(ApplicantResultFilters filters)
         {
             Result<ApplicantViewModel> result = new Result<ApplicantViewModel>();
-           var data= await _applicantsService.GetApplicantsList(filters);
+            var data = await _applicantsService.GetApplicantsList(filters);
             result.Success = data.Any();
             result.MethodResults = data;
             return result;
         }
         [HttpGet]
         [Route("ApplicantById")]
-        [CustomAuthorizeAttribute]
+        [CustomAuthorize(Module = "Applicant", Role = ["View"])]
         public async Task<Result<ApplicantViewModel>> ApplicantById(string id)
         {
             Result<ApplicantViewModel> result = await _applicantsService.ApplicantById(id);
@@ -48,6 +48,7 @@ namespace Codeji.CMS.API.Controllers
         }
         [HttpPost]
         [Route("AddApplicant")]
+        [CustomAuthorize(Module = "Applicant", Role = ["Create"])]
         public async Task<Result> AppApplicants([FromBody] ApplicantAddEditModel applicantAddModel)
         {
 
@@ -63,6 +64,7 @@ namespace Codeji.CMS.API.Controllers
         }
         [HttpPost]
         [Route("EditApplicant")]
+        [CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
         public async Task<Result> EditApplicants([FromBody] ApplicantAddEditModel applicantEditModel)
         {
             Result result = new Result();
