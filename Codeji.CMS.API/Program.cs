@@ -32,7 +32,7 @@ builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
 // Swagger config
 builder.Services.AddSwaggerGen(option =>
 {
-    option.SwaggerDoc("V2", new OpenApiInfo { Title = "Amelio API", Version = "V2" });
+    option.SwaggerDoc("V2", new OpenApiInfo { Title = "Codeji Backend-Core API", Version = "V2" });
     option.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         In = ParameterLocation.Header,

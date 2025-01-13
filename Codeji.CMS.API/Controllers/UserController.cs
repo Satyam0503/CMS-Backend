@@ -2,7 +2,7 @@ using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.Services.Interface;
-using Microsoft.AspNetCore.Identity.Data;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Codeji.CMS.API.Controllers;
@@ -12,6 +12,7 @@ namespace Codeji.CMS.API.Controllers;
 public class UserController : BaseApiController
 {
     private readonly IUserService _userService;
+
     private readonly IHttpContextAccessor _httpContextAccessor;
     public UserController(IUserService userService, IHttpContextAccessor httpContextAccessor)
     {
@@ -20,17 +21,19 @@ public class UserController : BaseApiController
     }
     [Route("AddEditEmployees")]
     [HttpPost]
+    [Authorize]
     public async Task<Result<UserModel>> AddEditEmployees(UserModel user)
     {
-        return await _userService.AddEmployee(user);
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        return await _userService.AddEmployee(user, companyId);
     }
 
     [Route("GetAllEmployees")]
     [HttpGet]
     public async Task<Result<UserModel>> GetAllEmployees()
     {
-        var data = await _userService.GetAllEmployees();
-        var result = new Result<UserModel>();
+        List<UserModel> data = await _userService.GetAllEmployees();
+        Result<UserModel> result = new Result<UserModel>();
         result.Success = true;
         result.MethodResults = data.ToList();
         return result;
@@ -39,7 +42,7 @@ public class UserController : BaseApiController
     [HttpGet]
     public async Task<Result> ChangePassword(string password, string oldPassword)
     {
-        var result = new Result();
+        Result result = new Result();
         string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
         result.Success = await _userService.ResetPassword(userId, password, oldPassword);
         return result;
@@ -49,7 +52,7 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result<UserModel>> GetEmployeeById(string id)
     {
-        var result = await _userService.GetEmployeeById(id);
+        UserModel result = await _userService.GetEmployeeById(id);
         return new Result<UserModel>()
         {
             Success = true,

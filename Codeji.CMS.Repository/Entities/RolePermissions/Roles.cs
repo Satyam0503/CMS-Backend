@@ -2,10 +2,10 @@
 
 namespace Codeji.CMS.Repository.Entities.RolePermissions
 {
-    public class CompanyRole
+    public class Roles
     {
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
-        public string CompanyRoleId {  get; set; }
+        public string RolesId {  get; set; }
         public int RoleType { get; set; }
         public string CompanyId { get; set; }
         public string Titles { get; set; }

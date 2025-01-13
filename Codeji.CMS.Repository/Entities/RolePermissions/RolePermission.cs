@@ -6,7 +6,7 @@ namespace Codeji.CMS.Repository.Entities.RolePermissions
     {
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
         public string RolePermissionId { get; set; }
-        public string CompanyRoleId { get; set; }
+        public string RolesId { get; set; }
         public int ModulePermissionId { get; set; }
         public bool HasAccess { get; set; }
         public bool IsDefaultProfile { get; set; }

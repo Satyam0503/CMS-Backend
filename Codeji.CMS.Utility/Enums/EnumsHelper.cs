@@ -17,6 +17,12 @@ namespace Codeji.CMS.Utility.Enums
             Inactive = 2,
             Closed = 3
         }
+        public enum Roles
+        {
+            Administrator = 1,
+            HR=2,
+            Employee=3
+        }
     }
 }
 
