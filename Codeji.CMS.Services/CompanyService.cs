@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using AutoMapper;
+﻿using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.GenericRepository.Interfaces;
@@ -19,71 +14,65 @@ namespace Codeji.CMS.Services
     {
         private readonly IMongoDbRepository<Company> _companyRepo;
         private readonly IMongoDbRepository<User> _userRepo;
-        private readonly IMongoDbRepository<CompanyRole> _companyRoleRepo;
-        private IMapper _mapper;
+        private readonly IMongoDbRepository<Roles> _companyRoleRepo;
+        private readonly IMongoDbRepository<ModulePermission> _modulePermissisonRepo;
+        private readonly IMongoDbRepository<RolePermission> _rolePermissionRepo;
+        private readonly IMapper _mapper;
+        private readonly IRoleService _roleService;
 
-        public CompanyService(IMongoDbRepository<Company> companyRepo, IMapper mapper, IMongoDbRepository<User> userRepo, IMongoDbRepository<CompanyRole> companyRoleRepo)
+        public CompanyService(
+            IMongoDbRepository<Company> companyRepo,
+            IMapper mapper,
+            IMongoDbRepository<User> userRepo,
+            IMongoDbRepository<Roles> companyRoleRepo,
+            IMongoDbRepository<ModulePermission> modulePermissisonRepo,
+            IMongoDbRepository<RolePermission> rolePermissionRepo,
+            IRoleService roleService
+
+            )
         {
+            _roleService = roleService;
             _companyRepo = companyRepo;
             _userRepo = userRepo;
             _companyRoleRepo = companyRoleRepo;
+            _modulePermissisonRepo = modulePermissisonRepo;
+            _rolePermissionRepo = rolePermissionRepo;
             _mapper = mapper;
-            
+
         }
 
-        public bool AddDefaultRole(string companyId)
-        {
-            var roles = _companyRoleRepo.Get(x => x.IsDefault).ToList();
-            
-            foreach (var role in roles)
-            {
-                CompanyRole defaultData = new CompanyRole()
-                {
-                    RoleType = role.RoleType,
-                    Titles = role.Titles,
-                    Description = role.Description,
-                    IsNotEditable = role.IsNotEditable,
-                    IsDefault = false,
-                    HasAppAccess= role.HasAppAccess,
-                    CompanyId = companyId,
-                    CreatedDate = DateTime.UtcNow
-                };
-               _companyRoleRepo.AddOne(defaultData);
-            }
-            return true;
-        }
 
-        public async Task<CompanyRequestModel> Register(CompanyRequestModel companyModel)
+
+        public async Task<Result> Register(CompanyRequestModel companyModel)
         {
-            var company = new Company()
+            Result result = new Result();
+            string companyId = Guid.NewGuid().ToString();
+            //Add Default Role
+            List<Roles> adminRole = await _roleService.AddDefaultRole(companyId);
+            User user = new User()
             {
-                CompanyId = Guid.NewGuid().ToString(),
+                UserId = Guid.NewGuid().ToString(),
+                Email = companyModel.Email,
+                FirstName = companyModel.FirstName,
+                LastName = companyModel.LastName,
+                CompanyId = companyId,
+                Password = AuthenticationHandler.HashedPassword(companyModel.Password),
+                RoleId = adminRole.FirstOrDefault(x => x.RoleType == 1)?.RolesId ?? "",
+            };
+            //Company Creation and Addition in DB
+            Company company = new Company()
+            {
+                CompanyId = companyId,
+                PrimaryContact = user.UserId,
                 CompanyName = companyModel.CompanyName,
             };
 
             await _companyRepo.AddOne(company);
 
-            //Add Default Role
-            AddDefaultRole(company.CompanyId);
+            Result addedUser = await _userRepo.AddOne(user);
 
-
-            var adminRole = await _companyRoleRepo.FirstOrDefault(x => x.RoleType == 1 && x.CompanyId == company.CompanyId);
-            User user = new User()
-            {
-                Email = companyModel.Email,
-                FirstName = companyModel.FirstName,
-                LastName = companyModel.LastName,
-                CompanyId = company.CompanyId,
-                Password = AuthenticationHandler.HashedPassword(companyModel.Password),
-                RoleId = adminRole?.CompanyRoleId,
-            };
-            var addedUser = _userRepo.AddOne(user);
-
-            //company.PrimaryContact = "dfsdfsdf";
-            
-
-
-            return companyModel;
+            result.Success = true;
+            return result;
 
 
 

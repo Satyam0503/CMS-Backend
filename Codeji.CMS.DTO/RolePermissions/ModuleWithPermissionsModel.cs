@@ -1,5 +1,4 @@
-﻿using System;
-using Codeji.CMS.Utility;
+﻿using Codeji.CMS.Utility;
 
 namespace Codeji.CMS.DTO.RolePermissions
 {
@@ -14,7 +13,7 @@ namespace Codeji.CMS.DTO.RolePermissions
         public string PermissionName { get; set; }
         public string RolePermissionId { get; set; }
         public int ModulePermissionId { get; set; }
-        public string CompanyRoleId { get; set; }
+        public string RolesId { get; set; }
         public bool HasAccess { get; set; }
         public string PermissionConstant { get; set; }
     }
@@ -25,6 +24,7 @@ namespace Codeji.CMS.DTO.RolePermissions
         [Sanitize]
         public string Description { get; set; }
         public List<ModuleRolePermissionsModel> RolePermissions { get; set; }
+        public bool HasAppAccess { get; set; }
         public List<string> UserRoles { get; set; }
     }
 }

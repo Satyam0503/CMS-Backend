@@ -11,6 +11,6 @@ namespace Codeji.CMS.Repository.Entities.RolePermissions
         public int ModulePermissionId { get; set; }
         public int ModuleId { get; set; }
         public int PermissionId { get; set; }
-        public bool IsReadOnly { get; set; }
+        public bool HasModuleAccess { get; set; }
     }
 }

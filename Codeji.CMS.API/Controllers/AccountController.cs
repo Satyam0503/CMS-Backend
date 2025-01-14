@@ -6,7 +6,6 @@ using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels.Company;
-using Codeji.CMS.Services;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.Helpers;
@@ -85,7 +84,7 @@ namespace Codeji.CMS.API.Controllers
         [Route("account/register")]
         public async Task<Result> register([FromBody] CompanyRequestModel companyModel)
         {
-            var result = await _companyService.Register(companyModel);
+            Result result = await _companyService.Register(companyModel);
             return new Result()
             {
                 Success = true,
@@ -100,10 +99,10 @@ namespace Codeji.CMS.API.Controllers
         [AllowAnonymous]
         public async Task<Result> login([FromBody] LoginModel model)
         {
-            var result = new Result();
+            Result result = new Result();
             if (!ModelState.IsValid)
                 return result;
-            var token = await _userServices.GetVerificationToken(model.Email, model.Password);
+            string token = await _userServices.GetVerificationToken(model.Email, model.Password);
             if (string.IsNullOrEmpty(token))
             {
                 result.Message = "Email or Password not matched.";
@@ -119,9 +118,9 @@ namespace Codeji.CMS.API.Controllers
         [Authorize]
         public async Task<Result<LoginUserViewModel>> getUserByToken()
         {
-            var result = new Result<LoginUserViewModel>();
+            Result<LoginUserViewModel> result = new Result<LoginUserViewModel>();
             string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
-            var user = await _userServices.GetSignedUserDetails(userId);
+            LoginUserViewModel user = await _userServices.GetSignedUserDetails(userId);
             if (user != null)
             {
                 result.MethodResult = user;
@@ -131,6 +130,7 @@ namespace Codeji.CMS.API.Controllers
             result.Success = true;
             return result;
         }
+
         [HttpPost]
         [Route("applicant/applyJob")]
         [AllowAnonymous]
@@ -140,7 +140,7 @@ namespace Codeji.CMS.API.Controllers
             if (string.IsNullOrEmpty(applicantRegisterModel.Email))
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
             string? ApplicantId = await _applicantsServices.GetApplicantsEXistingId(applicantRegisterModel.Email, applicantRegisterModel.CompnyId);
-            var addEditApplicantModel = _mapper.Map<ApplicantAddEditModel>(applicantRegisterModel);
+            ApplicantAddEditModel addEditApplicantModel = _mapper.Map<ApplicantAddEditModel>(applicantRegisterModel);
             if (string.IsNullOrEmpty(ApplicantId))
                 result = await _applicantsServices.RegisterApplicants(addEditApplicantModel);
             else

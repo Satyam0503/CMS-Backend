@@ -1,42 +1,39 @@
-using System.Data;
 using System.Linq.Expressions;
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.GenericRepository.Interfaces;
-using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
-using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.Helpers;
-using Microsoft.AspNetCore.Http;
 
 namespace Codeji.CMS.Services;
 
 public class UserService : IUserService
 {
-    IMongoDbRepository<User> _employeeRepository;
-    IMapper _mapper;
+    readonly IMongoDbRepository<User> _employeeRepository;
+    readonly IMapper _mapper;
 
     public UserService(IMongoDbRepository<User> employeeRepository, IMapper mapper)
     {
         _employeeRepository = employeeRepository;
         _mapper = mapper;
     }
-    public async Task<Result<UserModel>> AddEmployee(UserModel user)
+    public async Task<Result<UserModel>> AddEmployee(UserModel user, string companyId)
     {
-        var employee = new User()
+
+        User employee = new User()
         {
-            UserId=user.UserId,
+            UserId = user.UserId,
+            CompanyId = companyId,
             FirstName = user.FirstName,
             LastName = user.LastName,
             Email = user.Email,
             RoleId = user.RoleId
-
         };
 
-        await _employeeRepository.AddOne(employee );
+        await _employeeRepository.AddOne(employee);
 
         return new Result<UserModel>
         {
@@ -48,7 +45,7 @@ public class UserService : IUserService
     }
     public async Task<Result<UserModel>> EditEmployee(UserModel user)
     {
-        var employee = new User()
+        User employee = new User()
         {
 
             FirstName = user.FirstName,
@@ -69,7 +66,7 @@ public class UserService : IUserService
     }
     public async Task<UserModel> GetEmployeeById(string id)
     {
-        var user = await _employeeRepository.FirstOrDefault(x => x.UserId == id);
+        User? user = await _employeeRepository.FirstOrDefault(x => x.UserId == id);
 
         return new UserModel()
         {
@@ -83,7 +80,7 @@ public class UserService : IUserService
     }
     public async Task<List<UserModel>> GetAllEmployees()
     {
-        var list = await _employeeRepository.GetAll();
+        IEnumerable<User> list = await _employeeRepository.GetAll();
         return _mapper.Map<List<UserModel>>(list);
 
     }
@@ -94,7 +91,7 @@ public class UserService : IUserService
 
     public async Task<bool> ResetPassword(string userId, string password, string oldPassword = "")
     {
-        var user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
+        User? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
         if (user is null)
             return false;
 
@@ -113,10 +110,10 @@ public class UserService : IUserService
     // Logic for Login User and Applicant by Email and Password
     public async Task<string> GetVerificationToken(string email, string password)
     {
-        var user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+        User? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
         if (user != null && AuthenticationHandler.VerifyPassword(password, user.Password))
         {
-            var roles = new List<string>() { "admin", "employee" };
+            List<string> roles = new List<string>() { "admin", "employee" };
             return AuthenticationHandler.GenerateJwtToken(user.UserId, user.CompanyId, user.RoleId, roles);
         }
         return string.Empty;
@@ -125,7 +122,7 @@ public class UserService : IUserService
     public async Task<LoginUserViewModel> GetSignedUserDetails(string userId)
     {
         LoginUserViewModel returnModel = new LoginUserViewModel();
-        var user = await GetEmployeeById(userId);
+        UserModel? user = await GetEmployeeById(userId);
         if (user is null)
             return null;
 
