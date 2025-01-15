@@ -15,6 +15,7 @@ public static class ServicesRegistration
         services.AddScoped<IApplicantsService, ApplicantServices>();
         services.AddScoped<IRoleService, RoleServices>();
         services.AddScoped<ICompanyService, CompanyService>();
+        services.AddScoped<IEmployeeService, EmployeeService>();
 
         return services;
     }

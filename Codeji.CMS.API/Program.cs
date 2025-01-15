@@ -14,7 +14,7 @@ using Microsoft.Extensions.Primitives;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container
 builder.Services.AddControllers();
@@ -125,7 +125,7 @@ builder.Services.AddSignalR(options =>
 builder.WebHost.UseIISIntegration();
 builder.Logging.AddConsole();
 // Build the application
-var app = builder.Build();
+WebApplication app = builder.Build();
 
 // Middleware pipeline
 app.UseMiddleware(typeof(ExceptionHandlingMiddleware));
@@ -143,12 +143,12 @@ if (Convert.ToBoolean(configuration.GetSection("AppSettings:isForDebug").Value))
 app.UseCors(corsName);
 
 // Serve static files
-app.UseStaticFiles();
-//app.UseStaticFiles(new StaticFileOptions
-//{
-//    FileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), "Upload")),
-//    RequestPath = new PathString("/fs")
-//});
+//app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), "Upload")),
+    RequestPath = new PathString("/fs")
+});
 
 app.UseHttpsRedirection();
 app.UseAuthentication();

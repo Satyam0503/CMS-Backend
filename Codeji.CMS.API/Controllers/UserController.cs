@@ -1,6 +1,7 @@
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
+using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.Services.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,12 +13,14 @@ namespace Codeji.CMS.API.Controllers;
 public class UserController : BaseApiController
 {
     private readonly IUserService _userService;
+    private readonly IEmployeeService _employeeService;
 
     private readonly IHttpContextAccessor _httpContextAccessor;
-    public UserController(IUserService userService, IHttpContextAccessor httpContextAccessor)
+    public UserController(IUserService userService, IHttpContextAccessor httpContextAccessor, IEmployeeService employeeService)
     {
         _userService = userService;
         _httpContextAccessor = httpContextAccessor;
+        _employeeService = employeeService;
     }
     [Route("AddEditEmployees")]
     [HttpPost]
@@ -59,6 +62,41 @@ public class UserController : BaseApiController
             MethodResult = result
         };
     }
+
+    //Employee Details APIs
+
+    [Route("AddEmployeeEducation")]
+    [HttpPost]
+    [Authorize]
+    public async Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        return await _employeeService.AddEmployeeEducation(educationDetails, userId, companyId);
+
+    }
+
+    [Route("AddEmployeeCertification")]
+    [HttpPost]
+    [Authorize]
+    public async Task<Result<EmployeeCertificationRequestModel>> AddEmployeeCertification(EmployeeCertificationRequestModel certificationDetails)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        return await _employeeService.AddEmployeeCertification(certificationDetails, userId, companyId);
+
+    }
+
+    //[Route("GetEmployeeEducationDetails")]
+    //[HttpPost]
+    //public async Task<Result<EmployeeEducationRequestModel>> GetEmployeeEducationDetails(string id)
+    //{
+    //    EmployeeEducationRequestModel result = await _employeeService.GetEmployeeEducationDetails(id);
+    //    return new Result<EmployeeEducationRequestModel>()
+    //    {
+    //        Success = true,
+    //        MethodResult = result
+    //    };
 }
 
 
