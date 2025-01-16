@@ -1,12 +1,11 @@
-﻿using System;
-namespace Codeji.CMS.DTO.Employee
+﻿namespace Codeji.CMS.DTO.Employee
 {
     public class LoginUserViewModel
     {
         public string UserId { get; set; }
         public string FirstName { get; set; }
         public string LastName { get; set; }
-        public string Fullname
+        public string FullName
         {
             get { return FirstName + " " + LastName; }
         }

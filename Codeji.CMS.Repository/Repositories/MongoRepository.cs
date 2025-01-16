@@ -1,25 +1,24 @@
-using Codeji.CMS.GenericRepository;
+using System.Data.Entity;
+using System.Linq.Expressions;
+using System.Reflection;
+using Codeji.CMS.Domain.Models;
+using Codeji.CMS.GenericRepository.Extensions;
+using Codeji.CMS.GenericRepository.Interfaces;
+using Codeji.CMS.GenericRepository.Repositories;
+using Codeji.CMS.GenericRepository.Services;
 using LinqKit;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
 using MongoDB.Driver.Linq;
-using Codeji.CMS.Domain.Models;
-using Codeji.CMS.GenericRepository.Extensions;
-using Codeji.CMS.GenericRepository.Interfaces;
-using Codeji.CMS.GenericRepository.Services;
-using System.Data.Entity;
-using System.Linq.Expressions;
 using Task = System.Threading.Tasks.Task;
-using Codeji.CMS.GenericRepository.Repositories;
-using System.Reflection;
 
 namespace Codeji.CMS.GenericRepository
 {
     public class MongoRepository<TEntity> : IMongoDbRepository<TEntity>
     {
-        private IMongoCollection<TEntity> _dbSet = null;
+        private readonly IMongoCollection<TEntity> _dbSet = null;
         private readonly IHttpContextAccessor _httpContextAccessor;
-         //private IMongoDbContext _mongoDbContext;
+        //private IMongoDbContext _mongoDbContext;
         public MongoRepository(IMongoDbCacheService _cacheService, IHttpContextAccessor httpContextAccessor)
         {
             MongoDbContext _mongoDbContext = new MongoDbContext(_cacheService, typeof(TEntity).Name);
@@ -35,7 +34,7 @@ namespace Codeji.CMS.GenericRepository
         #region getand set comapnyId
         private string GetCompanyId()
         {
-            var companyId = _httpContextAccessor.HttpContext?.Items["CompanyId"]?.ToString();
+            string? companyId = _httpContextAccessor.HttpContext?.Items["CompanyId"]?.ToString();
             //if (string.IsNullOrEmpty(companyId))
             //{
             //    throw new UnauthorizedAccessException("CompanyId is not available in the current context.");
@@ -45,12 +44,12 @@ namespace Codeji.CMS.GenericRepository
 
         private void SetCompanyId(TEntity entity)
         {
-            var companyId = GetCompanyId();
+            string companyId = GetCompanyId();
 
             if (!string.IsNullOrEmpty(companyId))
             {
                 // Use reflection to set the CompanyId property dynamically
-                var companyIdProperty = typeof(TEntity).GetProperty("CompanyId", BindingFlags.Public | BindingFlags.Instance);
+                PropertyInfo? companyIdProperty = typeof(TEntity).GetProperty("CompanyId", BindingFlags.Public | BindingFlags.Instance);
                 if (companyIdProperty != null && companyIdProperty.CanWrite)
                 {
                     companyIdProperty.SetValue(entity, companyId);
@@ -97,14 +96,14 @@ namespace Codeji.CMS.GenericRepository
             return res;
         }
         #region Create
-        public async Task<Result>  AddOne(TEntity item)
+        public async Task<Result> AddOne(TEntity item)
         {
             Result res = new Result();
             try
             {
-                
-                    SetCompanyId(item);
-               
+
+                SetCompanyId(item);
+
                 IMongoCollection<TEntity> collection = _dbSet;
                 await collection.InsertOneAsync(item);
                 res.Success = true;

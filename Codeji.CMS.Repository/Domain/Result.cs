@@ -4,13 +4,15 @@ namespace Codeji.CMS.Domain.Models
 {
     public class Result<T>
     {
+        public string UserId;
+
         public bool Success { get; set; }
         public string Message { get; set; }
         public int StatusCode { get; set; }
         public int TotalRecords { get; set; }
         public Result()
         {
-            Success = false;
+            Success = true;
             Message = "";
             StatusCode = StatusCodes.Status200OK;
             MethodResults = new List<T>();

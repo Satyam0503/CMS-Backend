@@ -2,7 +2,7 @@
 {
     public class EmployeeEducationRequestModel
     {
-        //public string UserId { get; set; }
+        public string UserId { get; set; }
 
         public string EducationTitle { get; set; }
         public string CollegeName { get; set; }

@@ -87,16 +87,33 @@ public class UserController : BaseApiController
 
     }
 
-    //[Route("GetEmployeeEducationDetails")]
-    //[HttpPost]
-    //public async Task<Result<EmployeeEducationRequestModel>> GetEmployeeEducationDetails(string id)
-    //{
-    //    EmployeeEducationRequestModel result = await _employeeService.GetEmployeeEducationDetails(id);
-    //    return new Result<EmployeeEducationRequestModel>()
-    //    {
-    //        Success = true,
-    //        MethodResult = result
-    //    };
+    [Route("GetEmployeeEducationDetails")]
+    [HttpPost]
+    [Authorize]
+    public async Task<Result<EmployeeEducationRequestModel>> GetEmployeeEducationDetails()
+    {
+        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        List<EmployeeEducationRequestModel> data = await _employeeService.GetEmployeeEducationDetails(userId);
+        Result<EmployeeEducationRequestModel> result = new Result<EmployeeEducationRequestModel>();
+        result.Success = true;
+        result.MethodResults = data.ToList();
+        return result;
+    }
+
+
+    [Route("GetEmployeeCertificationDetails")]
+    [HttpPost]
+    [Authorize]
+    public async Task<Result<EmployeeCertificationRequestModel>> GetEmployeeCertificationDetails()
+    {
+        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        List<EmployeeCertificationRequestModel> data = await _employeeService.GetEmployeeCertificationDetails(userId);
+        Result<EmployeeCertificationRequestModel> result = new Result<EmployeeCertificationRequestModel>();
+        result.Success = true;
+        result.MethodResults = data.ToList();
+        return result;
+    }
+
 }
 
 

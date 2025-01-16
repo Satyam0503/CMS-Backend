@@ -7,6 +7,8 @@ namespace Codeji.CMS.Services.Interface
     {
         Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId, string companyId);
         Task<Result<EmployeeCertificationRequestModel>> AddEmployeeCertification(EmployeeCertificationRequestModel cerificationDetails, string userId, string companyId);
-        //Task<Result<EmployeeEducationRequestModel>> GetEmployeeEducationDetails(string id);
+        Task<List<EmployeeEducationRequestModel>> GetEmployeeEducationDetails(string id);
+
+        Task<List<EmployeeCertificationRequestModel>> GetEmployeeCertificationDetails(string id);
     }
 }

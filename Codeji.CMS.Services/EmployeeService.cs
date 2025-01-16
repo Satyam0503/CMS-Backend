@@ -62,16 +62,16 @@ namespace Codeji.CMS.Services
             };
         }
 
-        //public async Task<Result<EmployeeEducationRequestModel>> GetEmployeeEducationDetails(string id)
-        //{
-        //    EducationDetails? education = await _educationDetailsRepo.FirstOrDefault(x => x.UserId == id);
-        //    return new EmployeeEducationRequestModel()
-        //    {
-        //        UserId = education.UserId,
-        //    };
-        //    {
+        public async Task<List<EmployeeEducationRequestModel>> GetEmployeeEducationDetails(string userId)
+        {
+            IEnumerable<EducationDetails> list = await _educationDetailsRepo.GetAll(x => x.UserId == userId);
+            return _mapper.Map<List<EmployeeEducationRequestModel>>(list);
+        }
 
-        //    };
-        //}
+        public async Task<List<EmployeeCertificationRequestModel>> GetEmployeeCertificationDetails(string userId)
+        {
+            IEnumerable<CertificationDetails> list = await _certificationDetailsRepo.GetAll(x => x.UserId == userId);
+            return _mapper.Map<List<EmployeeCertificationRequestModel>>(list);
+        }
     }
 }

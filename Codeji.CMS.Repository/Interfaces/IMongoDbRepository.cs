@@ -1,8 +1,6 @@
-using Codeji.CMS.GenericRepository;
-using MongoDB.Driver;
-using Codeji.CMS.Domain.Models;
 using System.Linq.Expressions;
-using Codeji.CMS.Repository.Entities.RolePermissions;
+using Codeji.CMS.Domain.Models;
+using MongoDB.Driver;
 
 namespace Codeji.CMS.GenericRepository.Interfaces
 {
@@ -98,7 +96,7 @@ namespace Codeji.CMS.GenericRepository.Interfaces
         #region New methods
         Task<IEnumerable<TResult>> GetAggregateDataAsync<TResult>(
             Expression<Func<TEntity, bool>> filter = null, ProjectionDefinition<TEntity, TResult>? projection = null, bool WithDeletedObjects = false, bool? isAscending = null, string? orderedKey = null, int? skip = null, int? limit = null, string? hint = null);
-    
+
 
         #endregion
     }
