@@ -102,7 +102,14 @@ public class UserService : IUserService
     }
     public async Task<bool> IsEmailExist(string email)
     {
-        return await _employeeRepository.Exist(x => x.Email.Equals(email));
+        //return await _employeeRepository.Exist(x => x.Email.Equals(email));
+        User? user = await _employeeRepository.FirstOrDefault(x => x.Email == email);
+        if (user is null)
+        {
+            return false;
+        }
+        return true;
+
     }
 
     public async Task<bool> ResetPassword(string userId, string password, string oldPassword = "")

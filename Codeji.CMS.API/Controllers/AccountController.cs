@@ -84,6 +84,16 @@ namespace Codeji.CMS.API.Controllers
         [Route("account/register")]
         public async Task<Result> register([FromBody] CompanyRequestModel companyModel)
         {
+            //Validating Company Registration
+            bool isEmailExist = await _userServices.IsEmailExist(companyModel.Email);
+            if (isEmailExist)
+            {
+                return new Result()
+                {
+                    Message = "Company Already Exist",
+                    StatusCode = StatusCodes.Status406NotAcceptable
+                };
+            }
             Result result = await _companyService.Register(companyModel);
             return new Result()
             {
