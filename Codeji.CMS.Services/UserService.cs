@@ -13,11 +13,13 @@ namespace Codeji.CMS.Services;
 public class UserService : IUserService
 {
     readonly IMongoDbRepository<User> _employeeRepository;
+    readonly IMongoDbRepository<EducationDetails> _educationRepo;
     readonly IMapper _mapper;
 
-    public UserService(IMongoDbRepository<User> employeeRepository, IMapper mapper)
+    public UserService(IMongoDbRepository<User> employeeRepository, IMapper mapper, IMongoDbRepository<EducationDetails> educationRepo)
     {
         _employeeRepository = employeeRepository;
+        _educationRepo = educationRepo;
         _mapper = mapper;
     }
     public async Task<Result<UserModel>> AddEmployee(UserModel user, string companyId)
@@ -30,7 +32,21 @@ public class UserService : IUserService
             FirstName = user.FirstName,
             LastName = user.LastName,
             Email = user.Email,
-            RoleId = user.RoleId
+            Password = user.Password,
+            RoleId = user.RoleId,
+            Gender = user.Gender,
+            EmployeeId = user.EmployeeId,
+            DateOfBirth = user.DateOfBirth,
+            Department = user.Department,
+            ReportingManager = user.ReportingManager,
+            TeamLead = user.TeamLead,
+            PhoneNumber = user.PhoneNumber,
+            BloodGroup = user.BloodGroup,
+            PersonalEmail = user.PersonalEmail,
+            EmergencyContact = user.EmergencyContact,
+            DateOfJoining = user.DateOfJoining,
+            Status = true,
+            Address = user.Address
         };
 
         await _employeeRepository.AddOne(employee);
@@ -86,7 +102,14 @@ public class UserService : IUserService
     }
     public async Task<bool> IsEmailExist(string email)
     {
-        return await _employeeRepository.Exist(x => x.Email.Equals(email));
+        //return await _employeeRepository.Exist(x => x.Email.Equals(email));
+        User? user = await _employeeRepository.FirstOrDefault(x => x.Email == email);
+        if (user is null)
+        {
+            return false;
+        }
+        return true;
+
     }
 
     public async Task<bool> ResetPassword(string userId, string password, string oldPassword = "")
@@ -124,8 +147,9 @@ public class UserService : IUserService
         LoginUserViewModel returnModel = new LoginUserViewModel();
         UserModel? user = await GetEmployeeById(userId);
         if (user is null)
+        {
             return null;
-
+        }
         returnModel.UserId = user.UserId;
         returnModel.Role = "admin";
         returnModel.FirstName = user.FirstName;

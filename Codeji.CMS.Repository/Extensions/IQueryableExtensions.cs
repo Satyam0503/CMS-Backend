@@ -1,6 +1,6 @@
+using Codeji.CMS.GenericRepository.Interfaces;
 using LinqKit;
 using MongoDB.Driver.Linq;
-using Codeji.CMS.GenericRepository.Interfaces;
 
 namespace Codeji.CMS.GenericRepository.Extensions
 {
