@@ -27,15 +27,25 @@ public class UserController : BaseApiController
     [Authorize]
     public async Task<Result<UserModel>> AddEditEmployees(UserModel user)
     {
+        bool isEmailExist = await _userService.IsEmailExist(user.Email);
+        if (isEmailExist)
+        {
+            return new Result<UserModel>
+            {
+                Message = "User Already Exist"
+            };
+        }
         string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
         return await _userService.AddEmployee(user, companyId);
     }
 
     [Route("GetAllEmployees")]
     [HttpGet]
+    [Authorize]
     public async Task<Result<UserModel>> GetAllEmployees()
     {
-        List<UserModel> data = await _userService.GetAllEmployees();
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        List<UserModel> data = await _userService.GetAllEmployees(companyId);
         Result<UserModel> result = new Result<UserModel>();
         result.Success = true;
         result.MethodResults = data.ToList();

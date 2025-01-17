@@ -11,7 +11,7 @@ public interface IUserService
     Task<Result<UserModel>> EditEmployee(UserModel user);
 
     Task<UserModel> GetEmployeeById(string id);
-    Task<List<UserModel>> GetAllEmployees();
+    Task<List<UserModel>> GetAllEmployees(string companyId);
     Task<bool> IsEmailExist(string email);
     Task<bool> ResetPassword(string userId, string password, string oldPassword = "");
     Task<string> GetVerificationToken(string email, string password);

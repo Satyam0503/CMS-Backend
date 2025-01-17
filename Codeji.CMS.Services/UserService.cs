@@ -98,9 +98,9 @@ public class UserService : IUserService
         };
 
     }
-    public async Task<List<UserModel>> GetAllEmployees()
+    public async Task<List<UserModel>> GetAllEmployees(string companyId)
     {
-        IEnumerable<User> list = await _employeeRepository.GetAll();
+        IEnumerable<User> list = await _employeeRepository.GetAll(x => x.CompanyId == companyId);
         return _mapper.Map<List<UserModel>>(list);
 
     }
