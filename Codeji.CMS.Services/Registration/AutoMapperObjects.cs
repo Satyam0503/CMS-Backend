@@ -2,8 +2,10 @@
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
+using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.RolePermissions;
 
 namespace Codeji.CMS.Services.Registration
 {
@@ -17,6 +19,7 @@ namespace Codeji.CMS.Services.Registration
             CreateMap<User, CompanyRequestModel>().ReverseMap();
             CreateMap<EducationDetails, EmployeeEducationRequestModel>().ReverseMap();
             CreateMap<CertificationDetails, EmployeeCertificationRequestModel>().ReverseMap();
+            CreateMap<Roles, RoleModel>().ReverseMap();
 
         }
 

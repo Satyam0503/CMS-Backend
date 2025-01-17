@@ -130,7 +130,8 @@ namespace Codeji.CMS.API.Controllers
         {
             Result<LoginUserViewModel> result = new Result<LoginUserViewModel>();
             string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
-            LoginUserViewModel user = await _userServices.GetSignedUserDetails(userId);
+            string roleId = CurrentContext.CurrentUserRoleId(_httpContextAccessor);
+            LoginUserViewModel user = await _userServices.GetSignedUserDetails(userId, roleId);
             if (user != null)
             {
                 result.MethodResult = user;

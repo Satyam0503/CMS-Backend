@@ -15,5 +15,5 @@ public interface IUserService
     Task<bool> IsEmailExist(string email);
     Task<bool> ResetPassword(string userId, string password, string oldPassword = "");
     Task<string> GetVerificationToken(string email, string password);
-    Task<LoginUserViewModel> GetSignedUserDetails(string userId);
+    Task<LoginUserViewModel> GetSignedUserDetails(string userId, string companyId);
 }

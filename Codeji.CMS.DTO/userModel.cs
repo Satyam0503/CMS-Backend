@@ -22,5 +22,7 @@ public class UserModel
     public string? EmergencyContact { get; set; }
     public string? DateOfJoining { get; set; }
     public bool? Status { get; set; }
+    public bool? IsEmailVerified { get; set; }
+
     public string? Address { get; set; }
 }

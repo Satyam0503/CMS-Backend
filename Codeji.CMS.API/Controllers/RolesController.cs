@@ -1,15 +1,9 @@
-﻿using Codeji.CMS.Domain.Models;
-using System.Net;
+﻿using Codeji.CMS.API.App_Start;
+using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.Services.Interface;
-using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Codeji.CMS.API.App_Start;
-using Codeji.CMS.DTO;
-using Codeji.CMS.Services;
-using Codeji.CMS.Repository.Entities.RolePermissions;
 
 namespace Codeji.CMS.API.Controllers
 {
@@ -39,7 +33,8 @@ namespace Codeji.CMS.API.Controllers
         [Authorize]
         public async Task<Result<RoleModel>> GetRoles()
         {
-            var roles = await _roleService.GetRoles(CurrentContext.CurrentUserCompanyId(_httpContextAccessor));
+            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+            List<RoleModel> roles = await _roleService.GetRoles(companyId);
             return new Result<RoleModel>()
             {
                 MethodResults = roles ?? new List<RoleModel>(),
