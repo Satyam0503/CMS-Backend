@@ -22,10 +22,10 @@ public class UserController : BaseApiController
         _httpContextAccessor = httpContextAccessor;
         _employeeService = employeeService;
     }
-    [Route("AddEditEmployees")]
+    [Route("AddEmployees")]
     [HttpPost]
     [Authorize]
-    public async Task<Result<UserModel>> AddEditEmployees(UserModel user)
+    public async Task<Result<UserModel>> AddEmployees(UserModel user)
     {
         bool isEmailExist = await _userService.IsEmailExist(user.Email);
         if (isEmailExist)
@@ -37,6 +37,21 @@ public class UserController : BaseApiController
         }
         string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
         return await _userService.AddEmployee(user, companyId);
+    }
+
+    [Route("EditEmployees")] // Work Required in Edit-Employee Controller cmnt on (20-01-2025 )
+    [HttpPost]
+    public async Task<Result<UserModel>> EditEmployees(UserModel user, string userId)
+    {
+        UserModel isEmailExist = await _userService.GetEmployeeById(userId);
+        if (userId == isEmailExist.UserId)
+        {
+            return new Result<UserModel>
+            {
+                Message = "User Already Exist"
+            };
+        }
+        return await _userService.EditEmployee(user, userId);
     }
 
     [Route("GetAllEmployees")]

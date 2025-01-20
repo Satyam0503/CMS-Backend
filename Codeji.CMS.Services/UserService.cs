@@ -39,6 +39,7 @@ public class UserService : IUserService
             RoleId = user.RoleId,
             Gender = user.Gender,
             EmployeeId = user.EmployeeId,
+            JobRole = user.JobRole,
             DateOfBirth = user.DateOfBirth,
             Department = user.Department,
             ReportingManager = user.ReportingManager,
@@ -63,22 +64,22 @@ public class UserService : IUserService
 
         };
     }
-    public async Task<Result<UserModel>> EditEmployee(UserModel user)
+    public async Task<Result<UserModel>> EditEmployee(UserModel user, string id)
     {
+        //User? user = await _employeeRepository.FirstOrDefault(x => x.UserId == id);
         User employee = new User()
         {
-
             FirstName = user.FirstName,
             LastName = user.LastName,
             Email = user.Email,
-            RoleId = user.RoleId
+            RoleId = user.RoleId,
 
         };
-        Expression<Func<User, bool>> whereCondition = x => user.UserId == x.UserId;
+        Expression<Func<User, bool>> whereCondition = x => id == x.UserId;
         await _employeeRepository.Update(whereCondition, employee);
         return new Result<UserModel>
         {
-            MethodResult = user,
+
             Message = "User Updated",
             Success = true
 
@@ -94,7 +95,22 @@ public class UserService : IUserService
             FirstName = user.FirstName,
             LastName = user.LastName,
             Email = user.Email,
-            RoleId = user.RoleId
+            RoleId = user.RoleId,
+            CompanyId = user.CompanyId,
+            Gender = user.Gender,
+            EmployeeId = user.EmployeeId,
+            DateOfBirth = user.DateOfBirth,
+            Department = user.Department,
+            ReportingManager = user.ReportingManager,
+            TeamLead = user.TeamLead,
+            PhoneNumber = user.PhoneNumber,
+            BloodGroup = user.BloodGroup,
+            PersonalEmail = user.PersonalEmail,
+            EmergencyContact = user.EmergencyContact,
+            DateOfJoining = user.DateOfJoining,
+            Status = true,
+            IsEmailVerified = true,
+            Address = user.Address
         };
 
     }
@@ -168,6 +184,7 @@ public class UserService : IUserService
         returnModel.FirstName = user.FirstName;
         returnModel.LastName = user.LastName;
         returnModel.Permissions = [];
+        returnModel.CompanyId = role.CompanyId;
         return returnModel;
 
     }
