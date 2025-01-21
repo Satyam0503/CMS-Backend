@@ -32,6 +32,7 @@ public class UserController : BaseApiController
         {
             return new Result<UserModel>
             {
+                Success = false,
                 Message = "User Already Exist"
             };
         }
