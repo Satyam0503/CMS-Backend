@@ -6,6 +6,7 @@ namespace Codeji.CMS.API.App_Start;
 public enum ClaimTypesEnum
 {
     CompanyId,
+    role_id,
     UserPermissionRole,
     user_id,
     company_id,
@@ -19,6 +20,13 @@ public static class CurrentContext
         ClaimsIdentity? identity = httpContextAccessor?.HttpContext?.User.Identity as ClaimsIdentity;
         return identity?.Claims.Where(a => a.Type == ClaimTypesEnum.user_id.ToString()).Select(a => a.Value).SingleOrDefault() ?? "";
     }
+
+    public static string CurrentUserRoleId(IHttpContextAccessor httpContextAccessor)
+    {
+        ClaimsIdentity? identity = httpContextAccessor?.HttpContext?.User.Identity as ClaimsIdentity;
+        return identity?.Claims.Where(a => a.Type == ClaimTypesEnum.role_id.ToString()).Select(a => a.Value).SingleOrDefault() ?? "";
+    }
+
     public static string CurrentUserCompanyId(IHttpContextAccessor httpContextAccessor)
     {
         ClaimsIdentity? identity = httpContextAccessor?.HttpContext?.User.Identity as ClaimsIdentity;

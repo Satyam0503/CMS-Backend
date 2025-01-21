@@ -22,20 +22,47 @@ public class UserController : BaseApiController
         _httpContextAccessor = httpContextAccessor;
         _employeeService = employeeService;
     }
-    [Route("AddEditEmployees")]
+    [Route("AddEmployees")]
     [HttpPost]
     [Authorize]
-    public async Task<Result<UserModel>> AddEditEmployees(UserModel user)
+    public async Task<Result<UserModel>> AddEmployees(UserModel user)
     {
+        bool isEmailExist = await _userService.IsEmailExist(user.Email);
+        if (isEmailExist)
+        {
+            return new Result<UserModel>
+            {
+                Message = "User Already Exist"
+            };
+        }
         string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
         return await _userService.AddEmployee(user, companyId);
     }
 
+    [Route("EditEmployees")]
+    [HttpPost]
+    [Authorize]
+    public async Task<Result<UserModel>> EditEmployees(UserModel user, string userId)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        UserModel isUserExist = await _userService.GetEmployeeById(userId);
+        if (userId != isUserExist.UserId)
+        {
+            return new Result<UserModel>
+            {
+                Message = "User Not Exist"
+            };
+        }
+        return await _userService.EditEmployee(user, userId, companyId, isUserExist.Password);
+    }
+
     [Route("GetAllEmployees")]
     [HttpGet]
+    [Authorize]
     public async Task<Result<UserModel>> GetAllEmployees()
     {
-        List<UserModel> data = await _userService.GetAllEmployees();
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        List<UserModel> data = await _userService.GetAllEmployees(companyId);
         Result<UserModel> result = new Result<UserModel>();
         result.Success = true;
         result.MethodResults = data.ToList();

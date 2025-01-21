@@ -135,7 +135,7 @@ app.UseMiddleware(typeof(ExceptionHandlingMiddleware));
 if (Convert.ToBoolean(configuration.GetSection("AppSettings:isForDebug").Value))
 {
     app.UseSwagger();
-    app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/V2/swagger.json", "Amelio API V2"); });
+    app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/V2/swagger.json", "Codeji Backend API"); });
 
 }
 

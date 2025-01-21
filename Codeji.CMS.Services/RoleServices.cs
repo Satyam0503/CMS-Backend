@@ -65,7 +65,7 @@ public class RoleServices : IRoleService
     public async Task<List<RoleModel>> GetRoles(string companyId)
     {
         List<Roles> roles = (await _RolesRepository.GetAll(x => x.CompanyId == companyId)).ToList();
-        return await returnRolesList(roles);
+        return _mapper.Map<List<RoleModel>>(roles);
     }
     //Fetch matched role with given Id
     public async Task<RoleModel> GetRoleById(string roleId)
