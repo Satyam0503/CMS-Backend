@@ -53,7 +53,7 @@ public class UserController : BaseApiController
                 Message = "User Not Exist"
             };
         }
-        return await _userService.EditEmployee(user, userId, companyId);
+        return await _userService.EditEmployee(user, userId, companyId, isUserExist.Password);
     }
 
     [Route("GetAllEmployees")]

@@ -62,7 +62,7 @@ public class UserService : IUserService
 
         };
     }
-    public async Task<Result<UserModel>> EditEmployee(UserModel user, string userId, string companyId)
+    public async Task<Result<UserModel>> EditEmployee(UserModel user, string userId, string companyId, string userPassword)
     {
         //User? checkUser = await _employeeRepository.FirstOrDefault(x => x.UserId == id);
         User employee = new User()
@@ -73,6 +73,7 @@ public class UserService : IUserService
             LastName = user.LastName,
             Email = user.Email,
             RoleId = user.RoleId,
+            Password = userPassword,
             Gender = user.Gender,
             EmployeeId = user.EmployeeId,
             JobRole = user.JobRole,
