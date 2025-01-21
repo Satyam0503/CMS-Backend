@@ -14,14 +14,12 @@ namespace Codeji.CMS.Services;
 public class UserService : IUserService
 {
     readonly IMongoDbRepository<User> _employeeRepository;
-    readonly IMongoDbRepository<EducationDetails> _educationRepo;
     readonly IMongoDbRepository<Roles> _rolesRepository;
     readonly IMapper _mapper;
 
-    public UserService(IMongoDbRepository<User> employeeRepository, IMapper mapper, IMongoDbRepository<EducationDetails> educationRepo, IMongoDbRepository<Roles> rolesRepository)
+    public UserService(IMongoDbRepository<User> employeeRepository, IMapper mapper, IMongoDbRepository<Roles> rolesRepository)
     {
         _employeeRepository = employeeRepository;
-        _educationRepo = educationRepo;
         _rolesRepository = rolesRepository;
         _mapper = mapper;
     }
@@ -64,25 +62,40 @@ public class UserService : IUserService
 
         };
     }
-    public async Task<Result<UserModel>> EditEmployee(UserModel user, string id)
+    public async Task<Result<UserModel>> EditEmployee(UserModel user, string userId, string companyId)
     {
-        //User? user = await _employeeRepository.FirstOrDefault(x => x.UserId == id);
+        //User? checkUser = await _employeeRepository.FirstOrDefault(x => x.UserId == id);
         User employee = new User()
         {
+            UserId = userId,
+            CompanyId = companyId,
             FirstName = user.FirstName,
             LastName = user.LastName,
             Email = user.Email,
             RoleId = user.RoleId,
-
+            Gender = user.Gender,
+            EmployeeId = user.EmployeeId,
+            JobRole = user.JobRole,
+            DateOfBirth = user.DateOfBirth,
+            Department = user.Department,
+            ReportingManager = user.ReportingManager,
+            TeamLead = user.TeamLead,
+            PhoneNumber = user.PhoneNumber,
+            BloodGroup = user.BloodGroup,
+            PersonalEmail = user.PersonalEmail,
+            EmergencyContact = user.EmergencyContact,
+            DateOfJoining = user.DateOfJoining,
+            Status = true,
+            IsEmailVerified = true,
+            Address = user.Address
         };
-        Expression<Func<User, bool>> whereCondition = x => id == x.UserId;
+        Expression<Func<User, bool>> whereCondition = x => x.UserId == userId;
         await _employeeRepository.Update(whereCondition, employee);
         return new Result<UserModel>
         {
-
             Message = "User Updated",
-            Success = true
-
+            Success = true,
+            MethodResult = user,
         };
     }
     public async Task<UserModel> GetEmployeeById(string id)

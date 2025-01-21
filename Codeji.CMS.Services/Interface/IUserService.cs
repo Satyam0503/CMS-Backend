@@ -8,7 +8,7 @@ namespace Codeji.CMS.Services.Interface;
 public interface IUserService
 {
     Task<Result<UserModel>> AddEmployee(UserModel user, string companyId);
-    Task<Result<UserModel>> EditEmployee(UserModel user, string userId);
+    Task<Result<UserModel>> EditEmployee(UserModel user, string userId, string companyId);
 
     Task<UserModel> GetEmployeeById(string id);
     Task<List<UserModel>> GetAllEmployees(string companyId);
