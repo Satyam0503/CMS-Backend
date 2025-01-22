@@ -103,7 +103,6 @@ namespace Codeji.CMS.API.Controllers
         }
 
 
-
         [HttpPost]
         [Route("account/login")]
         [AllowAnonymous]
@@ -145,20 +144,20 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("applicant/applyJob")]
         [AllowAnonymous]
-        public async Task<Result> RegisterApplicants([FromBody] ApplicantRegisterModel applicantRegisterModel)
+        public async Task<Result> RegisterApplicants([FromBody] ApplicantRegisterModel applicantRegisterModel, [FromQuery] string companyId)
         {
+
             Result result = new Result();
             if (string.IsNullOrEmpty(applicantRegisterModel.Email))
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
-            string? ApplicantId = await _applicantsServices.GetApplicantsEXistingId(applicantRegisterModel.Email, applicantRegisterModel.CompnyId);
-            ApplicantAddEditModel addEditApplicantModel = _mapper.Map<ApplicantAddEditModel>(applicantRegisterModel);
+            string? ApplicantId = await _applicantsServices.GetApplicantsEXistingId(applicantRegisterModel.Email, companyId);
+            ApplicantRegisterModel addEditApplicantModel = _mapper.Map<ApplicantRegisterModel>(applicantRegisterModel);
             if (string.IsNullOrEmpty(ApplicantId))
-                result = await _applicantsServices.RegisterApplicants(addEditApplicantModel);
+                result = await _applicantsServices.RegisterApplicants(addEditApplicantModel, companyId);
             else
-                result = await _applicantsServices.UpdateApplicants(addEditApplicantModel);
+                result = await _applicantsServices.UpdateApplicants(addEditApplicantModel, ApplicantId);
             return result;
         }
-
     }
 }
 

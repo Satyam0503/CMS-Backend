@@ -1,12 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using AutoMapper;
+﻿using AutoMapper;
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
-using Codeji.CMS.Services.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -19,13 +14,15 @@ namespace Codeji.CMS.API.Controllers
     [Authorize]
     public class ApplicantsController : BaseApiController
     {
-        IApplicantsService _applicantsService;
-        IMapper _mapper;
+        readonly IApplicantsService _applicantsService;
+        readonly IMapper _mapper;
+        readonly IHttpContextAccessor _httpContextAccessor;
         public ApplicantsController(IApplicantsService applicantsService,
-            IMapper mapper)
+            IMapper mapper, IHttpContextAccessor httpContextAccessor)
         {
             _applicantsService = applicantsService;
             _mapper = mapper;
+            _httpContextAccessor = httpContextAccessor;
         }
         [HttpPost]
         [Route("GetApplicantList")]
@@ -33,7 +30,7 @@ namespace Codeji.CMS.API.Controllers
         public async Task<Result<ApplicantViewModel>> GetApplicantList(ApplicantResultFilters filters)
         {
             Result<ApplicantViewModel> result = new Result<ApplicantViewModel>();
-            var data = await _applicantsService.GetApplicantsList(filters);
+            List<ApplicantViewModel> data = await _applicantsService.GetApplicantsList(filters);
             result.Success = data.Any();
             result.MethodResults = data;
             return result;
@@ -48,33 +45,35 @@ namespace Codeji.CMS.API.Controllers
         }
         [HttpPost]
         [Route("AddApplicant")]
-        [CustomAuthorize(Module = "Applicant", Role = ["Create"])]
-        public async Task<Result> AppApplicants([FromBody] ApplicantAddEditModel applicantAddModel)
+        //[CustomAuthorize(Module = "Applicant", Role = ["Create"])]
+        public async Task<Result> AppApplicants([FromBody] ApplicantRegisterModel applicantAddModel)
         {
 
             Result result = new Result();
+            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
             if (string.IsNullOrEmpty(applicantAddModel.Email))
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
-            string? ApplicantId = await _applicantsService.GetApplicantsEXistingId(applicantAddModel.Email);
+            string? ApplicantId = await _applicantsService.GetApplicantsEXistingId(applicantAddModel.Email, companyId);
             if (string.IsNullOrEmpty(ApplicantId))
-                result = await _applicantsService.RegisterApplicants(applicantAddModel);
+                result = await _applicantsService.RegisterApplicants(applicantAddModel, companyId);
             else
-                result = await _applicantsService.UpdateApplicants(applicantAddModel);
+                result = await _applicantsService.UpdateApplicants(applicantAddModel, ApplicantId);
             return result;
         }
         [HttpPost]
         [Route("EditApplicant")]
         [CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
-        public async Task<Result> EditApplicants([FromBody] ApplicantAddEditModel applicantEditModel)
+        public async Task<Result> EditApplicants([FromBody] ApplicantRegisterModel applicantEditModel)
         {
             Result result = new Result();
+            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
             if (string.IsNullOrEmpty(applicantEditModel.Email))
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
-            string? ApplicantId = await _applicantsService.GetApplicantsEXistingId(applicantEditModel.Email);
+            string? ApplicantId = await _applicantsService.GetApplicantsEXistingId(applicantEditModel.Email, companyId);
             if (string.IsNullOrEmpty(ApplicantId))
-                result = await _applicantsService.RegisterApplicants(applicantEditModel);
+                result = await _applicantsService.RegisterApplicants(applicantEditModel, companyId);
             else
-                result = await _applicantsService.UpdateApplicants(applicantEditModel);
+                result = await _applicantsService.UpdateApplicants(applicantEditModel, ApplicantId);
             return result;
         }
 

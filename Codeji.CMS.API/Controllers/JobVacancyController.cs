@@ -28,4 +28,25 @@ public class JobVacancyController : BaseApiController
         string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
         return await _jobVacancyService.AddJobVacancy(jobVacancy, companyId);
     }
+
+    [Route("EditJobVacancy")]
+    [HttpPost]
+    public async Task<Result<JobVacancyModel>> EditJobVacancy(JobVacancyModel jobVacancy, string jobId)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        return await _jobVacancyService.EditJobVacancy(jobVacancy, jobId, companyId);
+    }
+    [Route("GetAllVacancy")]
+    [HttpGet]
+    public async Task<Result<JobVacancyModel>> GetAllVacancy()
+    {
+        List<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy();
+        Result<JobVacancyModel> result = new Result<JobVacancyModel>()
+        {
+            Success = true,
+            MethodResults = data.ToList()
+        };
+
+        return result;
+    }
 }

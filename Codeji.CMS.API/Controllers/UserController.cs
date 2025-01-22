@@ -54,7 +54,7 @@ public class UserController : BaseApiController
                 Message = "User Not Exist"
             };
         }
-        return await _userService.EditEmployee(user, userId, companyId, isUserExist.Password);
+        return await _userService.EditEmployee(user, userId, companyId, isUserExist.Password); //Pasword Field Need to change when create Verify Mail feature of User.
     }
 
     [Route("GetAllEmployees")]

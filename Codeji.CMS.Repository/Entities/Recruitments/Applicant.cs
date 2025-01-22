@@ -1,6 +1,4 @@
-﻿using System;
-using System.ComponentModel.DataAnnotations;
-using MongoDB.Bson.Serialization.Attributes;
+﻿using MongoDB.Bson.Serialization.Attributes;
 
 namespace Codeji.CMS.Repository.Entities.Recruitments
 {
@@ -21,7 +19,7 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         /// Status: Inactive,Active,Closed
         /// </summary>
         public int Status { get; set; } = 0;
-        public decimal Exprience { get; set; }
+        public decimal Experience { get; set; }
         public string ResumeUrl { get; set; }
     }
 }
