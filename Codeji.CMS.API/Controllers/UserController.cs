@@ -80,10 +80,12 @@ public class UserController : BaseApiController
     }
 
     [Route("GetEmployeeById")]
-    [HttpPost]
-    public async Task<Result<UserModel>> GetEmployeeById(string id)
+    [HttpGet]
+    [Authorize]
+    public async Task<Result<UserModel>> GetEmployeeById()
     {
-        UserModel result = await _userService.GetEmployeeById(id);
+        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        UserModel result = await _userService.GetEmployeeById(userId);
         return new Result<UserModel>()
         {
             Success = true,
@@ -92,6 +94,16 @@ public class UserController : BaseApiController
     }
 
     //Employee Details APIs
+
+    [Route("AddEmployeeSummary")]
+    [HttpPost]
+    [Authorize]
+    public async Task<Result<EmployeeSummaryRequestModel>> AddEmployeeSummary(EmployeeSummaryRequestModel userSummary)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        return await _employeeService.AddEmployeeSummary(userSummary, userId, companyId);
+    }
 
     [Route("AddEmployeeEducation")]
     [HttpPost]
@@ -113,6 +125,20 @@ public class UserController : BaseApiController
         string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
         return await _employeeService.AddEmployeeCertification(certificationDetails, userId, companyId);
 
+    }
+
+    [Route("GetEmployeeSummary")]
+    [HttpPost]
+    [Authorize]
+    public async Task<Result<EmployeeSummaryRequestModel>> GetEmployeeSummary()
+    {
+        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        EmployeeSummaryRequestModel summary = await _employeeService.GetEmployeeSummary(userId);
+        return new Result<EmployeeSummaryRequestModel>()
+        {
+            Success = true,
+            MethodResult = summary
+        };
     }
 
     [Route("GetEmployeeEducationDetails")]

@@ -99,9 +99,9 @@ public class UserService : IUserService
             MethodResult = user,
         };
     }
-    public async Task<UserModel> GetEmployeeById(string id)
+    public async Task<UserModel> GetEmployeeById(string userId)
     {
-        User? user = await _employeeRepository.FirstOrDefault(x => x.UserId == id);
+        User? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
 
         return new UserModel()
         {

@@ -10,7 +10,7 @@ public interface IUserService
     Task<Result<UserModel>> AddEmployee(UserModel user, string companyId);
     Task<Result<UserModel>> EditEmployee(UserModel user, string userId, string companyId, string userPassword);
 
-    Task<UserModel> GetEmployeeById(string id);
+    Task<UserModel> GetEmployeeById(string userId);
     Task<List<UserModel>> GetAllEmployees(string companyId);
     Task<bool> IsEmailExist(string email);
     Task<bool> ResetPassword(string userId, string password, string oldPassword = "");

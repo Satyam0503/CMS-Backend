@@ -11,13 +11,33 @@ namespace Codeji.CMS.Services
     {
         readonly IMongoDbRepository<EducationDetails> _educationDetailsRepo;
         readonly IMongoDbRepository<CertificationDetails> _certificationDetailsRepo;
+        readonly IMongoDbRepository<UserSummary> _userSummaryRepo;
         readonly IMapper _mapper;
 
-        public EmployeeService(IMongoDbRepository<EducationDetails> educationDetailsRepo, IMapper mapper, IMongoDbRepository<CertificationDetails> certificationDetailsRepo)
+        public EmployeeService(IMongoDbRepository<EducationDetails> educationDetailsRepo, IMapper mapper, IMongoDbRepository<CertificationDetails> certificationDetailsRepo, IMongoDbRepository<UserSummary> userSummary)
         {
             _educationDetailsRepo = educationDetailsRepo;
             _mapper = mapper;
             _certificationDetailsRepo = certificationDetailsRepo;
+            _userSummaryRepo = userSummary;
+        }
+
+        public async Task<Result<EmployeeSummaryRequestModel>> AddEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId, string companyId)
+        {
+            UserSummary summary = new UserSummary()
+            {
+                CompanyId = companyId,
+                UserId = userId,
+                EmployeeSummary = userSummary.EmployeeSummary
+            };
+            await _userSummaryRepo.AddOne(summary);
+            return new Result<EmployeeSummaryRequestModel>
+            {
+                Message = "Summary Added Successfully",
+                Success = true
+
+            };
+
         }
         public async Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId, string companyId)
         {
@@ -72,6 +92,15 @@ namespace Codeji.CMS.Services
         {
             IEnumerable<CertificationDetails> list = await _certificationDetailsRepo.GetAll(x => x.UserId == userId);
             return _mapper.Map<List<EmployeeCertificationRequestModel>>(list);
+        }
+
+        public async Task<EmployeeSummaryRequestModel> GetEmployeeSummary(string userId)
+        {
+            UserSummary summary = await _userSummaryRepo.FirstOrDefault(x => x.UserId == userId);
+            return new EmployeeSummaryRequestModel()
+            {
+                EmployeeSummary = summary.EmployeeSummary
+            };
         }
     }
 }
