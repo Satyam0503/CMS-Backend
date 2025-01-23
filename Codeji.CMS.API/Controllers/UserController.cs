@@ -95,7 +95,7 @@ public class UserController : BaseApiController
 
     //Employee Details APIs
 
-    [Route("AddEmployeeSummary")]
+    [Route("AddEditEmployeeSummary")]
     [HttpPost]
     [Authorize]
     public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary)
