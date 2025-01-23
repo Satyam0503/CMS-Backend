@@ -1,4 +1,5 @@
-﻿using AutoMapper;
+﻿using System.Linq.Expressions;
+using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.GenericRepository.Interfaces;
@@ -11,32 +12,49 @@ namespace Codeji.CMS.Services
     {
         readonly IMongoDbRepository<EducationDetails> _educationDetailsRepo;
         readonly IMongoDbRepository<CertificationDetails> _certificationDetailsRepo;
-        readonly IMongoDbRepository<UserSummary> _userSummaryRepo;
+        readonly IMongoDbRepository<EmployeeSummary> _employeeSummaryRepo;
         readonly IMapper _mapper;
 
-        public EmployeeService(IMongoDbRepository<EducationDetails> educationDetailsRepo, IMapper mapper, IMongoDbRepository<CertificationDetails> certificationDetailsRepo, IMongoDbRepository<UserSummary> userSummary)
+        public EmployeeService(IMongoDbRepository<EducationDetails> educationDetailsRepo, IMapper mapper, IMongoDbRepository<CertificationDetails> certificationDetailsRepo, IMongoDbRepository<EmployeeSummary> userSummary)
         {
             _educationDetailsRepo = educationDetailsRepo;
             _mapper = mapper;
             _certificationDetailsRepo = certificationDetailsRepo;
-            _userSummaryRepo = userSummary;
+            _employeeSummaryRepo = userSummary;
         }
 
-        public async Task<Result<EmployeeSummaryRequestModel>> AddEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId, string companyId)
+        public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId, string companyId)
         {
-            UserSummary summary = new UserSummary()
+            Expression<Func<EmployeeSummary, bool>> whereCondition = x => userId == x.UserId && x.Id == userSummary.SummaryId && x.CompanyId == companyId;
+            EmployeeSummary? employeesummary = await _employeeSummaryRepo.FirstOrDefault(whereCondition);
+            bool success = false;
+
+            if (employeesummary == null)
             {
-                CompanyId = companyId,
-                UserId = userId,
-                EmployeeSummary = userSummary.EmployeeSummary
-            };
-            await _userSummaryRepo.AddOne(summary);
+                EmployeeSummary summary = new EmployeeSummary()
+                {
+                    CompanyId = companyId,
+                    UserId = userId,
+                    Summary = userSummary.Summary
+                };
+                Result result = await _employeeSummaryRepo.AddOne(summary);
+                success = result.Success;
+            }
+            else
+            {
+
+                employeesummary.Summary = userSummary.Summary;
+                Result result = await _employeeSummaryRepo.Update(whereCondition, employeesummary);
+                success = result.Success;
+
+            }
             return new Result<EmployeeSummaryRequestModel>
             {
                 Message = "Summary Added Successfully",
-                Success = true
+                Success = success
 
             };
+
 
         }
         public async Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId, string companyId)
@@ -96,10 +114,10 @@ namespace Codeji.CMS.Services
 
         public async Task<EmployeeSummaryRequestModel> GetEmployeeSummary(string userId)
         {
-            UserSummary summary = await _userSummaryRepo.FirstOrDefault(x => x.UserId == userId);
+            EmployeeSummary summary = await _employeeSummaryRepo.FirstOrDefault(x => x.UserId == userId);
             return new EmployeeSummaryRequestModel()
             {
-                EmployeeSummary = summary.EmployeeSummary
+                Summary = summary.Summary
             };
         }
     }

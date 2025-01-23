@@ -2,6 +2,7 @@
 {
     public class EmployeeSummaryRequestModel
     {
-        public string EmployeeSummary { get; set; }
+        public string SummaryId { get; set; }
+        public string Summary { get; set; }
     }
 }

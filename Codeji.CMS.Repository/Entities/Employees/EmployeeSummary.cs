@@ -2,12 +2,12 @@
 
 namespace Codeji.CMS.Repository.Entities.Employees
 {
-    public class UserSummary
+    public class EmployeeSummary
     {
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
-        public string SummaryId { get; set; }
+        public string Id { get; set; }
         public string CompanyId { get; set; }
         public string UserId { get; set; }
-        public string EmployeeSummary { get; set; }
+        public string Summary { get; set; }
     }
 }

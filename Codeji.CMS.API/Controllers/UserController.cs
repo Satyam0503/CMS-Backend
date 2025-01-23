@@ -98,11 +98,11 @@ public class UserController : BaseApiController
     [Route("AddEmployeeSummary")]
     [HttpPost]
     [Authorize]
-    public async Task<Result<EmployeeSummaryRequestModel>> AddEmployeeSummary(EmployeeSummaryRequestModel userSummary)
+    public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary)
     {
         string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
         string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
-        return await _employeeService.AddEmployeeSummary(userSummary, userId, companyId);
+        return await _employeeService.AddEditEmployeeSummary(userSummary, userId, companyId);
     }
 
     [Route("AddEmployeeEducation")]

@@ -31,6 +31,7 @@ public class JobVacancyController : BaseApiController
 
     [Route("EditJobVacancy")]
     [HttpPost]
+    [Authorize]
     public async Task<Result<JobVacancyModel>> EditJobVacancy(JobVacancyModel jobVacancy, string jobId)
     {
         string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);

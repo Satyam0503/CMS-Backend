@@ -36,7 +36,7 @@ namespace Codeji.CMS.Services
             return new Result<JobVacancyModel>
             {
                 MethodResult = jobVacancy,
-                Message = "User added",
+                Message = "Vacacny Added Successfully",
                 Success = true
 
             };
