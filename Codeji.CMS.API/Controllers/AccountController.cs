@@ -150,7 +150,7 @@ namespace Codeji.CMS.API.Controllers
             Result result = new Result();
             if (string.IsNullOrEmpty(applicantRegisterModel.Email))
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
-            string? ApplicantId = await _applicantsServices.GetApplicantsEXistingId(applicantRegisterModel.Email, companyId);
+            string? ApplicantId = await _applicantsServices.GetApplicantsExistingId(applicantRegisterModel.Email, companyId);
             ApplicantRegisterModel addEditApplicantModel = _mapper.Map<ApplicantRegisterModel>(applicantRegisterModel);
             if (string.IsNullOrEmpty(ApplicantId))
                 result = await _applicantsServices.RegisterApplicants(addEditApplicantModel, companyId);

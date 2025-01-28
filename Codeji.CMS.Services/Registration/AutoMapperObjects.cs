@@ -1,5 +1,6 @@
 ﻿using AutoMapper;
 using Codeji.CMS.DTO;
+using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
@@ -23,6 +24,7 @@ namespace Codeji.CMS.Services.Registration
             CreateMap<CertificationDetails, EmployeeCertificationRequestModel>().ReverseMap();
             CreateMap<Roles, RoleModel>().ReverseMap();
             CreateMap<JobVacancy, JobVacancyModel>().ReverseMap();
+            CreateMap<Applicant, ApplicantViewModel>().ReverseMap();
 
         }
 

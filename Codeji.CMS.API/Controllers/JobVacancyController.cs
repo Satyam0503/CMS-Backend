@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Codeji.CMS.API.Controllers;
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 
 public class JobVacancyController : BaseApiController
 {
@@ -22,7 +23,7 @@ public class JobVacancyController : BaseApiController
 
     [Route("AddJobVacancy")]
     [HttpPost]
-    [Authorize]
+
     public async Task<Result<JobVacancyModel>> AddJobVacancy(JobVacancyModel jobVacancy)
     {
         string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
@@ -31,7 +32,6 @@ public class JobVacancyController : BaseApiController
 
     [Route("EditJobVacancy")]
     [HttpPost]
-    [Authorize]
     public async Task<Result<JobVacancyModel>> EditJobVacancy(JobVacancyModel jobVacancy, string jobId)
     {
         string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
@@ -41,7 +41,8 @@ public class JobVacancyController : BaseApiController
     [HttpGet]
     public async Task<Result<JobVacancyModel>> GetAllVacancy()
     {
-        List<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy();
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        List<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy(companyId);
         Result<JobVacancyModel> result = new Result<JobVacancyModel>()
         {
             Success = true,

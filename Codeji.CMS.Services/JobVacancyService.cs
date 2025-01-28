@@ -51,7 +51,7 @@ namespace Codeji.CMS.Services
                 Title = jobVacancy.Title,
                 Vacancies = jobVacancy.Vacancies,
                 JobType = jobVacancy.JobType,
-                Status = true,
+                Status = jobVacancy.Status,
                 Description = jobVacancy.Description,
             };
             Expression<Func<JobVacancy, bool>> whereCondition = x => x.JobId == jobId;
@@ -64,9 +64,9 @@ namespace Codeji.CMS.Services
             };
         }
 
-        public async Task<List<JobVacancyModel>> GetAllVacancy()
+        public async Task<List<JobVacancyModel>> GetAllVacancy(string companyId)
         {
-            IEnumerable<JobVacancy> list = await _jobVacancyRepo.GetAll();
+            IEnumerable<JobVacancy> list = await _jobVacancyRepo.GetAll(x => x.CompanyId == companyId);
             return _mapper.Map<List<JobVacancyModel>>(list);
         }
     }

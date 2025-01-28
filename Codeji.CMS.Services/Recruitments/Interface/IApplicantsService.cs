@@ -7,8 +7,8 @@ namespace Codeji.CMS.Services.Recruitments.Interface
     {
         Task<Result> RegisterApplicants(ApplicantRegisterModel applicantRegisterModel, string companyId);
         Task<Result> UpdateApplicants(ApplicantRegisterModel applicantRegisterModel, string ApplicantId);
-        Task<string> GetApplicantsEXistingId(string email, string companyId);
-        Task<List<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters);
+        Task<string> GetApplicantsExistingId(string email, string companyId);
+        Task<List<ApplicantViewModel>> GetApplicantsList(string companyId);
         Task<Result<ApplicantViewModel>> ApplicantById(string applicantId);
 
 
