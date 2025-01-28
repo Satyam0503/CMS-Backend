@@ -78,5 +78,10 @@ namespace Codeji.CMS.Services
 
 
         }
+        public async Task<List<Company>> GetAllCompanyList()
+        {
+            IEnumerable<Company> list = await _companyRepo.GetAll();
+            return _mapper.Map<List<Company>>(list);
+        }
     }
 }
