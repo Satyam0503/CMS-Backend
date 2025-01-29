@@ -16,6 +16,7 @@ namespace Codeji.CMS.Services.Recruitments
         {
             _applicantRepository = applicantDbRepository;
             _mapper = mapper;
+
         }
         /// <summary>
         /// For Annonymous add and update applicants
@@ -30,7 +31,8 @@ namespace Codeji.CMS.Services.Recruitments
                 FirstName = applicantRegisterModel.FirstName,
                 LastName = applicantRegisterModel.LastName,
                 Experience = applicantRegisterModel.Experience,
-                VacanyId = applicantRegisterModel.VacanyId,
+                VacancyId = applicantRegisterModel.VacancyId,
+                VacancyName = applicantRegisterModel.VacancyName,
                 Phone = applicantRegisterModel.Phone,
                 Email = applicantRegisterModel.Email,
                 CreatedBy = "new"
@@ -47,7 +49,7 @@ namespace Codeji.CMS.Services.Recruitments
             entity.UpdatedBy = "";
             entity.UpdatedDate = DateTime.Now;
             entity.Experience = model.Experience;
-            entity.VacanyId = model.VacanyId;
+            entity.VacancyId = model.VacancyId;
             entity.FirstName = model.FirstName;
             entity.LastName = model.LastName;
             Expression<Func<Applicant, bool>> whereCondition = x => x.ApplicantId == ApplicantId;
@@ -135,13 +137,15 @@ namespace Codeji.CMS.Services.Recruitments
                     Email = entity.Email,
                     Phone = entity.Phone,
                     Status = entity.Status,
-                    VacanyId = entity.VacanyId,
+                    VacancyId = entity.VacancyId,
+                    VacancyName = entity.VacancyName,
                     Experience = entity.Experience,
                     FirstName = entity.FirstName,
                     LastName = entity.LastName,
                     UpdateDate = entity.UpdatedDate,
                     ActivityType = entity.ActivityType,
-                    ResumeUrl = entity.ResumeUrl
+                    ResumeUrl = entity.ResumeUrl,
+
                 };
             }
             return result;
