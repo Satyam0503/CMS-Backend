@@ -109,8 +109,18 @@ namespace Codeji.CMS.API.Controllers
         public async Task<Result> login([FromBody] LoginModel model)
         {
             Result result = new Result();
+            bool isEmailExist = await _userServices.IsEmailExist(model.Email);
+            if (!isEmailExist)
+            {
+                result.Message = "Incorrect Credentials";
+                result.Success = false;
+                result.StatusCode = 400;
+                return result;
+
+            }
             if (!ModelState.IsValid)
                 return result;
+
             string token = await _userServices.GetVerificationToken(model.Email, model.Password);
             if (string.IsNullOrEmpty(token))
             {

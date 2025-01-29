@@ -1,6 +1,7 @@
 ﻿using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
+using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -72,6 +73,25 @@ namespace Codeji.CMS.API.Controllers
             string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
             result = await _applicantsService.UpdateApplicants(model, companyId);
             return result;
+        }
+
+        [HttpPost]
+        [Route("UploadResume")]
+        //[CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
+        public async Task<IActionResult> UploadResume([FromForm] Resume model)
+        {
+            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads");
+            if (!Directory.Exists(uploadFolder))
+            {
+                Directory.CreateDirectory(uploadFolder);
+            }
+            string uniqueFileName = Path.GetRandomFileName();
+            string filePath = Path.Combine(uploadFolder, uniqueFileName);
+            using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
+            {
+                await model.File.CopyToAsync(fileStream);
+            };
+            return Ok("File uploaded successfully.");
         }
 
     }

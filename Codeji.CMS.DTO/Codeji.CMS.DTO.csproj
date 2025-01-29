@@ -12,7 +12,6 @@
     <None Remove="Helpers\" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Recruitments\" />
     <Folder Include="RolePermissions\" />
     <Folder Include="Employee\" />
     <Folder Include="Helpers\" />
