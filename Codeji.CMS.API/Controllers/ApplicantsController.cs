@@ -1,5 +1,4 @@
-﻿using AutoMapper;
-using Codeji.CMS.API.App_Start;
+﻿using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
@@ -15,13 +14,10 @@ namespace Codeji.CMS.API.Controllers
     public class ApplicantsController : BaseApiController
     {
         readonly IApplicantsService _applicantsService;
-        readonly IMapper _mapper;
         readonly IHttpContextAccessor _httpContextAccessor;
-        public ApplicantsController(IApplicantsService applicantsService,
-            IMapper mapper, IHttpContextAccessor httpContextAccessor)
+        public ApplicantsController(IApplicantsService applicantsService, IHttpContextAccessor httpContextAccessor)
         {
             _applicantsService = applicantsService;
-            _mapper = mapper;
             _httpContextAccessor = httpContextAccessor;
         }
         [HttpGet]

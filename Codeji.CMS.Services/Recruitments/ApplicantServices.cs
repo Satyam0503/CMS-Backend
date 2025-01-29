@@ -136,7 +136,7 @@ namespace Codeji.CMS.Services.Recruitments
                     Phone = entity.Phone,
                     Status = entity.Status,
                     VacanyId = entity.VacanyId,
-                    Exprience = entity.Experience,
+                    Experience = entity.Experience,
                     FirstName = entity.FirstName,
                     LastName = entity.LastName,
                     UpdateDate = entity.UpdatedDate,

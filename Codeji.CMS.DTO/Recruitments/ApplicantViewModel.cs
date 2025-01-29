@@ -17,7 +17,7 @@ namespace Codeji.CMS.DTO.Recruitments
         public string VacanyName { get; set; }
         public string VacanyId { get; set; }
 
-        public decimal Exprience { get; set; }
+        public decimal Experience { get; set; }
         public DateTime? ApplyDate { get; set; }
         public DateTime? UpdateDate { get; set; }
         public string ResumeUrl { get; set; }
