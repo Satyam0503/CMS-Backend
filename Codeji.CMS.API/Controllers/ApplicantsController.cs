@@ -41,9 +41,9 @@ namespace Codeji.CMS.API.Controllers
             return result;
         }
         [HttpPost]
-        [Route("AddEditApplicant")]
+        [Route("AddApplicant")]
         //[CustomAuthorize(Module = "Applicant", Role = ["Create"])]
-        public async Task<Result> AddEditApplicant([FromBody] ApplicantRegisterModel applicantAddModel)
+        public async Task<Result> AddApplicant([FromBody] ApplicantRegisterModel applicantAddModel)
         {
 
             Result result = new Result();
@@ -52,27 +52,27 @@ namespace Codeji.CMS.API.Controllers
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
             string? ApplicantId = await _applicantsService.GetApplicantsExistingId(applicantAddModel.Email, companyId);
             if (string.IsNullOrEmpty(ApplicantId))
+            {
                 result = await _applicantsService.RegisterApplicants(applicantAddModel, companyId);
+            }
             else
-                result = await _applicantsService.UpdateApplicants(applicantAddModel, ApplicantId);
+            {
+                result.Success = false;
+                result.Message = "Applicant Already Exists";
+            }
             return result;
         }
-        //[HttpPost]
-        //[Route("EditApplicant")]
-        ////[CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
-        //public async Task<Result> EditApplicants([FromBody] ApplicantRegisterModel applicantEditModel)
-        //{
-        //    Result result = new Result();
-        //    string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-        //    if (string.IsNullOrEmpty(applicantEditModel.Email))
-        //        return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
-        //    string? ApplicantId = await _applicantsService.GetApplicantsEXistingId(applicantEditModel.Email, companyId);
-        //    if (string.IsNullOrEmpty(ApplicantId))
-        //        result = await _applicantsService.RegisterApplicants(applicantEditModel, companyId);
-        //    else
-        //        result = await _applicantsService.UpdateApplicants(applicantEditModel, ApplicantId);
-        //    return result;
-        //}
+
+        [HttpPost]
+        [Route("EditApplicant")]
+        //[CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
+        public async Task<Result> EditApplicants([FromBody] ApplicantRegisterModel model)
+        {
+            Result result = new Result();
+            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+            result = await _applicantsService.UpdateApplicants(model, companyId);
+            return result;
+        }
 
     }
 }

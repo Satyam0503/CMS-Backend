@@ -42,17 +42,19 @@ namespace Codeji.CMS.Services.Recruitments
             return result;
         }
 
-        public async Task<Result> UpdateApplicants(ApplicantRegisterModel model, string ApplicantId)
+        public async Task<Result> UpdateApplicants(ApplicantRegisterModel model, string companyId)
         {
+            Expression<Func<Applicant, bool>> whereCondition = x => x.ApplicantId == model.ApplicantId && x.CompanyId == companyId && x.Email == model.Email;
             //to do improvement
-            Applicant entity = await _applicantRepository.FirstOrDefault(x => x.ApplicantId == ApplicantId);
+            Applicant entity = await _applicantRepository.FirstOrDefault(whereCondition);
             entity.UpdatedBy = "";
             entity.UpdatedDate = DateTime.Now;
             entity.Experience = model.Experience;
             entity.VacancyId = model.VacancyId;
             entity.FirstName = model.FirstName;
             entity.LastName = model.LastName;
-            Expression<Func<Applicant, bool>> whereCondition = x => x.ApplicantId == ApplicantId;
+            entity.VacancyName = model.VacancyName;
+            entity.VacancyId = model.VacancyId;
             Result res = await _applicantRepository.Update(whereCondition, entity);
             return res;
 
