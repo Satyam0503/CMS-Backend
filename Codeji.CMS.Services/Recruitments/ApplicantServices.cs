@@ -30,14 +30,13 @@ namespace Codeji.CMS.Services.Recruitments
             Applicant applicant = new Applicant()
             {
                 CompanyId = companyId,
-                FirstName = applicantRegisterModel.Applicant.FirstName,
-                LastName = applicantRegisterModel.Applicant.LastName,
-                Experience = applicantRegisterModel.Applicant.Experience,
-                VacancyId = applicantRegisterModel.Applicant.VacancyId,
-                VacancyName = applicantRegisterModel.Applicant.VacancyName,
-                Phone = applicantRegisterModel.Applicant.Phone,
-                Email = applicantRegisterModel.Applicant.Email,
-                ResumeUrl = filepath,
+                FirstName = applicantRegisterModel.FirstName,
+                LastName = applicantRegisterModel.LastName,
+                Experience = applicantRegisterModel.Experience,
+                VacancyId = applicantRegisterModel.VacancyId,
+                VacancyName = applicantRegisterModel.VacancyName,
+                Phone = applicantRegisterModel.Phone,
+                Email = applicantRegisterModel.Email,
                 CreatedBy = "new"
 
             };
@@ -61,16 +60,6 @@ namespace Codeji.CMS.Services.Recruitments
             Result res = await _applicantRepository.Update(whereCondition, entity);
             return res;
 
-        }
-
-        public async Task<bool> IsEmailExist(string email)
-        {
-            Applicant? res = await _applicantRepository.FirstOrDefault(x => x.Email == email);
-            if (string.IsNullOrEmpty(res?.Email))
-            {
-                return false;
-            }
-            return true;
         }
 
         public async Task<bool> IsEmailExist(string email)
