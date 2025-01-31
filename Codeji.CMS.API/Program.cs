@@ -143,7 +143,7 @@ if (Convert.ToBoolean(configuration.GetSection("AppSettings:isForDebug").Value))
 app.UseCors(corsName);
 
 // Serve static files
-app.UseStaticFiles();
+//app.UseStaticFiles();
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), "Uploads")),
