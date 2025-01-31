@@ -1,4 +1,6 @@
 
+using Codeji.CMS.Services.Employees;
+using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
@@ -11,7 +13,6 @@ public static class ServicesRegistration
     {
         //   services.AddSingleton<IColleagueBusiness, ColleagueBusiness>();
         services.AddScoped<IMiddlewareService, MiddlewareService>();
-        services.AddScoped<IUserService, UserService>();
         services.AddScoped<IApplicantsService, ApplicantServices>();
         services.AddScoped<IRoleService, RoleServices>();
         services.AddScoped<ICompanyService, CompanyService>();

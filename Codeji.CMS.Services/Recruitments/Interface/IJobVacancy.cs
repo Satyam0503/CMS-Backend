@@ -1,7 +1,7 @@
 ﻿using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RequestModels;
 
-namespace Codeji.CMS.Services.Interface
+namespace Codeji.CMS.Services.Recruitments.Interface
 {
     public interface IJobVacancy
     {

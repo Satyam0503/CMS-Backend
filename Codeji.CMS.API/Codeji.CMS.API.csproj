@@ -21,6 +21,7 @@
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Properties\" />
+    <Folder Include="Uploads\Resume\" />
     <Folder Include="Upload\" />
   </ItemGroup>
 </Project>

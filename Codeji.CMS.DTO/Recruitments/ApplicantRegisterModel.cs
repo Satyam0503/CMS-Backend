@@ -8,7 +8,7 @@ namespace Codeji.CMS.DTO.Recruitments
         public string CompanyId { get; set; }
         [RegularExpression("^[^=~<>;`%]*$", ErrorMessage = "One or more invalid characters")]
         public string FirstName { get; set; }
-        [Required]
+
         [RegularExpression("^[^=~<>;`%]*$", ErrorMessage = "One or more invalid characters")]
         public required string LastName { get; set; }
         [EmailAddress]
@@ -19,6 +19,7 @@ namespace Codeji.CMS.DTO.Recruitments
         public string VacancyId { get; set; }
         public string VacancyName { get; set; }
         public decimal Experience { get; set; }
+        public string? ResumeUrl { get; set; }
 
     }
 }

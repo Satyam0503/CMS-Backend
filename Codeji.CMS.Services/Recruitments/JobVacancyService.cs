@@ -4,9 +4,9 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Recruitments;
-using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Services.Recruitments.Interface;
 
-namespace Codeji.CMS.Services
+namespace Codeji.CMS.Services.Recruitments
 {
     public class JobVacancyService : IJobVacancy
     {

@@ -1,12 +1,12 @@
 ﻿
+using System.Net;
+using System.Text;
 using Codeji.CMS.DTO.RolePermissions;
-using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Services.Employees.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Newtonsoft.Json;
-using System.Net;
-using System.Text;
 
 namespace Codeji.CMS.API.App_Start
 {
@@ -86,7 +86,7 @@ namespace Codeji.CMS.API.App_Start
     }
     public class FilesExtensionsAttribute : Attribute, IAsyncActionFilter
     {
-        private string[] _extensions;
+        private readonly string[] _extensions;
         public FilesExtensionsAttribute(string[] extensions) { _extensions = extensions; }
         public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
         {

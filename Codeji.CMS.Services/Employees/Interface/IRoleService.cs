@@ -1,5 +1,5 @@
 ﻿using Codeji.CMS.DTO.RolePermissions;
-namespace Codeji.CMS.Services.Interface;
+namespace Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 public interface IRoleService
 {

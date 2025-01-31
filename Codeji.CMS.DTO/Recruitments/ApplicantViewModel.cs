@@ -22,6 +22,7 @@ namespace Codeji.CMS.DTO.Recruitments
         public DateTime? UpdateDate { get; set; }
         public string ResumeUrl { get; set; }
 
+
     }
 }
 

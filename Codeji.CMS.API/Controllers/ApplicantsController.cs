@@ -1,11 +1,9 @@
 ﻿using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
-using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-
 // For more information on enabling Web API for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
 
 namespace Codeji.CMS.API.Controllers
@@ -44,17 +42,37 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("AddApplicant")]
         //[CustomAuthorize(Module = "Applicant", Role = ["Create"])]
-        public async Task<Result> AddApplicant([FromBody] ApplicantRegisterModel applicantAddModel)
+        public async Task<Result> AddApplicant([FromForm] ResumeApplicantModel model)
         {
 
             Result result = new Result();
             string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-            if (string.IsNullOrEmpty(applicantAddModel.Email))
+            if (string.IsNullOrEmpty(model.Applicant.Email))
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
-            string? ApplicantId = await _applicantsService.GetApplicantsExistingId(applicantAddModel.Email, companyId);
+
+            bool isEmailExist = await _applicantsService.IsEmailExist(model.Applicant.Email);
+
+            if (isEmailExist)
+                return new Result() { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Email Already Exist" };
+
+            //Logic For Resume Adding
+            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\Resume");
+            string fileExtension = Path.GetExtension(model.File.FileName);
+            if (!Directory.Exists(uploadFolder))
+            {
+                Directory.CreateDirectory(uploadFolder);
+            }
+            string uniqueFileName = $"{Guid.NewGuid().ToString()}{fileExtension}";
+            string filePath = Path.Combine(uploadFolder, uniqueFileName);
+            using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
+            {
+                await model.File.CopyToAsync(fileStream);
+            };
+
+            string? ApplicantId = await _applicantsService.GetApplicantsExistingId(model.Applicant.Email, companyId);
             if (string.IsNullOrEmpty(ApplicantId))
             {
-                result = await _applicantsService.RegisterApplicants(applicantAddModel, companyId);
+                result = await _applicantsService.RegisterApplicants(model, companyId, filePath);
             }
             else
             {
@@ -77,23 +95,39 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("UploadResume")]
+        [AllowAnonymous]
         //[CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
-        public async Task<IActionResult> UploadResume([FromForm] Resume model)
+        public async Task<Result> UploadResume([FromForm] ResumeApplicantModel model)
         {
-            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads");
+            Result result = new Result();
+            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\Resume");
+            string fileExtension = Path.GetExtension(model.File.FileName);
             if (!Directory.Exists(uploadFolder))
             {
                 Directory.CreateDirectory(uploadFolder);
             }
-            string uniqueFileName = Path.GetRandomFileName();
+            string uniqueFileName = $"{Guid.NewGuid().ToString()}{fileExtension}";
             string filePath = Path.Combine(uploadFolder, uniqueFileName);
             using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
             {
                 await model.File.CopyToAsync(fileStream);
             };
-            return Ok("File uploaded successfully.");
-        }
+            string? ApplicantId = await _applicantsService.GetApplicantsExistingId(model.Applicant.Email, companyId);
+            if (string.IsNullOrEmpty(ApplicantId))
+            {
+                result.Success = false;
+                result.Message = "Please Check The Email";
+                result.StatusCode = 400;
+            }
+            else
+            {
+                result = await _applicantsService.AddAppicantResume(filePath, companyId, model.Applicant.Email);
 
+            }
+
+            return result;
+        }
     }
 }
 

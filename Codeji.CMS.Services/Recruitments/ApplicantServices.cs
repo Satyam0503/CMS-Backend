@@ -11,10 +11,12 @@ namespace Codeji.CMS.Services.Recruitments
     public class ApplicantServices : IApplicantsService
     {
         readonly IMongoDbRepository<Applicant> _applicantRepository;
+        readonly IMongoDbRepository<Resume> _resumeRepository;
         readonly IMapper _mapper;
-        public ApplicantServices(IMongoDbRepository<Applicant> applicantDbRepository, IMapper mapper)
+        public ApplicantServices(IMongoDbRepository<Applicant> applicantDbRepository, IMapper mapper, IMongoDbRepository<Resume> resumeRepository)
         {
             _applicantRepository = applicantDbRepository;
+            _resumeRepository = resumeRepository;
             _mapper = mapper;
 
         }
@@ -23,18 +25,19 @@ namespace Codeji.CMS.Services.Recruitments
         /// </summary>
         /// <param name="applicantRegisterModel"></param>
         /// <returns></returns>
-        public Task<Result> RegisterApplicants(ApplicantRegisterModel applicantRegisterModel, string companyId)
+        public Task<Result> RegisterApplicants(ResumeApplicantModel applicantRegisterModel, string companyId, string filepath)
         {
             Applicant applicant = new Applicant()
             {
                 CompanyId = companyId,
-                FirstName = applicantRegisterModel.FirstName,
-                LastName = applicantRegisterModel.LastName,
-                Experience = applicantRegisterModel.Experience,
-                VacancyId = applicantRegisterModel.VacancyId,
-                VacancyName = applicantRegisterModel.VacancyName,
-                Phone = applicantRegisterModel.Phone,
-                Email = applicantRegisterModel.Email,
+                FirstName = applicantRegisterModel.Applicant.FirstName,
+                LastName = applicantRegisterModel.Applicant.LastName,
+                Experience = applicantRegisterModel.Applicant.Experience,
+                VacancyId = applicantRegisterModel.Applicant.VacancyId,
+                VacancyName = applicantRegisterModel.Applicant.VacancyName,
+                Phone = applicantRegisterModel.Applicant.Phone,
+                Email = applicantRegisterModel.Applicant.Email,
+                ResumeUrl = filepath,
                 CreatedBy = "new"
 
             };
@@ -58,6 +61,16 @@ namespace Codeji.CMS.Services.Recruitments
             Result res = await _applicantRepository.Update(whereCondition, entity);
             return res;
 
+        }
+
+        public async Task<bool> IsEmailExist(string email)
+        {
+            Applicant? res = await _applicantRepository.FirstOrDefault(x => x.Email == email);
+            if (string.IsNullOrEmpty(res?.Email))
+            {
+                return false;
+            }
+            return true;
         }
         public async Task<string> GetApplicantsExistingId(string email, string companyId)
         {
@@ -151,6 +164,15 @@ namespace Codeji.CMS.Services.Recruitments
                 };
             }
             return result;
+        }
+
+        public async Task<Result> AddAppicantResume(string filePath, string companyId, string email)
+        {
+            Expression<Func<Applicant, bool>> whereCondition = x => x.CompanyId == companyId && x.Email == email;
+            Applicant resume = await _applicantRepository.FirstOrDefault(whereCondition);
+            resume.ResumeUrl = filePath;
+            Result res = await _applicantRepository.Update(whereCondition, resume);
+            return res;
         }
     }
 }

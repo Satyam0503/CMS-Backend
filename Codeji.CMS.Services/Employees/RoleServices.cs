@@ -6,13 +6,14 @@ using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.RolePermissions;
+using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
 using MongoDB.Driver;
 using MongoDB.Driver.Linq;
 using Module = Codeji.CMS.Repository.Entities.RolePermissions.Module;
 
-namespace Codeji.CMS.Services;
+namespace Codeji.CMS.Services.Employees;
 public class RoleServices : IRoleService
 {
     private readonly IMongoDbRepository<Roles> _RolesRepository;

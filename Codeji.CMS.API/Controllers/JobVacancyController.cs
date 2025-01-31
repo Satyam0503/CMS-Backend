@@ -1,7 +1,7 @@
 ﻿using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RequestModels;
-using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Services.Recruitments.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
