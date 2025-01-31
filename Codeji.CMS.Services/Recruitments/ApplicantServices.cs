@@ -25,7 +25,7 @@ namespace Codeji.CMS.Services.Recruitments
         /// </summary>
         /// <param name="applicantRegisterModel"></param>
         /// <returns></returns>
-        public Task<Result> RegisterApplicants(ResumeApplicantModel applicantRegisterModel, string companyId, string filepath)
+        public Task<Result> RegisterApplicants(ApplicantAddEditModel applicantRegisterModel, string companyId)
         {
             Applicant applicant = new Applicant()
             {
@@ -61,6 +61,16 @@ namespace Codeji.CMS.Services.Recruitments
             Result res = await _applicantRepository.Update(whereCondition, entity);
             return res;
 
+        }
+
+        public async Task<bool> IsEmailExist(string email)
+        {
+            Applicant? res = await _applicantRepository.FirstOrDefault(x => x.Email == email);
+            if (string.IsNullOrEmpty(res?.Email))
+            {
+                return false;
+            }
+            return true;
         }
 
         public async Task<bool> IsEmailExist(string email)
@@ -166,11 +176,15 @@ namespace Codeji.CMS.Services.Recruitments
             return result;
         }
 
-        public async Task<Result> AddAppicantResume(string filePath, string companyId, string email)
+        public async Task<Result> AddAppicantResume(string fileName, string companyId, string email, string filePath)
         {
             Expression<Func<Applicant, bool>> whereCondition = x => x.CompanyId == companyId && x.Email == email;
             Applicant resume = await _applicantRepository.FirstOrDefault(whereCondition);
-            resume.ResumeUrl = filePath;
+            //if (System.IO.File.Exists(filePath))
+            //{
+            //    File.Delete(filePath);
+            //}
+            resume.ResumeUrl = fileName;
             Result res = await _applicantRepository.Update(whereCondition, resume);
             return res;
         }

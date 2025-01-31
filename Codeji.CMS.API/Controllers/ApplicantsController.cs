@@ -42,37 +42,19 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("AddApplicant")]
         //[CustomAuthorize(Module = "Applicant", Role = ["Create"])]
-        public async Task<Result> AddApplicant([FromForm] ResumeApplicantModel model)
+        public async Task<Result> AddApplicant([FromBody] ApplicantAddEditModel applicantRegisterModel)
         {
 
             Result result = new Result();
             string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-            if (string.IsNullOrEmpty(model.Applicant.Email))
+            if (string.IsNullOrEmpty(applicantRegisterModel.Email))
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
 
-            bool isEmailExist = await _applicantsService.IsEmailExist(model.Applicant.Email);
-
-            if (isEmailExist)
-                return new Result() { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Email Already Exist" };
-
-            //Logic For Resume Adding
-            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\Resume");
-            string fileExtension = Path.GetExtension(model.File.FileName);
-            if (!Directory.Exists(uploadFolder))
-            {
-                Directory.CreateDirectory(uploadFolder);
-            }
-            string uniqueFileName = $"{Guid.NewGuid().ToString()}{fileExtension}";
-            string filePath = Path.Combine(uploadFolder, uniqueFileName);
-            using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
-            {
-                await model.File.CopyToAsync(fileStream);
-            };
-
-            string? ApplicantId = await _applicantsService.GetApplicantsExistingId(model.Applicant.Email, companyId);
+            bool isEmailExist = await _applicantsService.IsEmailExist(applicantRegisterModel.Email);
+            string? ApplicantId = await _applicantsService.GetApplicantsExistingId(applicantRegisterModel.Email, companyId);
             if (string.IsNullOrEmpty(ApplicantId))
             {
-                result = await _applicantsService.RegisterApplicants(model, companyId, filePath);
+                result = await _applicantsService.RegisterApplicants(applicantRegisterModel, companyId);
             }
             else
             {
@@ -95,9 +77,9 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("UploadResume")]
-        [AllowAnonymous]
+        [Authorize]
         //[CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
-        public async Task<Result> UploadResume([FromForm] ResumeApplicantModel model)
+        public async Task<Result> UploadResume([FromForm] ResumeApplicantModel model, string email)
         {
             Result result = new Result();
             string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
@@ -107,13 +89,13 @@ namespace Codeji.CMS.API.Controllers
             {
                 Directory.CreateDirectory(uploadFolder);
             }
-            string uniqueFileName = $"{Guid.NewGuid().ToString()}{fileExtension}";
-            string filePath = Path.Combine(uploadFolder, uniqueFileName);
+            string fileName = $"{Guid.NewGuid().ToString()}{fileExtension}";
+            string filePath = Path.Combine(uploadFolder + fileName);
             using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
             {
                 await model.File.CopyToAsync(fileStream);
             };
-            string? ApplicantId = await _applicantsService.GetApplicantsExistingId(model.Applicant.Email, companyId);
+            string? ApplicantId = await _applicantsService.GetApplicantsExistingId(email, companyId);
             if (string.IsNullOrEmpty(ApplicantId))
             {
                 result.Success = false;
@@ -122,7 +104,7 @@ namespace Codeji.CMS.API.Controllers
             }
             else
             {
-                result = await _applicantsService.AddAppicantResume(filePath, companyId, model.Applicant.Email);
+                result = await _applicantsService.AddAppicantResume(fileName, companyId, email, filePath);
 
             }
 
