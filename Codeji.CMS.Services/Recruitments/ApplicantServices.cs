@@ -77,6 +77,12 @@ namespace Codeji.CMS.Services.Recruitments
             return res?.ApplicantId ?? string.Empty;
         }
 
+        public async Task<string> GetApplicantExistingResume(string email, string companyId)
+        {
+            Applicant? res = await _applicantRepository.FirstOrDefault(x => (string.IsNullOrEmpty(companyId) || x.CompanyId == companyId) && x.Email == email);
+            return res?.ResumeUrl ?? string.Empty;
+        }
+
         public async Task<List<ApplicantViewModel>> GetApplicantsList(string companyId)
         {
             IEnumerable<Applicant> list = await _applicantRepository.GetAll(x => x.CompanyId == companyId);
@@ -139,6 +145,7 @@ namespace Codeji.CMS.Services.Recruitments
 
         public async Task<Result<ApplicantViewModel>> ApplicantById(string applicantId)
         {
+            string resumePath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\Resume\\");
             Result<ApplicantViewModel> result = new Result<ApplicantViewModel>();
             Applicant entity = await _applicantRepository.FirstOrDefault(x => x.ApplicantId == applicantId);
             if (entity is not null)
@@ -158,7 +165,7 @@ namespace Codeji.CMS.Services.Recruitments
                     LastName = entity.LastName,
                     UpdateDate = entity.UpdatedDate,
                     ActivityType = entity.ActivityType,
-                    ResumeUrl = entity.ResumeUrl,
+                    ResumeUrl = Path.Combine(resumePath, entity.ResumeUrl),
 
                 };
             }
@@ -169,11 +176,16 @@ namespace Codeji.CMS.Services.Recruitments
         {
             Expression<Func<Applicant, bool>> whereCondition = x => x.CompanyId == companyId && x.Email == email;
             Applicant resume = await _applicantRepository.FirstOrDefault(whereCondition);
-            //if (System.IO.File.Exists(filePath))
-            //{
-            //    File.Delete(filePath);
-            //}
+            if (resume == null)
+            {
+                return new Result()
+                {
+                    Success = false,
+                    Message = "Applicant Not Found"
+                };
+            }
             resume.ResumeUrl = fileName;
+
             Result res = await _applicantRepository.Update(whereCondition, resume);
             return res;
         }

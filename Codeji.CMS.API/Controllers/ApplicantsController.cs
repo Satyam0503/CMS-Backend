@@ -55,6 +55,8 @@ namespace Codeji.CMS.API.Controllers
             if (string.IsNullOrEmpty(ApplicantId))
             {
                 result = await _applicantsService.RegisterApplicants(applicantRegisterModel, companyId);
+                result.Success = true;
+                result.Message = "Applicant Added Successfully";
             }
             else
             {
@@ -83,7 +85,7 @@ namespace Codeji.CMS.API.Controllers
         {
             Result result = new Result();
             string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\Resume");
+            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\Resume\\");
             string fileExtension = Path.GetExtension(model.File.FileName);
             if (!Directory.Exists(uploadFolder))
             {
@@ -95,17 +97,17 @@ namespace Codeji.CMS.API.Controllers
             {
                 await model.File.CopyToAsync(fileStream);
             };
-            string? ApplicantId = await _applicantsService.GetApplicantsExistingId(email, companyId);
-            if (string.IsNullOrEmpty(ApplicantId))
+            string? resume = await _applicantsService.GetApplicantExistingResume(email, companyId);
+            if (string.IsNullOrEmpty(resume))
             {
-                result.Success = false;
-                result.Message = "Please Check The Email";
-                result.StatusCode = 400;
+                result = await _applicantsService.AddAppicantResume(fileName, companyId, email, filePath);
             }
             else
             {
+                string oldPath = Path.Combine(uploadFolder, resume);
+                FileInfo fileInfo = new(oldPath);
+                fileInfo.Delete();
                 result = await _applicantsService.AddAppicantResume(fileName, companyId, email, filePath);
-
             }
 
             return result;
