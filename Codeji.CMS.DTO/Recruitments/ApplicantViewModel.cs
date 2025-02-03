@@ -1,5 +1,7 @@
 ﻿
 
+using Codeji.CMS.Utility;
+
 namespace Codeji.CMS.DTO.Recruitments
 {
     public class ApplicantViewModel
@@ -22,6 +24,13 @@ namespace Codeji.CMS.DTO.Recruitments
         public DateTime? UpdateDate { get; set; }
         public string ResumeUrl { get; set; }
 
+        public string? FullApplicantResumePath
+        {
+            get
+            {
+                return !string.IsNullOrEmpty(ResumeUrl) ? Common.GetApplicantResumeFullPath(ResumeUrl) : null;
+            }
+        }
 
     }
 }

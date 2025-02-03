@@ -145,7 +145,6 @@ namespace Codeji.CMS.Services.Recruitments
 
         public async Task<Result<ApplicantViewModel>> ApplicantById(string applicantId)
         {
-            string resumePath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\Resume\\");
             Result<ApplicantViewModel> result = new Result<ApplicantViewModel>();
             Applicant entity = await _applicantRepository.FirstOrDefault(x => x.ApplicantId == applicantId);
             if (entity is not null)
@@ -165,7 +164,7 @@ namespace Codeji.CMS.Services.Recruitments
                     LastName = entity.LastName,
                     UpdateDate = entity.UpdatedDate,
                     ActivityType = entity.ActivityType,
-                    ResumeUrl = Path.Combine(resumePath, entity.ResumeUrl),
+                    ResumeUrl = entity.ResumeUrl,
 
                 };
             }
