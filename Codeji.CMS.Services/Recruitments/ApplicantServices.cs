@@ -44,7 +44,7 @@ namespace Codeji.CMS.Services.Recruitments
             return result;
         }
 
-        public async Task<Result> UpdateApplicants(ApplicantRegisterModel model, string companyId)
+        public async Task<Result> UpdateApplicants(ApplicantAddEditModel model, string companyId)
         {
             Expression<Func<Applicant, bool>> whereCondition = x => x.ApplicantId == model.ApplicantId && x.CompanyId == companyId && x.Email == model.Email;
             //to do improvement

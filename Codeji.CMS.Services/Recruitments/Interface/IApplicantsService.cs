@@ -6,7 +6,7 @@ namespace Codeji.CMS.Services.Recruitments.Interface
     public interface IApplicantsService
     {
         Task<Result> RegisterApplicants(ApplicantAddEditModel applicantRegisterModel, string companyId);
-        Task<Result> UpdateApplicants(ApplicantRegisterModel model, string companyId);
+        Task<Result> UpdateApplicants(ApplicantAddEditModel model, string companyId);
         Task<bool> IsEmailExist(string email);
         Task<string> GetApplicantsExistingId(string email, string companyId);
         Task<string> GetApplicantExistingResume(string email, string companyId);

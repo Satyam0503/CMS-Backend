@@ -69,7 +69,7 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("EditApplicant")]
         //[CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
-        public async Task<Result> EditApplicants([FromBody] ApplicantRegisterModel model)
+        public async Task<Result> EditApplicants([FromBody] ApplicantAddEditModel model)
         {
             Result result = new Result();
             string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);

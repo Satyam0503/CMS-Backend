@@ -4,6 +4,7 @@ using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
+using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
@@ -151,23 +152,23 @@ namespace Codeji.CMS.API.Controllers
             return result;
         }
 
-        //[HttpPost]
-        //[Route("applicant/applyJob")]
-        //[AllowAnonymous]
-        //public async Task<Result> RegisterApplicants([FromBody] ApplicantRegisterModel applicantRegisterModel, [FromQuery] string companyId)
-        //{
+        [HttpPost]
+        [Route("applicant/applyJob")]
+        [AllowAnonymous]
+        public async Task<Result> RegisterApplicants([FromBody] ApplicantAddEditModel applicantRegisterModel, string companyId)
+        {
 
-        //    Result result = new Result();
-        //    if (string.IsNullOrEmpty(applicantRegisterModel.Email))
-        //        return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
-        //    string? ApplicantId = await _applicantsServices.GetApplicantsExistingId(applicantRegisterModel.Email, companyId);
-        //    ApplicantRegisterModel addEditApplicantModel = _mapper.Map<ApplicantRegisterModel>(applicantRegisterModel);
-        //    if (string.IsNullOrEmpty(ApplicantId))
-        //        result = await _applicantsServices.RegisterApplicants(addEditApplicantModel, companyId,);
-        //    else
-        //        result = await _applicantsServices.UpdateApplicants(addEditApplicantModel, ApplicantId);
-        //    return result;
-        //}
+            Result result = new Result();
+            if (string.IsNullOrEmpty(applicantRegisterModel.Email))
+                return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
+            string? ApplicantId = await _applicantsServices.GetApplicantsExistingId(applicantRegisterModel.Email, companyId);
+            //ApplicantAddEditModel addEditApplicantModel = _mapper.Map<ApplicantAddEditModel>(applicantRegisterModel);
+            if (string.IsNullOrEmpty(ApplicantId))
+                result = await _applicantsServices.RegisterApplicants(applicantRegisterModel, companyId);
+            else
+                result = await _applicantsServices.UpdateApplicants(applicantRegisterModel, ApplicantId);
+            return result;
+        }
     }
 }
 
