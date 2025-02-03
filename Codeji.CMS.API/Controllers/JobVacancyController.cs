@@ -1,13 +1,14 @@
 ﻿using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RequestModels;
-using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Services.Recruitments.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Codeji.CMS.API.Controllers;
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 
 public class JobVacancyController : BaseApiController
 {
@@ -22,10 +23,32 @@ public class JobVacancyController : BaseApiController
 
     [Route("AddJobVacancy")]
     [HttpPost]
-    [Authorize]
+
     public async Task<Result<JobVacancyModel>> AddJobVacancy(JobVacancyModel jobVacancy)
     {
         string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
         return await _jobVacancyService.AddJobVacancy(jobVacancy, companyId);
+    }
+
+    [Route("EditJobVacancy")]
+    [HttpPost]
+    public async Task<Result<JobVacancyModel>> EditJobVacancy(JobVacancyModel jobVacancy, string jobId)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        return await _jobVacancyService.EditJobVacancy(jobVacancy, jobId, companyId);
+    }
+    [Route("GetAllVacancy")]
+    [HttpGet]
+    public async Task<Result<JobVacancyModel>> GetAllVacancy()
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        List<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy(companyId);
+        Result<JobVacancyModel> result = new Result<JobVacancyModel>()
+        {
+            Success = true,
+            MethodResults = data.ToList()
+        };
+
+        return result;
     }
 }

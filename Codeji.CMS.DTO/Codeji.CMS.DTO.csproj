@@ -12,10 +12,12 @@
     <None Remove="Helpers\" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Recruitments\" />
     <Folder Include="RolePermissions\" />
     <Folder Include="Employee\" />
     <Folder Include="Helpers\" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Http.Features" Version="2.2.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Codeji.CMS.Utility\Codeji.CMS.Utility.csproj" />

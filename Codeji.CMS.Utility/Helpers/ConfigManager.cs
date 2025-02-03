@@ -1,6 +1,3 @@
-using System.Text.Json.Serialization;
-using Codeji.CMS.Utility.Helpers;
-
 namespace Codeji.CMS.Utility.Helpers;
 public class ConfigManager
 {
@@ -15,6 +12,7 @@ public class ConfigManager
     public static string Employee_ImageUrl => ConfigurationHelper.config.GetSection("AppSettings:Employee_ImageUrl")?.Value ?? "";
     public static string Is_For_Debug => ConfigurationHelper.config.GetSection("AppSettings:isForDebug")?.Value ?? "";
     public static string App_Version => ConfigurationHelper.config.GetSection("AppSettings:AppVersion")?.Value ?? "";
+    public static string viewResumeUrl => ConfigurationHelper.config.GetSection("AppSettings:viewResumeUrl")?.Value ?? "";
 
 
 }

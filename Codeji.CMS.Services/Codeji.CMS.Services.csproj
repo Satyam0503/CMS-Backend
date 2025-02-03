@@ -17,8 +17,4 @@
     <None Remove="Recruitments\" />
     <None Remove="Recruitments\Interface\" />
   </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Recruitments\" />
-    <Folder Include="Recruitments\Interface\" />
-  </ItemGroup>
 </Project>

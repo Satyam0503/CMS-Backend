@@ -5,6 +5,7 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.RolePermissions;
+using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.Helpers;
 
@@ -77,6 +78,11 @@ namespace Codeji.CMS.Services
 
 
 
+        }
+        public async Task<List<Company>> GetAllCompanyList()
+        {
+            IEnumerable<Company> list = await _companyRepo.GetAll();
+            return _mapper.Map<List<Company>>(list);
         }
     }
 }

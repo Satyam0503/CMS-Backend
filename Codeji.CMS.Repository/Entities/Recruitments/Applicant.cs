@@ -1,6 +1,4 @@
-﻿using System;
-using System.ComponentModel.DataAnnotations;
-using MongoDB.Bson.Serialization.Attributes;
+﻿using MongoDB.Bson.Serialization.Attributes;
 
 namespace Codeji.CMS.Repository.Entities.Recruitments
 {
@@ -12,7 +10,8 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         public string LastName { get; set; }
         public string Email { get; set; }
         public required string Phone { get; set; }
-        public string VacanyId { get; set; }
+        public string VacancyId { get; set; }
+        public string VacancyName { get; set; }
         /// <summary>
         /// ActivityType : InProgress,Shorlisted,OnHold,Rejected, 
         /// </summary>
@@ -21,7 +20,7 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         /// Status: Inactive,Active,Closed
         /// </summary>
         public int Status { get; set; } = 0;
-        public decimal Exprience { get; set; }
+        public decimal Experience { get; set; }
         public string ResumeUrl { get; set; }
     }
 }
