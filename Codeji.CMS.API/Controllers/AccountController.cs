@@ -172,7 +172,7 @@ namespace Codeji.CMS.API.Controllers
             else
             {
                 result.Success = false;
-                result.Message = "You have already applied within the last 6 months. Please reapply after the waiting period.";
+                result.Message = "You have already applied. Please reapply after the waiting period.";
             }
             return result;
         }

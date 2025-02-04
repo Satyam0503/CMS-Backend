@@ -37,6 +37,7 @@ namespace Codeji.CMS.Services.Recruitments
                 VacancyName = applicantRegisterModel.VacancyName,
                 Phone = applicantRegisterModel.Phone,
                 Email = applicantRegisterModel.Email,
+                Status = applicantRegisterModel.Status,
                 CreatedBy = "new"
 
             };
@@ -57,6 +58,7 @@ namespace Codeji.CMS.Services.Recruitments
             entity.LastName = model.LastName;
             entity.VacancyName = model.VacancyName;
             entity.VacancyId = model.VacancyId;
+            entity.ActivityType = model.ActivityType;
             Result res = await _applicantRepository.Update(whereCondition, entity);
             return res;
 

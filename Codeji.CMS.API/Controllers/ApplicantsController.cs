@@ -62,6 +62,7 @@ namespace Codeji.CMS.API.Controllers
             else
             {
                 result.Success = false;
+                result.StatusCode = StatusCodes.Status403Forbidden;
                 result.Message = "Application has already been submitted. Please reapply after the waiting period";
             }
             return result;

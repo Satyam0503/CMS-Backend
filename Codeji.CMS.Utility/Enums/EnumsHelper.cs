@@ -4,10 +4,11 @@
     {
         public enum ActivityTypeEnums
         {
-            Inprogress = 1,
-            OnHold = 2,
-            Shortlisted = 3,
-            Rejected = 4
+            InProgress = 0,
+            OnHold = 1,
+            Shortlisted = 2,
+            Selected = 3,
+            Rejected = 4,
         }
         public enum StatusEnums
         {
