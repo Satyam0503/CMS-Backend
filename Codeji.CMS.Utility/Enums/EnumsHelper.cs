@@ -1,16 +1,15 @@
-﻿using System;
-namespace Codeji.CMS.Utility.Enums
+﻿namespace Codeji.CMS.Utility.Enums
 {
     public static class EnumsHelper
     {
-        public enum StatusEnums
+        public enum ActivityTypeEnums
         {
             Inprogress = 1,
             OnHold = 2,
             Shortlisted = 3,
             Rejected = 4
         }
-        public enum ActivityTypeEnums
+        public enum StatusEnums
         {
             New = 0,
             Active = 1,
@@ -20,8 +19,8 @@ namespace Codeji.CMS.Utility.Enums
         public enum Roles
         {
             Administrator = 1,
-            HR=2,
-            Employee=3
+            HR = 2,
+            Employee = 3
         }
     }
 }
