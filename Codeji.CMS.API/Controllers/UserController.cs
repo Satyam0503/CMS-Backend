@@ -1,7 +1,9 @@
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
+using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
+using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Employees.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -166,6 +168,37 @@ public class UserController : BaseApiController
         return result;
     }
 
+    [Route("AddComment")]
+    [HttpPost]
+    [Authorize]
+    public async Task<Result> AddComment(CommentRequestModel model)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        await _employeeService.AddComment(companyId, model);
+        Result result = new Result()
+        {
+            Success = true,
+            Message = "Comment Added Successfully",
+            StatusCode = StatusCodes.Status200OK,
+        };
+        return result;
+    }
+
+    [Route("GetAllComment")]
+    [HttpPost]
+    [Authorize]
+    public async Task<Result<Comments>> GetAllComment([FromQuery] string applicantId)
+    {
+        List<Comments> list = await _employeeService.GetAllComment(applicantId);
+        Result<Comments> result = new()
+        {
+            Success = true,
+            Message = "Add Logic For Controller",
+            StatusCode = StatusCodes.Status200OK,
+            MethodResults = [.. list]
+        };
+        return result;
+    }
 }
 
 

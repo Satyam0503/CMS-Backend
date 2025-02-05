@@ -1,7 +1,9 @@
 ﻿using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
+using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
+using Codeji.CMS.Repository.Entities.Recruitments;
 
 namespace Codeji.CMS.Services.Employees.Interface
 {
@@ -22,5 +24,7 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<List<EmployeeEducationRequestModel>> GetEmployeeEducationDetails(string id);
         Task<EmployeeSummaryRequestModel> GetEmployeeSummary(string userId);
         Task<List<EmployeeCertificationRequestModel>> GetEmployeeCertificationDetails(string id);
+        Task<Result> AddComment(string companyId, CommentRequestModel model);
+        Task<List<Comments>> GetAllComment(string applicantId);
     }
 }

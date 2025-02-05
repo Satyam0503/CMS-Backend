@@ -11,7 +11,6 @@ namespace Codeji.CMS.DTO.Recruitments
         public string LastName { get; set; }
         public string Email { get; set; }
         public string Phone { get; set; }
-        public string StatusName { get; set; }
         public int Status { get; set; }
         public string ActivityTypeName { get; set; }
         public int ActivityType { get; set; }
