@@ -59,6 +59,7 @@ namespace Codeji.CMS.Services.Recruitments
             entity.VacancyName = model.VacancyName;
             entity.VacancyId = model.VacancyId;
             entity.ActivityType = model.ActivityType;
+            entity.Status = model.Status;
             Result res = await _applicantRepository.Update(whereCondition, entity);
             return res;
 

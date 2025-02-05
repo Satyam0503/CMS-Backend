@@ -12,6 +12,6 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         public string ApplicantId { get; set; }
         public string UserId { get; set; }
         public string UserName { get; set; }
-        public int ApplicantStatus { get; set; }
+        public int ActivityCategory { get; set; }
     }
 }

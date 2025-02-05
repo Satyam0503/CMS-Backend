@@ -328,7 +328,7 @@ namespace Codeji.CMS.Services.Employees
                 CompanyId = companyId,
                 UserId = model.UserId,
                 ApplicantId = model.ApplicantId,
-                ApplicantStatus = model.ActivityCategory,
+                ActivityCategory = model.ActivityCategory,
                 Description = model.Description,
                 CreatedDate = DateTime.UtcNow,
                 UserName = model.Username,

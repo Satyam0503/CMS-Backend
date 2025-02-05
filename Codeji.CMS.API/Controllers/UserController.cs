@@ -128,7 +128,7 @@ public class UserController : BaseApiController
     }
 
     [Route("GetEmployeeSummary")]
-    [HttpPost]
+    [HttpGet]
     [Authorize]
     public async Task<Result<EmployeeSummaryRequestModel>> GetEmployeeSummary()
     {
@@ -142,7 +142,7 @@ public class UserController : BaseApiController
     }
 
     [Route("GetEmployeeEducationDetails")]
-    [HttpPost]
+    [HttpGet]
     [Authorize]
     public async Task<Result<EmployeeEducationRequestModel>> GetEmployeeEducationDetails()
     {
@@ -156,7 +156,7 @@ public class UserController : BaseApiController
 
 
     [Route("GetEmployeeCertificationDetails")]
-    [HttpPost]
+    [HttpGet]
     [Authorize]
     public async Task<Result<EmployeeCertificationRequestModel>> GetEmployeeCertificationDetails()
     {
@@ -185,7 +185,7 @@ public class UserController : BaseApiController
     }
 
     [Route("GetAllComment")]
-    [HttpPost]
+    [HttpGet]
     [Authorize]
     public async Task<Result<Comments>> GetAllComment([FromQuery] string applicantId)
     {
