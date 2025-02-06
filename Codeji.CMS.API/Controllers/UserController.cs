@@ -193,7 +193,7 @@ public class UserController : BaseApiController
         Result<Comments> result = new()
         {
             Success = true,
-            Message = "Add Logic For Controller",
+            Message = "All Comments",
             StatusCode = StatusCodes.Status200OK,
             MethodResults = [.. list]
         };

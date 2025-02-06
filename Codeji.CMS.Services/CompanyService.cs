@@ -74,10 +74,6 @@ namespace Codeji.CMS.Services
 
             result.Success = true;
             return result;
-
-
-
-
         }
         public async Task<List<Company>> GetAllCompanyList()
         {

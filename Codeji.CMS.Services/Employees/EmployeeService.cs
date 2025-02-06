@@ -323,13 +323,17 @@ namespace Codeji.CMS.Services.Employees
 
         public async Task<Result> AddComment(string companyId, CommentRequestModel model)
         {
+            string modifiedComment = model.Description
+                .Replace("<p><br></p>", " ")
+                .Replace("</p><p>", " ")
+                .Replace("</p> <p>", " ");
             Comments comments = new Comments()
             {
                 CompanyId = companyId,
                 UserId = model.UserId,
                 ApplicantId = model.ApplicantId,
                 ActivityCategory = model.ActivityCategory,
-                Description = model.Description,
+                Description = modifiedComment,
                 CreatedDate = DateTime.UtcNow,
                 UserName = model.Username,
             };
