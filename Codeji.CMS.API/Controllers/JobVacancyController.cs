@@ -40,6 +40,7 @@ public class JobVacancyController : BaseApiController
     }
     [Route("GetAllVacancy")]
     [HttpPost]
+    [AllowAnonymous]
     public async Task<Result<JobVacancyModel>> GetAllVacancy(ApplyNowVacancyModel model)
     {
         if (string.IsNullOrEmpty(model.companyId))
