@@ -50,18 +50,20 @@ namespace Codeji.CMS.API.Controllers
             if (string.IsNullOrEmpty(applicantRegisterModel.Email))
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
 
-            bool isEmailExist = await _applicantsService.IsEmailExist(applicantRegisterModel.Email);
+            //bool isEmailExist = await _applicantsService.IsEmailExist(applicantRegisterModel.Email);
             string? ApplicantId = await _applicantsService.GetApplicantsExistingId(applicantRegisterModel.Email, companyId);
             if (string.IsNullOrEmpty(ApplicantId))
             {
                 result = await _applicantsService.RegisterApplicants(applicantRegisterModel, companyId);
                 result.Success = true;
-                result.Message = "Applicant Added Successfully";
+                result.Message = "Application has been submitted successfully";
             }
+
             else
             {
                 result.Success = false;
-                result.Message = "Applicant Already Exists";
+                result.StatusCode = StatusCodes.Status403Forbidden;
+                result.Message = "Application has already been submitted. Please reapply after the waiting period";
             }
             return result;
         }
@@ -79,7 +81,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("UploadResume")]
-        [Authorize]
+        [AllowAnonymous]
         //[CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
         public async Task<Result> UploadResume([FromForm] ResumeApplicantModel model, string email)
         {

@@ -1,7 +1,9 @@
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
+using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
+using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Employees.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -126,7 +128,7 @@ public class UserController : BaseApiController
     }
 
     [Route("GetEmployeeSummary")]
-    [HttpPost]
+    [HttpGet]
     [Authorize]
     public async Task<Result<EmployeeSummaryRequestModel>> GetEmployeeSummary()
     {
@@ -140,7 +142,7 @@ public class UserController : BaseApiController
     }
 
     [Route("GetEmployeeEducationDetails")]
-    [HttpPost]
+    [HttpGet]
     [Authorize]
     public async Task<Result<EmployeeEducationRequestModel>> GetEmployeeEducationDetails()
     {
@@ -154,7 +156,7 @@ public class UserController : BaseApiController
 
 
     [Route("GetEmployeeCertificationDetails")]
-    [HttpPost]
+    [HttpGet]
     [Authorize]
     public async Task<Result<EmployeeCertificationRequestModel>> GetEmployeeCertificationDetails()
     {
@@ -166,6 +168,37 @@ public class UserController : BaseApiController
         return result;
     }
 
+    [Route("AddComment")]
+    [HttpPost]
+    [Authorize]
+    public async Task<Result> AddComment(CommentRequestModel model)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        await _employeeService.AddComment(companyId, model);
+        Result result = new Result()
+        {
+            Success = true,
+            Message = "Comment Added Successfully",
+            StatusCode = StatusCodes.Status200OK,
+        };
+        return result;
+    }
+
+    [Route("GetAllComment")]
+    [HttpGet]
+    [Authorize]
+    public async Task<Result<Comments>> GetAllComment([FromQuery] string applicantId)
+    {
+        List<Comments> list = await _employeeService.GetAllComment(applicantId);
+        Result<Comments> result = new()
+        {
+            Success = true,
+            Message = "All Comments",
+            StatusCode = StatusCodes.Status200OK,
+            MethodResults = [.. list]
+        };
+        return result;
+    }
 }
 
 

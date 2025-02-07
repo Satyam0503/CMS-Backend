@@ -16,10 +16,7 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         /// ActivityType : InProgress,Shorlisted,OnHold,Rejected, 
         /// </summary>
         public int ActivityType { get; set; }
-        /// <summary>
-        /// Status: Inactive,Active,Closed
-        /// </summary>
-        public int Status { get; set; } = 0;
+        public int Status { get; set; }
         public decimal Experience { get; set; }
         public string ResumeUrl { get; set; }
     }

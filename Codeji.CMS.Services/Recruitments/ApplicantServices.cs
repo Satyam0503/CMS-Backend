@@ -25,7 +25,7 @@ namespace Codeji.CMS.Services.Recruitments
         /// </summary>
         /// <param name="applicantRegisterModel"></param>
         /// <returns></returns>
-        public Task<Result> RegisterApplicants(ApplicantAddEditModel applicantRegisterModel, string companyId)
+        public async Task<Result> RegisterApplicants(ApplicantAddEditModel applicantRegisterModel, string companyId)
         {
             Applicant applicant = new Applicant()
             {
@@ -37,10 +37,11 @@ namespace Codeji.CMS.Services.Recruitments
                 VacancyName = applicantRegisterModel.VacancyName,
                 Phone = applicantRegisterModel.Phone,
                 Email = applicantRegisterModel.Email,
+                Status = applicantRegisterModel.Status,
                 CreatedBy = "new"
 
             };
-            Task<Result> result = _applicantRepository.AddOne(applicant);
+            Result result = await _applicantRepository.AddOne(applicant);
             return result;
         }
 
@@ -57,6 +58,8 @@ namespace Codeji.CMS.Services.Recruitments
             entity.LastName = model.LastName;
             entity.VacancyName = model.VacancyName;
             entity.VacancyId = model.VacancyId;
+            entity.ActivityType = model.ActivityType;
+            entity.Status = model.Status;
             Result res = await _applicantRepository.Update(whereCondition, entity);
             return res;
 
@@ -74,7 +77,24 @@ namespace Codeji.CMS.Services.Recruitments
         public async Task<string> GetApplicantsExistingId(string email, string companyId)
         {
             Applicant? res = await _applicantRepository.FirstOrDefault(x => (string.IsNullOrEmpty(companyId) || x.CompanyId == companyId) && x.Email == email);
-            return res?.ApplicantId ?? string.Empty;
+            if (string.IsNullOrEmpty(res?.Email))
+            {
+                return string.Empty;
+            }
+            else
+            {
+                DateTime createdDate = (DateTime)res.CreatedDate;
+                long createdTimeStamp = new DateTimeOffset(createdDate).ToUnixTimeSeconds();
+                DateTimeOffset sixMonthAgo = DateTimeOffset.Now.AddMonths(-6);
+                if (createdDate <= sixMonthAgo)
+
+                {
+                    return string.Empty;
+                }
+                return res?.ApplicantId;
+
+            }
+
         }
 
         public async Task<string> GetApplicantExistingResume(string email, string companyId)

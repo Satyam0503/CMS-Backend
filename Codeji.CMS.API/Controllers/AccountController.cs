@@ -155,18 +155,25 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("applicant/applyJob")]
         [AllowAnonymous]
-        public async Task<Result> RegisterApplicants([FromBody] ApplicantAddEditModel applicantRegisterModel, string companyId)
+        public async Task<Result> RegisterApplicants([FromBody] ApplicantAddEditModel applicantRegisterModel)
         {
 
             Result result = new Result();
             if (string.IsNullOrEmpty(applicantRegisterModel.Email))
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
-            string? ApplicantId = await _applicantsServices.GetApplicantsExistingId(applicantRegisterModel.Email, companyId);
-            //ApplicantAddEditModel addEditApplicantModel = _mapper.Map<ApplicantAddEditModel>(applicantRegisterModel);
+            string? ApplicantId = await _applicantsServices.GetApplicantsExistingId(applicantRegisterModel.Email, applicantRegisterModel.CompanyId);
             if (string.IsNullOrEmpty(ApplicantId))
-                result = await _applicantsServices.RegisterApplicants(applicantRegisterModel, companyId);
+            {
+                result = await _applicantsServices.RegisterApplicants(applicantRegisterModel, applicantRegisterModel.CompanyId);
+                result.Success = true;
+                result.Message = "Your application has been submitted successfully";
+            }
+
             else
-                result = await _applicantsServices.UpdateApplicants(applicantRegisterModel, ApplicantId);
+            {
+                result.Success = false;
+                result.Message = "You have already applied. Please reapply after the waiting period.";
+            }
             return result;
         }
     }

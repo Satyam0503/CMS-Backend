@@ -3,12 +3,15 @@ using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
+using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility.Helpers;
+using Microsoft.AspNetCore.Http;
 
 namespace Codeji.CMS.Services.Employees
 {
@@ -20,11 +23,14 @@ namespace Codeji.CMS.Services.Employees
         readonly IMapper _mapper;
         readonly IMongoDbRepository<User> _employeeRepository;
         readonly IMongoDbRepository<Roles> _rolesRepository;
+        readonly IMongoDbRepository<Comments> _commentRepository;
         public EmployeeService(IMongoDbRepository<EducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<CertificationDetails> certificationDetailsRepo,
             IMongoDbRepository<EmployeeSummary> userSummary,
             IMongoDbRepository<User> employeeRepository,
-            IMongoDbRepository<Roles> rolesRepository)
+            IMongoDbRepository<Roles> rolesRepository,
+            IMongoDbRepository<Comments> commentRepository
+            )
         {
             _employeeRepository = employeeRepository;
             _rolesRepository = rolesRepository;
@@ -32,6 +38,8 @@ namespace Codeji.CMS.Services.Employees
             _mapper = mapper;
             _certificationDetailsRepo = certificationDetailsRepo;
             _employeeSummaryRepo = userSummary;
+            _commentRepository = commentRepository;
+
         }
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string companyId)
         {
@@ -174,6 +182,7 @@ namespace Codeji.CMS.Services.Employees
             await _employeeRepository.Update(whereCondition, user);
             return true;
         }
+
         // Logic for Login User and Employee by Email and Password
         public async Task<string> GetVerificationToken(string email, string password)
         {
@@ -308,6 +317,39 @@ namespace Codeji.CMS.Services.Employees
             {
                 Summary = summary.Summary
             };
+        }
+
+        //Logic For Addig Comment on Applicant By Employee (Admin And HR Manager )
+
+        public async Task<Result> AddComment(string companyId, CommentRequestModel model)
+        {
+            string modifiedComment = model.Description
+                .Replace("<p><br></p>", " ")
+                .Replace("</p><p>", " ")
+                .Replace("</p> <p>", " ");
+            Comments comments = new Comments()
+            {
+                CompanyId = companyId,
+                UserId = model.UserId,
+                ApplicantId = model.ApplicantId,
+                ActivityCategory = model.ActivityCategory,
+                Description = modifiedComment,
+                CreatedDate = DateTime.UtcNow,
+                UserName = model.Username,
+            };
+            await _commentRepository.AddOne(comments);
+            Result result = new Result()
+            {
+                Success = true,
+                Message = "Comment Added Successfully",
+                StatusCode = StatusCodes.Status200OK,
+            };
+            return result;
+        }
+        public async Task<List<Comments>> GetAllComment(string applicantId)
+        {
+            IEnumerable<Comments> list = await _commentRepository.GetAll(x => x.ApplicantId == applicantId);
+            return _mapper.Map<List<Comments>>(list);
         }
     }
 }
