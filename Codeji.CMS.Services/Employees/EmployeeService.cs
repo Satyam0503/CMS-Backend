@@ -5,6 +5,7 @@ using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
+using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
@@ -23,22 +24,28 @@ namespace Codeji.CMS.Services.Employees
         readonly IMapper _mapper;
         readonly IMongoDbRepository<User> _employeeRepository;
         readonly IMongoDbRepository<Roles> _rolesRepository;
+        private readonly IRoleService _roleService;
         readonly IMongoDbRepository<Comments> _commentRepository;
+        readonly IMongoDbRepository<RolePermission> _rolePermissionRepository;
         public EmployeeService(IMongoDbRepository<EducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<CertificationDetails> certificationDetailsRepo,
             IMongoDbRepository<EmployeeSummary> userSummary,
             IMongoDbRepository<User> employeeRepository,
             IMongoDbRepository<Roles> rolesRepository,
-            IMongoDbRepository<Comments> commentRepository
+            IMongoDbRepository<Comments> commentRepository,
+            IRoleService roleService,
+            IMongoDbRepository<RolePermission> rolePermissionRepository
             )
         {
             _employeeRepository = employeeRepository;
             _rolesRepository = rolesRepository;
+            _roleService = roleService;
             _educationDetailsRepo = educationDetailsRepo;
             _mapper = mapper;
             _certificationDetailsRepo = certificationDetailsRepo;
             _employeeSummaryRepo = userSummary;
             _commentRepository = commentRepository;
+            _rolePermissionRepository = rolePermissionRepository;
 
         }
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string companyId)
@@ -212,11 +219,14 @@ namespace Codeji.CMS.Services.Employees
             {
                 return null;
             }
+            List<ModuleWithPermissionsModel> modulePermission = await _roleService.GetRoleWithPermissions(role.RolesId, role.CompanyId);
             returnModel.UserId = user.UserId;
             returnModel.Role = role.Titles;
             returnModel.FirstName = user.FirstName;
             returnModel.LastName = user.LastName;
             returnModel.Permissions = [];
+            returnModel.modulePermission = modulePermission;
+            returnModel.RoleId = role.RolesId;
             returnModel.CompanyId = role.CompanyId;
             return returnModel;
 

@@ -81,12 +81,13 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("UploadResume")]
+        [FilesExtensions([".pdf"])]
         [AllowAnonymous]
         //[CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
         public async Task<Result> UploadResume([FromForm] ResumeApplicantModel model, string email)
         {
             Result result = new Result();
-            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+            //string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
             string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\Resume\\");
             string fileExtension = Path.GetExtension(model.File.FileName);
             if (!Directory.Exists(uploadFolder))
@@ -99,21 +100,20 @@ namespace Codeji.CMS.API.Controllers
             {
                 await model.File.CopyToAsync(fileStream);
             };
-            string? resume = await _applicantsService.GetApplicantExistingResume(email, companyId);
+            string? resume = await _applicantsService.GetApplicantExistingResume(email);
             if (string.IsNullOrEmpty(resume))
             {
-                result = await _applicantsService.AddAppicantResume(fileName, companyId, email, filePath);
+                result = await _applicantsService.AddAppicantResume(fileName, email, filePath);
             }
             else
             {
                 string oldPath = Path.Combine(uploadFolder, resume);
                 FileInfo fileInfo = new(oldPath);
                 fileInfo.Delete();
-                result = await _applicantsService.AddAppicantResume(fileName, companyId, email, filePath);
+                result = await _applicantsService.AddAppicantResume(fileName, email, filePath);
             }
 
             return result;
         }
     }
 }
-

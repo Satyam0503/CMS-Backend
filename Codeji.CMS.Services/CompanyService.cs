@@ -50,6 +50,7 @@ namespace Codeji.CMS.Services
             string companyId = Guid.NewGuid().ToString();
             //Add Default Role
             List<Roles> adminRole = await _roleService.AddDefaultRole(companyId);
+
             User user = new User()
             {
                 UserId = Guid.NewGuid().ToString(),

@@ -99,7 +99,7 @@ public class RoleServices : IRoleService
             {
                 RolePermissionId = permission.RolePermissionId,
                 ModulePermissionId = permission.ModulePermissionId,
-                RolesId = permission.RolesId,
+                RoleId = permission.RolesId,
                 HasAccess = permission.HasAccess
             });
         }
@@ -114,7 +114,7 @@ public class RoleServices : IRoleService
         Roles role = await _RolesRepository.FirstOrDefault(whereCondition);
         if (role != null)
         {
-            IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => x.RolesId == role.RolesId);
+            IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => x.RoleId == role.RolesId);
             List<ModulePermission> modulePermissions = (await _modulePermissionRepository.GetAll()).ToList();
             List<Permission> permissions = (await _permissionRepository.GetAll()).ToList();
             List<Module> modules = (await _moduleRepository.GetAll()).ToList();
@@ -122,7 +122,7 @@ public class RoleServices : IRoleService
                           join mp in modulePermissions on rp.ModulePermissionId equals mp.ModulePermissionId
                           join m in modules on mp.ModuleId equals m.ModuleId
                           join p in permissions on mp.PermissionId equals p.PermissionId
-                          where rp.RolesId == role.RolesId
+                          where rp.RoleId == role.RolesId
                           select new { permission = p, rolePermissions = rp, module = m, modulePermission = mp }).ToList();
             var Roless = result.Select(x => new { x.module.ModuleId, x.module.ModuleName, x.module.ModuleConstant }).Distinct().ToArray();
             for (int i = 0; i < Roless.Length; i++)
@@ -138,7 +138,7 @@ public class RoleServices : IRoleService
                     PermissionName = y.permission.PermissionName,
                     RolePermissionId = y.rolePermissions.RolePermissionId,
                     ModulePermissionId = y.modulePermission.ModulePermissionId,
-                    RolesId = y.rolePermissions.RolesId,
+                    RolesId = y.rolePermissions.RoleId,
                     HasAccess = y.rolePermissions.HasAccess,
                     PermissionConstant = y.permission.PermissionConstant
                 }).ToList();
@@ -152,7 +152,7 @@ public class RoleServices : IRoleService
     {
         List<Roles> roles = _RolesRepository.Get(x => x.IsDefault && string.IsNullOrEmpty(x.CompanyId)).ToList();
         List<string> roleIds = roles.Select(x => x.RolesId).ToList();
-        IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => roleIds.Contains(x.RolesId));
+        IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => roleIds.Contains(x.RoleId));
         foreach (Roles? role in roles)
         {
             string oldRoleId = role.RolesId;
@@ -160,13 +160,19 @@ public class RoleServices : IRoleService
             role.CompanyId = companyId;
             role.IsDefault = false;
             role.CreatedDate = DateTime.Now;
-            List<RolePermission> permissions = rolePermissions.Where(x => x.RolesId == oldRoleId).ToList();
+            List<RolePermission> permissions = rolePermissions.Where(x => x.RoleId == oldRoleId).ToList();
             foreach (RolePermission? item in permissions)
             {
-                item.CreatedDate = DateTime.Now;
-                item.CompanyId = companyId;
-                item.RolesId = role.RolesId;
-                await _rolePermissionRepository.AddOne(item);
+                Task<Domain.Models.Result> rolePermission = _rolePermissionRepository.AddOne(
+                    new RolePermission
+                    {
+                        ModulePermissionId = item.ModulePermissionId,
+                        RoleId = role.RolesId,
+                        CreatedDate = DateTime.Now,
+                        CompanyId = companyId,
+                        HasAccess = item.HasAccess
+                    });
+                //await _rolePermissionRepository.AddOne(item);
             }
         }
         await _RolesRepository.AddMany(roles);
@@ -235,9 +241,9 @@ public class RoleServices : IRoleService
         // for roles connection to the application permission change
         string[] rolesIds = roles.Select(x => x.RolesId).ToArray();
         // 27 for Dashboard acces permission.
-        IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => rolesIds.Contains(x.RolesId));
+        IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => rolesIds.Contains(x.RoleId));
         return (from role in roles
-                join rp in rolePermissions on role.RolesId equals rp.RolesId
+                join rp in rolePermissions on role.RolesId equals rp.RoleId
                 select new RoleModel
                 {
                     RolesId = role.RolesId,
@@ -256,10 +262,10 @@ public class RoleServices : IRoleService
             return null;
         }
 
-        RolePermission rolePermission = await _rolePermissionRepository.FirstOrDefault(x => x.RolesId == permission.RolesId && x.RolePermissionId == permission.RolePermissionId);
+        RolePermission rolePermission = await _rolePermissionRepository.FirstOrDefault(x => x.RoleId == permission.RoleId && x.RolePermissionId == permission.RolePermissionId);
         if (rolePermission != null)
         {
-            FilterDefinition<RolePermission> filter = Builders<RolePermission>.Filter.Where(e => e.RolesId == permission.RolesId && e.RolePermissionId == permission.RolePermissionId);
+            FilterDefinition<RolePermission> filter = Builders<RolePermission>.Filter.Where(e => e.RoleId == permission.RoleId && e.RolePermissionId == permission.RolePermissionId);
             rolePermission.HasAccess = permission.HasAccess;
             rolePermission.UpdatedBy = "saveRolePermission";
             rolePermission.UpdatedDate = DateTime.UtcNow;
@@ -270,7 +276,7 @@ public class RoleServices : IRoleService
             rolePermission = new RolePermission()
             {
                 HasAccess = permission.HasAccess,
-                RolesId = permission.RolesId,
+                RoleId = permission.RoleId,
                 ModulePermissionId = permission.ModulePermissionId,
                 CreatedBy = "saveRolePermission",
                 CreatedDate = DateTime.UtcNow,
