@@ -9,10 +9,10 @@ namespace Codeji.CMS.Services.Recruitments.Interface
         Task<Result> UpdateApplicants(ApplicantAddEditModel model, string companyId);
         Task<bool> IsEmailExist(string email);
         Task<string> GetApplicantsExistingId(string email, string companyId);
-        Task<string> GetApplicantExistingResume(string email, string companyId);
+        Task<string> GetApplicantExistingResume(string email);
         Task<List<ApplicantViewModel>> GetApplicantsList(string companyId);
         Task<Result<ApplicantViewModel>> ApplicantById(string applicantId);
-        Task<Result> AddAppicantResume(string fileName, string companyId, string email, string filePath);
+        Task<Result> AddAppicantResume(string fileName, string email, string filePath);
 
 
     }

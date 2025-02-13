@@ -1,4 +1,6 @@
-﻿namespace Codeji.CMS.DTO.Employee
+﻿using Codeji.CMS.DTO.RolePermissions;
+
+namespace Codeji.CMS.DTO.Employee
 {
     public class LoginUserViewModel
     {
@@ -11,7 +13,8 @@
         }
         public string CompanyId { get; set; }
         public string Role { get; set; }
-
+        public string RoleId { get; set; }
+        public List<ModuleWithPermissionsModel> modulePermission { get; set; }
         public string[] Permissions { get; set; }
 
 

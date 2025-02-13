@@ -56,6 +56,7 @@ namespace Codeji.CMS.Services.Recruitments
             entity.VacancyId = model.VacancyId;
             entity.FirstName = model.FirstName;
             entity.LastName = model.LastName;
+            entity.Phone = model.Phone;
             entity.VacancyName = model.VacancyName;
             entity.VacancyId = model.VacancyId;
             entity.ActivityType = model.ActivityType;
@@ -97,9 +98,9 @@ namespace Codeji.CMS.Services.Recruitments
 
         }
 
-        public async Task<string> GetApplicantExistingResume(string email, string companyId)
+        public async Task<string> GetApplicantExistingResume(string email)
         {
-            Applicant? res = await _applicantRepository.FirstOrDefault(x => (string.IsNullOrEmpty(companyId) || x.CompanyId == companyId) && x.Email == email);
+            Applicant? res = await _applicantRepository.FirstOrDefault(x => x.Email == email);
             return res?.ResumeUrl ?? string.Empty;
         }
 
@@ -191,9 +192,9 @@ namespace Codeji.CMS.Services.Recruitments
             return result;
         }
 
-        public async Task<Result> AddAppicantResume(string fileName, string companyId, string email, string filePath)
+        public async Task<Result> AddAppicantResume(string fileName, string email, string filePath)
         {
-            Expression<Func<Applicant, bool>> whereCondition = x => x.CompanyId == companyId && x.Email == email;
+            Expression<Func<Applicant, bool>> whereCondition = x => x.Email == email;
             Applicant resume = await _applicantRepository.FirstOrDefault(whereCondition);
             if (resume == null)
             {
