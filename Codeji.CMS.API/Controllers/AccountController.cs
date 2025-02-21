@@ -126,6 +126,15 @@ namespace Codeji.CMS.API.Controllers
             if (string.IsNullOrEmpty(token))
             {
                 result.Message = "Email or Password not matched.";
+                result.Success = false;
+                result.StatusCode = 404;
+                return result;
+            }
+            if (token == "false")
+            {
+                result.Message = "Please Verify Email First";
+                result.Success = false;
+                result.StatusCode = 404;
                 return result;
             }
             result.Message = token;

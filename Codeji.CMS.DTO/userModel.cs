@@ -1,3 +1,5 @@
+using Codeji.CMS.Utility;
+
 namespace Codeji.CMS.DTO;
 
 public class UserModel
@@ -24,6 +26,13 @@ public class UserModel
     public string? DateOfJoining { get; set; }
     public bool? Status { get; set; }
     public bool? IsEmailVerified { get; set; }
-
     public string? Address { get; set; }
+    public string? ProfileUrl { get; set; }
+    public string? FullProfileUrl
+    {
+        get
+        {
+            return !string.IsNullOrEmpty(ProfileUrl) ? Common.GetEmployeeImageUrl(ProfileUrl) : null;
+        }
+    }
 }

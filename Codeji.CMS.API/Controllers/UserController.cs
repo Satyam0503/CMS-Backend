@@ -3,6 +3,7 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
+using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Employees.Interface;
 using Microsoft.AspNetCore.Authorization;
@@ -37,6 +38,7 @@ public class UserController : BaseApiController
             };
         }
         string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+
         return await _employeeService.AddEmployee(user, companyId);
     }
 
@@ -54,7 +56,7 @@ public class UserController : BaseApiController
                 Message = "User Not Exist"
             };
         }
-        return await _employeeService.EditEmployee(user, userId, companyId, isUserExist.Password); //Pasword Field Need to change when create Verify Mail feature of User.
+        return await _employeeService.EditEmployee(user, userId, companyId);
     }
 
     [Route("GetAllEmployees")]
@@ -70,13 +72,26 @@ public class UserController : BaseApiController
         return result;
     }
     [Route("ChangePassword")]
-    [HttpGet]
-    public async Task<Result> ChangePassword(string password, string oldPassword)
+    [HttpPost]
+    [Authorize]
+    public async Task<Result> ChangePassword(ChangePasswordRequest passwordModel)
     {
         Result result = new Result();
         string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
-        result.Success = await _employeeService.ResetPassword(userId, password, oldPassword);
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        result.Success = await _employeeService.ResetPassword(userId, companyId, passwordModel.Password, passwordModel.OldPassword);
         return result;
+    }
+
+    [Route("CreateNewPassword")]
+    [HttpPost]
+    public async Task<Result> CreateNewPassword(string password, string userId, string companyId)
+    {
+        Result result = new Result();
+        result.Success = await _employeeService.CreateNewPassword(userId, companyId, password);
+        result.Message = "User Verified and Password Created Successfully";
+        return result;
+
     }
 
     [Route("GetEmployeeById")]
@@ -133,7 +148,8 @@ public class UserController : BaseApiController
     public async Task<Result<EmployeeSummaryRequestModel>> GetEmployeeSummary()
     {
         string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
-        EmployeeSummaryRequestModel summary = await _employeeService.GetEmployeeSummary(userId);
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        EmployeeSummaryRequestModel summary = await _employeeService.GetEmployeeSummary(userId, companyId);
         return new Result<EmployeeSummaryRequestModel>()
         {
             Success = true,
@@ -198,6 +214,69 @@ public class UserController : BaseApiController
             MethodResults = [.. list]
         };
         return result;
+    }
+
+    [Route("UploadUserImage")]
+    [HttpPost]
+    [FilesExtensions([".jpg", ".jpeg", ".png"])]
+    [Authorize]
+    public async Task<Result> UploadUserImage(IFormFile profilePicture)
+    {
+        Result result = new Result();
+        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\ProfileImage\\");
+        string fileExtension = Path.GetExtension(profilePicture.FileName);
+        if (!Directory.Exists(uploadFolder))
+        {
+            Directory.CreateDirectory(uploadFolder);
+        }
+        string fileName = $"{Guid.NewGuid().ToString()}{fileExtension}";
+        string filePath = Path.Combine(uploadFolder + fileName);
+        using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
+        {
+            await profilePicture.CopyToAsync(fileStream);
+        };
+        string profile = await _employeeService.GetUserExistingProfile(userId);
+        if (string.IsNullOrEmpty(profile))
+        {
+            result = await _employeeService.AddUserProfileImage(fileName, userId, filePath);
+        }
+        else
+        {
+            string oldPath = Path.Combine(uploadFolder, profile);
+            FileInfo fileInfo = new(oldPath);
+            fileInfo.Delete();
+            result = await _employeeService.AddUserProfileImage(fileName, userId, filePath);
+        }
+        result.Success = true;
+        return result;
+    }
+
+    [Route("AddSkills")]
+    [HttpPost]
+    [Authorize]
+    public async Task<Result> AddEditSkills(SkillsRequestModel skillsModel)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        return await _employeeService.AddEditEmployeeSkills(skillsModel, companyId, userId);
+
+    }
+
+    [Route("GetEmployeeSkills")]
+    [HttpGet]
+    [Authorize]
+    public async Task<Result<EmployeeSkills>> GetEmployeeSkills()
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        EmployeeSkills result = await _employeeService.GetEmployeeSkills(companyId, userId);
+        return new Result<EmployeeSkills>()
+        {
+            Success = true,
+            MethodResult = result
+        };
+
     }
 }
 

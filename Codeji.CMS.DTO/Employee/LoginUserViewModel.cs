@@ -11,6 +11,7 @@ namespace Codeji.CMS.DTO.Employee
         {
             get { return FirstName + " " + LastName; }
         }
+        public string? ProfileImage { get; set; }
         public string CompanyId { get; set; }
         public string Role { get; set; }
         public string RoleId { get; set; }

@@ -26,4 +26,5 @@ public class User : BaseClass
     public bool Status { get; set; }
     public bool IsEmailVerified { get; set; }
     public string Address { get; set; }
+    public string ProfileUrl { get; set; }
 }

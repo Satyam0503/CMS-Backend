@@ -1,5 +1,4 @@
-﻿using System;
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.Extensions.Configuration;
@@ -13,14 +12,14 @@ namespace Codeji.CMS.Utility.Helpers
         public static string GenerateJwtToken(string userId, string companyId, string roleId, List<string> userRole)
         {
             // Retrieve JWT settings from configuration
-            var jwtSettings = ConfigurationHelper.config.GetSection("jwt");
-            var key = Encoding.UTF8.GetBytes(jwtSettings["SecretKey"]);
-            var issuer = jwtSettings["Issuer"];
-            var audience = jwtSettings["Audience"];
-            var expiryDays = int.Parse(jwtSettings["Expiry"]);
+            IConfigurationSection jwtSettings = ConfigurationHelper.config.GetSection("jwt");
+            byte[] key = Encoding.UTF8.GetBytes(jwtSettings["SecretKey"]);
+            string issuer = jwtSettings["Issuer"];
+            string audience = jwtSettings["Audience"];
+            int expiryDays = int.Parse(jwtSettings["Expiry"]);
 
             // Define claims
-            var claims = new List<Claim>
+            List<Claim> claims = new List<Claim>
             {
             new Claim(JwtRegisteredClaimNames.Sub, userId), // Subject
             new Claim("user_id", userId),
@@ -30,15 +29,15 @@ namespace Codeji.CMS.Utility.Helpers
             new Claim("role_id",roleId),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()) // Unique Token ID
             };
-            foreach (var role in userRole)
+            foreach (string role in userRole)
             {
                 claims.Add(new Claim(ClaimTypes.Role, role));
             }
             // Create signing credentials
-            var credentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256);
+            SigningCredentials credentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256);
 
             // Create the token
-            var tokenDescriptor = new JwtSecurityToken(
+            JwtSecurityToken tokenDescriptor = new JwtSecurityToken(
                 issuer: issuer,
                 audience: audience,
                 claims: claims,
