@@ -6,6 +6,7 @@ using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels.Company;
+using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments.Interface;
@@ -159,6 +160,24 @@ namespace Codeji.CMS.API.Controllers
             }
             result.Success = true;
             return result;
+        }
+
+        [Route("CreateNewPassword")]
+        [HttpPost]
+        public async Task<Result> CreateNewPassword(CreateNewPasswordRequest model)
+        {
+            Result result = new Result();
+            bool user = await _employeeService.CreateNewPassword(model.NewPassword, model.StatusNumber);
+            if (!user)
+            {
+                result.Success = false;
+                result.Message = "Password Not Created";
+                return result;
+            }
+            result.Success = user;
+            result.Message = "Password Created Successfully";
+            return result;
+
         }
 
         [HttpPost]

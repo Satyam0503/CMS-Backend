@@ -2,11 +2,12 @@
 
 namespace Codeji.CMS.Repository.Entities.Employees
 {
-    public class CertificationDetails : BaseClass
+    public class CertificationDetails
 
     {
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
-        public string CertificationDetailId { get; set; }
+        public string CertificationId { get; set; }
+        public string CompanyId { get; set; }
         public string UserId { get; set; }
         public string CertificationTitle { get; set; }
         public string OrganisationName { get; set; }

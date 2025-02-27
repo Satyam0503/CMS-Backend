@@ -83,16 +83,6 @@ public class UserController : BaseApiController
         return result;
     }
 
-    [Route("CreateNewPassword")]
-    [HttpPost]
-    public async Task<Result> CreateNewPassword(string password, string userId, string companyId)
-    {
-        Result result = new Result();
-        result.Success = await _employeeService.CreateNewPassword(userId, companyId, password);
-        result.Message = "User Verified and Password Created Successfully";
-        return result;
-
-    }
 
     [Route("GetEmployeeById")]
     [HttpGet]
@@ -131,6 +121,16 @@ public class UserController : BaseApiController
 
     }
 
+    [Route("EditEmployeeEducation")]
+    [HttpPost]
+    [Authorize]
+    public async Task<Result> EditEmployeeEducation(EducationDetails educationDetails)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        return await _employeeService.EditEmployeeEducation(educationDetails, companyId, userId);
+    }
+
     [Route("AddEmployeeCertification")]
     [HttpPost]
     [Authorize]
@@ -140,6 +140,16 @@ public class UserController : BaseApiController
         string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
         return await _employeeService.AddEmployeeCertification(certificationDetails, userId, companyId);
 
+    }
+
+    [Route("EditEmployeeCertification")]
+    [HttpPost]
+    [Authorize]
+    public async Task<Result> EditEmployeeCertification(CertificationDetails certificationDetails)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        return await _employeeService.EditEmployeeCertification(certificationDetails, companyId, userId);
     }
 
     [Route("GetEmployeeSummary")]
@@ -160,11 +170,11 @@ public class UserController : BaseApiController
     [Route("GetEmployeeEducationDetails")]
     [HttpGet]
     [Authorize]
-    public async Task<Result<EmployeeEducationRequestModel>> GetEmployeeEducationDetails()
+    public async Task<Result<EducationDetails>> GetEmployeeEducationDetails()
     {
         string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
-        List<EmployeeEducationRequestModel> data = await _employeeService.GetEmployeeEducationDetails(userId);
-        Result<EmployeeEducationRequestModel> result = new Result<EmployeeEducationRequestModel>();
+        List<EducationDetails> data = await _employeeService.GetEmployeeEducationDetails(userId);
+        Result<EducationDetails> result = new Result<EducationDetails>();
         result.Success = true;
         result.MethodResults = data.ToList();
         return result;
@@ -174,11 +184,11 @@ public class UserController : BaseApiController
     [Route("GetEmployeeCertificationDetails")]
     [HttpGet]
     [Authorize]
-    public async Task<Result<EmployeeCertificationRequestModel>> GetEmployeeCertificationDetails()
+    public async Task<Result<CertificationDetails>> GetEmployeeCertificationDetails()
     {
         string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
-        List<EmployeeCertificationRequestModel> data = await _employeeService.GetEmployeeCertificationDetails(userId);
-        Result<EmployeeCertificationRequestModel> result = new Result<EmployeeCertificationRequestModel>();
+        List<CertificationDetails> data = await _employeeService.GetEmployeeCertificationDetails(userId);
+        Result<CertificationDetails> result = new Result<CertificationDetails>();
         result.Success = true;
         result.MethodResults = data.ToList();
         return result;
@@ -278,7 +288,55 @@ public class UserController : BaseApiController
         };
 
     }
+
+    [Route("DeleteEducationDetails")]
+    [HttpDelete]
+    [Authorize]
+    public async Task<Result> DeleteEducationDetails([FromQuery] string educationId)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        Result data = await _employeeService.DeleteEducationDetails(educationId, companyId, userId);
+        if (data == null)
+        {
+            return new Result()
+            {
+                Success = false,
+                Message = "Education Detail Not Deleted ",
+                StatusCode = 400
+            };
+        }
+        return new Result()
+        {
+            Success = true,
+            Message = "Education Detail Deleted Successfully",
+            StatusCode = 200
+        };
+    }
+
+    [Route("DeleteCertificationDetails")]
+    [HttpDelete]
+    [Authorize]
+    public async Task<Result> DeleteCertificationDetails([FromQuery] string certificationId)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        Result data = await _employeeService.DeleteCertificationDetails(certificationId, companyId, userId);
+        if (data == null)
+        {
+            return new Result()
+            {
+                Success = false,
+                Message = "Certification Detail Not Deleted ",
+                StatusCode = 400
+            };
+        }
+        return new Result()
+        {
+            Success = true,
+            Message = "Certification Detail Deleted Successfully",
+            StatusCode = 200
+        };
+    }
+
 }
-
-
-
