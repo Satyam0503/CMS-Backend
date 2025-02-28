@@ -24,6 +24,8 @@ public class User : BaseClass
     public string EmergencyContact { get; set; }
     public string DateOfJoining { get; set; }
     public bool Status { get; set; }
+    public string StatusNumber { get; set; }
     public bool IsEmailVerified { get; set; }
     public string Address { get; set; }
+    public string ProfileUrl { get; set; }
 }

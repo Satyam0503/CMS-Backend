@@ -5,7 +5,7 @@ namespace Codeji.CMS.Repository.Entities.Employees
     public class EducationDetails
     {
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
-        public string EducationDetailId { get; set; }
+        public string EducationId { get; set; }
         public string CompanyId { get; set; }
         public string UserId { get; set; }
         public string EducationTitle { get; set; }

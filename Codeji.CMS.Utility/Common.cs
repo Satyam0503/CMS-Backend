@@ -10,5 +10,12 @@ namespace Codeji.CMS.Utility
                 return string.Empty;
             return ConfigManager.APIUrl + ConfigManager.viewResumeUrl + resumeUrl;
         }
+
+        public static string GetEmployeeImageUrl(string profileUrl)
+        {
+            if (string.IsNullOrEmpty(profileUrl))
+                return string.Empty;
+            return ConfigManager.APIUrl + ConfigManager.Employee_ImageUrl + profileUrl;
+        }
     }
 }

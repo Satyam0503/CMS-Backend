@@ -17,7 +17,7 @@ namespace Codeji.CMS.Services.Registration
         private readonly IMapper _mapper;
         public AutoMapperObjects()
         {
-            CreateMap<User, UserModel>().ReverseMap();
+            CreateMap<User, UserModel>().ForMember(dest => dest.Password, opt => opt.Ignore()).ReverseMap();
             CreateMap<Company, CompanyRequestModel>().ReverseMap();
             CreateMap<User, CompanyRequestModel>().ReverseMap();
             CreateMap<EducationDetails, EmployeeEducationRequestModel>().ReverseMap();
