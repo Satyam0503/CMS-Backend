@@ -147,8 +147,8 @@ namespace Codeji.CMS.Services.Recruitments
             && (!filters.Status.Any() || filters.Status.Contains(x.Status))
             && (!filters.VacancyIds.Any() || filters.VacancyIds.Contains(x.VacancyId))
             && (string.IsNullOrEmpty(filters.Name) || x.FirstName.Contains(filters.Name))
-            && ((!filters.MinExperience.HasValue && filters.MaxExperience.HasValue) || (x.Experience >= filters.MinExperience))
-            && ((!filters.MaxExperience.HasValue && filters.MinExperience.HasValue) || (x.Experience <= filters.MaxExperience));
+            && (!filters.MinExperience.HasValue || (x.Experience >= filters.MinExperience && x.Experience <= filters.MaxExperience));
+
             List<Applicant> applicants = (await _applicantRepository.GetAll(whereCondition)).ToList();
             return _mapper.Map<List<ApplicantViewModel>>(applicants);
 
