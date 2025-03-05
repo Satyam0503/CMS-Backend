@@ -9,6 +9,7 @@
     <PackageReference Include="AutoMapper" Version="13.0.1" />
     <PackageReference Include="SendGrid" Version="9.29.3" />
     <PackageReference Include="SendGrid.Extensions.DependencyInjection" Version="1.0.1" />
+    <PackageReference Include="X.PagedList" Version="10.5.7" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Codeji.CMS.Repository\Codeji.CMS.Repository.csproj" />

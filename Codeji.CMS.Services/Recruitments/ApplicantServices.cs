@@ -2,9 +2,13 @@
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
+using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.GenericRepository.Interfaces;
+using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility.Helpers;
+using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Recruitments
 {
@@ -13,12 +17,22 @@ namespace Codeji.CMS.Services.Recruitments
         readonly IMongoDbRepository<Applicant> _applicantRepository;
         readonly IMongoDbRepository<Resume> _resumeRepository;
         readonly IMapper _mapper;
-        public ApplicantServices(IMongoDbRepository<Applicant> applicantDbRepository, IMapper mapper, IMongoDbRepository<Resume> resumeRepository)
+        private readonly IJobVacancy _jobVacancyService;
+        readonly IMongoDbRepository<Company> _companyRepository;
+        readonly IMongoDbRepository<MailTemplate> _mailTemplateRepository;
+        public ApplicantServices(IMongoDbRepository<Applicant> applicantDbRepository,
+            IMapper mapper,
+            IMongoDbRepository<Resume> resumeRepository,
+            IJobVacancy jobVacancyService,
+            IMongoDbRepository<Company> companyRepository,
+            IMongoDbRepository<MailTemplate> mailTemplateRepository)
         {
             _applicantRepository = applicantDbRepository;
             _resumeRepository = resumeRepository;
             _mapper = mapper;
-
+            _jobVacancyService = jobVacancyService;
+            _companyRepository = companyRepository;
+            _mailTemplateRepository = mailTemplateRepository;
         }
         /// <summary>
         /// For Annonymous add and update applicants
@@ -42,6 +56,15 @@ namespace Codeji.CMS.Services.Recruitments
 
             };
             Result result = await _applicantRepository.AddOne(applicant);
+
+            //Acknowledgement Email Logic 
+
+            List<JobVacancyModel> vacancies = await _jobVacancyService.GetAllVacancy(applicant.CompanyId);
+            List<JobVacancyModel> vacancyName = vacancies.FindAll(x => x.JobId == applicant.VacancyId);
+            string jobTitle = vacancyName[0].Title;
+            Company? companyName = await _companyRepository.FirstOrDefault(x => x.CompanyId == applicant.CompanyId);
+            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 4);
+            await EmailFunctionality.SendEmailFromAPI(applicant.Email, emailContent.subject, emailContent.body);
             return result;
         }
 
@@ -101,68 +124,35 @@ namespace Codeji.CMS.Services.Recruitments
         public async Task<string> GetApplicantExistingResume(string email)
         {
             Applicant? res = await _applicantRepository.FirstOrDefault(x => x.Email == email);
+
+
+
+
+
             return res?.ResumeUrl ?? string.Empty;
         }
 
-        public async Task<List<ApplicantViewModel>> GetApplicantsList(string companyId)
-        {
-            IEnumerable<Applicant> list = await _applicantRepository.GetAll(x => x.CompanyId == companyId);
-            return _mapper.Map<List<ApplicantViewModel>>(list);
-        }
-
-        //Get Applicant List Using Filter Change this logic in Future
-        //public async Task<List<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters)
+        //public async Task<List<ApplicantViewModel>> GetApplicantsList(string companyId)
         //{
-        //    Expression<Func<Applicant, bool>> whereCondition = x =>
-        //    (!filters.FilterFrom.HasValue || (x.CreatedDate.HasValue && x.CreatedDate > filters.FilterFrom && x.CreatedDate < filters.FilterTo))
-        //    && (!filters.ActivityTypes.Any() || filters.ActivityTypes.Contains(x.ActivityType))
-        //    && (!filters.Status.Any() || filters.Status.Contains(x.Status))
-        //    && (!filters.VacancyIds.Any() || filters.VacancyIds.Contains(x.VacanyId))
-        //    && (string.IsNullOrEmpty(filters.Name) || x.FirstName.Contains(filters.Name));
-
-        //    ProjectionDefinition<Applicant, Applicant> projection = Builders<Applicant>.Projection.Expression(app => new Applicant
-        //    {
-        //        ApplicantId = app.ApplicantId,
-        //        Email = app.Email,
-        //        Experience = app.Experience,
-        //        FirstName = app.FirstName,
-        //        LastName = app.LastName,
-        //        Phone = app.Phone,
-        //        VacanyId = app.VacanyId,
-        //        CreatedDate = app.CreatedDate,
-        //        UpdatedDate = app.UpdatedDate,
-        //        Status = app.Status,
-        //        ActivityType = app.ActivityType
-
-        //    });
-
-        //    IEnumerable<Applicant> applicants = await _applicantRepository.GetAggregateDataAsync(whereCondition, projection);
-        //    List<ApplicantViewModel> list = (from ap in applicants
-        //                                     join s in StaticData.StatusList
-        //                                     on ap.Status equals s.Value
-        //                                     join ac in StaticData.ActivityTypeList
-        //                                     on ap.ActivityType equals ac.Value into acType
-        //                                     from act in acType.DefaultIfEmpty(new EnumsBindList())
-
-        //                                     select new ApplicantViewModel
-        //                                     {
-        //                                         ApplicantId = ap.ApplicantId,
-        //                                         ActivityTypeName = act.Name,
-        //                                         ApplyDate = ap.CreatedDate,
-        //                                         Email = ap.Email,
-        //                                         Exprience = ap.Experience,
-        //                                         FirstName = ap.FirstName,
-        //                                         LastName = ap.LastName,
-        //                                         Phone = ap.Phone,
-        //                                         StatusName = s.Name,
-        //                                         UpdateDate = ap.UpdatedDate,
-        //                                         VacanyName = "to ddo"
-
-        //                                     }).ToList();
-
-        //    return list;
+        //    IEnumerable<Applicant> list = await _applicantRepository.GetAll(x => x.CompanyId == companyId);
+        //    return _mapper.Map<List<ApplicantViewModel>>(list);
         //}
 
+        //Get Applicant List Using Filter Change this logic in Future
+        public async Task<List<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters, string companyId)
+        {
+            Expression<Func<Applicant, bool>> whereCondition = x => x.CompanyId == companyId
+            && (!filters.FilterFrom.HasValue || (x.CreatedDate.HasValue && x.CreatedDate > filters.FilterFrom && x.CreatedDate < filters.FilterTo))
+            && (!filters.ActivityTypes.Any() || filters.ActivityTypes.Contains(x.ActivityType))
+            && (!filters.Status.Any() || filters.Status.Contains(x.Status))
+            && (!filters.VacancyIds.Any() || filters.VacancyIds.Contains(x.VacancyId))
+            && (string.IsNullOrEmpty(filters.Name) || x.FirstName.Contains(filters.Name))
+            && ((!filters.MinExperience.HasValue && filters.MaxExperience.HasValue) || (x.Experience >= filters.MinExperience))
+            && ((!filters.MaxExperience.HasValue && filters.MinExperience.HasValue) || (x.Experience <= filters.MaxExperience));
+            List<Applicant> applicants = (await _applicantRepository.GetAll(whereCondition)).ToList();
+            return _mapper.Map<List<ApplicantViewModel>>(applicants);
+
+        }
 
         public async Task<Result<ApplicantViewModel>> ApplicantById(string applicantId)
         {

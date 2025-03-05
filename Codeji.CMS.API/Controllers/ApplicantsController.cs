@@ -19,14 +19,14 @@ namespace Codeji.CMS.API.Controllers
             _applicantsService = applicantsService;
             _httpContextAccessor = httpContextAccessor;
         }
-        [HttpGet]
+        [HttpPost]
         [Route("GetApplicantList")]
         //[CustomAuthorize(Module = "Applicant", Role = ["View"])]
-        public async Task<Result<ApplicantViewModel>> GetApplicantList()
+        public async Task<Result<ApplicantViewModel>> GetApplicantList(ApplicantResultFilters filters)
         {
             string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
             Result<ApplicantViewModel> result = new Result<ApplicantViewModel>();
-            List<ApplicantViewModel> data = await _applicantsService.GetApplicantsList(companyId);
+            List<ApplicantViewModel> data = await _applicantsService.GetApplicantsList(filters, companyId);
             result.Success = data.Any();
             result.MethodResults = data;
             return result;
