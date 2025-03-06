@@ -2,7 +2,6 @@
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
-using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Recruitments;
@@ -59,9 +58,7 @@ namespace Codeji.CMS.Services.Recruitments
 
             //Acknowledgement Email Logic 
 
-            List<JobVacancyModel> vacancies = await _jobVacancyService.GetAllVacancy(applicant.CompanyId);
-            List<JobVacancyModel> vacancyName = vacancies.FindAll(x => x.JobId == applicant.VacancyId);
-            string jobTitle = vacancyName[0].Title;
+            string jobTitle = await _jobVacancyService.GetVacancyById(companyId, applicant.VacancyId);
             Company? companyName = await _companyRepository.FirstOrDefault(x => x.CompanyId == applicant.CompanyId);
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 4);
             await EmailFunctionality.SendEmailFromAPI(applicant.Email, emailContent.subject, emailContent.body);
@@ -139,7 +136,7 @@ namespace Codeji.CMS.Services.Recruitments
         //}
 
         //Get Applicant List Using Filter Change this logic in Future
-        public async Task<List<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters, string companyId)
+        public async Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters, string companyId, int pageNo, int records)
         {
             Expression<Func<Applicant, bool>> whereCondition = x => x.CompanyId == companyId
             && (!filters.FilterFrom.HasValue || (x.CreatedDate.HasValue && x.CreatedDate > filters.FilterFrom && x.CreatedDate < filters.FilterTo))
@@ -150,7 +147,31 @@ namespace Codeji.CMS.Services.Recruitments
             && (!filters.MinExperience.HasValue || (x.Experience >= filters.MinExperience && x.Experience <= filters.MaxExperience));
 
             List<Applicant> applicants = (await _applicantRepository.GetAll(whereCondition)).ToList();
-            return _mapper.Map<List<ApplicantViewModel>>(applicants);
+            IEnumerable<Applicant> pagedList = applicants.Skip((pageNo - 1) * records).Take(records);
+            if (pageNo != 0 && records != 0)
+            {
+                List<ApplicantViewModel> data = _mapper.Map<List<ApplicantViewModel>>(pagedList);
+                Result<ApplicantViewModel> result = new Result<ApplicantViewModel>
+                {
+                    Success = true,
+                    TotalRecords = applicants.Count,
+                    MethodResults = data
+                };
+                return result;
+            }
+            else
+            {
+                List<ApplicantViewModel> data = _mapper.Map<List<ApplicantViewModel>>(applicants);
+                Result<ApplicantViewModel> result = new Result<ApplicantViewModel>
+                {
+                    Success = true,
+                    TotalRecords = applicants.Count,
+                    MethodResults = data,
+                };
+                return result;
+            }
+
+
 
         }
 

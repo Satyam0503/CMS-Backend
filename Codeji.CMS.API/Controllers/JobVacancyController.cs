@@ -41,19 +41,24 @@ public class JobVacancyController : BaseApiController
     [Route("GetAllVacancy")]
     [HttpPost]
     [AllowAnonymous]
-    public async Task<Result<JobVacancyModel>> GetAllVacancy(ApplyNowVacancyModel model)
+    public async Task<Result<JobVacancyModel>> GetAllVacancy(ApplyNowVacancyModel model, [FromQuery] int pageNo, [FromQuery] int records)
     {
         if (string.IsNullOrEmpty(model.companyId))
         {
             model.companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
         }
-        List<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy(model.companyId);
-        Result<JobVacancyModel> result = new Result<JobVacancyModel>()
-        {
-            Success = true,
-            MethodResults = data.ToList()
-        };
-        return result;
+        Result<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy(model.companyId, pageNo, records);
+
+        return data;
     }
 
+    [Route("GetVacancyById")]
+    [HttpPost]
+    [Authorize]
+    public async Task<string> GetVacancyById(string vacancyId)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        string data = await _jobVacancyService.GetVacancyById(companyId, vacancyId);
+        return data;
+    }
 }

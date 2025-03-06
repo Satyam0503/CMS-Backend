@@ -22,14 +22,11 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("GetApplicantList")]
         //[CustomAuthorize(Module = "Applicant", Role = ["View"])]
-        public async Task<Result<ApplicantViewModel>> GetApplicantList(ApplicantResultFilters filters)
+        public async Task<Result<ApplicantViewModel>> GetApplicantList(ApplicantResultFilters filters, [FromQuery] int pageNo, [FromQuery] int records)
         {
             string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-            Result<ApplicantViewModel> result = new Result<ApplicantViewModel>();
-            List<ApplicantViewModel> data = await _applicantsService.GetApplicantsList(filters, companyId);
-            result.Success = data.Any();
-            result.MethodResults = data;
-            return result;
+            Result<ApplicantViewModel> data = await _applicantsService.GetApplicantsList(filters, companyId, pageNo, records);
+            return data;
         }
         [HttpGet]
         [Route("ApplicantById")]

@@ -131,12 +131,35 @@ namespace Codeji.CMS.Services.Employees
             UserModel userModel = _mapper.Map<UserModel>(user);
             return userModel;
         }
-        public async Task<List<UserModel>> GetAllEmployees(string companyId)
+        public async Task<Result<UserModel>> GetAllEmployees(string companyId, int pageNo, int records)
         {
             Task<List<RoleModel>> roleList = _roleService.GetRoles(companyId);
             RoleModel? adminRole = roleList.Result.FirstOrDefault(role => role.Titles == "Company Administrator");
             IEnumerable<User> list = await _employeeRepository.GetAll(x => x.CompanyId == companyId && x.RoleId != adminRole.RolesId);
-            return _mapper.Map<List<UserModel>>(list);
+            object pagedList = list.Skip((pageNo - 1) * records).Take(records);
+            if (pageNo != 0 && records != 0)
+            {
+                List<UserModel> data = _mapper.Map<List<UserModel>>(pagedList);
+                Result<UserModel> result = new Result<UserModel>
+                {
+                    Success = true,
+                    TotalRecords = list.Count(),
+                    MethodResults = data.ToList(),
+                };
+                return result;
+            }
+            else
+            {
+                List<UserModel> data = _mapper.Map<List<UserModel>>(list);
+                Result<UserModel> result = new Result<UserModel>
+                {
+                    Success = true,
+                    TotalRecords = list.Count(),
+                    MethodResults = data.ToList(),
+                };
+                return result;
+            }
+
 
         }
         public async Task<bool> IsEmailExist(string email)
