@@ -29,12 +29,15 @@ namespace Codeji.CMS.API.Controllers
         private readonly IApplicantsService _applicantsServices;
         private readonly IMapper _mapper;
         private readonly IEmployeeService _employeeService;
+        private readonly HttpClient _httpClient;
         public AccountController(IEmployeeService userService,
+            IConfiguration configuration,
             IAntiforgery antiforgery,
             IHttpContextAccessor httpContextAccessor,
             IApplicantsService applicantsServices,
             ICompanyService companyService,
-            IMapper mapper)
+            IMapper mapper,
+            HttpClient httpClient)
         {
             _antiforgery = antiforgery;
             _httpContextAccessor = httpContextAccessor;
@@ -204,6 +207,35 @@ namespace Codeji.CMS.API.Controllers
             }
             return result;
         }
+
+        [HttpGet]
+        [Route("VerificationCaptch")]
+        [AllowAnonymous]
+        public async Task<bool> GetreCaptchaResponse(string userResponse)
+        {
+            string? reCaptchaSecretKey = ConfigManager.RecaptchSecretKey;
+            if (reCaptchaSecretKey != null && userResponse != null)
+            {
+                FormUrlEncodedContent content = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    {"secret", reCaptchaSecretKey },
+                    {"response", userResponse }
+                });
+                HttpResponseMessage response = await _httpClient.PostAsync("https://www.google.com/recaptcha/api/siteverify", content);
+                if (response.IsSuccessStatusCode)
+                {
+                    reCaptchaResponse? result = await response.Content.ReadFromJsonAsync<reCaptchaResponse>();
+                    return result.Success;
+                }
+            }
+            return false;
+        }
+        public class reCaptchaResponse
+        {
+            public bool Success { get; set; }
+            public string[] ErrorCodes { get; set; }
+        }
     }
 }
+
 

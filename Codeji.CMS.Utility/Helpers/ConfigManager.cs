@@ -13,7 +13,14 @@ public class ConfigManager
     public static string Is_For_Debug => ConfigurationHelper.config.GetSection("AppSettings:isForDebug")?.Value ?? "";
     public static string App_Version => ConfigurationHelper.config.GetSection("AppSettings:AppVersion")?.Value ?? "";
     public static string viewResumeUrl => ConfigurationHelper.config.GetSection("AppSettings:viewResumeUrl")?.Value ?? "";
-
     public static string SENDGRID_API_KEY => ConfigurationHelper.config.GetSection("AppSettings:SENDGRID_API_KEY")?.Value ?? "";
+    public static string LocalAuthUrl => ConfigurationHelper.config.GetSection("AppSettings:LocalAuthUrl")?.Value ?? "";
+    public static string SendGridEmail => ConfigurationHelper.config.GetSection("AppSettings:SendGridEmail")?.Value ?? "";
+    public static string SendGridSenderName => ConfigurationHelper.config.GetSection("AppSettings:SendGridSenderName")?.Value ?? "";
+    public static string RecaptchSecretKey => ConfigurationHelper.config.GetSection("reCaptcha:SecretKey")?.Value ?? "";
+
+
+
+
 }
 

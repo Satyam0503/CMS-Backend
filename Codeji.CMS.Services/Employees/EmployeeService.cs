@@ -32,6 +32,7 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<RolePermission> _rolePermissionRepository;
         readonly IMongoDbRepository<EmployeeSkills> _employeeSkillsRepository;
         readonly IMongoDbRepository<Company> _companyRepository;
+        readonly IMongoDbRepository<MailTemplate> _mailTemplateRepository;
         public EmployeeService(IMongoDbRepository<EducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<CertificationDetails> certificationDetailsRepo,
             IMongoDbRepository<EmployeeSummary> userSummary,
@@ -41,7 +42,8 @@ namespace Codeji.CMS.Services.Employees
             IRoleService roleService,
             IMongoDbRepository<RolePermission> rolePermissionRepository,
             IMongoDbRepository<EmployeeSkills> employeeSkillsRepository,
-            IMongoDbRepository<Company> companyRepository
+            IMongoDbRepository<Company> companyRepository,
+            IMongoDbRepository<MailTemplate> mailTemplateRepository
             )
         {
             _employeeRepository = employeeRepository;
@@ -55,6 +57,7 @@ namespace Codeji.CMS.Services.Employees
             _rolePermissionRepository = rolePermissionRepository;
             _employeeSkillsRepository = employeeSkillsRepository;
             _companyRepository = companyRepository;
+            _mailTemplateRepository = mailTemplateRepository;
 
         }
 
@@ -86,11 +89,21 @@ namespace Codeji.CMS.Services.Employees
                 IsEmailVerified = false,
                 Address = user.Address
             };
+            Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == employee.CompanyId);
             await _employeeRepository.AddOne(employee);
 
-            //EmailFunctionality.SendCreatePasswordEmail(employee.Email, employee.StatusNumber);
+            //Acknowledgement Email Logic 
+            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 0);
+            HtmlTemplate htmlTemplate = new HtmlTemplate();
+            string replacedBody = htmlTemplate.Render(emailContent.body, new
+            {
+                RecipientName = employee.FirstName + " " + employee.LastName,
+                PasswordCreationLink = ConfigManager.LocalAuthUrl,
+                statusNumber = employee.StatusNumber,
+                CompanyName = company.CompanyName,
+            });
+            await EmailFunctionality.SendEmailFromAPI(employee.Email, emailContent.subject, replacedBody);
 
-            //SendEmail(employee.Email, employee.StatusNumber);
             return new Result<UserModel>
             {
                 MethodResult = user,
@@ -537,6 +550,23 @@ namespace Codeji.CMS.Services.Employees
         {
             Expression<Func<CertificationDetails, bool>> whereCondition = x => x.CertificationId == certificationId && x.UserId == userId && x.CompanyId == companyId;
             Result data = await _certificationDetailsRepo.Delete(whereCondition);
+            return data;
+        }
+
+        public async Task<Result> DeleteEmployee(string employeeId, string companyId)
+        {
+            Expression<Func<User, bool>> employeeWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
+            Expression<Func<CertificationDetails, bool>> certificateWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
+            Expression<Func<EmployeeSkills, bool>> skillsWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
+            Expression<Func<EmployeeSummary, bool>> summaryWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
+            Expression<Func<EducationDetails, bool>> educationWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
+            await _certificationDetailsRepo.Delete(certificateWhereCondition);
+            await _employeeSkillsRepository.Delete(skillsWhereCondition);
+            await _employeeSummaryRepo.Delete(summaryWhereCondition);
+            await _educationDetailsRepo.Delete(educationWhereCondition);
+
+            Result data = await _employeeRepository.Delete(employeeWhereCondition);
+
             return data;
         }
     }

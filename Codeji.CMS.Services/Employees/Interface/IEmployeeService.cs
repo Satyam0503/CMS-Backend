@@ -36,5 +36,6 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<bool> CreateNewPassword(string password, string statusNumber);
         Task<Result> DeleteEducationDetails(string educationId, string companyId, string userId);
         Task<Result> DeleteCertificationDetails(string certificationId, string companyId, string userId);
+        Task<Result> DeleteEmployee(string employeeId, string companyId);
     }
 }

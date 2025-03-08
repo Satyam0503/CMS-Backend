@@ -58,10 +58,15 @@ namespace Codeji.CMS.Services.Recruitments
 
             //Acknowledgement Email Logic 
 
-            string jobTitle = await _jobVacancyService.GetVacancyById(companyId, applicant.VacancyId);
-            Company? companyName = await _companyRepository.FirstOrDefault(x => x.CompanyId == applicant.CompanyId);
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 4);
-            await EmailFunctionality.SendEmailFromAPI(applicant.Email, emailContent.subject, emailContent.body);
+            HtmlTemplate htmlTemplate = new HtmlTemplate();
+            string replacedBody = htmlTemplate.Render(emailContent.body, new
+            {
+                CandidateName = applicant.FirstName + " " + applicant.LastName,
+                JobTitle = applicant.VacancyName
+
+            });
+            await EmailFunctionality.SendEmailFromAPI(applicant.Email, emailContent.subject, replacedBody);
             return result;
         }
 
@@ -139,12 +144,14 @@ namespace Codeji.CMS.Services.Recruitments
         public async Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters, string companyId, int pageNo, int records)
         {
             Expression<Func<Applicant, bool>> whereCondition = x => x.CompanyId == companyId
-            && (!filters.FilterFrom.HasValue || (x.CreatedDate.HasValue && x.CreatedDate > filters.FilterFrom && x.CreatedDate < filters.FilterTo))
+            && (!filters.FilterFrom.HasValue || (x.CreatedDate.HasValue && x.CreatedDate >= filters.FilterFrom && x.CreatedDate <= filters.FilterTo))
             && (!filters.ActivityTypes.Any() || filters.ActivityTypes.Contains(x.ActivityType))
             && (!filters.Status.Any() || filters.Status.Contains(x.Status))
             && (!filters.VacancyIds.Any() || filters.VacancyIds.Contains(x.VacancyId))
-            && (string.IsNullOrEmpty(filters.Name) || x.FirstName.Contains(filters.Name))
-            && (!filters.MinExperience.HasValue || (x.Experience >= filters.MinExperience && x.Experience <= filters.MaxExperience));
+            && (!filters.MinExperience.HasValue || (x.Experience >= filters.MinExperience && x.Experience <= filters.MaxExperience
+            && (string.IsNullOrEmpty(filters.Name) || x.FirstName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
+            || x.LastName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
+            || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase))));
 
             List<Applicant> applicants = (await _applicantRepository.GetAll(whereCondition)).ToList();
             IEnumerable<Applicant> pagedList = applicants.Skip((pageNo - 1) * records).Take(records);

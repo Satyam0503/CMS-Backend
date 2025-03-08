@@ -61,4 +61,28 @@ public class JobVacancyController : BaseApiController
         string data = await _jobVacancyService.GetVacancyById(companyId, vacancyId);
         return data;
     }
+
+    [Route("DeleteJobVacancy")]
+    [HttpDelete]
+    [Authorize]
+    public async Task<Result> DeleteJobVacancy([FromQuery] string vacancyId)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        Result data = await _jobVacancyService.DeleteJobVacancy(vacancyId, companyId);
+        if (data == null)
+        {
+            return new Result()
+            {
+                Success = false,
+                Message = "Job Not Deleted ",
+                StatusCode = 400
+            };
+        }
+        return new Result()
+        {
+            Success = true,
+            Message = "Job Deleted Successfully",
+            StatusCode = 200
+        };
+    }
 }

@@ -23,7 +23,6 @@ namespace Codeji.CMS.DTO.Recruitments
         public DateTime? ApplyDate { get; set; }
         public DateTime? UpdateDate { get; set; }
         public string ResumeUrl { get; set; }
-
         public string? FullApplicantResumePath
         {
             get
