@@ -1,10 +1,7 @@
-﻿using System;
-using System.Net.NetworkInformation;
-using static Codeji.CMS.Utility.Enums.EnumsHelper;
+﻿using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.Utility.Constraints
 {
-
 
     public class EnumsBindList
     {
@@ -14,9 +11,9 @@ namespace Codeji.CMS.Utility.Constraints
     }
     public static class StaticData
     {
-        public static readonly List<EnumsBindList> StatusList = Enum.GetValues(typeof(StatusEnums))
+        public static readonly List<EnumsBindList> StatusList = Enum.GetValues(typeof(ActivityStatus))
         .Cast<EnumsBindList>().ToList();
-        public static readonly List<EnumsBindList> ActivityTypeList = Enum.GetValues(typeof(ActivityTypeEnums))
+        public static readonly List<EnumsBindList> ActivityTypeList = Enum.GetValues(typeof(ActivityType))
        .Cast<EnumsBindList>().ToList();
 
 

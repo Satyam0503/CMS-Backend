@@ -16,8 +16,6 @@ using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
-using SendGrid;
-using SendGrid.Helpers.Mail;
 
 namespace Codeji.CMS.Services.Employees
 {
@@ -60,21 +58,6 @@ namespace Codeji.CMS.Services.Employees
 
         }
 
-        //Testing Email Send Using Send Grid
-        public static async Task SendEmail(string email, string statusNumber)
-        {
-            string apiKey = ConfigManager.SENDGRID_API_KEY;
-            SendGridClient client = new SendGridClient(apiKey);
-            EmailAddress from = new EmailAddress("s.abhishek@codeji.in", "Company Admin");
-            string subject = "Sending with SendGrid";
-            EmailAddress to = new EmailAddress(email, "Test User");
-            string plainTextContent = "and easy to do anywhere, even with C#";
-            string htmlContent = $"Confirm Email and create new password <button><a href=\"http://127.0.0.1:5173/auth/createpassword?statusNumber={statusNumber}\">Click Me</a></button>";
-            SendGridMessage msg = MailHelper.CreateSingleEmail(from, to, subject, plainTextContent, htmlContent);
-            Response response = await client.SendEmailAsync(msg).ConfigureAwait(false);
-
-        }
-
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string companyId)
         {
             User employee = new User()
@@ -104,7 +87,10 @@ namespace Codeji.CMS.Services.Employees
                 Address = user.Address
             };
             await _employeeRepository.AddOne(employee);
-            SendEmail(employee.Email, employee.StatusNumber);
+
+            //EmailFunctionality.SendCreatePasswordEmail(employee.Email, employee.StatusNumber);
+
+            //SendEmail(employee.Email, employee.StatusNumber);
             return new Result<UserModel>
             {
                 MethodResult = user,
@@ -145,12 +131,35 @@ namespace Codeji.CMS.Services.Employees
             UserModel userModel = _mapper.Map<UserModel>(user);
             return userModel;
         }
-        public async Task<List<UserModel>> GetAllEmployees(string companyId)
+        public async Task<Result<UserModel>> GetAllEmployees(string companyId, int pageNo, int records)
         {
             Task<List<RoleModel>> roleList = _roleService.GetRoles(companyId);
             RoleModel? adminRole = roleList.Result.FirstOrDefault(role => role.Titles == "Company Administrator");
             IEnumerable<User> list = await _employeeRepository.GetAll(x => x.CompanyId == companyId && x.RoleId != adminRole.RolesId);
-            return _mapper.Map<List<UserModel>>(list);
+            object pagedList = list.Skip((pageNo - 1) * records).Take(records);
+            if (pageNo != 0 && records != 0)
+            {
+                List<UserModel> data = _mapper.Map<List<UserModel>>(pagedList);
+                Result<UserModel> result = new Result<UserModel>
+                {
+                    Success = true,
+                    TotalRecords = list.Count(),
+                    MethodResults = data.ToList(),
+                };
+                return result;
+            }
+            else
+            {
+                List<UserModel> data = _mapper.Map<List<UserModel>>(list);
+                Result<UserModel> result = new Result<UserModel>
+                {
+                    Success = true,
+                    TotalRecords = list.Count(),
+                    MethodResults = data.ToList(),
+                };
+                return result;
+            }
+
 
         }
         public async Task<bool> IsEmailExist(string email)
@@ -248,10 +257,11 @@ namespace Codeji.CMS.Services.Employees
             EmployeeSummary? employeesummary = await _employeeSummaryRepo.FirstOrDefault(x => x.UserId == userId && x.CompanyId == companyId);
             bool success = false;
 
-            if (employeesummary == null)
+            if (employeesummary == null && string.IsNullOrEmpty(userSummary.SummaryId))
             {
                 EmployeeSummary summary = new EmployeeSummary()
                 {
+
                     CompanyId = companyId,
                     UserId = userId,
                     Summary = userSummary.Summary

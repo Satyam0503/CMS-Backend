@@ -1,5 +1,4 @@
-﻿using System;
-using AutoMapper;
+﻿using AutoMapper;
 using Codeji.CMS.DTO;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Employees;
@@ -27,6 +26,11 @@ namespace Codeji.CMS.Services
             User user = _userRepository.FirstOrDefault(x => x.UserId == id).Result;
             return _mapper.Map(user, userModel);
         }
+
+        //public static void ApplyFilter(FilterRequestModel model)
+        //{
+
+        //}
     }
 }
 

@@ -1,5 +1,4 @@
-﻿using System;
-namespace Codeji.CMS.DTO.Recruitments
+﻿namespace Codeji.CMS.DTO.Recruitments
 {
     public class ApplicantResultFilters
     {
@@ -12,7 +11,8 @@ namespace Codeji.CMS.DTO.Recruitments
         public int[] Status { get; set; }
         public int[] ActivityTypes { get; set; }
         public string[] VacancyIds { get; set; }
-
+        public int? MinExperience { get; set; }
+        public int? MaxExperience { get; set; }
 
     }
 }

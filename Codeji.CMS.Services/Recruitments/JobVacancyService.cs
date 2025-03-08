@@ -64,10 +64,44 @@ namespace Codeji.CMS.Services.Recruitments
             };
         }
 
-        public async Task<List<JobVacancyModel>> GetAllVacancy(string companyId)
+        public async Task<Result<JobVacancyModel>> GetAllVacancy(string companyId, int pageNo, int records)
         {
             IEnumerable<JobVacancy> list = await _jobVacancyRepo.GetAll(x => x.CompanyId == companyId);
-            return _mapper.Map<List<JobVacancyModel>>(list);
+            IEnumerable<JobVacancy> pagedList = list.Skip((pageNo - 1) * records).Take(records);
+
+            if (pageNo != 0 && records != 0)
+            {
+                List<JobVacancyModel> data = _mapper.Map<List<JobVacancyModel>>(pagedList);
+                Result<JobVacancyModel> result = new Result<JobVacancyModel>()
+                {
+                    Success = true,
+                    TotalRecords = list.Count(),
+                    MethodResults = data,
+                };
+                return result;
+            }
+            else
+            {
+                List<JobVacancyModel> data = _mapper.Map<List<JobVacancyModel>>(list);
+                Result<JobVacancyModel> result = new Result<JobVacancyModel>()
+                {
+                    Success = true,
+                    TotalRecords = list.Count(),
+                    MethodResults = data,
+                };
+                return result;
+            }
+
+        }
+
+        public async Task<string> GetVacancyById(string companyId, string vacancyId)
+        {
+            JobVacancy? data = await _jobVacancyRepo.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == vacancyId);
+            if (data == null)
+            {
+                return "[Job Title]";
+            }
+            return data.Title;
         }
     }
 }

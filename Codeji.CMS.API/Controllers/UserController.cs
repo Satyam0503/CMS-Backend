@@ -62,14 +62,11 @@ public class UserController : BaseApiController
     [Route("GetAllEmployees")]
     [HttpGet]
     [Authorize]
-    public async Task<Result<UserModel>> GetAllEmployees()
+    public async Task<Result<UserModel>> GetAllEmployees([FromQuery] int pageNo, [FromQuery] int records)
     {
         string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-        List<UserModel> data = await _employeeService.GetAllEmployees(companyId);
-        Result<UserModel> result = new Result<UserModel>();
-        result.Success = true;
-        result.MethodResults = data.ToList();
-        return result;
+        Result<UserModel> data = await _employeeService.GetAllEmployees(companyId, pageNo, records);
+        return data;
     }
     [Route("ChangePassword")]
     [HttpPost]
