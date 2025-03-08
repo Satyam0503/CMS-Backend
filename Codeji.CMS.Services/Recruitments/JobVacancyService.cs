@@ -27,7 +27,7 @@ namespace Codeji.CMS.Services.Recruitments
                 Title = jobVacancy.Title,
                 Vacancies = jobVacancy.Vacancies,
                 JobType = jobVacancy.JobType,
-                Status = true,
+                Status = jobVacancy.Status,
                 Description = jobVacancy.Description,
             };
 
@@ -102,6 +102,13 @@ namespace Codeji.CMS.Services.Recruitments
                 return "[Job Title]";
             }
             return data.Title;
+        }
+
+        public async Task<Result> DeleteJobVacancy(string vacancyId, string companyId)
+        {
+            Expression<Func<JobVacancy, bool>> whereCondition = x => x.JobId == vacancyId && x.CompanyId == companyId;
+            Result data = await _jobVacancyRepo.Delete(whereCondition);
+            return data;
         }
     }
 }

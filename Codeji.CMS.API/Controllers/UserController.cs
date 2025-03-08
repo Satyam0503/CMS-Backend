@@ -336,4 +336,27 @@ public class UserController : BaseApiController
         };
     }
 
+    [Route("DeleteEmployee")]
+    [HttpDelete]
+    [Authorize]
+    public async Task<Result> DeleteEmployee([FromQuery] string employeeId)
+    {
+        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+        Result data = await _employeeService.DeleteEmployee(employeeId, companyId);
+        if (data == null)
+        {
+            return new Result()
+            {
+                Success = false,
+                Message = "Employee Not Deleted ",
+                StatusCode = 400
+            };
+        }
+        return new Result()
+        {
+            Success = true,
+            Message = "Employee Deleted Successfully",
+            StatusCode = 200
+        };
+    }
 }

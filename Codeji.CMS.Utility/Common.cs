@@ -2,7 +2,7 @@
 
 namespace Codeji.CMS.Utility
 {
-    public class Common
+    public static class Common
     {
         public static string GetApplicantResumeFullPath(string resumeUrl)
         {

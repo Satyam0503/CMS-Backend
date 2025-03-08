@@ -18,13 +18,16 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container
 builder.Services.AddControllers();
+
 string corsName = "codeji";
 builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
 {
     builder
     .AllowCredentials()
     .WithOrigins(
-        "http://127.0.0.1:5173")
+        "http://127.0.0.1:5173",
+        "*.codeji.in"
+        )
     .AllowAnyHeader()
     .AllowAnyMethod();
 }));
