@@ -41,5 +41,20 @@ namespace Codeji.CMS.API.Controllers
                 Success = true
             };
         }
+        [HttpGet]
+        [Route("GetRolePermission")]
+        [Authorize]
+        public async Task<Result<ModuleWithPermissionsModel>> GetRolePermission()
+        {
+            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+            string roleId = CurrentContext.CurrentUserRoleId(_httpContextAccessor);
+            List<ModuleWithPermissionsModel> role = await _roleService.GetRoleWithPermissions(roleId, companyId);
+            return new Result<ModuleWithPermissionsModel>()
+            {
+                TotalRecords = role.Count,
+                MethodResults = role ?? new List<ModuleWithPermissionsModel>(),
+                Success = true
+            };
+        }
     }
 }

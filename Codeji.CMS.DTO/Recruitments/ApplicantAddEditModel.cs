@@ -20,6 +20,7 @@ namespace Codeji.CMS.DTO.Recruitments
         public string VacancyName { get; set; }
         public decimal Experience { get; set; }
         public string? ResumeUrl { get; set; }
+        public string State { get; set; }
         public int Status { get; set; }
         public int ActivityType { get; set; }
     }
