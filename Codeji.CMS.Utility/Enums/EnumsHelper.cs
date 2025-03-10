@@ -13,9 +13,8 @@
         }
         public enum ActivityStatus
         {
-            New = 0,
             Active = 1,
-            InActive = 2,
+            InActive = 0,
         }
         public enum Roles
         {

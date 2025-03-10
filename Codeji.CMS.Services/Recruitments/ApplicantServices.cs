@@ -51,6 +51,7 @@ namespace Codeji.CMS.Services.Recruitments
                 Phone = applicantRegisterModel.Phone,
                 Email = applicantRegisterModel.Email,
                 Status = applicantRegisterModel.Status,
+                State = applicantRegisterModel.State,
                 CreatedBy = "new"
 
             };
@@ -86,6 +87,7 @@ namespace Codeji.CMS.Services.Recruitments
             entity.VacancyId = model.VacancyId;
             entity.ActivityType = model.ActivityType;
             entity.Status = model.Status;
+            entity.State = model.State;
             Result res = await _applicantRepository.Update(whereCondition, entity);
             return res;
 
@@ -148,10 +150,11 @@ namespace Codeji.CMS.Services.Recruitments
             && (!filters.ActivityTypes.Any() || filters.ActivityTypes.Contains(x.ActivityType))
             && (!filters.Status.Any() || filters.Status.Contains(x.Status))
             && (!filters.VacancyIds.Any() || filters.VacancyIds.Contains(x.VacancyId))
-            && (!filters.MinExperience.HasValue || (x.Experience >= filters.MinExperience && x.Experience <= filters.MaxExperience
-            && (string.IsNullOrEmpty(filters.Name) || x.FirstName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
+            && (!filters.MinExperience.HasValue || (x.Experience >= filters.MinExperience && x.Experience <= filters.MaxExperience))
+            && (string.IsNullOrEmpty(filters.Name)
+            || x.FirstName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
             || x.LastName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
-            || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase))));
+            || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));
 
             List<Applicant> applicants = (await _applicantRepository.GetAll(whereCondition)).ToList();
             IEnumerable<Applicant> pagedList = applicants.Skip((pageNo - 1) * records).Take(records);
@@ -179,7 +182,6 @@ namespace Codeji.CMS.Services.Recruitments
             }
 
 
-
         }
 
         public async Task<Result<ApplicantViewModel>> ApplicantById(string applicantId)
@@ -202,6 +204,7 @@ namespace Codeji.CMS.Services.Recruitments
                     FirstName = entity.FirstName,
                     LastName = entity.LastName,
                     UpdateDate = entity.UpdatedDate,
+                    State = entity.State,
                     ActivityType = entity.ActivityType,
                     ResumeUrl = entity.ResumeUrl,
 

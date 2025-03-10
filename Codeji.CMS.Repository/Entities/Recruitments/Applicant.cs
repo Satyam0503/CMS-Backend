@@ -17,6 +17,7 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         /// </summary>
         public int ActivityType { get; set; }
         public int Status { get; set; }
+        public string State { get; set; }
         public decimal Experience { get; set; }
         public string ResumeUrl { get; set; }
     }
