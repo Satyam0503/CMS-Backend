@@ -11,7 +11,7 @@ namespace Codeji.CMS.Services.Recruitments.Interface
         Task<string> GetApplicantsExistingId(string email, string companyId);
         Task<string> GetApplicantExistingResume(string email);
         Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters, string companyId, int pageNo, int records);
-        Task<Result<ApplicantViewModel>> ApplicantById(string applicantId);
+        Task<Result<ApplicantViewModel>> ApplicantById(string applicantId, string companyId);
         Task<Result> AddAppicantResume(string fileName, string email, string filePath);
 
 

@@ -11,7 +11,6 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         public string Email { get; set; }
         public required string Phone { get; set; }
         public string VacancyId { get; set; }
-        public string VacancyName { get; set; }
         /// <summary>
         /// ActivityType : InProgress,Shorlisted,OnHold,Rejected, 
         /// </summary>
