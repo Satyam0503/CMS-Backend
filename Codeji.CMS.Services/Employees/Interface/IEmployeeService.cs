@@ -27,7 +27,7 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<List<EducationDetails>> GetEmployeeEducationDetails(string id);
         Task<EmployeeSummaryRequestModel> GetEmployeeSummary(string userId, string companyId);
         Task<List<CertificationDetails>> GetEmployeeCertificationDetails(string id);
-        Task<Result> AddComment(string companyId, CommentRequestModel model);
+        Task<Result> AddComment(string companyId, string userId, CommentRequestModel model);
         Task<List<Comments>> GetAllComment(string applicantId);
         Task<string> GetUserExistingProfile(string userId);
         Task<Result> AddUserProfileImage(string fileName, string userId, string filePath);
@@ -37,5 +37,6 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<Result> DeleteEducationDetails(string educationId, string companyId, string userId);
         Task<Result> DeleteCertificationDetails(string certificationId, string companyId, string userId);
         Task<Result> DeleteEmployee(string employeeId, string companyId);
+        Task<List<ProcessLogs>> GetProcessLogData(string companyId);
     }
 }

@@ -8,7 +8,6 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
-using Codeji.CMS.Utility;
 using MongoDB.Driver;
 using MongoDB.Driver.Linq;
 using Module = Codeji.CMS.Repository.Entities.RolePermissions.Module;
@@ -46,15 +45,39 @@ public class RoleServices : IRoleService
     }
 
     //Add New Roles
-    public async Task<Roles> AddEditRoles(Roles roles)
+    public async Task<RoleWithModuleAndPermissions> AddEditRoles(RoleWithModuleAndPermissions roles, string companyId)
     {
-        if (string.IsNullOrEmpty(roles.RolesId))
+        List<Roles> roleData = (await _RolesRepository.GetAll(x => x.CompanyId == companyId)).ToList();
+        List<RolePermission> roleWithModulePermission = (await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId)).ToList();
+        if (string.IsNullOrEmpty(roles.RoleId))
         {
-            await _RolesRepository.AddOne(roles);
+            Roles newRole = new Roles()
+            {
+                RoleType = roleData.Count + 1,
+                CompanyId = companyId,
+                Titles = roles.RoleTitle,
+                Description = roles.Description,
+                HasAppAccess = roles.HasAppAccess,
+                IsNotEditable = false,
+                CreatedDate = DateTime.Now
+
+            };
+            await _RolesRepository.AddOne(newRole);
+            foreach (ModuleRolePermissionsModel permission in roles.RolePermissions)
+            {
+                await _rolePermissionRepository.AddOne(new RolePermission
+                {
+                    RolePermissionId = permission.RolePermissionId,
+                    CompanyId = companyId,
+                    ModulePermissionId = permission.ModulePermissionId,
+                    RoleId = newRole.RolesId,
+                    HasAccess = permission.HasAccess
+                });
+            }
         }
         else
         {
-            Task<Roles?> currentRole = _RolesRepository.FirstOrDefault(x => x.RolesId == roles.RolesId);
+            Task<Roles?> currentRole = _RolesRepository.FirstOrDefault(x => x.RolesId == roles.RoleId);
             if (currentRole != null)
             {
 
@@ -75,37 +98,38 @@ public class RoleServices : IRoleService
         return _mapper.Map<RoleModel>(role); ;
     }
     //Saving role and it's permission
-    public async Task<RoleWithModuleAndPermissions> SaveRoleAndPermissions(RoleWithModuleAndPermissions roleWithModuleAndPermissions)
-    {
-        if (roleWithModuleAndPermissions == null)
-        {
-            return null;
-        }
+    //public async Task<RoleWithModuleAndPermissions> SaveRoleAndPermissions(RoleWithModuleAndPermissions roleWithModuleAndPermissions)
+    //{
+    //    if (roleWithModuleAndPermissions == null)
+    //    {
+    //        return null;
+    //    }
 
-        Sanitizer.SanitizeProperties(roleWithModuleAndPermissions);
-        Roles Roles = await AddEditRoles(new Roles
-        {
-            Titles = roleWithModuleAndPermissions.RoleTitle,
-            RolesId = roleWithModuleAndPermissions.RoleId,
-            Description = roleWithModuleAndPermissions.Description,
-            UserRoles = roleWithModuleAndPermissions.UserRoles,
-            HasAppAccess = roleWithModuleAndPermissions.HasAppAccess,
-            UpdatedDate = DateTime.Now
-        });
-        foreach (ModuleRolePermissionsModel permission in roleWithModuleAndPermissions.RolePermissions)
-        {
-            permission.RolesId = Roles.RolesId;
-            await saveRolePermission(new RolePermission
-            {
-                RolePermissionId = permission.RolePermissionId,
-                ModulePermissionId = permission.ModulePermissionId,
-                RoleId = permission.RolesId,
-                HasAccess = permission.HasAccess
-            });
-        }
-        roleWithModuleAndPermissions.RoleId = Roles.RolesId;
-        return roleWithModuleAndPermissions;
-    }
+    //    Sanitizer.SanitizeProperties(roleWithModuleAndPermissions);
+    //    Roles Roles = await AddEditRoles(new Roles
+    //    {
+    //        Titles = roleWithModuleAndPermissions.RoleTitle,
+    //        RolesId = roleWithModuleAndPermissions.RoleId,
+    //        Description = roleWithModuleAndPermissions.Description,
+    //        UserRoles = roleWithModuleAndPermissions.UserRoles,
+    //        HasAppAccess = roleWithModuleAndPermissions.HasAppAccess,
+    //        UpdatedDate = DateTime.Now
+    //    });
+    //    foreach (ModuleRolePermissionsModel permission in roleWithModuleAndPermissions.RolePermissions)
+    //    {
+    //        permission.RolesId = Roles.RolesId;
+    //        await saveRolePermission(new RolePermission
+    //        {
+    //            RolePermissionId = permission.RolePermissionId,
+    //            ModulePermissionId = permission.ModulePermissionId,
+    //            RoleId = permission.RolesId,
+    //            HasAccess = permission.HasAccess
+    //        });
+    //    }
+    //    roleWithModuleAndPermissions.RoleId = Roles.RolesId;
+    //    return roleWithModuleAndPermissions;
+    //}
+
     //Get all roles with their permission
     public async Task<List<ModuleWithPermissionsModel>> GetRoleWithPermissions(string roleId, string companyId)
     {
@@ -332,5 +356,37 @@ public class RoleServices : IRoleService
         return hasPermission;
     }
 
-}
 
+    //Get All Roles
+    public async Task<List<ModuleWithPermissionsModel>> GetAllRolesWithPermission(string companyId)
+    {
+        List<ModuleWithPermissionsModel> moduleWithPermissionsModel = new();
+        Expression<Func<Roles, bool>> whereCondition = x => x.CompanyId == companyId;
+        List<ModulePermission> modulePermissions = (await _modulePermissionRepository.GetAll()).ToList();
+        List<Permission> permissions = (await _permissionRepository.GetAll()).ToList();
+        List<Module> modules = (await _moduleRepository.GetAll()).ToList();
+        var result = (from mp in modulePermissions
+                      join m in modules on mp.ModuleId equals m.ModuleId
+                      join p in permissions on mp.PermissionId equals p.PermissionId
+                      select new { permission = p, module = m, modulePermission = mp }).ToList();
+        var Roless = result.Select(x => new { x.module.ModuleId, x.module.ModuleName, x.module.ModuleConstant }).Distinct().ToArray();
+        for (int i = 0; i < Roless.Length; i++)
+        {
+            var Roles = Roless[i];
+            ModuleWithPermissionsModel moduleWithPermissionModel = new()
+            {
+                ModuleName = Roles.ModuleName,
+                ModuleConstant = Roles.ModuleConstant
+            };
+            List<ModuleRolePermissionsModel> permissionsList = result.Where(x => x.module.ModuleId == Roles.ModuleId).Select(y => new ModuleRolePermissionsModel
+            {
+                PermissionName = y.permission.PermissionName,
+                ModulePermissionId = y.modulePermission.ModulePermissionId,
+                PermissionConstant = y.permission.PermissionConstant
+            }).ToList();
+            moduleWithPermissionModel.Permissions = permissionsList;
+            moduleWithPermissionsModel.Add(moduleWithPermissionModel);
+        }
+        return moduleWithPermissionsModel;
+    }
+}
