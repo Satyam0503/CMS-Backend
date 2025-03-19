@@ -214,9 +214,9 @@ public class UserController : BaseApiController
     [Route("UploadUserImage")]
     [HttpPost]
     [FilesExtensions([".jpg", ".jpeg", ".png"])]
-    public async Task<Result> UploadUserImage(IFormFile profilePicture)
+    public async Task<Result<string>> UploadUserImage(IFormFile profilePicture)
     {
-        Result result = new Result();
+
         string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
         string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\ProfileImage\\");
         string fileExtension = Path.GetExtension(profilePicture.FileName);
@@ -233,17 +233,31 @@ public class UserController : BaseApiController
         string profile = await _employeeService.GetUserExistingProfile(userId);
         if (string.IsNullOrEmpty(profile))
         {
-            result = await _employeeService.AddUserProfileImage(fileName, userId, filePath);
+            string data = await _employeeService.AddUserProfileImage(fileName, userId, filePath);
+            Result<string> result = new()
+            {
+                MethodResult = data,
+                Success = true,
+                StatusCode = 201
+
+            };
+            return result;
         }
         else
         {
             string oldPath = Path.Combine(uploadFolder, profile);
             FileInfo fileInfo = new(oldPath);
             fileInfo.Delete();
-            result = await _employeeService.AddUserProfileImage(fileName, userId, filePath);
+            string data = await _employeeService.AddUserProfileImage(fileName, userId, filePath);
+
+            Result<string> result = new()
+            {
+                MethodResult = data,
+                Success = true,
+                StatusCode = 200
+            };
+            return result;
         }
-        result.Success = true;
-        return result;
     }
 
     [Route("AddSkills")]

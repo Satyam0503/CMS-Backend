@@ -60,15 +60,15 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("AddEditRole")]
         [Authorize]
-        public async Task<Result<RoleWithModuleAndPermissions>> AddRole(RoleWithModuleAndPermissions model)
+        public async Task<Result> AddRole(RoleWithModuleAndPermissions model)
         {
             string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-            RoleWithModuleAndPermissions data = await _roleService.AddEditRoles(model, companyId);
-            return new Result<RoleWithModuleAndPermissions>()
+            string data = await _roleService.AddEditRoles(model, companyId);
+            return new Result()
             {
                 Success = true,
-                Message = "Role is Added Successfully",
-                MethodResult = data,
+                Message = data,
+                StatusCode = 200
             };
         }
 

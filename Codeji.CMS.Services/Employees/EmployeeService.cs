@@ -13,6 +13,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
+using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
@@ -541,22 +542,19 @@ namespace Codeji.CMS.Services.Employees
             User? res = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
             return res?.ProfileUrl ?? string.Empty;
         }
-        public async Task<Result> AddUserProfileImage(string fileName, string userId, string filePath)
+        public async Task<string> AddUserProfileImage(string fileName, string userId, string filePath)
         {
             Expression<Func<User, bool>> whereCondition = x => x.UserId == userId;
             User profile = await _employeeRepository.FirstOrDefault(whereCondition);
             if (profile == null)
             {
-                return new Result()
-                {
-                    Success = false,
-                    Message = "User Not Found"
-                };
+                return "User Not Found";
             }
             profile.ProfileUrl = fileName;
 
             Result res = await _employeeRepository.Update(whereCondition, profile);
-            return res;
+            string fullProfileUrl = Common.GetEmployeeImageUrl(fileName);
+            return fullProfileUrl;
         }
 
         public async Task<Result> DeleteEducationDetails(string educationId, string companyId, string userId)

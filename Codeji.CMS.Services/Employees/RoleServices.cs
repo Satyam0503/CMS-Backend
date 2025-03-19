@@ -45,7 +45,7 @@ public class RoleServices : IRoleService
     }
 
     //Add New Roles
-    public async Task<RoleWithModuleAndPermissions> AddEditRoles(RoleWithModuleAndPermissions roles, string companyId)
+    public async Task<string> AddEditRoles(RoleWithModuleAndPermissions roles, string companyId)
     {
         List<Roles> roleData = (await _RolesRepository.GetAll(x => x.CompanyId == companyId)).ToList();
         List<RolePermission> roleWithModulePermission = (await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId)).ToList();
@@ -74,16 +74,46 @@ public class RoleServices : IRoleService
                     HasAccess = permission.HasAccess
                 });
             }
+            return "Role Added Successfuly";
         }
         else
         {
+
             Task<Roles?> currentRole = _RolesRepository.FirstOrDefault(x => x.RolesId == roles.RoleId);
             if (currentRole != null)
             {
+                Expression<Func<Roles, bool>> roleWhereCondition = x => x.CompanyId == companyId && x.RolesId == roles.RoleId;
+                await _RolesRepository.UpdateMany(roleWhereCondition, Builders<Roles>.Update.Set(x => x.Titles, roles.RoleTitle)
+                    .Set(x => x.Description, roles.Description)
+                    .Set(x => x.UpdatedDate, DateTime.UtcNow));
 
+                foreach (ModuleRolePermissionsModel currentRolePermission in roles.RolePermissions)
+                {
+                    Task<RolePermission?> data = _rolePermissionRepository.FirstOrDefault(x => x.RoleId == roles.RoleId && x.RolePermissionId == currentRolePermission.RolePermissionId);
+                    if (data.Result != null)
+                    {
+                        Expression<Func<RolePermission, bool>> whereCondition = x => x.RoleId == currentRolePermission.RolesId && x.RolePermissionId == currentRolePermission.RolePermissionId;
+                        await _rolePermissionRepository.UpdateMany(whereCondition, Builders<RolePermission>.Update
+                            .Set(x => x.HasAccess, currentRolePermission.HasAccess)
+                            .Set(x => x.UpdatedDate, DateTime.UtcNow));
+                    }
+                    else
+                    {
+                        RolePermission newPermission = new RolePermission()
+                        {
+                            RoleId = roles.RoleId,
+                            ModulePermissionId = currentRolePermission.ModulePermissionId,
+                            HasAccess = currentRolePermission.HasAccess,
+                            IsAccessible = false,
+                            CompanyId = companyId
+
+                        };
+                        await _rolePermissionRepository.AddOne(newPermission);
+                    }
+                }
             }
+            return "Role Updated Successfuly";
         }
-        return roles;
     }
     //Get company's all roles
     public async Task<List<RoleModel>> GetRoles(string companyId)

@@ -30,7 +30,7 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<Result> AddComment(string companyId, string userId, CommentRequestModel model);
         Task<List<Comments>> GetAllComment(string applicantId);
         Task<string> GetUserExistingProfile(string userId);
-        Task<Result> AddUserProfileImage(string fileName, string userId, string filePath);
+        Task<string> AddUserProfileImage(string fileName, string userId, string filePath);
         Task<Result> AddEditEmployeeSkills(SkillsRequestModel skillsModel, string companyId, string userId);
         Task<EmployeeSkills> GetEmployeeSkills(string companyId, string userId);
         Task<bool> CreateNewPassword(string password, string statusNumber);

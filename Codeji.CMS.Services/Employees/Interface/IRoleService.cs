@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 public interface IRoleService
 {
-    Task<RoleWithModuleAndPermissions> AddEditRoles(RoleWithModuleAndPermissions roles, string companyId);
+    Task<string> AddEditRoles(RoleWithModuleAndPermissions roles, string companyId);
     Task<List<RoleModel>> GetRoles(string companyId);
     Task<RoleModel> GetRoleById(string roleId);
     //Task<RoleWithModuleAndPermissions> SaveRoleAndPermissions(RoleWithModuleAndPermissions roleWithModuleAndPermissions);
