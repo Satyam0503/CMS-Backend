@@ -56,5 +56,51 @@ namespace Codeji.CMS.API.Controllers
                 Success = true
             };
         }
+
+        [HttpPost]
+        [Route("AddEditRole")]
+        [Authorize]
+        public async Task<Result> AddRole(RoleWithModuleAndPermissions model)
+        {
+            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+            string data = await _roleService.AddEditRoles(model, companyId);
+            return new Result()
+            {
+                Success = true,
+                Message = data,
+                StatusCode = 200
+            };
+        }
+
+        [HttpGet]
+        [Route("GetAllRolesWithPermission")]
+        [Authorize]
+        public async Task<Result<ModuleWithPermissionsModel>> GetModulePermission()
+        {
+            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+            List<ModuleWithPermissionsModel> data = await _roleService.GetAllRolesWithPermission(companyId);
+            return new Result<ModuleWithPermissionsModel>()
+            {
+                TotalRecords = data.Count,
+                MethodResults = data,
+                Success = true
+            };
+        }
+
+        [HttpGet]
+        [Route("GetRoleWithPermissionById")]
+        [Authorize]
+        public async Task<Result<ModuleWithPermissionsModel>> GetModulePermissionyId([FromQuery] string roleId)
+        {
+            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+            List<ModuleWithPermissionsModel> data = await _roleService.GetRoleWithPermissions(roleId, companyId);
+            return new Result<ModuleWithPermissionsModel>()
+            {
+                TotalRecords = data.Count,
+                Success = true,
+                MethodResults = data,
+
+            };
+        }
     }
 }

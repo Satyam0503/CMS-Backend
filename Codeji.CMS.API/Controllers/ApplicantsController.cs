@@ -33,7 +33,8 @@ namespace Codeji.CMS.API.Controllers
         //[CustomAuthorize(Module = "Applicant", Role = ["View"])]
         public async Task<Result<ApplicantViewModel>> ApplicantById(string id)
         {
-            Result<ApplicantViewModel> result = await _applicantsService.ApplicantById(id);
+            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+            Result<ApplicantViewModel> result = await _applicantsService.ApplicantById(id, companyId);
             return result;
         }
         [HttpPost]
@@ -112,5 +113,7 @@ namespace Codeji.CMS.API.Controllers
 
             return result;
         }
+
+
     }
 }

@@ -9,6 +9,7 @@
         public int ActivityCategory { get; set; }
         public DateTime CreatedDate { get; set; }
         public string Username { get; set; }
+        public string JobTitle { get; set; }
 
 
     }

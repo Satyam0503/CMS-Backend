@@ -19,12 +19,14 @@ namespace Codeji.CMS.Services.Recruitments
         private readonly IJobVacancy _jobVacancyService;
         readonly IMongoDbRepository<Company> _companyRepository;
         readonly IMongoDbRepository<MailTemplate> _mailTemplateRepository;
+        readonly IMongoDbRepository<JobVacancy> _jobVacancyRepository;
         public ApplicantServices(IMongoDbRepository<Applicant> applicantDbRepository,
             IMapper mapper,
             IMongoDbRepository<Resume> resumeRepository,
             IJobVacancy jobVacancyService,
             IMongoDbRepository<Company> companyRepository,
-            IMongoDbRepository<MailTemplate> mailTemplateRepository)
+            IMongoDbRepository<MailTemplate> mailTemplateRepository,
+            IMongoDbRepository<JobVacancy> jobVacancyRepository)
         {
             _applicantRepository = applicantDbRepository;
             _resumeRepository = resumeRepository;
@@ -32,6 +34,7 @@ namespace Codeji.CMS.Services.Recruitments
             _jobVacancyService = jobVacancyService;
             _companyRepository = companyRepository;
             _mailTemplateRepository = mailTemplateRepository;
+            _jobVacancyRepository = jobVacancyRepository;
         }
         /// <summary>
         /// For Annonymous add and update applicants
@@ -47,7 +50,7 @@ namespace Codeji.CMS.Services.Recruitments
                 LastName = applicantRegisterModel.LastName,
                 Experience = applicantRegisterModel.Experience,
                 VacancyId = applicantRegisterModel.VacancyId,
-                VacancyName = applicantRegisterModel.VacancyName,
+                //VacancyName = applicantRegisterModel.VacancyName,
                 Phone = applicantRegisterModel.Phone,
                 Email = applicantRegisterModel.Email,
                 Status = applicantRegisterModel.Status,
@@ -63,11 +66,11 @@ namespace Codeji.CMS.Services.Recruitments
             HtmlTemplate htmlTemplate = new HtmlTemplate();
             string replacedBody = htmlTemplate.Render(emailContent.body, new
             {
-                CandidateName = applicant.FirstName + " " + applicant.LastName,
-                JobTitle = applicant.VacancyName
+                CandidateName = applicantRegisterModel.FirstName + " " + applicantRegisterModel.LastName,
+                JobTitle = applicantRegisterModel.VacancyName
 
             });
-            await EmailFunctionality.SendEmailFromAPI(applicant.Email, emailContent.subject, replacedBody);
+            await EmailFunctionality.SendEmailFromAPI(applicantRegisterModel.Email, emailContent.subject, replacedBody);
             return result;
         }
 
@@ -83,7 +86,7 @@ namespace Codeji.CMS.Services.Recruitments
             entity.FirstName = model.FirstName;
             entity.LastName = model.LastName;
             entity.Phone = model.Phone;
-            entity.VacancyName = model.VacancyName;
+            //entity.VacancyName = model.VacancyName;
             entity.VacancyId = model.VacancyId;
             entity.ActivityType = model.ActivityType;
             entity.Status = model.Status;
@@ -157,58 +160,77 @@ namespace Codeji.CMS.Services.Recruitments
             || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));
 
             List<Applicant> applicants = (await _applicantRepository.GetAll(whereCondition)).ToList();
-            IEnumerable<Applicant> pagedList = applicants.Skip((pageNo - 1) * records).Take(records);
+            List<JobVacancy> vacancies = (await _jobVacancyRepository.GetAll(x => x.CompanyId == companyId)).ToList();
+
+            List<ApplicantViewModel> applicantData = _mapper.Map<List<ApplicantViewModel>>(applicants);
+            List<ApplicantViewModel> data = (from applicant in applicantData
+                                             join vacancy in vacancies on applicant.VacancyId equals vacancy.JobId
+                                             select new ApplicantViewModel
+                                             {
+                                                 ApplicantId = applicant.ApplicantId,
+                                                 FirstName = applicant.FirstName,
+                                                 LastName = applicant.LastName,
+                                                 Email = applicant.Email,
+                                                 Phone = applicant.Phone,
+                                                 StatusName = applicant.StatusName,
+                                                 Status = applicant.Status,
+                                                 ActivityTypeName = applicant.ActivityTypeName,
+                                                 VacancyName = vacancy.Title,
+                                                 VacancyId = vacancy.JobId,
+                                                 State = applicant.State,
+                                                 Experience = applicant.Experience,
+                                                 ApplyDate = applicant.ApplyDate,
+                                                 UpdateDate = applicant.UpdateDate,
+                                                 ResumeUrl = applicant.ResumeUrl,
+
+                                             }).ToList();
+            List<ApplicantViewModel> pagedList = data;
             if (pageNo != 0 && records != 0)
             {
-                List<ApplicantViewModel> data = _mapper.Map<List<ApplicantViewModel>>(pagedList);
-                Result<ApplicantViewModel> result = new Result<ApplicantViewModel>
-                {
-                    Success = true,
-                    TotalRecords = applicants.Count,
-                    MethodResults = data
-                };
-                return result;
+                pagedList = data.Skip((pageNo - 1) * records).Take(records).ToList();
             }
-            else
+
+            Result<ApplicantViewModel> result = new Result<ApplicantViewModel>
             {
-                List<ApplicantViewModel> data = _mapper.Map<List<ApplicantViewModel>>(applicants);
-                Result<ApplicantViewModel> result = new Result<ApplicantViewModel>
-                {
-                    Success = true,
-                    TotalRecords = applicants.Count,
-                    MethodResults = data,
-                };
-                return result;
-            }
+                Success = true,
+                TotalRecords = applicants.Count,
+                MethodResults = pagedList
+            };
+            return result;
 
 
         }
 
-        public async Task<Result<ApplicantViewModel>> ApplicantById(string applicantId)
+        public async Task<Result<ApplicantViewModel>> ApplicantById(string applicantId, string companyId)
         {
             Result<ApplicantViewModel> result = new Result<ApplicantViewModel>();
-            Applicant entity = await _applicantRepository.FirstOrDefault(x => x.ApplicantId == applicantId);
+            IEnumerable<Applicant>? entity = await _applicantRepository.GetAll(x => x.ApplicantId == applicantId);
+            List<JobVacancy> vacancies = (await _jobVacancyRepository.GetAll(x => x.CompanyId == companyId)).ToList();
+            IEnumerable<ApplicantViewModel> data = from e in entity
+                                                   join vacancy in vacancies on e.CompanyId equals vacancy.CompanyId
+                                                   where e.VacancyId == vacancy.JobId
+                                                   select new ApplicantViewModel
+                                                   {
+                                                       ApplicantId = e.ApplicantId,
+                                                       FirstName = e.FirstName,
+                                                       LastName = e.LastName,
+                                                       Email = e.Email,
+                                                       Phone = e.Phone,
+                                                       Status = e.Status,
+                                                       ActivityType = e.ActivityType,
+                                                       VacancyName = vacancy.Title,
+                                                       VacancyId = vacancy.JobId,
+                                                       State = e.State,
+                                                       Experience = e.Experience,
+                                                       ApplyDate = e.CreatedDate,
+                                                       UpdateDate = e.UpdatedDate,
+                                                       ResumeUrl = e.ResumeUrl,
+
+                                                   };
             if (entity is not null)
             {
                 result.Success = true;
-                result.MethodResult = new ApplicantViewModel()
-                {
-                    ApplicantId = entity.ApplicantId,
-                    ApplyDate = entity.CreatedDate,
-                    Email = entity.Email,
-                    Phone = entity.Phone,
-                    Status = entity.Status,
-                    VacancyId = entity.VacancyId,
-                    VacancyName = entity.VacancyName,
-                    Experience = entity.Experience,
-                    FirstName = entity.FirstName,
-                    LastName = entity.LastName,
-                    UpdateDate = entity.UpdatedDate,
-                    State = entity.State,
-                    ActivityType = entity.ActivityType,
-                    ResumeUrl = entity.ResumeUrl,
-
-                };
+                result.MethodResult = data.FirstOrDefault();
             }
             return result;
         }

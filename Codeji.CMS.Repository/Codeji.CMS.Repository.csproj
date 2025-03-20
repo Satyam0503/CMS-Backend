@@ -18,7 +18,6 @@
     <None Remove="Domain\Helpers\" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Entities\Company\" />
     <Folder Include="Domain\Helpers\" />
   </ItemGroup>
 </Project>

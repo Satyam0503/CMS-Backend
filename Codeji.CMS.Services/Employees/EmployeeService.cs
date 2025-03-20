@@ -13,6 +13,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
+using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
@@ -33,6 +34,8 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<EmployeeSkills> _employeeSkillsRepository;
         readonly IMongoDbRepository<Company> _companyRepository;
         readonly IMongoDbRepository<MailTemplate> _mailTemplateRepository;
+        readonly IMongoDbRepository<ProcessLogs> _processLogs;
+        readonly IMongoDbRepository<JobVacancy> _jobVacancy;
         public EmployeeService(IMongoDbRepository<EducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<CertificationDetails> certificationDetailsRepo,
             IMongoDbRepository<EmployeeSummary> userSummary,
@@ -43,7 +46,9 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<RolePermission> rolePermissionRepository,
             IMongoDbRepository<EmployeeSkills> employeeSkillsRepository,
             IMongoDbRepository<Company> companyRepository,
-            IMongoDbRepository<MailTemplate> mailTemplateRepository
+            IMongoDbRepository<MailTemplate> mailTemplateRepository,
+            IMongoDbRepository<ProcessLogs> processLogs,
+            IMongoDbRepository<JobVacancy> jobVacancy
             )
         {
             _employeeRepository = employeeRepository;
@@ -58,6 +63,8 @@ namespace Codeji.CMS.Services.Employees
             _employeeSkillsRepository = employeeSkillsRepository;
             _companyRepository = companyRepository;
             _mailTemplateRepository = mailTemplateRepository;
+            _processLogs = processLogs;
+            _jobVacancy = jobVacancy;
 
         }
 
@@ -490,18 +497,32 @@ namespace Codeji.CMS.Services.Employees
 
         //Logic For Addig Comment on Applicant By Employee (Admin And HR Manager )
 
-        public async Task<Result> AddComment(string companyId, CommentRequestModel model)
+        public async Task<Result> AddComment(string companyId, string userId, CommentRequestModel model)
         {
             Comments comments = new Comments()
             {
                 CompanyId = companyId,
-                UserId = model.UserId,
+                UserId = userId,
                 ApplicantId = model.ApplicantId,
                 ActivityCategory = model.ActivityCategory,
                 Description = model.Description,
                 CreatedDate = DateTime.UtcNow,
                 UserName = model.Username,
             };
+            User? user = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == model.UserId);
+            JobVacancy? job = await _jobVacancy.FirstOrDefault(x => x.CompanyId == companyId);
+            ProcessLogs processLogs = new ProcessLogs()
+            {
+                CompanyId = companyId,
+                UserId = userId,
+                ApplicantName = model.Username,
+                CommentedOn = DateTime.UtcNow,
+                Comments = model.Description,
+                CommentedBy = user.FirstName,
+                JobRole = model.JobTitle
+
+            };
+            await _processLogs.AddOne(processLogs);
             await _commentRepository.AddOne(comments);
             Result result = new Result()
             {
@@ -521,22 +542,19 @@ namespace Codeji.CMS.Services.Employees
             User? res = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
             return res?.ProfileUrl ?? string.Empty;
         }
-        public async Task<Result> AddUserProfileImage(string fileName, string userId, string filePath)
+        public async Task<string> AddUserProfileImage(string fileName, string userId, string filePath)
         {
             Expression<Func<User, bool>> whereCondition = x => x.UserId == userId;
             User profile = await _employeeRepository.FirstOrDefault(whereCondition);
             if (profile == null)
             {
-                return new Result()
-                {
-                    Success = false,
-                    Message = "User Not Found"
-                };
+                return "User Not Found";
             }
             profile.ProfileUrl = fileName;
 
             Result res = await _employeeRepository.Update(whereCondition, profile);
-            return res;
+            string fullProfileUrl = Common.GetEmployeeImageUrl(fileName);
+            return fullProfileUrl;
         }
 
         public async Task<Result> DeleteEducationDetails(string educationId, string companyId, string userId)
@@ -568,6 +586,12 @@ namespace Codeji.CMS.Services.Employees
             Result data = await _employeeRepository.Delete(employeeWhereCondition);
 
             return data;
+        }
+
+        public async Task<List<ProcessLogs>> GetProcessLogData(string companyId)
+        {
+            Expression<Func<ProcessLogs, bool>> whereCondition = x => x.CompanyId == companyId;
+            return (await _processLogs.GetAll(whereCondition)).ToList();
         }
     }
 }
