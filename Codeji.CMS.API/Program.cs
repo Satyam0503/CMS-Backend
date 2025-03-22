@@ -26,6 +26,7 @@ builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
     .AllowCredentials()
     .WithOrigins(
         "http://127.0.0.1:5173",
+        "https://localhost:7072",
         "*.codeji.in"
         )
     .AllowAnyHeader()
