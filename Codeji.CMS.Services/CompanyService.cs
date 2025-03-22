@@ -14,7 +14,7 @@ namespace Codeji.CMS.Services
     public class CompanyService : ICompanyService
     {
         private readonly IMongoDbRepository<Company> _companyRepo;
-        private readonly IMongoDbRepository<User> _userRepo;
+        private readonly IMongoDbRepository<EmpUser> _userRepo;
         private readonly IMongoDbRepository<Roles> _companyRoleRepo;
         private readonly IMongoDbRepository<ModulePermission> _modulePermissisonRepo;
         private readonly IMongoDbRepository<RolePermission> _rolePermissionRepo;
@@ -24,7 +24,7 @@ namespace Codeji.CMS.Services
         public CompanyService(
             IMongoDbRepository<Company> companyRepo,
             IMapper mapper,
-            IMongoDbRepository<User> userRepo,
+            IMongoDbRepository<EmpUser> userRepo,
             IMongoDbRepository<Roles> companyRoleRepo,
             IMongoDbRepository<ModulePermission> modulePermissisonRepo,
             IMongoDbRepository<RolePermission> rolePermissionRepo,
@@ -51,7 +51,7 @@ namespace Codeji.CMS.Services
             //Add Default Role
             List<Roles> adminRole = await _roleService.AddDefaultRole(companyId);
 
-            User user = new User()
+            EmpUser user = new EmpUser()
             {
                 UserId = Guid.NewGuid().ToString(),
                 Email = companyModel.Email,

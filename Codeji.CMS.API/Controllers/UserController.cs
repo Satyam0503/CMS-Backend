@@ -115,7 +115,7 @@ public class UserController : BaseApiController
 
     [Route("EditEmployeeEducation")]
     [HttpPost]
-    public async Task<Result> EditEmployeeEducation(EducationDetails educationDetails)
+    public async Task<Result> EditEmployeeEducation(EmpEducationDetails educationDetails)
     {
         string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
         string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
@@ -134,7 +134,7 @@ public class UserController : BaseApiController
 
     [Route("EditEmployeeCertification")]
     [HttpPost]
-    public async Task<Result> EditEmployeeCertification(CertificationDetails certificationDetails)
+    public async Task<Result> EditEmployeeCertification(EmpCertificationDetails certificationDetails)
     {
         string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
         string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
@@ -157,11 +157,11 @@ public class UserController : BaseApiController
 
     [Route("GetEmployeeEducationDetails")]
     [HttpGet]
-    public async Task<Result<EducationDetails>> GetEmployeeEducationDetails([FromQuery] string userId = null)
+    public async Task<Result<EmpEducationDetails>> GetEmployeeEducationDetails([FromQuery] string userId = null)
     {
         if (string.IsNullOrEmpty(userId)) userId = CurrentContext.CurrentUserId(_httpContextAccessor);
-        List<EducationDetails> data = await _employeeService.GetEmployeeEducationDetails(userId);
-        Result<EducationDetails> result = new Result<EducationDetails>();
+        List<EmpEducationDetails> data = await _employeeService.GetEmployeeEducationDetails(userId);
+        Result<EmpEducationDetails> result = new Result<EmpEducationDetails>();
         result.Success = true;
         result.MethodResults = data.ToList();
         return result;
@@ -170,11 +170,11 @@ public class UserController : BaseApiController
 
     [Route("GetEmployeeCertificationDetails")]
     [HttpGet]
-    public async Task<Result<CertificationDetails>> GetEmployeeCertificationDetails([FromQuery] string userId = null)
+    public async Task<Result<EmpCertificationDetails>> GetEmployeeCertificationDetails([FromQuery] string userId = null)
     {
         if (string.IsNullOrEmpty(userId)) userId = CurrentContext.CurrentUserId(_httpContextAccessor);
-        List<CertificationDetails> data = await _employeeService.GetEmployeeCertificationDetails(userId);
-        Result<CertificationDetails> result = new Result<CertificationDetails>();
+        List<EmpCertificationDetails> data = await _employeeService.GetEmployeeCertificationDetails(userId);
+        Result<EmpCertificationDetails> result = new Result<EmpCertificationDetails>();
         result.Success = true;
         result.MethodResults = data.ToList();
         return result;
@@ -272,12 +272,12 @@ public class UserController : BaseApiController
 
     [Route("GetEmployeeSkills")]
     [HttpGet]
-    public async Task<Result<EmployeeSkills>> GetEmployeeSkills([FromQuery] string userId = null)
+    public async Task<Result<EmpSkills>> GetEmployeeSkills([FromQuery] string userId = null)
     {
         if (string.IsNullOrEmpty(userId)) userId = CurrentContext.CurrentUserId(_httpContextAccessor);
         string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-        EmployeeSkills result = await _employeeService.GetEmployeeSkills(companyId, userId);
-        return new Result<EmployeeSkills>()
+        EmpSkills result = await _employeeService.GetEmployeeSkills(companyId, userId);
+        return new Result<EmpSkills>()
         {
             Success = true,
             MethodResult = result

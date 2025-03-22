@@ -10,6 +10,7 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         public string CompanyId { get; set; }
         public string UserId { get; set; }
         public string JobRole { get; set; }
+        public int ActionCategory { get; set; }
         public DateTime CommentedOn { get; set; }
         public string Comments { get; set; }
         public string CommentedBy { get; set; }

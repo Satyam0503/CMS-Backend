@@ -17,11 +17,11 @@ namespace Codeji.CMS.Services.Registration
         private readonly IMapper _mapper;
         public AutoMapperObjects()
         {
-            CreateMap<User, UserModel>().ForMember(dest => dest.Password, opt => opt.Ignore()).ReverseMap();
+            CreateMap<EmpUser, UserModel>().ForMember(dest => dest.Password, opt => opt.Ignore()).ReverseMap();
             CreateMap<Company, CompanyRequestModel>().ReverseMap();
-            CreateMap<User, CompanyRequestModel>().ReverseMap();
-            CreateMap<EducationDetails, EmployeeEducationRequestModel>().ReverseMap();
-            CreateMap<CertificationDetails, EmployeeCertificationRequestModel>().ReverseMap();
+            CreateMap<EmpUser, CompanyRequestModel>().ReverseMap();
+            CreateMap<EmpEducationDetails, EmployeeEducationRequestModel>().ReverseMap();
+            CreateMap<EmpCertificationDetails, EmployeeCertificationRequestModel>().ReverseMap();
             CreateMap<Roles, RoleModel>().ReverseMap();
             CreateMap<JobVacancy, JobVacancyModel>().ReverseMap();
             CreateMap<Applicant, ApplicantViewModel>().ForMember(dest => dest.ApplyDate, opt => opt.MapFrom(src => src.CreatedDate)).ReverseMap();

@@ -27,27 +27,21 @@ public class JobVacancyController : BaseApiController
 
     public async Task<Result<JobVacancyModel>> AddJobVacancy(JobVacancyModel jobVacancy)
     {
-        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-        return await _jobVacancyService.AddJobVacancy(jobVacancy, companyId);
+        return await _jobVacancyService.AddJobVacancy(jobVacancy);
     }
 
     [Route("EditJobVacancy")]
     [HttpPost]
     public async Task<Result<JobVacancyModel>> EditJobVacancy(JobVacancyModel jobVacancy, string jobId)
     {
-        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-        return await _jobVacancyService.EditJobVacancy(jobVacancy, jobId, companyId);
+        return await _jobVacancyService.EditJobVacancy(jobVacancy, jobId);
     }
     [Route("GetAllVacancy")]
-    [HttpPost]
+    [HttpGet]
     [AllowAnonymous]
-    public async Task<Result<JobVacancyModel>> GetAllVacancy(ApplyNowVacancyModel model, [FromQuery] int pageNo, [FromQuery] int records)
+    public async Task<Result<JobVacancyModel>> GetAllVacancy([FromQuery] int pageNo, [FromQuery] int records)
     {
-        if (string.IsNullOrEmpty(model.companyId))
-        {
-            model.companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-        }
-        Result<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy(model.companyId, pageNo, records);
+        Result<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy(pageNo, records);
 
         return data;
     }
@@ -57,8 +51,7 @@ public class JobVacancyController : BaseApiController
     [Authorize]
     public async Task<string> GetVacancyById(string vacancyId)
     {
-        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-        string data = await _jobVacancyService.GetVacancyById(companyId, vacancyId);
+        string data = await _jobVacancyService.GetVacancyById(vacancyId);
         return data;
     }
 
@@ -67,8 +60,7 @@ public class JobVacancyController : BaseApiController
     [Authorize]
     public async Task<Result> DeleteJobVacancy([FromQuery] string vacancyId)
     {
-        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-        Result data = await _jobVacancyService.DeleteJobVacancy(vacancyId, companyId);
+        Result data = await _jobVacancyService.DeleteJobVacancy(vacancyId);
         if (data == null)
         {
             return new Result()

@@ -20,7 +20,7 @@ public class RoleServices : IRoleService
     private readonly IMongoDbRepository<ModulePermission> _modulePermissionRepository;
     private readonly IMongoDbRepository<Module> _moduleRepository;
     private readonly IMongoDbRepository<Permission> _permissionRepository;
-    private readonly IMongoDbRepository<User> _userRepository;
+    private readonly IMongoDbRepository<EmpUser> _userRepository;
     private readonly IMapper _mapper;
     private readonly IMiddlewareService _middleware;
 
@@ -30,7 +30,7 @@ public class RoleServices : IRoleService
         IMongoDbRepository<ModulePermission> modulePermissionRepository,
         IMongoDbRepository<Module> moduleRepository,
         IMongoDbRepository<Permission> permissionRepository,
-        IMongoDbRepository<User> userRepository,
+        IMongoDbRepository<EmpUser> userRepository,
         IMapper mapper,
         IMiddlewareService middleware)
     {
@@ -283,7 +283,7 @@ public class RoleServices : IRoleService
     }
     public async Task<List<string>> GetUsersByRole(string[] roleIds, string companyId)
     {
-        Expression<Func<User, bool>> whereUserCondtion = x => roleIds.Contains(x.RoleId);
+        Expression<Func<EmpUser, bool>> whereUserCondtion = x => roleIds.Contains(x.RoleId);
         List<string> users = await _userRepository.Get(whereUserCondtion).Select(x => x.UserId).ToListAsync();
         return users;
     }
@@ -342,7 +342,7 @@ public class RoleServices : IRoleService
 
     //Verify Login User with role permissions
     #endregion
-    public async Task<bool> VerifyUserAccess(string module, string[] Role, string userId, string companyId, UserEditRoleCheckModel userForEdit = null)
+    public async Task<bool> VerifyUserAccess(string module, string[] Role, string userId, string companyId, UserCheckModel userForEdit = null)
     {
         bool hasPermission = false;
         string[] modules = Array.Empty<string>();

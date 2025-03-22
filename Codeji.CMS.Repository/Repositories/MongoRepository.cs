@@ -90,7 +90,7 @@ namespace Codeji.CMS.GenericRepository
             bool res = await GetQuery(filter, WithDeletedObjects).AnyAsync();
             return res;
         }
-        public async Task<TEntity?> FirstOrDefault(Expression<Func<TEntity, bool>> filter, bool WithDeletedObjects = false)
+        public async Task<TEntity?> FirstOrDefault(Expression<Func<TEntity, bool>> filter = null, bool WithDeletedObjects = false)
         {
             TEntity? res = GetQuery(filter, WithDeletedObjects).FirstOrDefault();
             return res;

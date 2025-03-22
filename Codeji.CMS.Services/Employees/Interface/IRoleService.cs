@@ -15,7 +15,7 @@ public interface IRoleService
     Task<List<RoleModel>> GetRolesWithPagination(int pageNo, int pageSize);
     Task<bool> CheckRoleDependancyForDeletion(string roleId);
     Task<List<string>> GetUsersByRole(string[] roleIds, string companyId);
-    Task<bool> VerifyUserAccess(string module, string[] Role, string userId, string companyId, UserEditRoleCheckModel userForEdit = null);
+    Task<bool> VerifyUserAccess(string module, string[] Role, string userId, string companyId, UserCheckModel userForEdit = null);
     Task<List<ModuleWithPermissionsModel>> GetAllRolesWithPermission(string companyId);
 
 }

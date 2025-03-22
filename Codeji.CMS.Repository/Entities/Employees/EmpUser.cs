@@ -2,7 +2,7 @@ using MongoDB.Bson.Serialization.Attributes;
 
 namespace Codeji.CMS.Repository.Entities.Employees;
 
-public class User : BaseClass
+public class EmpUser : BaseClass
 {
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
     public string UserId { get; set; }
