@@ -175,6 +175,7 @@ namespace Codeji.CMS.Services.Recruitments
                                                  StatusName = applicant.StatusName,
                                                  Status = applicant.Status,
                                                  ActivityTypeName = applicant.ActivityTypeName,
+                                                 ActivityType = applicant.ActivityType,
                                                  VacancyName = vacancy.Title,
                                                  VacancyId = vacancy.JobId,
                                                  State = applicant.State,
