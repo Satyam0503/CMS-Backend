@@ -1,12 +1,9 @@
 ﻿using System;
 namespace Codeji.CMS.DTO.RolePermissions
 {
-    public class UserEditRoleCheckModel
+    public class UserCheckModel
     {
-        public UserEditRoleCheckModel()
-        {
-
-        }
+        public string CompanyId { get; set; }
         public string UserId { get; set; }
         public string RoleId { get; set; }
     }

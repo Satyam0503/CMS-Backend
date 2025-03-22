@@ -22,29 +22,29 @@ namespace Codeji.CMS.Services.Employees
 {
     public class EmployeeService : IEmployeeService
     {
-        readonly IMongoDbRepository<EducationDetails> _educationDetailsRepo;
-        readonly IMongoDbRepository<CertificationDetails> _certificationDetailsRepo;
-        readonly IMongoDbRepository<EmployeeSummary> _employeeSummaryRepo;
+        readonly IMongoDbRepository<EmpEducationDetails> _educationDetailsRepo;
+        readonly IMongoDbRepository<EmpCertificationDetails> _certificationDetailsRepo;
+        readonly IMongoDbRepository<EmpSummary> _employeeSummaryRepo;
         readonly IMapper _mapper;
-        readonly IMongoDbRepository<User> _employeeRepository;
+        readonly IMongoDbRepository<EmpUser> _employeeRepository;
         readonly IMongoDbRepository<Roles> _rolesRepository;
         private readonly IRoleService _roleService;
         readonly IMongoDbRepository<Comments> _commentRepository;
         readonly IMongoDbRepository<RolePermission> _rolePermissionRepository;
-        readonly IMongoDbRepository<EmployeeSkills> _employeeSkillsRepository;
+        readonly IMongoDbRepository<EmpSkills> _employeeSkillsRepository;
         readonly IMongoDbRepository<Company> _companyRepository;
         readonly IMongoDbRepository<MailTemplate> _mailTemplateRepository;
         readonly IMongoDbRepository<ProcessLogs> _processLogs;
         readonly IMongoDbRepository<JobVacancy> _jobVacancy;
-        public EmployeeService(IMongoDbRepository<EducationDetails> educationDetailsRepo,
-            IMapper mapper, IMongoDbRepository<CertificationDetails> certificationDetailsRepo,
-            IMongoDbRepository<EmployeeSummary> userSummary,
-            IMongoDbRepository<User> employeeRepository,
+        public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
+            IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
+            IMongoDbRepository<EmpSummary> userSummary,
+            IMongoDbRepository<EmpUser> employeeRepository,
             IMongoDbRepository<Roles> rolesRepository,
             IMongoDbRepository<Comments> commentRepository,
             IRoleService roleService,
             IMongoDbRepository<RolePermission> rolePermissionRepository,
-            IMongoDbRepository<EmployeeSkills> employeeSkillsRepository,
+            IMongoDbRepository<EmpSkills> employeeSkillsRepository,
             IMongoDbRepository<Company> companyRepository,
             IMongoDbRepository<MailTemplate> mailTemplateRepository,
             IMongoDbRepository<ProcessLogs> processLogs,
@@ -70,7 +70,7 @@ namespace Codeji.CMS.Services.Employees
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string companyId)
         {
-            User employee = new User()
+            EmpUser employee = new EmpUser()
             {
                 UserId = user.UserId,
                 CompanyId = companyId,
@@ -123,8 +123,8 @@ namespace Codeji.CMS.Services.Employees
         {
             //User? checkUser = await _employeeRepository.FirstOrDefault(x => x.UserId == id);
 
-            UpdateDefinitionBuilder<User> update = Builders<User>.Update;
-            List<UpdateDefinition<User>> updateDefinition = new();
+            UpdateDefinitionBuilder<EmpUser> update = Builders<EmpUser>.Update;
+            List<UpdateDefinition<EmpUser>> updateDefinition = new();
             foreach (PropertyInfo property in user.GetType().GetProperties().Where(x => x.GetValue(user) != null))
             {
                 object value = property.GetValue(user, null);
@@ -135,8 +135,8 @@ namespace Codeji.CMS.Services.Employees
             }
 
             updateDefinition.Add(update.Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.UpdatedBy, userId));
-            UpdateDefinition<User> data = update.Combine(updateDefinition);
-            Expression<Func<User, bool>> whereCondition = x => x.UserId == userId && x.CompanyId == companyId;
+            UpdateDefinition<EmpUser> data = update.Combine(updateDefinition);
+            Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == userId && x.CompanyId == companyId;
             Task<Result> model = _employeeRepository.UpdateMany(whereCondition, data, true);
             return new Result<UserModel>
             {
@@ -147,7 +147,7 @@ namespace Codeji.CMS.Services.Employees
         }
         public async Task<UserModel> GetEmployeeById(string userId)
         {
-            User? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
+            EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
             UserModel userModel = _mapper.Map<UserModel>(user);
             return userModel;
         }
@@ -155,7 +155,7 @@ namespace Codeji.CMS.Services.Employees
         {
             Task<List<RoleModel>> roleList = _roleService.GetRoles(companyId);
             RoleModel? adminRole = roleList.Result.FirstOrDefault(role => role.Titles == "Company Administrator");
-            IEnumerable<User> list = await _employeeRepository.GetAll(x => x.CompanyId == companyId && x.RoleId != adminRole.RolesId);
+            IEnumerable<EmpUser> list = await _employeeRepository.GetAll(x => x.CompanyId == companyId && x.RoleId != adminRole.RolesId);
             object pagedList = list.Skip((pageNo - 1) * records).Take(records);
             if (pageNo != 0 && records != 0)
             {
@@ -185,7 +185,7 @@ namespace Codeji.CMS.Services.Employees
         public async Task<bool> IsEmailExist(string email)
         {
             //return await _employeeRepository.Exist(x => x.Email.Equals(email));
-            User? user = await _employeeRepository.FirstOrDefault(x => x.Email == email);
+            EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.Email == email);
             if (user is null)
             {
                 return false;
@@ -196,7 +196,7 @@ namespace Codeji.CMS.Services.Employees
 
         public async Task<bool> ResetPassword(string userId, string companyId, string password, string oldPassword)
         {
-            User? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId && x.CompanyId == companyId);
+            EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId && x.CompanyId == companyId);
             if (user is null)
                 return false;
             if (!string.IsNullOrEmpty(oldPassword))
@@ -207,14 +207,14 @@ namespace Codeji.CMS.Services.Employees
 
             user.Password = AuthenticationHandler.HashedPassword(password);
             user.UpdatedDate = DateTime.Now;
-            Expression<Func<User, bool>> whereCondition = x => user.UserId == x.UserId;
+            Expression<Func<EmpUser, bool>> whereCondition = x => user.UserId == x.UserId;
             await _employeeRepository.Update(whereCondition, user);
             return true;
         }
 
         public async Task<bool> CreateNewPassword(string password, string statusNumber)
         {
-            User? user = await _employeeRepository.FirstOrDefault(x => x.StatusNumber == statusNumber);
+            EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.StatusNumber == statusNumber);
             if (user is null)
             {
                 return false;
@@ -225,7 +225,7 @@ namespace Codeji.CMS.Services.Employees
             }
             user.Password = AuthenticationHandler.HashedPassword(password);
             user.IsEmailVerified = true;
-            Expression<Func<User, bool>> whereCondition = x => x.StatusNumber == user.StatusNumber;
+            Expression<Func<EmpUser, bool>> whereCondition = x => x.StatusNumber == user.StatusNumber;
             await _employeeRepository.Update(whereCondition, user);
             return true;
         }
@@ -233,7 +233,7 @@ namespace Codeji.CMS.Services.Employees
         public async Task<string> GetVerificationToken(string email, string password)
         {
 
-            User? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+            EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
 
             if (string.IsNullOrEmpty(user.Password))
             {
@@ -273,13 +273,13 @@ namespace Codeji.CMS.Services.Employees
         }
         public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId, string companyId)
         {
-            Expression<Func<EmployeeSummary, bool>> whereCondition = x => userId == x.UserId && x.Id == userSummary.SummaryId && x.CompanyId == companyId;
-            EmployeeSummary? employeesummary = await _employeeSummaryRepo.FirstOrDefault(x => x.UserId == userId && x.CompanyId == companyId);
+            Expression<Func<EmpSummary, bool>> whereCondition = x => userId == x.UserId && x.Id == userSummary.SummaryId && x.CompanyId == companyId;
+            EmpSummary? employeesummary = await _employeeSummaryRepo.FirstOrDefault(x => x.UserId == userId && x.CompanyId == companyId);
             bool success = false;
 
             if (employeesummary == null && string.IsNullOrEmpty(userSummary.SummaryId))
             {
-                EmployeeSummary summary = new EmployeeSummary()
+                EmpSummary summary = new EmpSummary()
                 {
 
                     CompanyId = companyId,
@@ -307,11 +307,11 @@ namespace Codeji.CMS.Services.Employees
         }
         public async Task<Result> AddEditEmployeeSkills(SkillsRequestModel skillsModel, string companyId, string userId)
         {
-            Expression<Func<EmployeeSkills, bool>> whereCondition = x => userId == x.UserId && x.CompanyId == companyId;
-            EmployeeSkills? employeSkills = await _employeeSkillsRepository.FirstOrDefault(whereCondition);
+            Expression<Func<EmpSkills, bool>> whereCondition = x => userId == x.UserId && x.CompanyId == companyId;
+            EmpSkills? employeSkills = await _employeeSkillsRepository.FirstOrDefault(whereCondition);
             if (employeSkills == null)
             {
-                EmployeeSkills newSkill = new EmployeeSkills();
+                EmpSkills newSkill = new EmpSkills();
                 {
                     newSkill.CompanyId = companyId;
                     newSkill.UserId = userId;
@@ -338,7 +338,7 @@ namespace Codeji.CMS.Services.Employees
         }
         public async Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId, string companyId)
         {
-            EducationDetails educationDetail = new EducationDetails()
+            EmpEducationDetails educationDetail = new EmpEducationDetails()
             {
                 CompanyId = companyId,
                 UserId = userId,
@@ -358,10 +358,10 @@ namespace Codeji.CMS.Services.Employees
             };
         }
 
-        public async Task<Result> EditEmployeeEducation(EducationDetails educationDetails, string companyId, string userId)
+        public async Task<Result> EditEmployeeEducation(EmpEducationDetails educationDetails, string companyId, string userId)
         {
-            Expression<Func<EducationDetails, bool>> whereCondition = x => x.UserId == userId && x.CompanyId == companyId && x.EducationId == educationDetails.EducationId;
-            EducationDetails? check = await _educationDetailsRepo.FirstOrDefault(whereCondition);
+            Expression<Func<EmpEducationDetails, bool>> whereCondition = x => x.UserId == userId && x.CompanyId == companyId && x.EducationId == educationDetails.EducationId;
+            EmpEducationDetails? check = await _educationDetailsRepo.FirstOrDefault(whereCondition);
             if (check == null)
             {
                 return new Result()
@@ -372,7 +372,7 @@ namespace Codeji.CMS.Services.Employees
 
                 };
             }
-            EducationDetails data = new EducationDetails()
+            EmpEducationDetails data = new EmpEducationDetails()
             {
                 EducationId = educationDetails.EducationId,
                 UserId = userId,
@@ -395,7 +395,7 @@ namespace Codeji.CMS.Services.Employees
 
         public async Task<Result<EmployeeCertificationRequestModel>> AddEmployeeCertification(EmployeeCertificationRequestModel cerificationDetails, string userId, string companyId)
         {
-            CertificationDetails certificatinDetail = new CertificationDetails()
+            EmpCertificationDetails certificatinDetail = new EmpCertificationDetails()
             {
                 CompanyId = companyId,
                 UserId = userId,
@@ -414,10 +414,10 @@ namespace Codeji.CMS.Services.Employees
             };
         }
 
-        public async Task<Result> EditEmployeeCertification(CertificationDetails certificationDetails, string companyId, string userId)
+        public async Task<Result> EditEmployeeCertification(EmpCertificationDetails certificationDetails, string companyId, string userId)
         {
-            Expression<Func<CertificationDetails, bool>> whereCondition = x => x.UserId == userId && x.CompanyId == companyId && x.CertificationId == certificationDetails.CertificationId;
-            CertificationDetails? check = await _certificationDetailsRepo.FirstOrDefault(whereCondition);
+            Expression<Func<EmpCertificationDetails, bool>> whereCondition = x => x.UserId == userId && x.CompanyId == companyId && x.CertificationId == certificationDetails.CertificationId;
+            EmpCertificationDetails? check = await _certificationDetailsRepo.FirstOrDefault(whereCondition);
             if (check == null)
             {
                 return new Result()
@@ -428,7 +428,7 @@ namespace Codeji.CMS.Services.Employees
 
                 };
             }
-            CertificationDetails data = new CertificationDetails()
+            EmpCertificationDetails data = new EmpCertificationDetails()
             {
                 CertificationId = certificationDetails.CertificationId,
                 UserId = userId,
@@ -449,21 +449,21 @@ namespace Codeji.CMS.Services.Employees
             };
         }
 
-        public async Task<List<EducationDetails>> GetEmployeeEducationDetails(string userId)
+        public async Task<List<EmpEducationDetails>> GetEmployeeEducationDetails(string userId)
         {
-            IEnumerable<EducationDetails> list = await _educationDetailsRepo.GetAll(x => x.UserId == userId);
-            return _mapper.Map<List<EducationDetails>>(list);
+            IEnumerable<EmpEducationDetails> list = await _educationDetailsRepo.GetAll(x => x.UserId == userId);
+            return _mapper.Map<List<EmpEducationDetails>>(list);
         }
 
-        public async Task<List<CertificationDetails>> GetEmployeeCertificationDetails(string userId)
+        public async Task<List<EmpCertificationDetails>> GetEmployeeCertificationDetails(string userId)
         {
-            IEnumerable<CertificationDetails> list = await _certificationDetailsRepo.GetAll(x => x.UserId == userId);
-            return _mapper.Map<List<CertificationDetails>>(list);
+            IEnumerable<EmpCertificationDetails> list = await _certificationDetailsRepo.GetAll(x => x.UserId == userId);
+            return _mapper.Map<List<EmpCertificationDetails>>(list);
         }
 
         public async Task<EmployeeSummaryRequestModel> GetEmployeeSummary(string userId, string companyId)
         {
-            EmployeeSummary summary = await _employeeSummaryRepo.FirstOrDefault(x => x.UserId == userId && x.CompanyId == companyId);
+            EmpSummary summary = await _employeeSummaryRepo.FirstOrDefault(x => x.UserId == userId && x.CompanyId == companyId);
             if (summary == null)
             {
                 return new EmployeeSummaryRequestModel()
@@ -478,17 +478,17 @@ namespace Codeji.CMS.Services.Employees
             };
         }
 
-        public async Task<EmployeeSkills> GetEmployeeSkills(string companyId, string userId)
+        public async Task<EmpSkills> GetEmployeeSkills(string companyId, string userId)
         {
-            EmployeeSkills employeeSkills = await _employeeSkillsRepository.FirstOrDefault(x => x.UserId == userId && x.CompanyId == companyId);
+            EmpSkills employeeSkills = await _employeeSkillsRepository.FirstOrDefault(x => x.UserId == userId && x.CompanyId == companyId);
             if (employeeSkills == null)
             {
-                return new EmployeeSkills()
+                return new EmpSkills()
                 {
                     Skills = ""
                 };
             }
-            return new EmployeeSkills()
+            return new EmpSkills()
             {
                 Id = employeeSkills.Id,
                 Skills = employeeSkills.Skills
@@ -509,8 +509,7 @@ namespace Codeji.CMS.Services.Employees
                 CreatedDate = DateTime.UtcNow,
                 UserName = model.Username,
             };
-            User? user = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == model.UserId);
-            JobVacancy? job = await _jobVacancy.FirstOrDefault(x => x.CompanyId == companyId);
+            EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == model.UserId);
             ProcessLogs processLogs = new ProcessLogs()
             {
                 CompanyId = companyId,
@@ -519,6 +518,7 @@ namespace Codeji.CMS.Services.Employees
                 CommentedOn = DateTime.UtcNow,
                 Comments = model.Description,
                 CommentedBy = user.FirstName,
+                ActionCategory = model.ActivityCategory,
                 JobRole = model.JobTitle
 
             };
@@ -539,13 +539,13 @@ namespace Codeji.CMS.Services.Employees
         }
         public async Task<string> GetUserExistingProfile(string userId)
         {
-            User? res = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
+            EmpUser? res = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
             return res?.ProfileUrl ?? string.Empty;
         }
         public async Task<string> AddUserProfileImage(string fileName, string userId, string filePath)
         {
-            Expression<Func<User, bool>> whereCondition = x => x.UserId == userId;
-            User profile = await _employeeRepository.FirstOrDefault(whereCondition);
+            Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == userId;
+            EmpUser profile = await _employeeRepository.FirstOrDefault(whereCondition);
             if (profile == null)
             {
                 return "User Not Found";
@@ -559,25 +559,25 @@ namespace Codeji.CMS.Services.Employees
 
         public async Task<Result> DeleteEducationDetails(string educationId, string companyId, string userId)
         {
-            Expression<Func<EducationDetails, bool>> wherCondition = x => x.EducationId == educationId && x.CompanyId == companyId && x.UserId == userId;
+            Expression<Func<EmpEducationDetails, bool>> wherCondition = x => x.EducationId == educationId && x.CompanyId == companyId && x.UserId == userId;
             Result data = await _educationDetailsRepo.Delete(wherCondition);
             return data;
         }
 
         public async Task<Result> DeleteCertificationDetails(string certificationId, string companyId, string userId)
         {
-            Expression<Func<CertificationDetails, bool>> whereCondition = x => x.CertificationId == certificationId && x.UserId == userId && x.CompanyId == companyId;
+            Expression<Func<EmpCertificationDetails, bool>> whereCondition = x => x.CertificationId == certificationId && x.UserId == userId && x.CompanyId == companyId;
             Result data = await _certificationDetailsRepo.Delete(whereCondition);
             return data;
         }
 
         public async Task<Result> DeleteEmployee(string employeeId, string companyId)
         {
-            Expression<Func<User, bool>> employeeWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
-            Expression<Func<CertificationDetails, bool>> certificateWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
-            Expression<Func<EmployeeSkills, bool>> skillsWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
-            Expression<Func<EmployeeSummary, bool>> summaryWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
-            Expression<Func<EducationDetails, bool>> educationWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
+            Expression<Func<EmpUser, bool>> employeeWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
+            Expression<Func<EmpCertificationDetails, bool>> certificateWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
+            Expression<Func<EmpSkills, bool>> skillsWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
+            Expression<Func<EmpSummary, bool>> summaryWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
+            Expression<Func<EmpEducationDetails, bool>> educationWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
             await _certificationDetailsRepo.Delete(certificateWhereCondition);
             await _employeeSkillsRepository.Delete(skillsWhereCondition);
             await _employeeSummaryRepo.Delete(summaryWhereCondition);

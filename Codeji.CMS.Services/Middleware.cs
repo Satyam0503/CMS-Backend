@@ -8,9 +8,9 @@ namespace Codeji.CMS.Services
 {
     public class MiddlewareService : IMiddlewareService
     {
-        private readonly IMongoDbRepository<User> _userRepository;
+        private readonly IMongoDbRepository<EmpUser> _userRepository;
         private readonly IMapper _mapper;
-        public MiddlewareService(IMongoDbRepository<User> userRepository, IMapper mapper)
+        public MiddlewareService(IMongoDbRepository<EmpUser> userRepository, IMapper mapper)
         {
             _userRepository = userRepository;
             _mapper = mapper;
@@ -23,7 +23,7 @@ namespace Codeji.CMS.Services
             {
                 return null;
             }
-            User user = _userRepository.FirstOrDefault(x => x.UserId == id).Result;
+            EmpUser user = _userRepository.FirstOrDefault(x => x.UserId == id).Result;
             return _mapper.Map(user, userModel);
         }
 

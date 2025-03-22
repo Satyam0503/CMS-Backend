@@ -19,11 +19,10 @@ namespace Codeji.CMS.Services.Recruitments
             _mapper = mapper;
         }
 
-        public async Task<Result<JobVacancyModel>> AddJobVacancy(JobVacancyModel jobVacancy, string companyId)
+        public async Task<Result<JobVacancyModel>> AddJobVacancy(JobVacancyModel jobVacancy)
         {
             JobVacancy vacancy = new JobVacancy()
             {
-                CompanyId = companyId,
                 Title = jobVacancy.Title,
                 Vacancies = jobVacancy.Vacancies,
                 JobType = jobVacancy.JobType,
@@ -42,12 +41,11 @@ namespace Codeji.CMS.Services.Recruitments
             };
 
         }
-        public async Task<Result<JobVacancyModel>> EditJobVacancy(JobVacancyModel jobVacancy, string jobId, string companyId)
+        public async Task<Result<JobVacancyModel>> EditJobVacancy(JobVacancyModel jobVacancy, string jobId)
         {
             JobVacancy editedJob = new JobVacancy()
             {
                 JobId = jobId,
-                CompanyId = companyId,
                 Title = jobVacancy.Title,
                 Vacancies = jobVacancy.Vacancies,
                 JobType = jobVacancy.JobType,
@@ -64,9 +62,9 @@ namespace Codeji.CMS.Services.Recruitments
             };
         }
 
-        public async Task<Result<JobVacancyModel>> GetAllVacancy(string companyId, int pageNo, int records)
+        public async Task<Result<JobVacancyModel>> GetAllVacancy(int pageNo, int records)
         {
-            IEnumerable<JobVacancy> list = await _jobVacancyRepo.GetAll(x => x.CompanyId == companyId);
+            IEnumerable<JobVacancy> list = await _jobVacancyRepo.GetAll();
             IEnumerable<JobVacancy> pagedList = list.Skip((pageNo - 1) * records).Take(records);
 
             if (pageNo != 0 && records != 0)
@@ -94,9 +92,9 @@ namespace Codeji.CMS.Services.Recruitments
 
         }
 
-        public async Task<string> GetVacancyById(string companyId, string vacancyId)
+        public async Task<string> GetVacancyById(string vacancyId)
         {
-            JobVacancy? data = await _jobVacancyRepo.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == vacancyId);
+            JobVacancy? data = await _jobVacancyRepo.FirstOrDefault(x => x.JobId == vacancyId);
             if (data == null)
             {
                 return "[Job Title]";
@@ -104,9 +102,9 @@ namespace Codeji.CMS.Services.Recruitments
             return data.Title;
         }
 
-        public async Task<Result> DeleteJobVacancy(string vacancyId, string companyId)
+        public async Task<Result> DeleteJobVacancy(string vacancyId)
         {
-            Expression<Func<JobVacancy, bool>> whereCondition = x => x.JobId == vacancyId && x.CompanyId == companyId;
+            Expression<Func<JobVacancy, bool>> whereCondition = x => x.JobId == vacancyId;
             Result data = await _jobVacancyRepo.Delete(whereCondition);
             return data;
         }

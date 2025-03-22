@@ -13,7 +13,7 @@ namespace Codeji.CMS.API.App_Start
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
     public class CustomAuthorizeAttribute : AuthorizeAttribute, IAsyncAuthorizationFilter
     {
-        UserEditRoleCheckModel userForEdit;
+        UserCheckModel userForEdit;
         public CustomAuthorizeAttribute()
         {
             Module = string.Empty;
@@ -35,7 +35,7 @@ namespace Codeji.CMS.API.App_Start
                     using (StreamReader reader = new StreamReader(request.Body, Encoding.UTF8, false, 1024, true))
                     {
                         string content = await reader.ReadToEndAsync();
-                        userForEdit = JsonConvert.DeserializeObject<UserEditRoleCheckModel>(content) ?? new UserEditRoleCheckModel();
+                        userForEdit = JsonConvert.DeserializeObject<UserCheckModel>(content) ?? new UserCheckModel();
                         request.Body.Position = 0;
                     }
                 }

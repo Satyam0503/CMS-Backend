@@ -2,11 +2,12 @@
 
 namespace Codeji.CMS.Repository.Entities.Employees
 {
-    public class Skills : BaseClass
+    public class EmpSkills
     {
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
-        public string SkillId { get; set; }
+        public string Id { get; set; }
+        public string CompanyId { get; set; }
         public string UserId { get; set; }
-        public string TotalSkills { get; set; }
+        public string Skills { get; set; }
     }
 }

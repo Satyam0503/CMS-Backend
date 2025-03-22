@@ -5,10 +5,13 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.Recruitments;
+using Codeji.CMS.DTO.RequestModels;
+using Codeji.CMS.DTO.RequestModels.ApplyNow;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Services.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Antiforgery;
@@ -182,7 +185,22 @@ namespace Codeji.CMS.API.Controllers
             return result;
 
         }
+        //[Route("applicant/getOpenings")]
+        //[HttpPost]
+        //public async Task<Result<JobVacancyModel>> getOpenings(ApplyNowVacancyModel model)
+        //{
+        //    Result<JobVacancyModel> data = new Result<JobVacancyModel>();
+        //    if (string.IsNullOrEmpty(model.companyId))
+        //    {
+        //        data.Success = false;
+        //        data.StatusCode = StatusCodes.Status401Unauthorized;
+        //        return data;
+        //    }
 
+        //    data = await _jobVacancyService.GetAllVacancy(model.companyId, 0, 0);
+
+        //    return data;
+        //}
         [HttpPost]
         [Route("applicant/applyJob")]
         [AllowAnonymous]
