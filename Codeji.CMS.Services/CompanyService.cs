@@ -81,5 +81,11 @@ namespace Codeji.CMS.Services
             IEnumerable<Company> list = await _companyRepo.GetAll();
             return _mapper.Map<List<Company>>(list);
         }
+
+        public async Task<bool> IsActiveCompanyExist(string companyId)
+        {
+            bool exist = await _companyRepo.Exist(x => x.CompanyId == companyId && x.Status);
+            return exist;
+        }
     }
 }

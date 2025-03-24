@@ -8,6 +8,7 @@ using Codeji.CMS.Services.Registration;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Connections;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Primitives;
@@ -24,12 +25,9 @@ builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
 {
     builder
     .AllowCredentials()
-    .WithOrigins(
-        "http://127.0.0.1:5173",
-        "https://localhost:7072",
-        "*.codeji.in"
-        )
-    .AllowAnyHeader()
+//.WithOrigins("http://localhost:5173").AllowAnyHeader()
+.WithOrigins(
+    ConfigManager.APIUrl.TrimEnd('/')).AllowAnyHeader()
     .AllowAnyMethod();
 }));
 
@@ -79,7 +77,7 @@ builder.Services.AddHttpContextAccessor();
 // MongoDB Configuration
 ConfigurationManager configuration = builder.Configuration;
 builder.Services.Configure<List<MongoDbSettings>>(configuration.GetSection("MongoDbSettings"));
-
+builder.Services.Configure<List<AppConfiguration>>(configuration.GetSection("MongoDbSettings"));
 // Register business logic services
 builder.Services.AddBusinessServices();
 
@@ -104,8 +102,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = builder.Configuration["Jwt:Issuer"],
-            ValidAudience = builder.Configuration["Jwt:Audience"],
+            ValidIssuer = ConfigManager.APIUrl,
+            ValidAudience = ConfigManager.AppUrl,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:SecretKey"]))
         };
     });
@@ -170,7 +168,10 @@ app.MapHub<NotificationHub>("/notificationhub", options =>
 
 // Configure controller routes
 app.MapControllers();
-
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedHost
+});
 // Add security headers
 app.Use(async (context, next) =>
 {

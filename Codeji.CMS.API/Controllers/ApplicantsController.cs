@@ -86,7 +86,7 @@ namespace Codeji.CMS.API.Controllers
         {
             Result result = new Result();
             //string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\Resume\\");
+            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads/Resume/");
             string fileExtension = Path.GetExtension(model.File.FileName);
             if (!Directory.Exists(uploadFolder))
             {
@@ -97,7 +97,8 @@ namespace Codeji.CMS.API.Controllers
             using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
             {
                 await model.File.CopyToAsync(fileStream);
-            };
+            }
+            ;
             string? resume = await _applicantsService.GetApplicantExistingResume(email);
             if (string.IsNullOrEmpty(resume))
             {

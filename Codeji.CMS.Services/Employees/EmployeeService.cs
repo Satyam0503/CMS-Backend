@@ -105,7 +105,7 @@ namespace Codeji.CMS.Services.Employees
             string replacedBody = htmlTemplate.Render(emailContent.body, new
             {
                 RecipientName = employee.FirstName + " " + employee.LastName,
-                PasswordCreationLink = ConfigManager.LocalAuthUrl,
+                PasswordCreationLink = ConfigManager.AppUrl + "auth/createpassword",
                 statusNumber = employee.StatusNumber,
                 CompanyName = company.CompanyName,
             });
@@ -592,6 +592,12 @@ namespace Codeji.CMS.Services.Employees
         {
             Expression<Func<ProcessLogs, bool>> whereCondition = x => x.CompanyId == companyId;
             return (await _processLogs.GetAll(whereCondition)).ToList();
+        }
+
+        public async Task<bool> IsUserActive(string userId)
+        {
+            bool IsUserActive = await _employeeRepository.Exist(x => x.UserId == userId && x.Status);
+            return IsUserActive;
         }
     }
 }

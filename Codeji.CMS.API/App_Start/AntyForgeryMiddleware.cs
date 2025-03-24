@@ -71,7 +71,7 @@ namespace Codeji.CMS.API.App_Start
             {
                 throw;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 throw;
             }

@@ -11,7 +11,7 @@ namespace Codeji.CMS.Utility.Helpers
 
             string SendGridAPIKey = ConfigManager.SENDGRID_API_KEY;
             SendGridClient SendGridClient = new SendGridClient(SendGridAPIKey);
-            EmailAddress fromAddress = new EmailAddress(ConfigManager.SendGridEmail, ConfigManager.SendGridSenderName);
+            EmailAddress fromAddress = new EmailAddress(ConfigManager.FromEmail, ConfigManager.FromName);
             EmailAddress toAddress = new EmailAddress(to);
             SendGridMessage Message = MailHelper.CreateSingleEmail(fromAddress, toAddress, subject, null, body);
             Response response = await SendGridClient.SendEmailAsync(Message).ConfigureAwait(false);
