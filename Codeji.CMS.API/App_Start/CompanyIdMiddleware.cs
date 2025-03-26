@@ -54,7 +54,7 @@ namespace Codeji.CMS.API.App_Start
             if (string.IsNullOrEmpty(company_Id) && !pathForNOCompanyIdRequired.Any(x => context.Request.Path.Value.Contains(x)))
             {
                 context.Response.StatusCode = (int)System.Net.HttpStatusCode.Unauthorized;
-                await context.Response.WriteAsync("Invalid Company Id");
+                await context.Response.WriteAsync("Required Company Id");
                 return;
             }
             context.Items["CompanyId"] = company_Id;

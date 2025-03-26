@@ -24,10 +24,9 @@ string corsName = "codeji";
 builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
 {
     builder
-    .AllowCredentials()
-//.WithOrigins("http://localhost:5173").AllowAnyHeader()
-.WithOrigins(
-    ConfigManager.APIUrl.TrimEnd('/')).AllowAnyHeader()
+    //.AllowCredentials()
+.AllowAnyOrigin().AllowAnyHeader()
+    //.WithOrigins( ConfigManager.APIUrl.TrimEnd('/')).AllowAnyHeader()
     .AllowAnyMethod();
 }));
 
@@ -77,7 +76,11 @@ builder.Services.AddHttpContextAccessor();
 // MongoDB Configuration
 ConfigurationManager configuration = builder.Configuration;
 builder.Services.Configure<List<MongoDbSettings>>(configuration.GetSection("MongoDbSettings"));
-builder.Services.Configure<List<AppConfiguration>>(configuration.GetSection("MongoDbSettings"));
+//builder.Services.Configure<AppConfiguration>(configuration.GetSection("AppConfiguration"));
+AppConfiguration? appConfigurations = configuration.GetSection("AppConfiguration").Get<AppConfiguration>();
+ConfigManager.Initialize(appConfigurations);
+
+builder.Services.AddSingleton(appConfigurations); // Optional, if needed elsewhere
 // Register business logic services
 builder.Services.AddBusinessServices();
 
@@ -102,8 +105,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = ConfigManager.APIUrl,
-            ValidAudience = ConfigManager.AppUrl,
+            ValidIssuer = builder.Configuration["AppConfiguration:AppSettings:APIUrl"],
+            ValidAudience = builder.Configuration["AppConfiguration:AppSettings:APPUrl"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:SecretKey"]))
         };
     });

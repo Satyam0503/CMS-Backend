@@ -2,9 +2,12 @@
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.ApplyNow;
+using Codeji.CMS.GenericRepository.Settings;
 using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace Codeji.CMS.API.Controllers;
 [ApiController]
@@ -20,6 +23,7 @@ public class JobVacancyController : BaseApiController
     {
         _jobVacancyService = jobVacancyService;
         _httpContextAccessor = httpContextAccessor;
+
     }
 
     [Route("AddJobVacancy")]

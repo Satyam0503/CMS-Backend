@@ -1,8 +1,8 @@
-﻿using Codeji.CMS.Domain.Models;
+﻿using System.Net;
+using Codeji.CMS.Domain.Models;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Antiforgery;
 using Newtonsoft.Json;
-using System.Net;
 using Task = System.Threading.Tasks.Task;
 
 namespace Codeji.CMS.API.App_Start
@@ -36,7 +36,7 @@ namespace Codeji.CMS.API.App_Start
 
         private async Task HandleExceptionAsync(HttpContext context, Exception ex)
         {
-            bool isForDebug = Convert.ToBoolean(ConfigManager.Is_For_Debug);
+            bool isForDebug = Convert.ToBoolean(ConfigManager.AppSettings.IsForDebug);
             if (isForDebug)
             {
                 throw ex;

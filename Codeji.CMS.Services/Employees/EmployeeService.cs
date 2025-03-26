@@ -105,7 +105,7 @@ namespace Codeji.CMS.Services.Employees
             string replacedBody = htmlTemplate.Render(emailContent.body, new
             {
                 RecipientName = employee.FirstName + " " + employee.LastName,
-                PasswordCreationLink = ConfigManager.AppUrl + "auth/createpassword",
+                PasswordCreationLink = ConfigManager.AppSettings.AppUrl + "auth/createpassword",
                 statusNumber = employee.StatusNumber,
                 CompanyName = company.CompanyName,
             });
