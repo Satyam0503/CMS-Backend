@@ -24,8 +24,8 @@ string corsName = "codeji";
 builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
 {
     builder
-    //.AllowCredentials()
-.AllowAnyOrigin().AllowAnyHeader()
+    .AllowCredentials()
+.WithOrigins("http://127.0.0.1:5173","http://localhost:5173").AllowAnyHeader()
     //.WithOrigins( ConfigManager.APIUrl.TrimEnd('/')).AllowAnyHeader()
     .AllowAnyMethod();
 }));
@@ -105,8 +105,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = builder.Configuration["AppConfiguration:AppSettings:APIUrl"],
-            ValidAudience = builder.Configuration["AppConfiguration:AppSettings:APPUrl"],
+            ValidIssuer = ConfigManager.AppSettings.APIUrl,
+            ValidAudience = "http://localhost:5173",
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:SecretKey"]))
         };
     });
@@ -137,7 +137,7 @@ app.UseMiddleware(typeof(ExceptionHandlingMiddleware));
 
 // Enable Swagger and Swagger UI
 // Configure the HTTP request pipeline
-if (Convert.ToBoolean(configuration.GetSection("AppSettings:isForDebug").Value))
+if (Convert.ToBoolean(configuration.GetSection("AppConfiguration:AppSettings:isForDebug").Value))
 {
     app.UseSwagger();
     app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/V2/swagger.json", "Codeji Backend API"); });
@@ -158,8 +158,8 @@ app.UseStaticFiles(new StaticFileOptions
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseMiddleware<AntiforgeryMiddleware>();
 app.UseMiddleware<CompanyIdMiddleware>();
+app.UseMiddleware<AntiforgeryMiddleware>();
 
 // Configure SignalR hub
 app.MapHub<NotificationHub>("/notificationhub", options =>

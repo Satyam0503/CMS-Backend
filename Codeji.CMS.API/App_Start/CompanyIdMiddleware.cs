@@ -41,7 +41,7 @@ namespace Codeji.CMS.API.App_Start
                 userId = context.User.Claims.FirstOrDefault(c => c.Type == "user_id")?.Value ?? string.Empty;
                 if (string.IsNullOrEmpty(company_Id))
                 {
-                    string token = context.Request.Headers["Authorization"].ToString().Replace("Bearer ", "");
+                    string token = context.Request.Headers.Authorization.ToString().Replace("Bearer ", "");
                     JwtSecurityTokenHandler handler = new JwtSecurityTokenHandler();
                     JwtSecurityToken? jwtToken = handler.ReadToken(token) as JwtSecurityToken;
                     if (jwtToken != null)

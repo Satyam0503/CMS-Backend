@@ -6,11 +6,15 @@ public class ConfigManager
     public static void Initialize(AppConfiguration settings)
     {
         Settings = settings;
+        AppSettings = settings.AppSettings;
+        FileSettings = settings.FileSettings;
+        EmailSettings = settings.EmailSettings;
+        ReCaptcha = settings.ReCaptcha;
     }
-    public static AppSettings AppSettings = Settings.AppSettings;
-    public static FileSettings FileSettings = Settings.FileSettings;
-    public static EmailSettings EmailSettings = Settings.EmailSettings;
-    public static ReCaptchaSettings ReCaptcha = Settings.ReCaptcha;
+    public static AppSettings AppSettings ;
+    public static FileSettings FileSettings;
+    public static EmailSettings EmailSettings ;
+    public static ReCaptchaSettings ReCaptcha ;
 
 }
 public class AppConfiguration
