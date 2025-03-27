@@ -23,11 +23,7 @@ builder.Services.AddControllers();
 string corsName = "codeji";
 builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
 {
-    builder
-    .AllowCredentials()
-.WithOrigins("http://127.0.0.1:5173","http://localhost:5173").AllowAnyHeader()
-    //.WithOrigins( ConfigManager.APIUrl.TrimEnd('/')).AllowAnyHeader()
-    .AllowAnyMethod();
+    builder.AllowCredentials().WithOrigins("http://127.0.0.1:5173", "http://localhost:5173").AllowAnyHeader().AllowAnyMethod();
 }));
 
 // Swagger config
@@ -158,8 +154,8 @@ app.UseStaticFiles(new StaticFileOptions
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseMiddleware<CompanyIdMiddleware>();
 app.UseMiddleware<AntiforgeryMiddleware>();
+app.UseMiddleware<CompanyIdMiddleware>();
 
 // Configure SignalR hub
 app.MapHub<NotificationHub>("/notificationhub", options =>

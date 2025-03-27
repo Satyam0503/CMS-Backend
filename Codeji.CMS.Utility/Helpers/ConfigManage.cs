@@ -11,10 +11,10 @@ public class ConfigManager
         EmailSettings = settings.EmailSettings;
         ReCaptcha = settings.ReCaptcha;
     }
-    public static AppSettings AppSettings ;
+    public static AppSettings AppSettings;
     public static FileSettings FileSettings;
-    public static EmailSettings EmailSettings ;
-    public static ReCaptchaSettings ReCaptcha ;
+    public static EmailSettings EmailSettings;
+    public static ReCaptchaSettings ReCaptcha;
 
 }
 public class AppConfiguration

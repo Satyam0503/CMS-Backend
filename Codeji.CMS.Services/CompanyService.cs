@@ -67,6 +67,7 @@ namespace Codeji.CMS.Services
                 CompanyId = companyId,
                 PrimaryContact = user.UserId,
                 CompanyName = companyModel.CompanyName,
+                Status = true,
             };
 
             await _companyRepo.AddOne(company);

@@ -14,8 +14,6 @@ namespace Codeji.CMS.Utility.Helpers
             // Retrieve JWT settings from configuration
             IConfigurationSection jwtSettings = ConfigurationHelper.config.GetSection("jwt");
             byte[] key = Encoding.UTF8.GetBytes(jwtSettings["SecretKey"]);
-            string issuer = jwtSettings["Issuer"];
-            string audience = jwtSettings["Audience"];
             int expiryDays = int.Parse(jwtSettings["Expiry"]);
 
             // Define claims
@@ -38,8 +36,8 @@ namespace Codeji.CMS.Utility.Helpers
 
             // Create the token
             JwtSecurityToken tokenDescriptor = new JwtSecurityToken(
-                issuer: issuer,
-                audience: audience,
+                issuer: ConfigManager.AppSettings.APIUrl,
+                audience: ConfigManager.AppSettings.AppUrl,
                 claims: claims,
                 expires: DateTime.UtcNow.AddDays(expiryDays),
                 signingCredentials: credentials
