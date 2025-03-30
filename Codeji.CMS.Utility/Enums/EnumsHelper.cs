@@ -10,6 +10,7 @@
             Shortlisted = 3,
             Selected = 4,
             Rejected = 5,
+            ReApply = 6
         }
         public enum ActivityStatus
         {

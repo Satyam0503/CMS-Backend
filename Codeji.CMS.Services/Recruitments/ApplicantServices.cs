@@ -2,11 +2,14 @@
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
+using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
+using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.Helpers;
+using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Recruitments
@@ -14,7 +17,7 @@ namespace Codeji.CMS.Services.Recruitments
     public class ApplicantServices : IApplicantsService
     {
         readonly IMongoDbRepository<Applicant> _applicantRepository;
-        readonly IMongoDbRepository<Resume> _resumeRepository;
+        private readonly IMongoDbRepository<ApplicantLogs> _ApplicantLogsRepository;
         readonly IMapper _mapper;
         private readonly IJobVacancy _jobVacancyService;
         readonly IMongoDbRepository<Company> _companyRepository;
@@ -22,30 +25,29 @@ namespace Codeji.CMS.Services.Recruitments
         readonly IMongoDbRepository<JobVacancy> _jobVacancyRepository;
         public ApplicantServices(IMongoDbRepository<Applicant> applicantDbRepository,
             IMapper mapper,
-            IMongoDbRepository<Resume> resumeRepository,
             IJobVacancy jobVacancyService,
             IMongoDbRepository<Company> companyRepository,
             IMongoDbRepository<MailTemplate> mailTemplateRepository,
-            IMongoDbRepository<JobVacancy> jobVacancyRepository)
+            IMongoDbRepository<JobVacancy> jobVacancyRepository,
+            IMongoDbRepository<ApplicantLogs> applicantLogsRepository)
         {
             _applicantRepository = applicantDbRepository;
-            _resumeRepository = resumeRepository;
             _mapper = mapper;
             _jobVacancyService = jobVacancyService;
             _companyRepository = companyRepository;
             _mailTemplateRepository = mailTemplateRepository;
             _jobVacancyRepository = jobVacancyRepository;
+            _ApplicantLogsRepository = applicantLogsRepository;
         }
         /// <summary>
         /// For Annonymous add and update applicants
         /// </summary>
         /// <param name="applicantRegisterModel"></param>
         /// <returns></returns>
-        public async Task<Result> RegisterApplicants(ApplicantAddEditModel applicantRegisterModel, string companyId)
+        public async Task<Result> RegisterApplicants(ApplicantAddEditModel applicantRegisterModel)
         {
             Applicant applicant = new Applicant()
             {
-                CompanyId = companyId,
                 FirstName = applicantRegisterModel.FirstName,
                 LastName = applicantRegisterModel.LastName,
                 Experience = applicantRegisterModel.Experience,
@@ -64,21 +66,29 @@ namespace Codeji.CMS.Services.Recruitments
 
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 4);
             HtmlTemplate htmlTemplate = new HtmlTemplate();
-            string replacedBody = htmlTemplate.Render(emailContent.body, new
+            string replacedBody = htmlTemplate.Render(emailContent?.body ?? string.Empty, new
             {
                 CandidateName = applicantRegisterModel.FirstName + " " + applicantRegisterModel.LastName,
-                JobTitle = applicantRegisterModel.VacancyName
+                //JobTitle = applicantRegisterModel.VacancyName
 
             });
             await EmailFunctionality.SendEmailFromAPI(applicantRegisterModel.Email, emailContent.subject, replacedBody);
             return result;
         }
 
-        public async Task<Result> UpdateApplicants(ApplicantAddEditModel model, string companyId)
+        public async Task<Result> UpdateApplicants(ApplicantAddEditModel model)
         {
-            Expression<Func<Applicant, bool>> whereCondition = x => x.ApplicantId == model.ApplicantId && x.CompanyId == companyId && x.Email == model.Email;
+            Expression<Func<Applicant, bool>> whereCondition = x => x.ApplicantId == model.ApplicantId && x.Email == model.Email;
             //to do improvement
-            Applicant entity = await _applicantRepository.FirstOrDefault(whereCondition);
+            Applicant? entity = await _applicantRepository.FirstOrDefault(whereCondition);
+            if (entity == null)
+            {
+                return new Result()
+                {
+                    Success = false,
+                    Message = "Applicant Not Found"
+                };
+            }
             entity.UpdatedBy = "";
             entity.UpdatedDate = DateTime.Now;
             entity.Experience = model.Experience;
@@ -98,32 +108,33 @@ namespace Codeji.CMS.Services.Recruitments
 
         public async Task<bool> IsEmailExist(string email)
         {
-            Applicant? res = await _applicantRepository.FirstOrDefault(x => x.Email == email);
-            if (string.IsNullOrEmpty(res?.Email))
-            {
-                return false;
-            }
-            return true;
+            bool res = await _applicantRepository.Exist(x => x.Email == email);
+            return res;
         }
-        public async Task<string> GetApplicantsExistingId(string email, string companyId)
+        public async Task<Result> GetApplicantsExistingId(string email)
         {
-            Applicant? res = await _applicantRepository.FirstOrDefault(x => (string.IsNullOrEmpty(companyId) || x.CompanyId == companyId) && x.Email == email);
-            if (string.IsNullOrEmpty(res?.Email))
+            Applicant? res = await _applicantRepository.FirstOrDefault(x => x.Email == email);
+            if (res is null)
             {
-                return string.Empty;
+                return new Result()
+                {
+                    Success = true,
+                };
+            }
+            else if (res.CreatedDate > DateTime.Now.AddMonths(-6))
+            {
+                return new Result()
+                {
+                    Success = false
+                };
             }
             else
             {
-                DateTime createdDate = (DateTime)res.CreatedDate;
-                long createdTimeStamp = new DateTimeOffset(createdDate).ToUnixTimeSeconds();
-                DateTimeOffset sixMonthAgo = DateTimeOffset.Now.AddMonths(-6);
-                if (createdDate <= sixMonthAgo)
-
+                return new Result()
                 {
-                    return string.Empty;
-                }
-                return res?.ApplicantId;
-
+                    Success = true,
+                    Message = res.ApplicantId
+                };
             }
 
         }
@@ -131,25 +142,17 @@ namespace Codeji.CMS.Services.Recruitments
         public async Task<string> GetApplicantExistingResume(string email)
         {
             Applicant? res = await _applicantRepository.FirstOrDefault(x => x.Email == email);
-
-
-
-
-
             return res?.ResumeUrl ?? string.Empty;
         }
 
-        //public async Task<List<ApplicantViewModel>> GetApplicantsList(string companyId)
-        //{
-        //    IEnumerable<Applicant> list = await _applicantRepository.GetAll(x => x.CompanyId == companyId);
-        //    return _mapper.Map<List<ApplicantViewModel>>(list);
-        //}
 
         //Get Applicant List Using Filter Change this logic in Future
-        public async Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters, string companyId, int pageNo, int records)
+        public async Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters, int pageNo, int records)
         {
-            Expression<Func<Applicant, bool>> whereCondition = x => x.CompanyId == companyId
-            && (!filters.FilterFrom.HasValue || (x.CreatedDate.HasValue && x.CreatedDate >= filters.FilterFrom && x.CreatedDate <= filters.FilterTo))
+            pageNo = pageNo == 0 ? 1 : pageNo;
+            records = records == 0 ? 10 : records;
+            Expression<Func<Applicant, bool>> whereCondition = x =>
+            (!filters.FilterFrom.HasValue || (x.CreatedDate.HasValue && x.CreatedDate >= filters.FilterFrom && x.CreatedDate <= filters.FilterTo))
             && (!filters.ActivityTypes.Any() || filters.ActivityTypes.Contains(x.ActivityType))
             && (!filters.Status.Any() || filters.Status.Contains(x.Status))
             && (!filters.VacancyIds.Any() || filters.VacancyIds.Contains(x.VacancyId))
@@ -159,11 +162,10 @@ namespace Codeji.CMS.Services.Recruitments
             || x.LastName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
             || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));
 
-            List<Applicant> applicants = (await _applicantRepository.GetAll(whereCondition)).ToList();
-            List<JobVacancy> vacancies = (await _jobVacancyRepository.GetAll(x => x.CompanyId == companyId)).ToList();
-
-            List<ApplicantViewModel> applicantData = _mapper.Map<List<ApplicantViewModel>>(applicants);
-            List<ApplicantViewModel> data = (from applicant in applicantData
+            var count = _applicantRepository.Count(whereCondition);
+            var applicants = await _applicantRepository.GetAggregateDataAsync<Applicant>(whereCondition, pageNo: pageNo, pageSize: records);
+            List<JobVacancy> vacancies = (await _jobVacancyRepository.GetAll()).ToList();
+            List<ApplicantViewModel> data = (from applicant in applicants
                                              join vacancy in vacancies on applicant.VacancyId equals vacancy.JobId
                                              select new ApplicantViewModel
                                              {
@@ -172,66 +174,52 @@ namespace Codeji.CMS.Services.Recruitments
                                                  LastName = applicant.LastName,
                                                  Email = applicant.Email,
                                                  Phone = applicant.Phone,
-                                                 StatusName = applicant.StatusName,
                                                  Status = applicant.Status,
-                                                 ActivityTypeName = applicant.ActivityTypeName,
                                                  ActivityType = applicant.ActivityType,
                                                  VacancyName = vacancy.Title,
                                                  VacancyId = vacancy.JobId,
                                                  State = applicant.State,
                                                  Experience = applicant.Experience,
-                                                 ApplyDate = applicant.ApplyDate,
-                                                 UpdateDate = applicant.UpdateDate,
+                                                 ApplyDate = applicant.CreatedDate,
+                                                 UpdateDate = applicant.UpdatedDate,
                                                  ResumeUrl = applicant.ResumeUrl,
 
                                              }).ToList();
-            List<ApplicantViewModel> pagedList = data;
-            if (pageNo != 0 && records != 0)
-            {
-                pagedList = data.Skip((pageNo - 1) * records).Take(records).ToList();
-            }
-
-            Result<ApplicantViewModel> result = new Result<ApplicantViewModel>
+            return new Result<ApplicantViewModel>
             {
                 Success = true,
-                TotalRecords = applicants.Count,
-                MethodResults = pagedList
+                TotalRecords = await count,
+                MethodResults = data
             };
-            return result;
-
-
         }
 
-        public async Task<Result<ApplicantViewModel>> ApplicantById(string applicantId, string companyId)
+        public async Task<Result<ApplicantViewModel>> ApplicantById(string applicantId)
         {
             Result<ApplicantViewModel> result = new Result<ApplicantViewModel>();
-            IEnumerable<Applicant>? entity = await _applicantRepository.GetAll(x => x.ApplicantId == applicantId);
-            List<JobVacancy> vacancies = (await _jobVacancyRepository.GetAll(x => x.CompanyId == companyId)).ToList();
-            IEnumerable<ApplicantViewModel> data = from e in entity
-                                                   join vacancy in vacancies on e.CompanyId equals vacancy.CompanyId
-                                                   where e.VacancyId == vacancy.JobId
-                                                   select new ApplicantViewModel
-                                                   {
-                                                       ApplicantId = e.ApplicantId,
-                                                       FirstName = e.FirstName,
-                                                       LastName = e.LastName,
-                                                       Email = e.Email,
-                                                       Phone = e.Phone,
-                                                       Status = e.Status,
-                                                       ActivityType = e.ActivityType,
-                                                       VacancyName = vacancy.Title,
-                                                       VacancyId = vacancy.JobId,
-                                                       State = e.State,
-                                                       Experience = e.Experience,
-                                                       ApplyDate = e.CreatedDate,
-                                                       UpdateDate = e.UpdatedDate,
-                                                       ResumeUrl = e.ResumeUrl,
-
-                                                   };
-            if (entity is not null)
+            Applicant? applicant = await _applicantRepository.FirstOrDefault(x => x.ApplicantId == applicantId);
+            JobVacancy? vacancy = await _jobVacancyRepository.FirstOrDefault(x => applicant != null && applicant.VacancyId == x.JobId);
+            if (applicant is not null)
             {
+                ApplicantViewModel data = new ApplicantViewModel
+                {
+                    ApplicantId = applicant.ApplicantId,
+                    FirstName = applicant.FirstName,
+                    LastName = applicant.LastName,
+                    Email = applicant.Email,
+                    Phone = applicant.Phone,
+                    Status = applicant.Status,
+                    ActivityType = applicant.ActivityType,
+                    VacancyName = vacancy?.Title ?? string.Empty,
+                    VacancyId = vacancy?.JobId ?? string.Empty,
+                    State = applicant.State,
+                    Experience = applicant.Experience,
+                    ApplyDate = applicant.CreatedDate,
+                    UpdateDate = applicant.UpdatedDate,
+                    ResumeUrl = applicant.ResumeUrl,
+
+                };
                 result.Success = true;
-                result.MethodResult = data.FirstOrDefault();
+                result.MethodResult = data;
             }
             return result;
         }
@@ -239,7 +227,7 @@ namespace Codeji.CMS.Services.Recruitments
         public async Task<Result> AddAppicantResume(string fileName, string email, string filePath)
         {
             Expression<Func<Applicant, bool>> whereCondition = x => x.Email == email;
-            Applicant resume = await _applicantRepository.FirstOrDefault(whereCondition);
+            Applicant? resume = await _applicantRepository.FirstOrDefault(whereCondition);
             if (resume == null)
             {
                 return new Result()
@@ -248,11 +236,43 @@ namespace Codeji.CMS.Services.Recruitments
                     Message = "Applicant Not Found"
                 };
             }
+            whereCondition = x => x.ApplicantId == resume.ApplicantId;
             resume.ResumeUrl = fileName;
-
-            Result res = await _applicantRepository.Update(whereCondition, resume);
-            return res;
+            return await _applicantRepository.Update(whereCondition, resume);
         }
+        //Logic For Addig Comment on Applicant By Employee (Admin And HR Manager )
+
+        public async Task<Result> AddComment(string userId, CommentRequestModel model)
+        {
+            ApplicantLogs comments = new ApplicantLogs()
+            {
+                UserId = userId,
+                ApplicantId = model.ApplicantId,
+                ActivityCategory = model.ActivityCategory,
+                Description = model.Description,
+                CreatedDate = DateTime.UtcNow,
+                CreatedBy = userId,
+                JobRole = model.JobTitle
+            };
+            await _ApplicantLogsRepository.AddOne(comments);
+            Result result = new Result()
+            {
+                Success = true,
+                Message = "Comment Added Successfully",
+                StatusCode = StatusCodes.Status200OK,
+            };
+            return result;
+        }
+        public async Task<List<ApplicantLogs>> GetAllComment(string applicantId)
+        {
+            IEnumerable<ApplicantLogs> list = await _ApplicantLogsRepository.GetAll(x => x.ApplicantId == applicantId);
+            return _mapper.Map<List<ApplicantLogs>>(list);
+        }
+        public async Task<List<ApplicantLogs>> GetProcessLogData()
+        {
+            return (await _ApplicantLogsRepository.GetAll()).ToList();
+        }
+
     }
 }
 

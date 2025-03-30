@@ -1,4 +1,5 @@
 ﻿using MongoDB.Bson.Serialization.Attributes;
+using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.Repository.Entities.Recruitments
 {
@@ -14,7 +15,7 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         /// <summary>
         /// ActivityType : InProgress,Shorlisted,OnHold,Rejected, 
         /// </summary>
-        public int ActivityType { get; set; }
+        public ActivityType ActivityType { get; set; }
         public int Status { get; set; }
         public string State { get; set; }
         public decimal Experience { get; set; }

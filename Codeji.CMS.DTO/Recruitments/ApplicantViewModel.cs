@@ -1,6 +1,7 @@
 ﻿
 
 using Codeji.CMS.Utility;
+using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.DTO.Recruitments
 {
@@ -14,7 +15,7 @@ namespace Codeji.CMS.DTO.Recruitments
         public string StatusName { get; set; }
         public int Status { get; set; }
         public string ActivityTypeName { get; set; }
-        public int ActivityType { get; set; }
+        public ActivityType ActivityType { get; set; }
 
         public string VacancyName { get; set; }
         public string VacancyId { get; set; }

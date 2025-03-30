@@ -1,19 +1,23 @@
 ﻿using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
+using Codeji.CMS.DTO.RequestModels;
+using Codeji.CMS.Repository.Entities.Recruitments;
 
 namespace Codeji.CMS.Services.Recruitments.Interface
 {
     public interface IApplicantsService
     {
-        Task<Result> RegisterApplicants(ApplicantAddEditModel applicantRegisterModel, string companyId);
-        Task<Result> UpdateApplicants(ApplicantAddEditModel model, string companyId);
+        Task<Result> RegisterApplicants(ApplicantAddEditModel applicantRegisterModel);
+        Task<Result> UpdateApplicants(ApplicantAddEditModel model);
         Task<bool> IsEmailExist(string email);
-        Task<string> GetApplicantsExistingId(string email, string companyId);
+        Task<Result> GetApplicantsExistingId(string email);
         Task<string> GetApplicantExistingResume(string email);
-        Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters, string companyId, int pageNo, int records);
-        Task<Result<ApplicantViewModel>> ApplicantById(string applicantId, string companyId);
+        Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters, int pageNo, int records);
+        Task<Result<ApplicantViewModel>> ApplicantById(string applicantId);
         Task<Result> AddAppicantResume(string fileName, string email, string filePath);
-
+        Task<List<ApplicantLogs>> GetAllComment(string applicantId);
+        Task<Result> AddComment(string userId, CommentRequestModel model);
+        Task<List<ApplicantLogs>> GetProcessLogData();
 
     }
 }

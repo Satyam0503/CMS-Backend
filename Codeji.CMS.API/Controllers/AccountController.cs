@@ -210,18 +210,20 @@ namespace Codeji.CMS.API.Controllers
             Result result = new Result();
             if (string.IsNullOrEmpty(applicantRegisterModel.Email))
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
-            string? ApplicantId = await _applicantsServices.GetApplicantsExistingId(applicantRegisterModel.Email, applicantRegisterModel.CompanyId);
-            if (string.IsNullOrEmpty(ApplicantId))
+            var ApplicantId = await _applicantsServices.GetApplicantsExistingId(applicantRegisterModel.Email);
+            if (ApplicantId.Success)
             {
-                result = await _applicantsServices.RegisterApplicants(applicantRegisterModel, applicantRegisterModel.CompanyId);
+                applicantRegisterModel.ActivityType = string.IsNullOrEmpty(ApplicantId.Message)
+                ? Utility.Enums.EnumsHelper.ActivityType.New :
+                Utility.Enums.EnumsHelper.ActivityType.ReApply;
+                result = await _applicantsServices.RegisterApplicants(applicantRegisterModel);
                 result.Success = true;
                 result.Message = "Your application has been submitted successfully";
             }
-
             else
             {
                 result.Success = false;
-                result.Message = "You have already applied. Please reapply after the waiting period.";
+                result.Message = "You have already applied. Please re-apply after the waiting period.";
             }
             return result;
         }

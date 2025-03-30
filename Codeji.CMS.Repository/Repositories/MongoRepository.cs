@@ -255,9 +255,9 @@ namespace Codeji.CMS.GenericRepository
         /// <param name="hint"></param>
         /// <returns></returns>
         public async Task<IEnumerable<TResult>> GetAggregateDataAsync<TResult>(
-            Expression<Func<TEntity, bool>> filter = null, ProjectionDefinition<TEntity, TResult>? projection = null, bool WithDeletedObjects = false, bool? isAscending = null, string? orderedKey = null, int? skip = null, int? limit = null, string? hint = null)
+            Expression<Func<TEntity, bool>> filter = null, ProjectionDefinition<TEntity, TResult>? projection = null, bool WithDeletedObjects = false, bool? isAscending = null, string? orderedKey = null, int? pageNo = null, int? pageSize = null, string? hint = null)
         {
-            IAsyncCursor<TResult> cursor = await GetCursoryAsync(filter, projection, WithDeletedObjects, isAscending, orderedKey, skip, limit, hint);
+            IAsyncCursor<TResult> cursor = await GetCursoryAsync(filter, projection, WithDeletedObjects, isAscending, orderedKey, pageNo, pageSize, hint);
             return cursor.ToEnumerable();
         }
 
@@ -303,8 +303,8 @@ namespace Codeji.CMS.GenericRepository
                     //int total = _dbSet.AsQueryable().Where(defaultFilter).Count();
                     int skip = (pageNo.Value - 1) * pageSize.Value;
                     int limit = pageSize.Value;
-                    pipeline.Add(PipelineStageDefinitionBuilder.Skip<int>(skip));
-                    pipeline.Add(PipelineStageDefinitionBuilder.Limit<int>(limit));
+                    pipeline.Add(PipelineStageDefinitionBuilder.Skip<TEntity>(skip));
+                    pipeline.Add(PipelineStageDefinitionBuilder.Limit<TEntity>(limit));
 
                 }
 
@@ -316,7 +316,7 @@ namespace Codeji.CMS.GenericRepository
 
                 return await _dbSet.AggregateAsync<TResult>(pipeline, options);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // Log exception here
                 return null;

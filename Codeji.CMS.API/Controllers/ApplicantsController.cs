@@ -1,6 +1,8 @@
 ﻿using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
+using Codeji.CMS.DTO.RequestModels;
+using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -25,7 +27,7 @@ namespace Codeji.CMS.API.Controllers
         public async Task<Result<ApplicantViewModel>> GetApplicantList(ApplicantResultFilters filters, [FromQuery] int pageNo, [FromQuery] int records)
         {
             string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-            Result<ApplicantViewModel> data = await _applicantsService.GetApplicantsList(filters, companyId, pageNo, records);
+            Result<ApplicantViewModel> data = await _applicantsService.GetApplicantsList(filters, pageNo, records);
             return data;
         }
         [HttpGet]
@@ -34,7 +36,7 @@ namespace Codeji.CMS.API.Controllers
         public async Task<Result<ApplicantViewModel>> ApplicantById(string id)
         {
             string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-            Result<ApplicantViewModel> result = await _applicantsService.ApplicantById(id, companyId);
+            Result<ApplicantViewModel> result = await _applicantsService.ApplicantById(id);
             return result;
         }
         [HttpPost]
@@ -47,12 +49,11 @@ namespace Codeji.CMS.API.Controllers
             string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
             if (string.IsNullOrEmpty(applicantRegisterModel.Email))
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
+            var isExist = await _applicantsService.IsEmailExist(applicantRegisterModel.Email);
+            if (isExist == false)
 
-            //bool isEmailExist = await _applicantsService.IsEmailExist(applicantRegisterModel.Email);
-            string? ApplicantId = await _applicantsService.GetApplicantsExistingId(applicantRegisterModel.Email, companyId);
-            if (string.IsNullOrEmpty(ApplicantId))
             {
-                result = await _applicantsService.RegisterApplicants(applicantRegisterModel, companyId);
+                result = await _applicantsService.RegisterApplicants(applicantRegisterModel);
                 result.Success = true;
                 result.Message = "Application has been submitted successfully";
             }
@@ -60,7 +61,6 @@ namespace Codeji.CMS.API.Controllers
             else
             {
                 result.Success = false;
-                result.StatusCode = StatusCodes.Status403Forbidden;
                 result.Message = "Application has already been submitted. Please reapply after the waiting period";
             }
             return result;
@@ -73,7 +73,7 @@ namespace Codeji.CMS.API.Controllers
         {
             Result result = new Result();
             string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-            result = await _applicantsService.UpdateApplicants(model, companyId);
+            result = await _applicantsService.UpdateApplicants(model);
             return result;
         }
 
@@ -112,6 +112,48 @@ namespace Codeji.CMS.API.Controllers
                 result = await _applicantsService.AddAppicantResume(fileName, email, filePath);
             }
 
+            return result;
+        }
+        [Route("AddComment")]
+        [HttpPost]
+        public async Task<Result> AddComment(CommentRequestModel model)
+        {
+            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+            string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+            await _applicantsService.AddComment(userId, model);
+            Result result = new Result()
+            {
+                Success = true,
+                Message = "Comment Added Successfully",
+                StatusCode = StatusCodes.Status200OK,
+            };
+            return result;
+        }
+
+        [Route("GetAllComment")]
+        [HttpGet]
+        public async Task<Result<ApplicantLogs>> GetAllComment([FromQuery] string applicantId)
+        {
+            List<ApplicantLogs> list = await _applicantsService.GetAllComment(applicantId);
+            Result<ApplicantLogs> result = new()
+            {
+                Success = true,
+                Message = "All Comments",
+                StatusCode = StatusCodes.Status200OK,
+                MethodResults = [.. list]
+            };
+            return result;
+        }
+        [HttpGet]
+        [Route("GetProcessLogData")]
+        public async Task<Result<ApplicantLogs>> GetProcessLogData()
+        {
+            List<ApplicantLogs> data = await _applicantsService.GetProcessLogData();
+            Result<ApplicantLogs> result = new()
+            {
+                Success = true,
+                MethodResults = data,
+            };
             return result;
         }
 

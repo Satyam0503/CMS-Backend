@@ -64,42 +64,29 @@ namespace Codeji.CMS.Services.Recruitments
 
         public async Task<Result<JobVacancyModel>> GetAllVacancy(int pageNo, int records)
         {
-            IEnumerable<JobVacancy> list = await _jobVacancyRepo.GetAll();
-            IEnumerable<JobVacancy> pagedList = list.Skip((pageNo - 1) * records).Take(records);
-
-            if (pageNo != 0 && records != 0)
+            pageNo = pageNo == 0 ? 1 : pageNo;
+            records = records == 0 ? 10 : records;
+            var totalRecord = _jobVacancyRepo.Count();
+            IEnumerable<JobVacancy> list = await _jobVacancyRepo.GetAggregateDataAsync<JobVacancy>(pageSize: records, pageNo: pageNo);
+            List<JobVacancyModel> data = _mapper.Map<List<JobVacancyModel>>(list);
+            Result<JobVacancyModel> result = new Result<JobVacancyModel>()
             {
-                List<JobVacancyModel> data = _mapper.Map<List<JobVacancyModel>>(pagedList);
-                Result<JobVacancyModel> result = new Result<JobVacancyModel>()
-                {
-                    Success = true,
-                    TotalRecords = list.Count(),
-                    MethodResults = data,
-                };
-                return result;
-            }
-            else
-            {
-                List<JobVacancyModel> data = _mapper.Map<List<JobVacancyModel>>(list);
-                Result<JobVacancyModel> result = new Result<JobVacancyModel>()
-                {
-                    Success = true,
-                    TotalRecords = list.Count(),
-                    MethodResults = data,
-                };
-                return result;
-            }
+                Success = true,
+                TotalRecords = await totalRecord,
+                MethodResults = data,
+            };
+            return result;
 
         }
 
-        public async Task<string> GetVacancyById(string vacancyId)
+        public async Task<JobVacancyModel?> GetVacancyById(string vacancyId)
         {
             JobVacancy? data = await _jobVacancyRepo.FirstOrDefault(x => x.JobId == vacancyId);
             if (data == null)
             {
-                return "[Job Title]";
+                return null;
             }
-            return data.Title;
+            return _mapper.Map<JobVacancyModel>(data);
         }
 
         public async Task<Result> DeleteJobVacancy(string vacancyId)

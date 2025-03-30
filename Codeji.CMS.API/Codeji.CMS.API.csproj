@@ -21,6 +21,7 @@
     <ProjectReference Include="..\Codeji.CMS.Repository\Codeji.CMS.Repository.csproj" />
     <ProjectReference Include="..\Codeji.CMS.Services\Codeji.CMS.Services.csproj" />
     <ProjectReference Include="..\Codeji.CMS.DTO\Codeji.CMS.DTO.csproj" />
+    <ProjectReference Include="..\Codeji.CMS.Utility\Codeji.CMS.Utility.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Remove="Upload\" />

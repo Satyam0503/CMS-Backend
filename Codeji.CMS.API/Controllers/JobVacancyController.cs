@@ -12,7 +12,7 @@ using Microsoft.Extensions.Options;
 namespace Codeji.CMS.API.Controllers;
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+
 
 public class JobVacancyController : BaseApiController
 {
@@ -52,16 +52,16 @@ public class JobVacancyController : BaseApiController
 
     [Route("GetVacancyById")]
     [HttpPost]
-    [Authorize]
+
     public async Task<string> GetVacancyById(string vacancyId)
     {
-        string data = await _jobVacancyService.GetVacancyById(vacancyId);
-        return data;
+        var data = await _jobVacancyService.GetVacancyById(vacancyId);
+        return data?.Title ?? string.Empty;
     }
 
     [Route("DeleteJobVacancy")]
     [HttpDelete]
-    [Authorize]
+
     public async Task<Result> DeleteJobVacancy([FromQuery] string vacancyId)
     {
         Result data = await _jobVacancyService.DeleteJobVacancy(vacancyId);

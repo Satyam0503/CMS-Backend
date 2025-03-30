@@ -95,7 +95,7 @@ namespace Codeji.CMS.GenericRepository.Interfaces
 
         #region New methods
         Task<IEnumerable<TResult>> GetAggregateDataAsync<TResult>(
-            Expression<Func<TEntity, bool>> filter = null, ProjectionDefinition<TEntity, TResult>? projection = null, bool WithDeletedObjects = false, bool? isAscending = null, string? orderedKey = null, int? skip = null, int? limit = null, string? hint = null);
+            Expression<Func<TEntity, bool>> filter = null, ProjectionDefinition<TEntity, TResult>? projection = null, bool WithDeletedObjects = false, bool? isAscending = null, string? orderedKey = null, int? pageNo = null, int? pageSize = null, string? hint = null);
 
 
         #endregion
