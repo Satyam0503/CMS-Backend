@@ -8,14 +8,14 @@ namespace Codeji.CMS.Utility
         {
             if (string.IsNullOrEmpty(resumeUrl))
                 return string.Empty;
-            return ConfigManager.APIUrl + ConfigManager.viewResumeUrl + resumeUrl;
+            return ConfigManager.AppSettings.AppUrl + ConfigManager.FileSettings.ViewResumeUrl + resumeUrl;
         }
 
         public static string GetEmployeeImageUrl(string profileUrl)
         {
             if (string.IsNullOrEmpty(profileUrl))
                 return string.Empty;
-            return ConfigManager.APIUrl + ConfigManager.Employee_ImageUrl + profileUrl;
+            return ConfigManager.AppSettings.AppUrl + ConfigManager.FileSettings.Employee_ImageUrl + profileUrl;
         }
     }
 }

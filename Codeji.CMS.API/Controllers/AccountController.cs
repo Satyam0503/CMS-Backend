@@ -80,7 +80,7 @@ namespace Codeji.CMS.API.Controllers
         {
             return new Result()
             {
-                Success = appVersion == ConfigManager.App_Version,
+                Success = appVersion == ConfigManager.AppSettings.AppVersion,
                 StatusCode = (int)HttpStatusCode.OK,
                 Message = "App request is old"
             };
@@ -231,7 +231,7 @@ namespace Codeji.CMS.API.Controllers
         [AllowAnonymous]
         public async Task<bool> GetreCaptchaResponse(string userResponse)
         {
-            string? reCaptchaSecretKey = ConfigManager.RecaptchSecretKey;
+            string? reCaptchaSecretKey = ConfigManager.ReCaptcha.SecretKey;
             if (reCaptchaSecretKey != null && userResponse != null)
             {
                 FormUrlEncodedContent content = new FormUrlEncodedContent(new Dictionary<string, string>

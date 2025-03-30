@@ -1,0 +1,11 @@
+[
+  {
+    "Name": "New Profile",
+    "Projects": [
+      {
+        "Path": "Codeji.CMS.API\\Codeji.CMS.API.csproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]

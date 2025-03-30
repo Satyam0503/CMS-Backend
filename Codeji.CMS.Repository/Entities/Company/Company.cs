@@ -7,6 +7,7 @@ namespace Codeji.CMS.Repository.Entities.Company
     {
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
         public string CompanyId { get; set; }
+        public bool Status { get; set; }
         public string CompanyName { get; set; }
         public string CompanyLogo { get; set; }
         public string PrimaryContact { get; set; }

@@ -12,7 +12,7 @@ namespace Codeji.CMS.Services.Employees.Interface
     {
         Task<Result<UserModel>> AddEmployee(UserModel user, string companyId);
         Task<Result<UserModel>> EditEmployee(UserModel user, string userId, string companyId);
-
+        Task<bool> IsUserActive(string userId);
         Task<UserModel> GetEmployeeById(string userId);
         Task<Result<UserModel>> GetAllEmployees(string companyId, int pageNo, int records);
         Task<bool> IsEmailExist(string email);

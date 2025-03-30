@@ -1,9 +1,9 @@
 ﻿
+using System.Net;
+using System.Text;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Antiforgery;
 using Newtonsoft.Json;
-using System.Net;
-using System.Text;
 using IMiddleware = Microsoft.AspNetCore.Http.IMiddleware;
 
 namespace Codeji.CMS.API.App_Start
@@ -19,7 +19,7 @@ namespace Codeji.CMS.API.App_Start
         {
             try
             {
-                bool isForDebug = Convert.ToBoolean(ConfigManager.Is_For_Debug);
+                bool isForDebug = Convert.ToBoolean(ConfigManager.AppSettings.IsForDebug);
                 bool isGetRequest = string.Equals("GET", context.Request.Method, StringComparison.OrdinalIgnoreCase);
                 IHeaderDictionary headers = context.Request.Headers;
                 IHttpContextAccessor _httpContextAccessor = (IHttpContextAccessor)context.RequestServices.GetService(typeof(IHttpContextAccessor));
@@ -48,7 +48,7 @@ namespace Codeji.CMS.API.App_Start
 
                 string normalizedRequestPath = requestPath.TrimEnd('/');
 
-                if (!isForDebug && !excludedUrls.Any(requestPath.Contains) && (string.IsNullOrEmpty(appVersionStr) || string.IsNullOrWhiteSpace(appVersionStr) || (!string.IsNullOrEmpty(appVersionStr) && appVersionStr.ToLowerInvariant() != ConfigManager.App_Version.ToLower())))
+                if (!isForDebug && !excludedUrls.Any(requestPath.Contains) && (string.IsNullOrEmpty(appVersionStr) || string.IsNullOrWhiteSpace(appVersionStr) || (!string.IsNullOrEmpty(appVersionStr) && appVersionStr.ToLowerInvariant() != ConfigManager.AppSettings.AppVersion.ToLower())))
                 {
                     var responseObject = new
                     {
@@ -71,7 +71,7 @@ namespace Codeji.CMS.API.App_Start
             {
                 throw;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 throw;
             }

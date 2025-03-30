@@ -45,7 +45,7 @@ namespace Codeji.CMS.GenericRepository
         private void SetCompanyId(TEntity entity)
         {
             string companyId = GetCompanyId();
-
+            Console.WriteLine(companyId);
             if (!string.IsNullOrEmpty(companyId))
             {
                 // Use reflection to set the CompanyId property dynamically
@@ -58,16 +58,17 @@ namespace Codeji.CMS.GenericRepository
         }
         #endregion
 
-        private IQueryable<TEntity> GetQuery(Expression<Func<TEntity, bool>> filter = null, bool WithDeletedObjects = false)
+        private IFindFluent<TEntity, TEntity> GetQuery(Expression<Func<TEntity, bool>> filter = null, bool WithDeletedObjects = false)
         {
             filter = filter ?? (x => true);
-            IQueryable<TEntity> query = _dbSet.AsQueryable().ApplyDefaultFilters(WithDeletedObjects, GetCompanyId()).Where(filter);
-            return query;
+            // IQueryable<TEntity> query = _dbSet.AsQueryable()(WithDeletedObjects, GetCompanyId()).Where(filter);
+            var filterDefinition = IQueryableCustomExtensions.ApplyDefaultFilters(filter, WithDeletedObjects, GetCompanyId());
+            return _dbSet.Find(filterDefinition);
         }
 
         public IQueryable<TEntity> Get(Expression<Func<TEntity, bool>> filter = null, Func<IQueryable<TEntity>, IOrderedQueryable<TEntity>> orderBy = null, bool WithDeletedObjects = false)
         {
-            IQueryable<TEntity> query = GetQuery(filter, WithDeletedObjects);
+            IQueryable<TEntity> query = GetQuery(filter, WithDeletedObjects).ToEnumerable().AsQueryable();
             if (orderBy != null)
                 return orderBy(query);
             return query.AsQueryable();
@@ -76,14 +77,14 @@ namespace Codeji.CMS.GenericRepository
         public async Task<IEnumerable<TEntity>> GetAll(Expression<Func<TEntity, bool>> whereCondition, bool WithDeletedObjects = false)
         {
             whereCondition = whereCondition ?? (x => true);
-            IQueryable<TEntity> query = _dbSet.AsQueryable().ApplyDefaultFilters(WithDeletedObjects, GetCompanyId()).Where(whereCondition);
-            return await Task.Run(() => query.AsEnumerable());
+            var query = GetQuery(whereCondition, WithDeletedObjects);
+            return await Task.Run(() => query.ToEnumerable());
 
         }
         public async Task<int> Count(Expression<Func<TEntity, bool>> filter, bool WithDeletedObjects = false)
         {
-            int res = await GetQuery(filter, WithDeletedObjects).CountAsync();
-            return res;
+            var res = await GetQuery(filter, WithDeletedObjects).CountDocumentsAsync();
+            return (int)res;
         }
         public async Task<bool> Exist(Expression<Func<TEntity, bool>> filter, bool WithDeletedObjects = false)
         {

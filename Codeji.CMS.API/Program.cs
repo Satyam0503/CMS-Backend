@@ -8,6 +8,7 @@ using Codeji.CMS.Services.Registration;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Connections;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Primitives;
@@ -22,15 +23,7 @@ builder.Services.AddControllers();
 string corsName = "codeji";
 builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
 {
-    builder
-    .AllowCredentials()
-    .WithOrigins(
-        "http://127.0.0.1:5173",
-        "https://localhost:7072",
-        "*.codeji.in"
-        )
-    .AllowAnyHeader()
-    .AllowAnyMethod();
+    builder.AllowCredentials().WithOrigins("http://127.0.0.1:5173", "http://localhost:5173").AllowAnyHeader().AllowAnyMethod();
 }));
 
 // Swagger config
@@ -79,7 +72,11 @@ builder.Services.AddHttpContextAccessor();
 // MongoDB Configuration
 ConfigurationManager configuration = builder.Configuration;
 builder.Services.Configure<List<MongoDbSettings>>(configuration.GetSection("MongoDbSettings"));
+//builder.Services.Configure<AppConfiguration>(configuration.GetSection("AppConfiguration"));
+AppConfiguration? appConfigurations = configuration.GetSection("AppConfiguration").Get<AppConfiguration>();
+ConfigManager.Initialize(appConfigurations);
 
+builder.Services.AddSingleton(appConfigurations); // Optional, if needed elsewhere
 // Register business logic services
 builder.Services.AddBusinessServices();
 
@@ -104,8 +101,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = builder.Configuration["Jwt:Issuer"],
-            ValidAudience = builder.Configuration["Jwt:Audience"],
+            ValidIssuer = ConfigManager.AppSettings.APIUrl,
+            ValidAudience = "http://localhost:5173",
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:SecretKey"]))
         };
     });
@@ -136,7 +133,7 @@ app.UseMiddleware(typeof(ExceptionHandlingMiddleware));
 
 // Enable Swagger and Swagger UI
 // Configure the HTTP request pipeline
-if (Convert.ToBoolean(configuration.GetSection("AppSettings:isForDebug").Value))
+if (Convert.ToBoolean(configuration.GetSection("AppConfiguration:AppSettings:isForDebug").Value))
 {
     app.UseSwagger();
     app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/V2/swagger.json", "Codeji Backend API"); });
@@ -170,7 +167,10 @@ app.MapHub<NotificationHub>("/notificationhub", options =>
 
 // Configure controller routes
 app.MapControllers();
-
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedHost
+});
 // Add security headers
 app.Use(async (context, next) =>
 {
