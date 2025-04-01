@@ -3,6 +3,7 @@ using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels;
+using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
@@ -18,6 +19,7 @@ namespace Codeji.CMS.Services.Recruitments
     {
         readonly IMongoDbRepository<Applicant> _applicantRepository;
         private readonly IMongoDbRepository<ApplicantLogs> _ApplicantLogsRepository;
+        private readonly IMongoDbRepository<EmpUser> _employeeRepository;
         readonly IMapper _mapper;
         private readonly IJobVacancy _jobVacancyService;
         readonly IMongoDbRepository<Company> _companyRepository;
@@ -29,7 +31,9 @@ namespace Codeji.CMS.Services.Recruitments
             IMongoDbRepository<Company> companyRepository,
             IMongoDbRepository<MailTemplate> mailTemplateRepository,
             IMongoDbRepository<JobVacancy> jobVacancyRepository,
-            IMongoDbRepository<ApplicantLogs> applicantLogsRepository)
+            IMongoDbRepository<ApplicantLogs> applicantLogsRepository,
+            IMongoDbRepository<EmpUser> employeeRepository
+            )
         {
             _applicantRepository = applicantDbRepository;
             _mapper = mapper;
@@ -38,6 +42,7 @@ namespace Codeji.CMS.Services.Recruitments
             _mailTemplateRepository = mailTemplateRepository;
             _jobVacancyRepository = jobVacancyRepository;
             _ApplicantLogsRepository = applicantLogsRepository;
+            _employeeRepository = employeeRepository;
         }
         /// <summary>
         /// For Annonymous add and update applicants
@@ -183,7 +188,6 @@ namespace Codeji.CMS.Services.Recruitments
                                                  ApplyDate = applicant.CreatedDate,
                                                  UpdateDate = applicant.UpdatedDate,
                                                  ResumeUrl = applicant.ResumeUrl,
-
                                              }).ToList();
             return new Result<ApplicantViewModel>
             {
@@ -244,7 +248,8 @@ namespace Codeji.CMS.Services.Recruitments
 
         public async Task<Result> AddComment(string userId, CommentRequestModel model)
         {
-            ApplicantLogs comments = new ApplicantLogs()
+            var applicant = await _applicantRepository.FirstOrDefault(x=>x.ApplicantId == model.ApplicantId);
+            ApplicantLogs comments = new()
             {
                 UserId = userId,
                 ApplicantId = model.ApplicantId,
@@ -252,10 +257,11 @@ namespace Codeji.CMS.Services.Recruitments
                 Description = model.Description,
                 CreatedDate = DateTime.UtcNow,
                 CreatedBy = userId,
-                JobRole = model.JobTitle
+                JobRole = model.JobTitle,
+                ApplicantName = applicant == null ? "" :$"{applicant.FirstName} {applicant.LastName}" 
             };
             await _ApplicantLogsRepository.AddOne(comments);
-            Result result = new Result()
+            Result result = new()
             {
                 Success = true,
                 Message = "Comment Added Successfully",
@@ -263,16 +269,63 @@ namespace Codeji.CMS.Services.Recruitments
             };
             return result;
         }
-        public async Task<List<ApplicantLogs>> GetAllComment(string applicantId)
+        public async Task<List<ApplicantLogResponseModel>> GetAllComment(string applicantId)
         {
-            IEnumerable<ApplicantLogs> list = await _ApplicantLogsRepository.GetAll(x => x.ApplicantId == applicantId);
-            return _mapper.Map<List<ApplicantLogs>>(list);
+            var logList = (await _ApplicantLogsRepository.GetAll(x => x.ApplicantId == applicantId)).ToList();
+            string [] userIds = logList.Select(x=>x.UserId).Distinct().ToArray();
+            var users = (await _employeeRepository.GetAll(x=> userIds.Contains(x.UserId))).ToList();
+            var data = (from log in logList
+                        join user in users on log.UserId equals user.UserId
+                        select new ApplicantLogResponseModel
+                        {
+                            Id = log.Id,
+                            Description = log.Description,
+                            ApplicantId = log.ApplicantId,
+                            ActivityCategory = log.ActivityCategory,
+                            JobRole = log.JobRole,
+                            UserId = log.UserId,
+                            UserName = $"{user.FirstName} {user.LastName}",
+                            CreatedDate = log.CreatedDate,
+                            CreatedBy = log.CreatedBy,
+                        }).ToList();
+            return data;
         }
-        public async Task<List<ApplicantLogs>> GetProcessLogData()
+        public async Task<Result<ApplicantLogResponseModel>> GetProcessLogData(ApplicantLogFilterModel filters)
         {
-            return (await _ApplicantLogsRepository.GetAll()).ToList();
-        }
+            Expression<Func<ApplicantLogs, bool>> whereCondition = x => 
+            (!filters.FilterFrom.HasValue  || (x.CreatedDate >= filters.FilterFrom))
+            && (!filters.FilterTo.HasValue || (x.CreatedDate <= filters.FilterTo))
+            && (filters.ActivityCategory.Length == 0 || filters.ActivityCategory.Contains(x.ActivityCategory))
+            && (string.IsNullOrEmpty(filters.JobRole) || x.JobRole.Contains(filters.JobRole,StringComparison.CurrentCultureIgnoreCase) )
+            && (string.IsNullOrEmpty(filters.ApplicantName) || x.ApplicantName.Contains(filters.ApplicantName,StringComparison.CurrentCultureIgnoreCase));
 
+            var logCount =await _ApplicantLogsRepository.Count(whereCondition);
+            var logList = (await _ApplicantLogsRepository.GetAggregateDataAsync<ApplicantLogs>(whereCondition, pageNo:filters.PageNo,pageSize:filters.PageSize)).ToList();
+            string [] empId=logList.Select(x=> x.UserId).Distinct().ToArray();
+            var users = await _employeeRepository.GetAll(x=> empId.Contains(x.UserId));
+            var data = ( from log in logList join user in users on log.UserId equals user.UserId
+            select new ApplicantLogResponseModel {
+                Id = log.Id,
+                Description = log.Description,
+                ApplicantId = log.ApplicantId,
+                ActivityCategory = log.ActivityCategory,
+                JobRole = log.JobRole,
+                UserId = log.UserId,
+                UserName = $"{user.FirstName} {user.LastName}", 
+                ApplicantName = log.ApplicantName,     
+                CompanyId = log.CompanyId,
+                CreatedBy = log.CreatedBy,
+                CreatedDate = log.CreatedDate,         
+            }).ToList();
+
+            Result<ApplicantLogResponseModel> result = new()
+            {
+                Success = true,
+                MethodResults = data,
+                TotalRecords= logCount,
+            };
+            return result;
+        }
     }
 }
 

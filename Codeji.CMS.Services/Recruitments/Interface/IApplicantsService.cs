@@ -1,6 +1,7 @@
 ﻿using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels;
+using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Repository.Entities.Recruitments;
 
 namespace Codeji.CMS.Services.Recruitments.Interface
@@ -15,10 +16,9 @@ namespace Codeji.CMS.Services.Recruitments.Interface
         Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters, int pageNo, int records);
         Task<Result<ApplicantViewModel>> ApplicantById(string applicantId);
         Task<Result> AddAppicantResume(string fileName, string email, string filePath);
-        Task<List<ApplicantLogs>> GetAllComment(string applicantId);
+        Task<List<ApplicantLogResponseModel>> GetAllComment(string applicantId);
         Task<Result> AddComment(string userId, CommentRequestModel model);
-        Task<List<ApplicantLogs>> GetProcessLogData();
-
+        Task<Result<ApplicantLogResponseModel>> GetProcessLogData(ApplicantLogFilterModel model);
     }
 }
 

@@ -2,6 +2,7 @@
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels;
+using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Microsoft.AspNetCore.Authorization;
@@ -26,7 +27,6 @@ namespace Codeji.CMS.API.Controllers
         //[CustomAuthorize(Module = "Applicant", Role = ["View"])]
         public async Task<Result<ApplicantViewModel>> GetApplicantList(ApplicantResultFilters filters, [FromQuery] int pageNo, [FromQuery] int records)
         {
-            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
             Result<ApplicantViewModel> data = await _applicantsService.GetApplicantsList(filters, pageNo, records);
             return data;
         }
@@ -35,7 +35,6 @@ namespace Codeji.CMS.API.Controllers
         //[CustomAuthorize(Module = "Applicant", Role = ["View"])]
         public async Task<Result<ApplicantViewModel>> ApplicantById(string id)
         {
-            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
             Result<ApplicantViewModel> result = await _applicantsService.ApplicantById(id);
             return result;
         }
@@ -118,7 +117,6 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         public async Task<Result> AddComment(CommentRequestModel model)
         {
-            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
             string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
             await _applicantsService.AddComment(userId, model);
             Result result = new Result()
@@ -132,10 +130,10 @@ namespace Codeji.CMS.API.Controllers
 
         [Route("GetAllComment")]
         [HttpGet]
-        public async Task<Result<ApplicantLogs>> GetAllComment([FromQuery] string applicantId)
+        public async Task<Result<ApplicantLogResponseModel>> GetAllComment([FromQuery] string applicantId)
         {
-            List<ApplicantLogs> list = await _applicantsService.GetAllComment(applicantId);
-            Result<ApplicantLogs> result = new()
+            var list = await _applicantsService.GetAllComment(applicantId);
+            Result<ApplicantLogResponseModel> result = new()
             {
                 Success = true,
                 Message = "All Comments",
@@ -144,17 +142,12 @@ namespace Codeji.CMS.API.Controllers
             };
             return result;
         }
-        [HttpGet]
+        [HttpPost]
         [Route("GetProcessLogData")]
-        public async Task<Result<ApplicantLogs>> GetProcessLogData()
+        public async Task<Result<ApplicantLogResponseModel>> GetProcessLogData(ApplicantLogFilterModel model)
         {
-            List<ApplicantLogs> data = await _applicantsService.GetProcessLogData();
-            Result<ApplicantLogs> result = new()
-            {
-                Success = true,
-                MethodResults = data,
-            };
-            return result;
+            var data = await _applicantsService.GetProcessLogData(model);
+            return data;
         }
 
 
