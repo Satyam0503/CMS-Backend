@@ -2,7 +2,7 @@
 
 namespace Codeji.CMS.Repository.Entities.Company
 {
-    public class Department
+    public class Department : BaseClass
     {
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
         public string DepartmentId { get; set; }

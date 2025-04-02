@@ -20,6 +20,7 @@ namespace Codeji.CMS.Services
         private readonly IMongoDbRepository<RolePermission> _rolePermissionRepo;
         private readonly IMapper _mapper;
         private readonly IRoleService _roleService;
+        private readonly IMongoDbRepository<Department> _departmentRepository;
 
         public CompanyService(
             IMongoDbRepository<Company> companyRepo,
@@ -87,6 +88,39 @@ namespace Codeji.CMS.Services
         {
             bool exist = await _companyRepo.Exist(x => x.CompanyId == companyId && x.Status);
             return exist;
+        }
+
+        public async Task<Result> AddDepartment(DepartmentRequestModel model)
+        {
+            Result result = new Result();
+            Department department = new Department()
+            {
+                DepartmentName = model.DepartmentName,
+                DepartmentDescription = model.DepartmentDescription,
+            };
+            await _departmentRepository.AddOne(department);
+            result.Success = true;
+            result.Message = "Department Added Successfully";
+            return result;
+        }
+
+        public async Task<Result<Department>> GetDepartmentList()
+        {
+            Result<Department> result = new Result<Department>();
+            IEnumerable<Department> departments = await _departmentRepository.GetAll();
+            if (departments == null || !departments.Any())
+            {
+                result.Success = false;
+                result.Message = "No Department Found";
+                result.StatusCode = 404;
+                return result;
+            }
+            result.MethodResults = departments.ToList();
+            result.TotalRecords = departments.Count();
+            result.Success = true;
+            result.StatusCode = 200;
+            result.Message = "List Of Departments";
+            return result;
         }
     }
 }
