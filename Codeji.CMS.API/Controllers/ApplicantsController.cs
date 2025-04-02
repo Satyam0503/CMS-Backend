@@ -128,20 +128,14 @@ namespace Codeji.CMS.API.Controllers
             return result;
         }
 
-        [Route("GetAllComment")]
+        [Route("GetAllComment/{applicantId}")]
         [HttpGet]
-        public async Task<Result<ApplicantLogResponseModel>> GetAllComment([FromQuery] string applicantId)
+        public async Task<Result<ApplicantLogResponseModel>> GetAllComment(string applicantId, [FromQuery] int pageNo, [FromQuery] int pageSize)
         {
-            var list = await _applicantsService.GetAllComment(applicantId);
-            Result<ApplicantLogResponseModel> result = new()
-            {
-                Success = true,
-                Message = "All Comments",
-                StatusCode = StatusCodes.Status200OK,
-                MethodResults = [.. list]
-            };
-            return result;
+            var data = await _applicantsService.GetAllComment(applicantId,pageNo,pageSize); 
+            return data;
         }
+        
         [HttpPost]
         [Route("GetProcessLogData")]
         public async Task<Result<ApplicantLogResponseModel>> GetProcessLogData(ApplicantLogFilterModel model)
@@ -149,7 +143,5 @@ namespace Codeji.CMS.API.Controllers
             var data = await _applicantsService.GetProcessLogData(model);
             return data;
         }
-
-
     }
 }
