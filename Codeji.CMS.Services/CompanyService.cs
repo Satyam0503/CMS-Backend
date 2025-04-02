@@ -29,7 +29,8 @@ namespace Codeji.CMS.Services
             IMongoDbRepository<Roles> companyRoleRepo,
             IMongoDbRepository<ModulePermission> modulePermissisonRepo,
             IMongoDbRepository<RolePermission> rolePermissionRepo,
-            IRoleService roleService
+            IRoleService roleService,
+            IMongoDbRepository<Department> departmentRepository
 
             )
         {
@@ -40,6 +41,7 @@ namespace Codeji.CMS.Services
             _modulePermissisonRepo = modulePermissisonRepo;
             _rolePermissionRepo = rolePermissionRepo;
             _mapper = mapper;
+            _departmentRepository = departmentRepository;
 
         }
 
