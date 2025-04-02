@@ -9,8 +9,9 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         public string Description { get; set; }
         public string ApplicantId { get; set; }
         public string UserId { get; set; }
-        public string UserName { get; set; }
+
         public string JobRole { get; set; }
         public int ActivityCategory { get; set; }
+        public string ApplicantName { get;set;}
     }
 }
