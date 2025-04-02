@@ -16,7 +16,7 @@ namespace Codeji.CMS.Services.Recruitments.Interface
         Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters, int pageNo, int records);
         Task<Result<ApplicantViewModel>> ApplicantById(string applicantId);
         Task<Result> AddAppicantResume(string fileName, string email, string filePath);
-        Task<List<ApplicantLogResponseModel>> GetAllComment(string applicantId);
+        Task<Result<ApplicantLogResponseModel>> GetAllComment(string applicantId,int pageNo,int pageSize);
         Task<Result> AddComment(string userId, CommentRequestModel model);
         Task<Result<ApplicantLogResponseModel>> GetProcessLogData(ApplicantLogFilterModel model);
     }

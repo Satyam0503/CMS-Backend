@@ -269,9 +269,10 @@ namespace Codeji.CMS.Services.Recruitments
             };
             return result;
         }
-        public async Task<List<ApplicantLogResponseModel>> GetAllComment(string applicantId)
+        public async Task<Result<ApplicantLogResponseModel>> GetAllComment(string applicantId,int pageNo,int pageSize)
         {
-            var logList = (await _ApplicantLogsRepository.GetAll(x => x.ApplicantId == applicantId)).ToList();
+            var logCount = await _ApplicantLogsRepository.Count(x =>x.ApplicantId== applicantId);
+            var logList = (await _ApplicantLogsRepository.GetAggregateDataAsync<ApplicantLogs>(x=>x.ApplicantId == applicantId, pageNo:pageNo,pageSize:pageSize )).ToList();
             string [] userIds = logList.Select(x=>x.UserId).Distinct().ToArray();
             var users = (await _employeeRepository.GetAll(x=> userIds.Contains(x.UserId))).ToList();
             var data = (from log in logList
@@ -288,7 +289,14 @@ namespace Codeji.CMS.Services.Recruitments
                             CreatedDate = log.CreatedDate,
                             CreatedBy = log.CreatedBy,
                         }).ToList();
-            return data;
+
+           Result<ApplicantLogResponseModel> result = new()
+            {
+                Success = true,
+                MethodResults = data,
+                TotalRecords= logCount,
+            };
+            return result;
         }
         public async Task<Result<ApplicantLogResponseModel>> GetProcessLogData(ApplicantLogFilterModel filters)
         {
