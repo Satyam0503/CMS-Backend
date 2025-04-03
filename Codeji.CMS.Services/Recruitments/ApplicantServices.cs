@@ -77,7 +77,7 @@ namespace Codeji.CMS.Services.Recruitments
                 //JobTitle = applicantRegisterModel.VacancyName
 
             });
-            await EmailFunctionality.SendEmailFromAPI(applicantRegisterModel.Email, emailContent.subject, replacedBody);
+            await Emailer.SendMail(applicantRegisterModel.Email, emailContent.subject, replacedBody);
             return result;
         }
 
@@ -248,7 +248,7 @@ namespace Codeji.CMS.Services.Recruitments
 
         public async Task<Result> AddComment(string userId, CommentRequestModel model)
         {
-            var applicant = await _applicantRepository.FirstOrDefault(x=>x.ApplicantId == model.ApplicantId);
+            var applicant = await _applicantRepository.FirstOrDefault(x => x.ApplicantId == model.ApplicantId);
             ApplicantLogs comments = new()
             {
                 UserId = userId,
@@ -258,7 +258,7 @@ namespace Codeji.CMS.Services.Recruitments
                 CreatedDate = DateTime.UtcNow,
                 CreatedBy = userId,
                 JobRole = model.JobTitle,
-                ApplicantName = applicant == null ? "" :$"{applicant.FirstName} {applicant.LastName}" 
+                ApplicantName = applicant == null ? "" : $"{applicant.FirstName} {applicant.LastName}"
             };
             await _ApplicantLogsRepository.AddOne(comments);
             Result result = new()
@@ -269,12 +269,12 @@ namespace Codeji.CMS.Services.Recruitments
             };
             return result;
         }
-        public async Task<Result<ApplicantLogResponseModel>> GetAllComment(string applicantId,int pageNo,int pageSize)
+        public async Task<Result<ApplicantLogResponseModel>> GetAllComment(string applicantId, int pageNo, int pageSize)
         {
-            var logCount = await _ApplicantLogsRepository.Count(x =>x.ApplicantId== applicantId);
-            var logList = (await _ApplicantLogsRepository.GetAggregateDataAsync<ApplicantLogs>(x=>x.ApplicantId == applicantId, pageNo:pageNo,pageSize:pageSize )).ToList();
-            string [] userIds = logList.Select(x=>x.UserId).Distinct().ToArray();
-            var users = (await _employeeRepository.GetAll(x=> userIds.Contains(x.UserId))).ToList();
+            var logCount = await _ApplicantLogsRepository.Count(x => x.ApplicantId == applicantId);
+            var logList = (await _ApplicantLogsRepository.GetAggregateDataAsync<ApplicantLogs>(x => x.ApplicantId == applicantId, pageNo: pageNo, pageSize: pageSize)).ToList();
+            string[] userIds = logList.Select(x => x.UserId).Distinct().ToArray();
+            var users = (await _employeeRepository.GetAll(x => userIds.Contains(x.UserId))).ToList();
             var data = (from log in logList
                         join user in users on log.UserId equals user.UserId
                         select new ApplicantLogResponseModel
@@ -290,47 +290,49 @@ namespace Codeji.CMS.Services.Recruitments
                             CreatedBy = log.CreatedBy,
                         }).ToList();
 
-           Result<ApplicantLogResponseModel> result = new()
+            Result<ApplicantLogResponseModel> result = new()
             {
                 Success = true,
                 MethodResults = data,
-                TotalRecords= logCount,
+                TotalRecords = logCount,
             };
             return result;
         }
         public async Task<Result<ApplicantLogResponseModel>> GetProcessLogData(ApplicantLogFilterModel filters)
         {
-            Expression<Func<ApplicantLogs, bool>> whereCondition = x => 
-            (!filters.FilterFrom.HasValue  || (x.CreatedDate >= filters.FilterFrom))
+            Expression<Func<ApplicantLogs, bool>> whereCondition = x =>
+            (!filters.FilterFrom.HasValue || (x.CreatedDate >= filters.FilterFrom))
             && (!filters.FilterTo.HasValue || (x.CreatedDate <= filters.FilterTo))
             && (filters.ActivityCategory.Length == 0 || filters.ActivityCategory.Contains(x.ActivityCategory))
-            && (string.IsNullOrEmpty(filters.JobRole) || x.JobRole.Contains(filters.JobRole,StringComparison.CurrentCultureIgnoreCase) )
-            && (string.IsNullOrEmpty(filters.ApplicantName) || x.ApplicantName.Contains(filters.ApplicantName,StringComparison.CurrentCultureIgnoreCase));
+            && (string.IsNullOrEmpty(filters.JobRole) || x.JobRole.Contains(filters.JobRole, StringComparison.CurrentCultureIgnoreCase))
+            && (string.IsNullOrEmpty(filters.ApplicantName) || x.ApplicantName.Contains(filters.ApplicantName, StringComparison.CurrentCultureIgnoreCase));
 
-            var logCount =await _ApplicantLogsRepository.Count(whereCondition);
-            var logList = (await _ApplicantLogsRepository.GetAggregateDataAsync<ApplicantLogs>(whereCondition, pageNo:filters.PageNo,pageSize:filters.PageSize)).ToList();
-            string [] empId=logList.Select(x=> x.UserId).Distinct().ToArray();
-            var users = await _employeeRepository.GetAll(x=> empId.Contains(x.UserId));
-            var data = ( from log in logList join user in users on log.UserId equals user.UserId
-            select new ApplicantLogResponseModel {
-                Id = log.Id,
-                Description = log.Description,
-                ApplicantId = log.ApplicantId,
-                ActivityCategory = log.ActivityCategory,
-                JobRole = log.JobRole,
-                UserId = log.UserId,
-                UserName = $"{user.FirstName} {user.LastName}", 
-                ApplicantName = log.ApplicantName,     
-                CompanyId = log.CompanyId,
-                CreatedBy = log.CreatedBy,
-                CreatedDate = log.CreatedDate,         
-            }).ToList();
+            var logCount = await _ApplicantLogsRepository.Count(whereCondition);
+            var logList = (await _ApplicantLogsRepository.GetAggregateDataAsync<ApplicantLogs>(whereCondition, pageNo: filters.PageNo, pageSize: filters.PageSize)).ToList();
+            string[] empId = logList.Select(x => x.UserId).Distinct().ToArray();
+            var users = await _employeeRepository.GetAll(x => empId.Contains(x.UserId));
+            var data = (from log in logList
+                        join user in users on log.UserId equals user.UserId
+                        select new ApplicantLogResponseModel
+                        {
+                            Id = log.Id,
+                            Description = log.Description,
+                            ApplicantId = log.ApplicantId,
+                            ActivityCategory = log.ActivityCategory,
+                            JobRole = log.JobRole,
+                            UserId = log.UserId,
+                            UserName = $"{user.FirstName} {user.LastName}",
+                            ApplicantName = log.ApplicantName,
+                            CompanyId = log.CompanyId,
+                            CreatedBy = log.CreatedBy,
+                            CreatedDate = log.CreatedDate,
+                        }).ToList();
 
             Result<ApplicantLogResponseModel> result = new()
             {
                 Success = true,
                 MethodResults = data,
-                TotalRecords= logCount,
+                TotalRecords = logCount,
             };
             return result;
         }

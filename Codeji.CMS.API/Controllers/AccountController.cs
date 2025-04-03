@@ -9,6 +9,7 @@ using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.ApplyNow;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
+using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments;
@@ -33,6 +34,8 @@ namespace Codeji.CMS.API.Controllers
         private readonly IMapper _mapper;
         private readonly IEmployeeService _employeeService;
         private readonly HttpClient _httpClient;
+        private readonly IPriorityTaskQueue _priorityTaskQueue;
+        private readonly IMiddlewareService _middlewareService;
         public AccountController(IEmployeeService userService,
             IConfiguration configuration,
             IAntiforgery antiforgery,
@@ -40,7 +43,9 @@ namespace Codeji.CMS.API.Controllers
             IApplicantsService applicantsServices,
             ICompanyService companyService,
             IMapper mapper,
-            HttpClient httpClient)
+            HttpClient httpClient,
+            IPriorityTaskQueue priorityTaskQueue,
+            IMiddlewareService middlewareService)
         {
             _antiforgery = antiforgery;
             _httpContextAccessor = httpContextAccessor;
@@ -48,6 +53,8 @@ namespace Codeji.CMS.API.Controllers
             _applicantsServices = applicantsServices;
             _mapper = mapper;
             _companyService = companyService;
+            _priorityTaskQueue = priorityTaskQueue;
+            _middlewareService = middlewareService;
         }
         /// This block contains pure anonymous API
         [HttpGet]
@@ -248,6 +255,29 @@ namespace Codeji.CMS.API.Controllers
                     return result.Success;
                 }
             }
+            return false;
+        }
+        [HttpGet]
+        [AllowAnonymous]
+        [Route("SendEmail")]
+        public async Task<bool> SendEmail()
+        {
+            _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
+            {
+                _middlewareService.EmailSendAndSave(new Repository.Entities.EmpEmailLogs()
+                {
+                    UserTo = "",
+                    Subject = "Test",
+                    Body = "Test",
+                    EmailLogType = Utility.Enums.EnumsHelper.MailType.ApplyNowMailToHR,
+                    Email = "jay@codeji.in",
+                    UserFrom = "    ",
+
+
+                });
+            }, priority: 1);
+
+
             return false;
         }
         public class reCaptchaResponse

@@ -4,6 +4,7 @@ using Codeji.CMS.API.App_Start;
 using Codeji.CMS.API.Notification;
 using Codeji.CMS.GenericRepository.Registration;
 using Codeji.CMS.GenericRepository.Settings;
+using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Registration;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -67,6 +68,8 @@ builder.Services.AddSingleton<IUserIdProvider, GetUserIdProvider>();
 builder.Services.AddSingleton<NotificationHub>();
 builder.Services.AddTransient<INotificationService, NotificationService>();
 builder.Services.AddSingleton<AntiforgeryMiddleware>();
+builder.Services.AddSingleton<IPriorityTaskQueue, PriorityTaskQueue>();
+builder.Services.AddHostedService<PriorityQueuedHostedService>();
 builder.Services.AddHttpContextAccessor();
 
 // MongoDB Configuration

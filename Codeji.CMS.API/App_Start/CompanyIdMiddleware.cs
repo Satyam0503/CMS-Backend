@@ -30,6 +30,7 @@ namespace Codeji.CMS.API.App_Start
                  "/api/account/getSignedUserDetails",
                  "/api/CreateNewPassword",
                  "/api/VerificationCaptch",
+                 "/api/SendEmail",
                  "/fs/"};
             IEmployeeService? _employeeService = context.RequestServices.GetService(typeof(IEmployeeService)) as IEmployeeService;
             ICompanyService? _companyService = context.RequestServices.GetService(typeof(ICompanyService)) as ICompanyService;

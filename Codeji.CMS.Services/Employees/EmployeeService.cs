@@ -102,7 +102,7 @@ namespace Codeji.CMS.Services.Employees
                 statusNumber = employee.StatusNumber,
                 CompanyName = company.CompanyName,
             });
-            await EmailFunctionality.SendEmailFromAPI(employee.Email, emailContent.subject, replacedBody);
+            await Emailer.SendMail(employee.Email, emailContent.subject, replacedBody);
 
             return new Result<UserModel>
             {
