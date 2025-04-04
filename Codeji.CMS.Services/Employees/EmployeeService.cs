@@ -71,7 +71,11 @@ namespace Codeji.CMS.Services.Employees
             _middlewareService = middlewareService;
         }
 
+<<<<<<< HEAD
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
+=======
+        public async Task<Result<UserModel>> AddEmployee(UserModel user,string currentUserId)
+>>>>>>> fix mail issue
         {
             EmpUser employee = new EmpUser()
             {
@@ -101,8 +105,13 @@ namespace Codeji.CMS.Services.Employees
 
             await _employeeRepository.AddOne(employee);
 
+<<<<<<< HEAD
             UserModel currentUser = _middlewareService.GetUserById(currentUserId);
             Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
+=======
+            var currentUser = _middlewareService.GetUserById(currentUserId);
+            var company = await _companyRepository.FirstOrDefault(x=>x.CompanyId == currentUser.CompanyId);
+>>>>>>> fix mail issue
 
             //Acknowledgement Email Logic 
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 0);
@@ -113,6 +122,7 @@ namespace Codeji.CMS.Services.Employees
                 PasswordCreationLink = ConfigManager.AppSettings.AppUrl + "auth/createpassword",
                 statusNumber = employee.StatusNumber,
                 CompanyName = company != null ? company.CompanyName : "",
+<<<<<<< HEAD
             });
 
             _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
@@ -127,6 +137,22 @@ namespace Codeji.CMS.Services.Employees
                   UserFrom = currentUser.Email,
               });
           }, priority: 1);
+=======
+            });         
+
+              _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
+            {
+                _middlewareService.EmailSendAndSave(new Repository.Entities.EmpEmailLogs()
+                {
+                    UserTo =employee.Email,
+                    Subject = emailContent.subject,
+                    Body = replacedBody,
+                    EmailLogType = Utility.Enums.EnumsHelper.MailType.CreateNewPasswordMail,
+                    Email = employee.Email,
+                    UserFrom =currentUser.Email,
+                });
+            }, priority: 1);
+>>>>>>> fix mail issue
             // await Emailer.SendMail(employee.Email, emailContent.subject, replacedBody);
             return new Result<UserModel>
             {

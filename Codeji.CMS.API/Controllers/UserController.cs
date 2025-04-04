@@ -40,7 +40,11 @@ public class UserController : BaseApiController
             };
         }
 
+<<<<<<< HEAD
         return await _employeeService.AddEmployee(user, currentUserId);
+=======
+        return await _employeeService.AddEmployee(user,currentUserId);
+>>>>>>> fix mail issue
     }
 
     [Route("EditEmployees")]
