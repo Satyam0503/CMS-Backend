@@ -202,6 +202,30 @@ public class RoleServices : IRoleService
         }
         return moduleWithPermissionsModel;
     }
+    public async Task<string[]> GetRolePermissionOfuser(string roleId)
+    {
+        List<ModuleWithPermissionsModel> moduleWithPermissionsModel = new();
+        Expression<Func<Roles, bool>> whereCondition = x => x.RolesId == roleId;
+        IEnumerable<Permission> permissions = await _permissionRepository.GetAll();
+        IEnumerable<Module> modules = await _moduleRepository.GetAll();
+        IEnumerable<ModulePermission> modulePermissions = await _modulePermissionRepository.GetAll();
+
+        Roles? role = await _RolesRepository.FirstOrDefault(whereCondition);
+        string[] res = Array.Empty<string>();
+        if (role != null)
+        {
+            List<int> rolePermissions = _rolePermissionRepository.Get(x => x.RoleId == role.RolesId && x.IsAccessible && x.HasAccess).Select(x => x.ModulePermissionId).ToList();
+
+
+            res = (from rp in rolePermissions
+                   join mp in modulePermissions on rp equals mp.ModulePermissionId
+                   join m in modules on mp.ModuleId equals m.ModuleId
+                   join p in permissions on mp.PermissionId equals p.PermissionId
+                   select String.Format($"{m.ModuleConstant}.{p.PermissionConstant}")).OrderBy(x => x).ToArray();
+
+        }
+        return res;
+    }
     public async Task<List<Roles>> AddDefaultRole(string companyId)
     {
         List<Roles> roles = _RolesRepository.Get(x => x.IsDefault && string.IsNullOrEmpty(x.CompanyId)).ToList();
@@ -346,40 +370,22 @@ public class RoleServices : IRoleService
     {
         bool hasPermission = false;
         string[] modules = Array.Empty<string>();
-        if (userForEdit != null && !string.IsNullOrEmpty(userForEdit.UserId) && Role.Contains("Constants.Colleagues_Edit") && userId == userForEdit.UserId)
-        {
-            UserModel users = _middleware.GetUserById(userForEdit.UserId);
-            if (users != null && users.RoleId == userForEdit.RoleId)
-                return true;
-        }
+        // if (userForEdit != null && !string.IsNullOrEmpty(userForEdit.UserId) && Role.Contains("Constants.Colleagues_Edit") && userId == userForEdit.UserId)
+        // {
+        //     UserModel users = _middleware.GetUserById(userForEdit.UserId);
+        //     if (users != null && users.RoleId == userForEdit.RoleId)
+        //         return true;
+        // }
 
         if (!string.IsNullOrEmpty(userId) && !string.IsNullOrEmpty(companyId))
 
         {
             UserModel user = _middleware.GetUserById(userId);
-            List<ModuleWithPermissionsModel> modulePremissions = await GetRoleWithPermissions(user.RoleId, companyId);
-            List<ModuleWithPermissionsModel> userPermissionList = _mapper.Map<List<ModuleWithPermissionsModel>>(modulePremissions);
-
+            string[] modulePremissions = await GetRolePermissionOfuser(user.RoleId);
+            string[] permission = Role.Select(_ => $"{module}.{_}").ToArray();
             if (!string.IsNullOrEmpty(module))
                 modules = new string[] { module };
-
-            for (int j = 0; j < modules.Length; j++)
-            {
-                module = modules[j];
-                ModuleWithPermissionsModel? userPermission = userPermissionList.FirstOrDefault(x => module == x.ModuleConstant);
-                //j==0 will determine that employee has access app as manager or Hr 
-                if (userPermission != null && (j == 0 || hasPermission))
-                {
-                    for (int i = 0; i < userPermission.Permissions.Count; i++)
-                    {
-                        hasPermission = Role.Contains(userPermission.Permissions[i].PermissionConstant);
-                        if (hasPermission)
-                            break;
-                    }
-                }
-                else
-                    hasPermission = false;
-            }
+            hasPermission = permission.Any(x => modulePremissions.Contains(x));
 
         }
 

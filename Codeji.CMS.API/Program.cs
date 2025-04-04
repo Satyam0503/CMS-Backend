@@ -158,7 +158,7 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<AntiforgeryMiddleware>();
-app.UseMiddleware<CompanyIdMiddleware>();
+// app.UseMiddleware<CompanyIdMiddleware>();
 
 // Configure SignalR hub
 app.MapHub<NotificationHub>("/notificationhub", options =>

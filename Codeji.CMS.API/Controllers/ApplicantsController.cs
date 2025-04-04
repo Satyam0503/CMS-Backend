@@ -3,8 +3,8 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.ResponseModel;
-using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 // For more information on enabling Web API for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
@@ -13,6 +13,7 @@ namespace Codeji.CMS.API.Controllers
 {
     [Route("api/[controller]")]
     [Authorize]
+    [ModulePermission("Applicant", "View")]
     public class ApplicantsController : BaseApiController
     {
         readonly IApplicantsService _applicantsService;
@@ -45,7 +46,6 @@ namespace Codeji.CMS.API.Controllers
         {
 
             Result result = new Result();
-            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
             if (string.IsNullOrEmpty(applicantRegisterModel.Email))
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
             var isExist = await _applicantsService.IsEmailExist(applicantRegisterModel.Email);
@@ -71,14 +71,13 @@ namespace Codeji.CMS.API.Controllers
         public async Task<Result> EditApplicants([FromBody] ApplicantAddEditModel model)
         {
             Result result = new Result();
-            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
             result = await _applicantsService.UpdateApplicants(model);
             return result;
         }
 
         [HttpPost]
         [Route("UploadResume")]
-        [FilesExtensions([".pdf"])]
+        //[FilesExtensions([".pdf"])]
         [AllowAnonymous]
         //[CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
         public async Task<Result> UploadResume([FromForm] ResumeApplicantModel model, string email)
@@ -117,7 +116,7 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         public async Task<Result> AddComment(CommentRequestModel model)
         {
-            string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+            string userId = CurrentContext.UserId(_httpContextAccessor);
             await _applicantsService.AddComment(userId, model);
             Result result = new Result()
             {
@@ -132,10 +131,10 @@ namespace Codeji.CMS.API.Controllers
         [HttpGet]
         public async Task<Result<ApplicantLogResponseModel>> GetAllComment(string applicantId, [FromQuery] int pageNo, [FromQuery] int pageSize)
         {
-            var data = await _applicantsService.GetAllComment(applicantId,pageNo,pageSize); 
+            var data = await _applicantsService.GetAllComment(applicantId, pageNo, pageSize);
             return data;
         }
-        
+
         [HttpPost]
         [Route("GetProcessLogData")]
         public async Task<Result<ApplicantLogResponseModel>> GetProcessLogData(ApplicantLogFilterModel model)

@@ -2,6 +2,7 @@
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
+using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -33,7 +34,7 @@ namespace Codeji.CMS.API.Controllers
         [Authorize]
         public async Task<Result<RoleModel>> GetRoles()
         {
-            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
             List<RoleModel> roles = await _roleService.GetRoles(companyId);
             return new Result<RoleModel>()
             {
@@ -46,8 +47,8 @@ namespace Codeji.CMS.API.Controllers
         [Authorize]
         public async Task<Result<ModuleWithPermissionsModel>> GetRolePermission()
         {
-            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-            string roleId = CurrentContext.CurrentUserRoleId(_httpContextAccessor);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            string roleId = CurrentContext.UserRoleId(_httpContextAccessor);
             List<ModuleWithPermissionsModel> role = await _roleService.GetRoleWithPermissions(roleId, companyId);
             return new Result<ModuleWithPermissionsModel>()
             {
@@ -62,7 +63,7 @@ namespace Codeji.CMS.API.Controllers
         [Authorize]
         public async Task<Result> AddRole(RoleWithModuleAndPermissions model)
         {
-            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
             string data = await _roleService.AddEditRoles(model, companyId);
             return new Result()
             {
@@ -77,7 +78,7 @@ namespace Codeji.CMS.API.Controllers
         [Authorize]
         public async Task<Result<ModuleWithPermissionsModel>> GetModulePermission()
         {
-            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
             List<ModuleWithPermissionsModel> data = await _roleService.GetAllRolesWithPermission(companyId);
             return new Result<ModuleWithPermissionsModel>()
             {
@@ -92,7 +93,7 @@ namespace Codeji.CMS.API.Controllers
         [Authorize]
         public async Task<Result<ModuleWithPermissionsModel>> GetModulePermissionyId([FromQuery] string roleId)
         {
-            string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
             List<ModuleWithPermissionsModel> data = await _roleService.GetRoleWithPermissions(roleId, companyId);
             return new Result<ModuleWithPermissionsModel>()
             {

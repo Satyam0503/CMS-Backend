@@ -2,6 +2,16 @@
 {
     public static class EnumsHelper
     {
+        public enum ClaimTypesEnum
+        {
+            CompanyId,
+            role_id,
+            UserPermissionRole,
+            user_id,
+            company_id,
+            admin_id,
+            admin_company_id,
+        }
         public enum ActivityType
         {
             New = 0,

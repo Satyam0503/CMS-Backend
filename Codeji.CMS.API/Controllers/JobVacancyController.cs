@@ -12,7 +12,7 @@ using Microsoft.Extensions.Options;
 namespace Codeji.CMS.API.Controllers;
 [ApiController]
 [Route("api/[controller]")]
-
+[Authorize]
 
 public class JobVacancyController : BaseApiController
 {

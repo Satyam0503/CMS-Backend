@@ -1,12 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UserSecretsId>2f999978-ada4-4282-8e10-d29162041a7a</UserSecretsId>
   </PropertyGroup>
-
   <ItemGroup>
     <None Remove="middlewares\" />
     <None Remove="Enums\" />
@@ -14,12 +12,13 @@
     <None Remove="Helpers\" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="middlewares\" />
+    <Folder Include="middlewares/" />
     <Folder Include="Enums\" />
     <Folder Include="Constraints\" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="MailKit" Version="4.11.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Http" Version="2.3.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="5.0.0" />
     <PackageReference Include="HtmlSanitizer" Version="8.1.870" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />

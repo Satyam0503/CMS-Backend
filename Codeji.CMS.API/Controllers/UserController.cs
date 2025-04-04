@@ -1,11 +1,10 @@
-using Codeji.CMS.API.App_Start;
+
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
-using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.Repository.Entities.Employees;
-using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Employees.Interface;
+using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -38,7 +37,6 @@ public class UserController : BaseApiController
                 Message = "User Already Exist"
             };
         }
-        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
 
         return await _employeeService.AddEmployee(user);
     }
@@ -47,7 +45,6 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result<UserModel>> EditEmployees(UserModel user, string userId)
     {
-        string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
         UserModel isUserExist = await _employeeService.GetEmployeeById(userId);
         if (userId != isUserExist.UserId)
         {
@@ -71,7 +68,7 @@ public class UserController : BaseApiController
     public async Task<Result> ChangePassword(ChangePasswordRequest passwordModel)
     {
         Result result = new Result();
-        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
         result.Success = await _employeeService.ResetPassword(userId, passwordModel.Password, passwordModel.OldPassword);
         return result;
     }
@@ -81,7 +78,7 @@ public class UserController : BaseApiController
     [HttpGet]
     public async Task<Result<UserModel>> GetEmployeeById([FromQuery] string userId = null)
     {
-        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
         UserModel result = await _employeeService.GetEmployeeById(userId);
         return new Result<UserModel>()
         {
@@ -96,7 +93,7 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary)
     {
-        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.AddEditEmployeeSummary(userSummary, userId);
     }
 
@@ -104,7 +101,7 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails)
     {
-        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.AddEmployeeEducation(educationDetails, userId);
 
     }
@@ -113,7 +110,7 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result> EditEmployeeEducation(EmpEducationDetails educationDetails)
     {
-        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.EditEmployeeEducation(educationDetails, userId);
     }
 
@@ -121,7 +118,7 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result<EmployeeCertificationRequestModel>> AddEmployeeCertification(EmployeeCertificationRequestModel certificationDetails)
     {
-        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.AddEmployeeCertification(certificationDetails, userId);
 
     }
@@ -130,7 +127,7 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result> EditEmployeeCertification(EmpCertificationDetails certificationDetails)
     {
-        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.EditEmployeeCertification(certificationDetails, userId);
     }
 
@@ -138,7 +135,7 @@ public class UserController : BaseApiController
     [HttpGet]
     public async Task<Result<EmployeeSummaryRequestModel>> GetEmployeeSummary([FromQuery] string userId = null)
     {
-        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
         EmployeeSummaryRequestModel summary = await _employeeService.GetEmployeeSummary(userId);
         return new Result<EmployeeSummaryRequestModel>()
         {
@@ -151,7 +148,7 @@ public class UserController : BaseApiController
     [HttpGet]
     public async Task<Result<EmpEducationDetails>> GetEmployeeEducationDetails([FromQuery] string userId = null)
     {
-        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
         List<EmpEducationDetails> data = await _employeeService.GetEmployeeEducationDetails(userId);
         Result<EmpEducationDetails> result = new Result<EmpEducationDetails>();
         result.Success = true;
@@ -164,7 +161,7 @@ public class UserController : BaseApiController
     [HttpGet]
     public async Task<Result<EmpCertificationDetails>> GetEmployeeCertificationDetails([FromQuery] string userId = null)
     {
-        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
         List<EmpCertificationDetails> data = await _employeeService.GetEmployeeCertificationDetails(userId);
         Result<EmpCertificationDetails> result = new Result<EmpCertificationDetails>();
         result.Success = true;
@@ -175,11 +172,11 @@ public class UserController : BaseApiController
 
     [Route("UploadUserImage")]
     [HttpPost]
-    [FilesExtensions([".jpg", ".jpeg", ".png"])]
+    //[FilesExtensions([".jpg", ".jpeg", ".png"])]
     public async Task<Result<string>> UploadUserImage(IFormFile profilePicture)
     {
 
-        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
         string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\ProfileImage\\");
         string fileExtension = Path.GetExtension(profilePicture.FileName);
         if (!Directory.Exists(uploadFolder))
@@ -227,7 +224,7 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result> AddEditSkills(SkillsRequestModel skillsModel)
     {
-        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.AddEditEmployeeSkills(skillsModel, userId);
 
     }
@@ -236,7 +233,7 @@ public class UserController : BaseApiController
     [HttpGet]
     public async Task<Result<EmpSkills>> GetEmployeeSkills([FromQuery] string userId = null)
     {
-        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
         EmpSkills result = await _employeeService.GetEmployeeSkills(userId);
         return new Result<EmpSkills>()
         {
@@ -250,7 +247,7 @@ public class UserController : BaseApiController
     [HttpDelete]
     public async Task<Result> DeleteEducationDetails([FromQuery] string educationId)
     {
-        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
         Result data = await _employeeService.DeleteEducationDetails(educationId, userId);
         if (data == null)
         {
@@ -273,7 +270,7 @@ public class UserController : BaseApiController
     [HttpDelete]
     public async Task<Result> DeleteCertificationDetails([FromQuery] string certificationId)
     {
-        string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
         Result data = await _employeeService.DeleteCertificationDetails(certificationId, userId);
         if (data == null)
         {

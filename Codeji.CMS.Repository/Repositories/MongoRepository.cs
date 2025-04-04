@@ -6,6 +6,7 @@ using Codeji.CMS.GenericRepository.Extensions;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.GenericRepository.Repositories;
 using Codeji.CMS.GenericRepository.Services;
+using Codeji.CMS.Utility.middlewares;
 using LinqKit;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
@@ -56,6 +57,34 @@ namespace Codeji.CMS.GenericRepository
                 }
             }
         }
+        private void AddCreatedBy(TEntity entity)
+        {
+            string uId = CurrentContext.UserId(_httpContextAccessor);
+            PropertyInfo? createdDate = typeof(TEntity).GetProperty("CreatedDate", BindingFlags.Public | BindingFlags.Instance);
+            if (createdDate != null && createdDate.CanWrite)
+            {
+                createdDate.SetValue(entity, DateTime.Now);
+            }
+            PropertyInfo? createdBy = typeof(TEntity).GetProperty("CreatedBy", BindingFlags.Public | BindingFlags.Instance);
+            if (createdBy != null && createdBy.CanWrite && !string.IsNullOrEmpty(uId))
+            {
+                createdBy.SetValue(entity, uId);
+            }
+        }
+        private void AddUpdatedBy(TEntity entity)
+        {
+            string uId = CurrentContext.UserId(_httpContextAccessor);
+            PropertyInfo? UpdatedDate = typeof(TEntity).GetProperty("UpdatedDate", BindingFlags.Public | BindingFlags.Instance);
+            if (UpdatedDate != null && UpdatedDate.CanWrite)
+            {
+                UpdatedDate.SetValue(entity, DateTime.Now);
+            }
+            PropertyInfo? UpdatedBy = typeof(TEntity).GetProperty("UpdatedBy", BindingFlags.Public | BindingFlags.Instance);
+            if (UpdatedBy != null && UpdatedBy.CanWrite && !string.IsNullOrEmpty(uId))
+            {
+                UpdatedBy.SetValue(entity, uId);
+            }
+        }
         #endregion
 
         private IFindFluent<TEntity, TEntity> GetQuery(Expression<Func<TEntity, bool>> filter = null, bool WithDeletedObjects = false)
@@ -104,7 +133,7 @@ namespace Codeji.CMS.GenericRepository
             {
 
                 SetCompanyId(item);
-
+                AddCreatedBy(item);
                 IMongoCollection<TEntity> collection = _dbSet;
                 await collection.InsertOneAsync(item);
                 res.Success = true;
@@ -129,6 +158,7 @@ namespace Codeji.CMS.GenericRepository
                 if (item.Any())
                 {
                     item.ForEach(SetCompanyId);
+                    item.ForEach(AddCreatedBy);
                     await collection.InsertManyAsync(item);
                     res.Success = true;
                     res.Message = "OK";
@@ -189,6 +219,7 @@ namespace Codeji.CMS.GenericRepository
             try
             {
                 SetCompanyId(model);
+                AddUpdatedBy(model);
                 // check filters with company ID.
                 //to DO
                 ReplaceOneResult updateRes = await _dbSet.ReplaceOneAsync(filter, model, new ReplaceOptions { IsUpsert = false });

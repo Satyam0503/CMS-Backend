@@ -14,7 +14,9 @@ using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Helpers;
+using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -159,11 +161,12 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("account/getSignedUserDetails")]
         [Authorize]
+        [ModulePermission("Dashboard", "View")]
         public async Task<Result<LoginUserViewModel>> getUserByToken()
         {
             Result<LoginUserViewModel> result = new Result<LoginUserViewModel>();
-            string userId = CurrentContext.CurrentUserId(_httpContextAccessor);
-            string roleId = CurrentContext.CurrentUserRoleId(_httpContextAccessor);
+            string userId = CurrentContext.UserId(_httpContextAccessor);
+            string roleId = CurrentContext.UserRoleId(_httpContextAccessor);
             LoginUserViewModel user = await _employeeService.GetSignedUserDetails(userId, roleId);
             if (user != null)
             {
@@ -262,6 +265,7 @@ namespace Codeji.CMS.API.Controllers
         [Route("SendEmail")]
         public async Task<bool> SendEmail()
         {
+            var a = AppModule.Applicants;
             _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
             {
                 _middlewareService.EmailSendAndSave(new Repository.Entities.EmpEmailLogs()
