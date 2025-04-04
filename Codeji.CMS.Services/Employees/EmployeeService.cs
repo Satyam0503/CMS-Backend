@@ -12,7 +12,9 @@ using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Repository.Entities.RolePermissions;
+using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Employees.Interface;
+using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
@@ -26,6 +28,7 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<EmpCertificationDetails> _certificationDetailsRepo;
         readonly IMongoDbRepository<EmpSummary> _employeeSummaryRepo;
         readonly IMapper _mapper;
+        private readonly IPriorityTaskQueue _priorityTaskQueue;
         readonly IMongoDbRepository<EmpUser> _employeeRepository;
         readonly IMongoDbRepository<Roles> _rolesRepository;
         private readonly IRoleService _roleService;
@@ -34,6 +37,8 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<Company> _companyRepository;
         readonly IMongoDbRepository<MailTemplate> _mailTemplateRepository;
         readonly IMongoDbRepository<JobVacancy> _jobVacancy;
+        private readonly IMiddlewareService _middlewareService;
+
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
             IMongoDbRepository<EmpSummary> userSummary,
@@ -44,7 +49,10 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<EmpSkills> employeeSkillsRepository,
             IMongoDbRepository<Company> companyRepository,
             IMongoDbRepository<MailTemplate> mailTemplateRepository,
-            IMongoDbRepository<JobVacancy> jobVacancy
+            IMongoDbRepository<JobVacancy> jobVacancy,
+            IPriorityTaskQueue priorityTaskQueue,
+            IMiddlewareService middlewareService,
+            IHttpContextAccessor httpContextAccessor
             )
         {
             _employeeRepository = employeeRepository;
@@ -59,10 +67,11 @@ namespace Codeji.CMS.Services.Employees
             _companyRepository = companyRepository;
             _mailTemplateRepository = mailTemplateRepository;
             _jobVacancy = jobVacancy;
-
+            _priorityTaskQueue = priorityTaskQueue;
+            _middlewareService = middlewareService;
         }
 
-        public async Task<Result<UserModel>> AddEmployee(UserModel user)
+        public async Task<Result<UserModel>> AddEmployee(UserModel user,string currentUserId)
         {
             EmpUser employee = new EmpUser()
             {
@@ -89,8 +98,11 @@ namespace Codeji.CMS.Services.Employees
                 IsEmailVerified = false,
                 Address = user.Address
             };
-            Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == employee.CompanyId);
+
             await _employeeRepository.AddOne(employee);
+
+            var currentUser = _middlewareService.GetUserById(currentUserId);
+            var company = await _companyRepository.FirstOrDefault(x=>x.CompanyId == currentUser.CompanyId);
 
             //Acknowledgement Email Logic 
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 0);
@@ -100,10 +112,22 @@ namespace Codeji.CMS.Services.Employees
                 RecipientName = employee.FirstName + " " + employee.LastName,
                 PasswordCreationLink = ConfigManager.AppSettings.AppUrl + "auth/createpassword",
                 statusNumber = employee.StatusNumber,
-                CompanyName = company.CompanyName,
-            });
-            await Emailer.SendMail(employee.Email, emailContent.subject, replacedBody);
+                CompanyName = company != null ? company.CompanyName : "",
+            });         
 
+              _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
+            {
+                _middlewareService.EmailSendAndSave(new Repository.Entities.EmpEmailLogs()
+                {
+                    UserTo =employee.Email,
+                    Subject = emailContent.subject,
+                    Body = replacedBody,
+                    EmailLogType = Utility.Enums.EnumsHelper.MailType.CreateNewPasswordMail,
+                    Email = employee.Email,
+                    UserFrom =currentUser.Email,
+                });
+            }, priority: 1);
+            // await Emailer.SendMail(employee.Email, emailContent.subject, replacedBody);
             return new Result<UserModel>
             {
                 MethodResult = user,

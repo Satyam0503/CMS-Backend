@@ -10,7 +10,7 @@ namespace Codeji.CMS.Services.Employees.Interface
 {
     public interface IEmployeeService
     {
-        Task<Result<UserModel>> AddEmployee(UserModel user);
+        Task<Result<UserModel>> AddEmployee(UserModel user,string currentUserId);
         Task<Result<UserModel>> EditEmployee(UserModel user, string userId);
         Task<bool> IsUserActive(string userId);
         Task<UserModel> GetEmployeeById(string userId);
