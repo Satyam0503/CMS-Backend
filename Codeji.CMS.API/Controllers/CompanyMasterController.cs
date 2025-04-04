@@ -1,6 +1,7 @@
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.RequestModels.Company;
+using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Services.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -23,7 +24,7 @@ public class CompanyMasterController : BaseApiController
   public async Task<Result> AddDepartments(DepartmentRequestModel model)
   {
     Result data = await _companyMasterService.AddDepartment(model);
-    Result result = new Result()
+    Result result = new()
     {
       Success = data.Success,
       StatusCode = data.StatusCode,
@@ -33,14 +34,9 @@ public class CompanyMasterController : BaseApiController
   }
   [HttpGet]
   [Route("GetDepartmentList")]
-  public async Task<Result> GetDepartmentList()
+  public async Task<Result<DepartmentViewModel>> GetDepartmentList()
   {
     Result<DepartmentViewModel> data = await _companyMasterService.GetDepartmentList();
-    return new Result
-    {
-      Success = data.Success,
-      Message = data.Message,
-      StatusCode = data.StatusCode
-    };
+    return data;
   }
 }
