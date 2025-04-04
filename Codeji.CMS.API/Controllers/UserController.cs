@@ -38,7 +38,7 @@ public class UserController : BaseApiController
             };
         }
 
-        return await _employeeService.AddEmployee(user);
+        return await _employeeService.AddEmployee(user, currentUserId);
     }
 
     [Route("EditEmployees")]
