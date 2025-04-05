@@ -238,6 +238,8 @@ public class RoleServices : IRoleService
             role.CompanyId = companyId;
             role.IsDefault = false;
             role.CreatedDate = DateTime.Now;
+            if(role.RoleType==1)
+            role.HasAppAccess=true;
             List<RolePermission> permissions = rolePermissions.Where(x => x.RoleId == oldRoleId).ToList();
             foreach (RolePermission? item in permissions)
             {
@@ -248,6 +250,7 @@ public class RoleServices : IRoleService
                         RoleId = role.RolesId,
                         CreatedDate = DateTime.Now,
                         CompanyId = companyId,
+                        IsAccessible=item.IsAccessible,
                         HasAccess = item.HasAccess
                     });
                 //await _rolePermissionRepository.AddOne(item);
