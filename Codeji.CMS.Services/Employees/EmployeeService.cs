@@ -255,15 +255,15 @@ namespace Codeji.CMS.Services.Employees
             {
                 return null;
             }
-            List<ModuleWithPermissionsModel> modulePermission = await _roleService.GetRoleWithPermissions(role.RolesId, role.CompanyId);
+        string[] allowedModulePermission = await _roleService.GetRolePermissionOfuser(role.RolesId);
             returnModel.UserId = user.UserId;
-            returnModel.Role = role.Titles;
+            // returnModel.Role = role.Titles;
             returnModel.FirstName = user.FirstName;
             returnModel.LastName = user.LastName;
-            returnModel.Permissions = [];
-            returnModel.modulePermission = modulePermission;
-            returnModel.RoleId = role.RolesId;
-            returnModel.CompanyId = role.CompanyId;
+            // returnModel.Permissions = [];
+            returnModel.modulePermission = allowedModulePermission;
+            // returnModel.RoleId = role.RolesId;
+            // returnModel.CompanyId = role.CompanyId;
             returnModel.CompanyName = companyDetails.CompanyName;
             returnModel.ProfileImage = string.IsNullOrEmpty(user.FullProfileUrl) ? null : user.FullProfileUrl;
             return returnModel;
