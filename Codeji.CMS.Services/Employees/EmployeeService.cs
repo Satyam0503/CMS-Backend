@@ -152,14 +152,12 @@ namespace Codeji.CMS.Services.Employees
                     UserFrom =currentUser.Email,
                 });
             }, priority: 1);
->>>>>>> fix mail issue
-            // await Emailer.SendMail(employee.Email, emailContent.subject, replacedBody);
+
             return new Result<UserModel>
             {
                 MethodResult = user,
                 Message = "User added",
                 Success = true
-
             };
         }
         public async Task<Result<UserModel>> EditEmployee(UserModel user, string userId)

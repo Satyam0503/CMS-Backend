@@ -38,7 +38,7 @@ namespace Codeji.CMS.API.Controllers
             List<RoleModel> roles = await _roleService.GetRoles(companyId);
             return new Result<RoleModel>()
             {
-                MethodResults = roles ?? new List<RoleModel>(),
+                MethodResults = roles ?? [],
                 Success = true
             };
         }
