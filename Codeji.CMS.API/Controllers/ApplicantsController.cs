@@ -54,13 +54,13 @@ namespace Codeji.CMS.API.Controllers
             {
                 result = await _applicantsService.RegisterApplicants(applicantRegisterModel);
                 result.Success = true;
-                result.Message = "Application has been submitted successfully";
+                result.Message = "MESSAGE.APPLICANT.ADD_SUCCESS";
             }
 
             else
             {
                 result.Success = false;
-                result.Message = "Application has already been submitted. Please reapply after the waiting period";
+                result.Message = "MESSAGE.APPLICANT.ALREADY_APPLIED";
             }
             return result;
         }
@@ -70,8 +70,8 @@ namespace Codeji.CMS.API.Controllers
         //[CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
         public async Task<Result> EditApplicants([FromBody] ApplicantAddEditModel model)
         {
-            Result result = new Result();
-            result = await _applicantsService.UpdateApplicants(model);
+            var result = await _applicantsService.UpdateApplicants(model);
+            result.Message ="MESSAGE.APPLICANT.UPDATED";
             return result;
         }
 
@@ -112,6 +112,7 @@ namespace Codeji.CMS.API.Controllers
 
             return result;
         }
+
         [Route("AddComment")]
         [HttpPost]
         public async Task<Result> AddComment(CommentRequestModel model)
@@ -121,7 +122,7 @@ namespace Codeji.CMS.API.Controllers
             Result result = new Result()
             {
                 Success = true,
-                Message = "Comment Added Successfully",
+                Message = "MESSAGE.COMMENT.ADD_SUCCESS",
                 StatusCode = StatusCodes.Status200OK,
             };
             return result;
