@@ -28,7 +28,9 @@ public class UserController : BaseApiController
 
     public async Task<Result<UserModel>> AddEmployees(UserModel user)
     {
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
         bool isEmailExist = await _employeeService.IsEmailExist(user.Email);
+
         if (isEmailExist)
         {
             return new Result<UserModel>
