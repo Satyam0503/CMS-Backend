@@ -103,5 +103,25 @@ namespace Codeji.CMS.API.Controllers
 
             };
         }
+
+        [HttpGet]
+        [Route("GetRoleById/{roleId}")]
+        [Authorize]
+        public async Task<Result<RoleModel>> GetRoleById(string roleId) {
+            var data = await _roleService.GetRoleById(roleId);
+            return new Result<RoleModel>(){
+                StatusCode = 200,
+                Success= true,
+                MethodResult = data,
+            };
+        }
+
+        [HttpPatch]
+        [Route("UpdateAppAccessForRole/{roleId}")]
+        [Authorize]
+        public async Task<Result> UpdateAppAccessForRole( string roleId, [FromBody] bool hasAppAccess){
+            var result = await _roleService.UpdateAppAccessForRole(roleId,hasAppAccess);
+            return result;
+        }
     }
 }

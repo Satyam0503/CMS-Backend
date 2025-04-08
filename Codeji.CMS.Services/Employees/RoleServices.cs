@@ -1,6 +1,7 @@
 ﻿using System.Data;
 using System.Linq.Expressions;
 using AutoMapper;
+using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.GenericRepository.Interfaces;
@@ -74,7 +75,7 @@ public class RoleServices : IRoleService
                     HasAccess = permission.HasAccess
                 });
             }
-            return "Role Added Successfuly";
+            return "ROLE.ADD.SUCCESS";
         }
         else
         {
@@ -112,7 +113,7 @@ public class RoleServices : IRoleService
                     }
                 }
             }
-            return "Role Updated Successfuly";
+            return "ROLE.UPDATE.SUCCESS";
         }
     }
     //Get company's all roles
@@ -125,7 +126,7 @@ public class RoleServices : IRoleService
     public async Task<RoleModel> GetRoleById(string roleId)
     {
         Roles role = await _RolesRepository.FirstOrDefault(x => x.RolesId == roleId);
-        return _mapper.Map<RoleModel>(role); ;
+        return _mapper.Map<RoleModel>(role);
     }
     //Saving role and it's permission
     //public async Task<RoleWithModuleAndPermissions> SaveRoleAndPermissions(RoleWithModuleAndPermissions roleWithModuleAndPermissions)
@@ -238,8 +239,8 @@ public class RoleServices : IRoleService
             role.CompanyId = companyId;
             role.IsDefault = false;
             role.CreatedDate = DateTime.Now;
-            if(role.RoleType==1)
-            role.HasAppAccess=true;
+            if (role.RoleType == 1)
+                role.HasAppAccess = true;
             List<RolePermission> permissions = rolePermissions.Where(x => x.RoleId == oldRoleId).ToList();
             foreach (RolePermission? item in permissions)
             {
@@ -250,7 +251,7 @@ public class RoleServices : IRoleService
                         RoleId = role.RolesId,
                         CreatedDate = DateTime.Now,
                         CompanyId = companyId,
-                        IsAccessible=item.IsAccessible,
+                        IsAccessible = item.IsAccessible,
                         HasAccess = item.HasAccess
                     });
                 //await _rolePermissionRepository.AddOne(item);
@@ -427,5 +428,29 @@ public class RoleServices : IRoleService
             moduleWithPermissionsModel.Add(moduleWithPermissionModel);
         }
         return moduleWithPermissionsModel;
+    }
+
+    public async Task<Result> UpdateAppAccessForRole(string roleId, bool hasAppAccess)
+    {
+        var isRoleExist = await _RolesRepository.Exist(x => x.RolesId == roleId);
+        if (!isRoleExist)
+        {
+            return new Result()
+            {
+                StatusCode = 200,
+                Message = "ROLE.NOT_EXIST",
+                Success = false
+            };
+        }
+        Expression<Func<Roles, bool>> whereCondition = x => x.RolesId == roleId;
+        await _RolesRepository.UpdateMany(whereCondition, Builders<Roles>.Update
+            .Set(x => x.HasAppAccess, hasAppAccess)
+            .Set(x => x.UpdatedDate, DateTime.UtcNow));
+
+        return new Result(){
+            StatusCode = 200,
+            Message = "ROLE.APP_ACCESS.UPDATED",
+            Success = true
+        };
     }
 }
