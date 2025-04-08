@@ -160,7 +160,6 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("account/getSignedUserDetails")]
-        [Authorize]
         [ModulePermission("Dashboard", "View")]
         public async Task<Result<LoginUserViewModel>> getUserByToken()
         {
@@ -220,7 +219,7 @@ namespace Codeji.CMS.API.Controllers
             Result result = new Result();
             if (string.IsNullOrEmpty(applicantRegisterModel.Email))
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
-            var ApplicantId = await _applicantsServices.GetApplicantsExistingId(applicantRegisterModel.Email);
+            Result ApplicantId = await _applicantsServices.GetApplicantsExistingId(applicantRegisterModel.Email);
             if (ApplicantId.Success)
             {
                 applicantRegisterModel.ActivityType = string.IsNullOrEmpty(ApplicantId.Message)
@@ -265,7 +264,7 @@ namespace Codeji.CMS.API.Controllers
         [Route("SendEmail")]
         public async Task<bool> SendEmail()
         {
-            var a = AppModule.Applicants;
+            string a = AppModule.Applicants;
             _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
             {
                 _middlewareService.EmailSendAndSave(new Repository.Entities.EmpEmailLogs()

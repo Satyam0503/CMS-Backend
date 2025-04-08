@@ -71,7 +71,7 @@ namespace Codeji.CMS.Services.Employees
             _middlewareService = middlewareService;
         }
 
-        public async Task<Result<UserModel>> AddEmployee(UserModel user,string currentUserId)
+        public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
         {
             EmpUser employee = new EmpUser()
             {
@@ -101,8 +101,8 @@ namespace Codeji.CMS.Services.Employees
 
             await _employeeRepository.AddOne(employee);
 
-            var currentUser = _middlewareService.GetUserById(currentUserId);
-            var company = await _companyRepository.FirstOrDefault(x=>x.CompanyId == currentUser.CompanyId);
+            UserModel currentUser = _middlewareService.GetUserById(currentUserId);
+            Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
 
             //Acknowledgement Email Logic 
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 0);
@@ -113,20 +113,20 @@ namespace Codeji.CMS.Services.Employees
                 PasswordCreationLink = ConfigManager.AppSettings.AppUrl + "auth/createpassword",
                 statusNumber = employee.StatusNumber,
                 CompanyName = company != null ? company.CompanyName : "",
-            });         
+            });
 
-              _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
-            {
-                _middlewareService.EmailSendAndSave(new Repository.Entities.EmpEmailLogs()
-                {
-                    UserTo =employee.Email,
-                    Subject = emailContent.subject,
-                    Body = replacedBody,
-                    EmailLogType = Utility.Enums.EnumsHelper.MailType.CreateNewPasswordMail,
-                    Email = employee.Email,
-                    UserFrom =currentUser.Email,
-                });
-            }, priority: 1);
+            _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
+          {
+              _middlewareService.EmailSendAndSave(new Repository.Entities.EmpEmailLogs()
+              {
+                  UserTo = employee.Email,
+                  Subject = emailContent.subject,
+                  Body = replacedBody,
+                  EmailLogType = Utility.Enums.EnumsHelper.MailType.CreateNewPasswordMail,
+                  Email = employee.Email,
+                  UserFrom = currentUser.Email,
+              });
+          }, priority: 1);
             // await Emailer.SendMail(employee.Email, emailContent.subject, replacedBody);
             return new Result<UserModel>
             {
@@ -174,7 +174,7 @@ namespace Codeji.CMS.Services.Employees
             records = records == 0 ? 10 : records;
             //  Task<List<RoleModel>> roleList = _roleService.GetRoles(companyId);
             //RoleModel? adminRole = roleList.Result.FirstOrDefault(role => role.Titles == "Company Administrator");
-            var count = _employeeRepository.Count();
+            Task<int> count = _employeeRepository.Count();
             IEnumerable<EmpUser> list = await _employeeRepository.GetAggregateDataAsync<EmpUser>(pageNo: pageNo, pageSize: records);
             List<UserModel> data = _mapper.Map<List<UserModel>>(list);
             Result<UserModel> result = new Result<UserModel>
@@ -247,27 +247,31 @@ namespace Codeji.CMS.Services.Employees
 
         public async Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId)
         {
-            LoginUserViewModel returnModel = new LoginUserViewModel();
-            UserModel? user = await GetEmployeeById(userId);
             Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == roleId);
-            Company? companyDetails = await _companyRepository.FirstOrDefault(x => true);
-            if (user is null)
+            bool isAppAccess = role.HasAppAccess;
+            if (isAppAccess)
             {
-                return null;
+                LoginUserViewModel returnModel = new LoginUserViewModel();
+                UserModel? user = await GetEmployeeById(userId);
+                Company? companyDetails = await _companyRepository.FirstOrDefault(x => true);
+                if (user is null)
+                {
+                    return null;
+                }
+                List<ModuleWithPermissionsModel> modulePermission = await _roleService.GetRoleWithPermissions(role.RolesId, role.CompanyId);
+                returnModel.UserId = user.UserId;
+                returnModel.Role = role.Titles;
+                returnModel.FirstName = user.FirstName;
+                returnModel.LastName = user.LastName;
+                returnModel.Permissions = [];
+                returnModel.modulePermission = modulePermission;
+                returnModel.RoleId = role.RolesId;
+                returnModel.CompanyId = role.CompanyId;
+                returnModel.CompanyName = companyDetails.CompanyName;
+                returnModel.ProfileImage = string.IsNullOrEmpty(user.FullProfileUrl) ? null : user.FullProfileUrl;
+                return returnModel;
             }
-            List<ModuleWithPermissionsModel> modulePermission = await _roleService.GetRoleWithPermissions(role.RolesId, role.CompanyId);
-            returnModel.UserId = user.UserId;
-            returnModel.Role = role.Titles;
-            returnModel.FirstName = user.FirstName;
-            returnModel.LastName = user.LastName;
-            returnModel.Permissions = [];
-            returnModel.modulePermission = modulePermission;
-            returnModel.RoleId = role.RolesId;
-            returnModel.CompanyId = role.CompanyId;
-            returnModel.CompanyName = companyDetails.CompanyName;
-            returnModel.ProfileImage = string.IsNullOrEmpty(user.FullProfileUrl) ? null : user.FullProfileUrl;
-            return returnModel;
-
+            return null;
         }
         public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId)
         {
@@ -549,7 +553,7 @@ namespace Codeji.CMS.Services.Employees
             Expression<Func<EmpUser, bool>> employeeWhereCondition = x => x.UserId == employeeId;
             UpdateDefinitionBuilder<EmpUser> empUpdateDefinition = Builders<EmpUser>.Update;
             UpdateDefinition<EmpUser> empUpdate = empUpdateDefinition.Set(x => x.IsDeleted, true).Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.UpdatedBy, employeeId);
-            var data = await _employeeRepository.UpdateMany(employeeWhereCondition, empUpdate);
+            Result data = await _employeeRepository.UpdateMany(employeeWhereCondition, empUpdate);
 
             return data;
         }
