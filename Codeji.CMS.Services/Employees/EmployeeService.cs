@@ -71,11 +71,7 @@ namespace Codeji.CMS.Services.Employees
             _middlewareService = middlewareService;
         }
 
-<<<<<<< HEAD
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
-=======
-        public async Task<Result<UserModel>> AddEmployee(UserModel user,string currentUserId)
->>>>>>> fix mail issue
         {
             EmpUser employee = new EmpUser()
             {
