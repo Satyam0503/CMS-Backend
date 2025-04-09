@@ -105,7 +105,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
             ValidIssuer = ConfigManager.AppSettings.APIUrl,
-            ValidAudience = "http://localhost:5173",
+            ValidAudience = ConfigManager.AppSettings.AppUrl,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:SecretKey"]))
         };
     });
