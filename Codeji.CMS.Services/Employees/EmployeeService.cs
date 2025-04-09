@@ -230,48 +230,48 @@ namespace Codeji.CMS.Services.Employees
         // Logic for Login User and Employee by Email and Password
         public async Task<string> GetVerificationToken(string email, string password)
         {
-
             EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
-
-            if (string.IsNullOrEmpty(user.Password))
+            Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == user.RoleId);
+            if (role.HasAppAccess)
             {
-                return "false";
+                if (string.IsNullOrEmpty(user.Password))
+                {
+                    return "false";
+                }
+                if (user != null && AuthenticationHandler.VerifyPassword(password, user.Password))
+                {
+                    List<string> roles = new List<string>() { "admin", "employee" };
+                    return AuthenticationHandler.GenerateJwtToken(user.UserId, user.CompanyId, user.RoleId, roles);
+                }
+                return string.Empty;
             }
-            if (user != null && AuthenticationHandler.VerifyPassword(password, user.Password))
-            {
-                List<string> roles = new List<string>() { "admin", "employee" };
-                return AuthenticationHandler.GenerateJwtToken(user.UserId, user.CompanyId, user.RoleId, roles);
-            }
-            return string.Empty;
+            return "No Access";
         }
 
         public async Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId)
         {
+
+            LoginUserViewModel returnModel = new LoginUserViewModel();
+            UserModel? user = await GetEmployeeById(userId);
             Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == roleId);
-            bool isAppAccess = role.HasAppAccess;
-            if (isAppAccess)
+            Company? companyDetails = await _companyRepository.FirstOrDefault(x => true);
+            if (user is null)
             {
-                LoginUserViewModel returnModel = new LoginUserViewModel();
-                UserModel? user = await GetEmployeeById(userId);
-                Company? companyDetails = await _companyRepository.FirstOrDefault(x => true);
-                if (user is null)
-                {
-                    return null;
-                }
-                List<ModuleWithPermissionsModel> modulePermission = await _roleService.GetRoleWithPermissions(role.RolesId, role.CompanyId);
-                returnModel.UserId = user.UserId;
-                returnModel.Role = role.Titles;
-                returnModel.FirstName = user.FirstName;
-                returnModel.LastName = user.LastName;
-                returnModel.Permissions = [];
-                returnModel.modulePermission = modulePermission;
-                returnModel.RoleId = role.RolesId;
-                returnModel.CompanyId = role.CompanyId;
-                returnModel.CompanyName = companyDetails.CompanyName;
-                returnModel.ProfileImage = string.IsNullOrEmpty(user.FullProfileUrl) ? null : user.FullProfileUrl;
-                return returnModel;
+                return null;
             }
-            return null;
+            List<ModuleWithPermissionsModel> modulePermission = await _roleService.GetRoleWithPermissions(role.RolesId, role.CompanyId);
+            returnModel.UserId = user.UserId;
+            returnModel.Role = role.Titles;
+            returnModel.FirstName = user.FirstName;
+            returnModel.LastName = user.LastName;
+            returnModel.Permissions = [];
+            returnModel.modulePermission = modulePermission;
+            returnModel.RoleId = role.RolesId;
+            returnModel.CompanyId = role.CompanyId;
+            returnModel.CompanyName = companyDetails.CompanyName;
+            returnModel.ProfileImage = string.IsNullOrEmpty(user.FullProfileUrl) ? null : user.FullProfileUrl;
+            return returnModel;
+
         }
         public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId)
         {

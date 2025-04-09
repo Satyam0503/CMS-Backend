@@ -153,6 +153,14 @@ namespace Codeji.CMS.API.Controllers
                 result.StatusCode = 404;
                 return result;
             }
+            if (token == "No Access")
+            {
+                result.Message = "MESSAGE.APPLICATION.ACCESS_DENIED";
+                result.Success = false;
+                result.StatusCode = 401;
+                return result;
+
+            }
             result.Message = token;
             result.Success = true;
             return result;
