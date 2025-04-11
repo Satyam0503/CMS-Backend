@@ -5,6 +5,7 @@ using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
+using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
@@ -19,6 +20,7 @@ namespace Codeji.CMS.Services.Registration
         public AutoMapperObjects()
         {
             CreateMap<EmpUser, UserModel>().ForMember(dest => dest.Password, opt => opt.Ignore()).ReverseMap();
+            CreateMap<EmpUser, GetAllEmployeeResponseModel>().ReverseMap();
             CreateMap<Company, CompanyRequestModel>().ReverseMap();
             CreateMap<EmpUser, CompanyRequestModel>().ReverseMap();
             CreateMap<EmpEducationDetails, EmployeeEducationRequestModel>().ReverseMap();
