@@ -8,6 +8,7 @@ namespace Codeji.CMS.DTO.RolePermissions
         public string Description { get; set; }
         public bool IsNotEditable { get; set; }
         public bool IsDefault { get; set; }
+        public bool HasAppAccess {get;set;}
         public List<string> UserRoles { get; set; }
     }
 }

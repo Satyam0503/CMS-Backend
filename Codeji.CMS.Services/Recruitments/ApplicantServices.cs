@@ -5,11 +5,15 @@ using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.GenericRepository.Interfaces;
+using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
+using Codeji.CMS.Services.BackgroundTasks;
+using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.Helpers;
+using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
 
@@ -25,6 +29,11 @@ namespace Codeji.CMS.Services.Recruitments
         readonly IMongoDbRepository<Company> _companyRepository;
         readonly IMongoDbRepository<MailTemplate> _mailTemplateRepository;
         readonly IMongoDbRepository<JobVacancy> _jobVacancyRepository;
+        private readonly IPriorityTaskQueue _priorityTaskQueue;
+
+        private readonly IMiddlewareService _middlewareService;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
         public ApplicantServices(IMongoDbRepository<Applicant> applicantDbRepository,
             IMapper mapper,
             IJobVacancy jobVacancyService,
@@ -32,7 +41,10 @@ namespace Codeji.CMS.Services.Recruitments
             IMongoDbRepository<MailTemplate> mailTemplateRepository,
             IMongoDbRepository<JobVacancy> jobVacancyRepository,
             IMongoDbRepository<ApplicantLogs> applicantLogsRepository,
-            IMongoDbRepository<EmpUser> employeeRepository
+            IMongoDbRepository<EmpUser> employeeRepository,
+            IPriorityTaskQueue priorityTaskQueue,
+            IMiddlewareService middlewareService,
+            IHttpContextAccessor httpContextAccessor
             )
         {
             _applicantRepository = applicantDbRepository;
@@ -43,6 +55,9 @@ namespace Codeji.CMS.Services.Recruitments
             _jobVacancyRepository = jobVacancyRepository;
             _ApplicantLogsRepository = applicantLogsRepository;
             _employeeRepository = employeeRepository;
+            _priorityTaskQueue = priorityTaskQueue;
+            _middlewareService = middlewareService;
+            _httpContextAccessor= httpContextAccessor;
         }
         /// <summary>
         /// For Annonymous add and update applicants
@@ -57,27 +72,39 @@ namespace Codeji.CMS.Services.Recruitments
                 LastName = applicantRegisterModel.LastName,
                 Experience = applicantRegisterModel.Experience,
                 VacancyId = applicantRegisterModel.VacancyId,
-                //VacancyName = applicantRegisterModel.VacancyName,
                 Phone = applicantRegisterModel.Phone,
                 Email = applicantRegisterModel.Email,
                 Status = applicantRegisterModel.Status,
                 State = applicantRegisterModel.State,
                 CreatedBy = "new"
-
             };
             Result result = await _applicantRepository.AddOne(applicant);
 
-            //Acknowledgement Email Logic 
-
+            //Acknowledgement Email Logic
+            var vacancy = await _jobVacancyService.GetVacancyById(applicantRegisterModel.VacancyId); 
+            var currentUser = _middlewareService.GetUserById(CurrentContext.UserId(_httpContextAccessor));
+            
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 4);
             HtmlTemplate htmlTemplate = new HtmlTemplate();
             string replacedBody = htmlTemplate.Render(emailContent?.body ?? string.Empty, new
             {
                 CandidateName = applicantRegisterModel.FirstName + " " + applicantRegisterModel.LastName,
-                //JobTitle = applicantRegisterModel.VacancyName
-
+                JobTitle = vacancy != null ? vacancy.Title : string.Empty
             });
-            await Emailer.SendMail(applicantRegisterModel.Email, emailContent.subject, replacedBody);
+
+            _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
+            {
+                _middlewareService.EmailSendAndSave(new EmpEmailLogs()
+                {
+                    UserTo =applicant.Email,
+                    Subject = emailContent.subject,
+                    Body = replacedBody,
+                    EmailLogType = Utility.Enums.EnumsHelper.MailType.ApplyNowMailToApplicant,
+                    Email = applicant.Email,
+                    UserFrom = currentUser != null ? currentUser.Email : string.Empty
+                });
+            }, priority: 1);
+
             return result;
         }
 
@@ -108,7 +135,6 @@ namespace Codeji.CMS.Services.Recruitments
             entity.State = model.State;
             Result res = await _applicantRepository.Update(whereCondition, entity);
             return res;
-
         }
 
         public async Task<bool> IsEmailExist(string email)

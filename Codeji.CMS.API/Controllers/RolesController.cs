@@ -38,7 +38,7 @@ namespace Codeji.CMS.API.Controllers
             List<RoleModel> roles = await _roleService.GetRoles(companyId);
             return new Result<RoleModel>()
             {
-                MethodResults = roles ?? new List<RoleModel>(),
+                MethodResults = roles ?? [],
                 Success = true
             };
         }
@@ -102,6 +102,26 @@ namespace Codeji.CMS.API.Controllers
                 MethodResults = data,
 
             };
+        }
+
+        [HttpGet]
+        [Route("GetRoleById/{roleId}")]
+        [Authorize]
+        public async Task<Result<RoleModel>> GetRoleById(string roleId) {
+            var data = await _roleService.GetRoleById(roleId);
+            return new Result<RoleModel>(){
+                StatusCode = 200,
+                Success= true,
+                MethodResult = data,
+            };
+        }
+
+        [HttpPatch]
+        [Route("UpdateAppAccessForRole/{roleId}")]
+        [Authorize]
+        public async Task<Result> UpdateAppAccessForRole( string roleId, [FromBody] bool hasAppAccess){
+            var result = await _roleService.UpdateAppAccessForRole(roleId,hasAppAccess);
+            return result;
         }
     }
 }
