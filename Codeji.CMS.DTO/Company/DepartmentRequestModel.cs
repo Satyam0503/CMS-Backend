@@ -8,6 +8,7 @@ namespace Codeji.CMS.DTO.RequestModels.Company
 {
     public class DepartmentRequestModel
     {
+        public string DepartmentId { get; set; }
         public string DepartmentName { get; set; }
         public string DepartmentDescription { get; set; }
 

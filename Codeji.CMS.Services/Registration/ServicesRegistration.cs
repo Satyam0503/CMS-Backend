@@ -1,4 +1,5 @@
 
+using Codeji.CMS.Services.Companies;
 using Codeji.CMS.Services.Employees;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
@@ -18,6 +19,7 @@ public static class ServicesRegistration
         services.AddScoped<ICompanyService, CompanyService>();
         services.AddScoped<IEmployeeService, EmployeeService>();
         services.AddScoped<IJobVacancy, JobVacancyService>();
+        services.AddScoped<ICompanyMasterService,CompanyMasterService>();
 
         return services;
     }
