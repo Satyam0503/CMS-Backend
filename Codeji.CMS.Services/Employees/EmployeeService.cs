@@ -76,7 +76,6 @@ namespace Codeji.CMS.Services.Employees
         }
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
-        public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
         {
             EmpUser employee = new EmpUser()
             {
