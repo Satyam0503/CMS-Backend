@@ -2,6 +2,7 @@
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
+using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility.middlewares;
@@ -58,9 +59,9 @@ public class UserController : BaseApiController
 
     [Route("GetAllEmployees")]
     [HttpGet]
-    public async Task<Result<UserModel>> GetAllEmployees([FromQuery] int pageNo, [FromQuery] int records)
+    public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees([FromQuery] int pageNo, [FromQuery] int records)
     {
-        Result<UserModel> data = await _employeeService.GetAllEmployees(pageNo, records);
+        Result<GetAllEmployeeResponseModel> data = await _employeeService.GetAllEmployees(pageNo, records);
         return data;
     }
     [Route("ChangePassword")]

@@ -6,6 +6,7 @@ using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
+using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
@@ -38,6 +39,7 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<MailTemplate> _mailTemplateRepository;
         readonly IMongoDbRepository<JobVacancy> _jobVacancy;
         private readonly IMiddlewareService _middlewareService;
+        readonly IMongoDbRepository<Department> _departmentRepository;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
@@ -52,7 +54,8 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<JobVacancy> jobVacancy,
             IPriorityTaskQueue priorityTaskQueue,
             IMiddlewareService middlewareService,
-            IHttpContextAccessor httpContextAccessor
+            IHttpContextAccessor httpContextAccessor,
+            IMongoDbRepository<Department> departmentRepository
             )
         {
             _employeeRepository = employeeRepository;
@@ -69,9 +72,10 @@ namespace Codeji.CMS.Services.Employees
             _jobVacancy = jobVacancy;
             _priorityTaskQueue = priorityTaskQueue;
             _middlewareService = middlewareService;
+            _departmentRepository = departmentRepository;
         }
 
-        public async Task<Result<UserModel>> AddEmployee(UserModel user,string currentUserId)
+        public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
         {
             EmpUser employee = new EmpUser()
             {
@@ -102,7 +106,7 @@ namespace Codeji.CMS.Services.Employees
             await _employeeRepository.AddOne(employee);
 
             var currentUser = _middlewareService.GetUserById(currentUserId);
-            var company = await _companyRepository.FirstOrDefault(x=>x.CompanyId == currentUser.CompanyId);
+            var company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
 
             //Acknowledgement Email Logic 
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 0);
@@ -113,20 +117,20 @@ namespace Codeji.CMS.Services.Employees
                 PasswordCreationLink = ConfigManager.AppSettings.AppUrl + "auth/createpassword",
                 statusNumber = employee.StatusNumber,
                 CompanyName = company != null ? company.CompanyName : "",
-            });         
+            });
 
-              _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
-            {
-                _middlewareService.EmailSendAndSave(new Repository.Entities.EmpEmailLogs()
-                {
-                    UserTo =employee.Email,
-                    Subject = emailContent.subject,
-                    Body = replacedBody,
-                    EmailLogType = Utility.Enums.EnumsHelper.MailType.CreateNewPasswordMail,
-                    Email = employee.Email,
-                    UserFrom =currentUser.Email,
-                });
-            }, priority: 1);
+            _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
+          {
+              _middlewareService.EmailSendAndSave(new Repository.Entities.EmpEmailLogs()
+              {
+                  UserTo = employee.Email,
+                  Subject = emailContent.subject,
+                  Body = replacedBody,
+                  EmailLogType = Utility.Enums.EnumsHelper.MailType.CreateNewPasswordMail,
+                  Email = employee.Email,
+                  UserFrom = currentUser.Email,
+              });
+          }, priority: 1);
 
             return new Result<UserModel>
             {
@@ -167,22 +171,37 @@ namespace Codeji.CMS.Services.Employees
             UserModel userModel = _mapper.Map<UserModel>(user);
             return userModel;
         }
-        public async Task<Result<UserModel>> GetAllEmployees(int pageNo, int records)
+        public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(int pageNo, int records)
         {
             pageNo = pageNo == 0 ? 1 : pageNo;
             records = records == 0 ? 10 : records;
-            //  Task<List<RoleModel>> roleList = _roleService.GetRoles(companyId);
-            //RoleModel? adminRole = roleList.Result.FirstOrDefault(role => role.Titles == "Company Administrator");
             var count = _employeeRepository.Count();
-            IEnumerable<EmpUser> list = await _employeeRepository.GetAggregateDataAsync<EmpUser>(pageNo: pageNo, pageSize: records);
-            List<UserModel> data = _mapper.Map<List<UserModel>>(list);
-            Result<UserModel> result = new Result<UserModel>
+            var empList = (await _employeeRepository.GetAggregateDataAsync<EmpUser>(pageNo: pageNo, pageSize: records)).ToList();
+            string[] departmentList = empList.Select(x => x.Department).Distinct().ToArray();
+            IEnumerable<Department> depList = await _departmentRepository.GetAll(x => departmentList.Contains(x.DepartmentId));
+            var data = (from emp in empList
+                        join department in depList
+                        on emp.Department equals department.DepartmentId into deptGroup
+                        from dept in deptGroup.DefaultIfEmpty()
+                        select new GetAllEmployeeResponseModel
+                        {
+                            UserId = emp.UserId,
+                            FullName = $"{emp.FirstName} {emp.LastName ?? ""}",
+                            Email = emp.Email,
+                            EmployeeId = emp.EmployeeId,
+                            JobRole = emp.JobRole,
+                            Department = dept?.DepartmentName,
+                            PhoneNumber = emp.PhoneNumber,
+                            DateOfBirth = emp.DateOfBirth,
+                            FullProfileUrl = string.IsNullOrEmpty(emp.ProfileUrl) ? null : Common.GetEmployeeImageUrl(emp.ProfileUrl),
+                        }).ToList();
+
+            return new Result<GetAllEmployeeResponseModel>()
             {
                 Success = true,
                 TotalRecords = await count,
                 MethodResults = data,
             };
-            return result;
         }
         public async Task<bool> IsEmailExist(string email)
         {
@@ -254,7 +273,7 @@ namespace Codeji.CMS.Services.Employees
             {
                 return null;
             }
-        string[] allowedModulePermission = await _roleService.GetRolePermissionOfuser(role.RolesId);
+            string[] allowedModulePermission = await _roleService.GetRolePermissionOfuser(role.RolesId);
             returnModel.UserId = user.UserId;
             // returnModel.Role = role.Titles;
             returnModel.FirstName = user.FirstName;

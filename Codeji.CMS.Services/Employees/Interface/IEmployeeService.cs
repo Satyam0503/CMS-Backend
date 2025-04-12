@@ -3,6 +3,7 @@ using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
+using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
 
@@ -14,7 +15,7 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<Result<UserModel>> EditEmployee(UserModel user, string userId);
         Task<bool> IsUserActive(string userId);
         Task<UserModel> GetEmployeeById(string userId);
-        Task<Result<UserModel>> GetAllEmployees(int pageNo, int records);
+        Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(int pageNo, int records);
         Task<bool> IsEmailExist(string email);
         Task<bool> ResetPassword(string userId, string password, string oldPassword = "");
         Task<string> GetVerificationToken(string email, string password);
