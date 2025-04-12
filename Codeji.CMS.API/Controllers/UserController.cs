@@ -40,7 +40,6 @@ public class UserController : BaseApiController
                 Message = "User Already Exist"
             };
         }
-        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.AddEmployee(user,currentUserId);
     }
 
