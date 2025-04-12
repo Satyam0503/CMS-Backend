@@ -76,6 +76,7 @@ namespace Codeji.CMS.Services.Employees
         }
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
+        public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
         {
             EmpUser employee = new EmpUser()
             {
@@ -105,8 +106,8 @@ namespace Codeji.CMS.Services.Employees
 
             await _employeeRepository.AddOne(employee);
 
-            var currentUser = _middlewareService.GetUserById(currentUserId);
-            var company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
+            UserModel currentUser = _middlewareService.GetUserById(currentUserId);
+            Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
 
             //Acknowledgement Email Logic 
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 0);
@@ -248,23 +249,27 @@ namespace Codeji.CMS.Services.Employees
         // Logic for Login User and Employee by Email and Password
         public async Task<string> GetVerificationToken(string email, string password)
         {
-
             EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
-
-            if (string.IsNullOrEmpty(user.Password))
+            Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == user.RoleId);
+            if (role.HasAppAccess)
             {
-                return "false";
+                if (string.IsNullOrEmpty(user.Password))
+                {
+                    return "false";
+                }
+                if (user != null && AuthenticationHandler.VerifyPassword(password, user.Password))
+                {
+                    List<string> roles = new List<string>() { "admin", "employee" };
+                    return AuthenticationHandler.GenerateJwtToken(user.UserId, user.CompanyId, user.RoleId, roles);
+                }
+                return string.Empty;
             }
-            if (user != null && AuthenticationHandler.VerifyPassword(password, user.Password))
-            {
-                List<string> roles = new List<string>() { "admin", "employee" };
-                return AuthenticationHandler.GenerateJwtToken(user.UserId, user.CompanyId, user.RoleId, roles);
-            }
-            return string.Empty;
+            return "No Access";
         }
 
         public async Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId)
         {
+
             LoginUserViewModel returnModel = new LoginUserViewModel();
             UserModel? user = await GetEmployeeById(userId);
             Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == roleId);
@@ -567,7 +572,7 @@ namespace Codeji.CMS.Services.Employees
             Expression<Func<EmpUser, bool>> employeeWhereCondition = x => x.UserId == employeeId;
             UpdateDefinitionBuilder<EmpUser> empUpdateDefinition = Builders<EmpUser>.Update;
             UpdateDefinition<EmpUser> empUpdate = empUpdateDefinition.Set(x => x.IsDeleted, true).Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.UpdatedBy, employeeId);
-            var data = await _employeeRepository.UpdateMany(employeeWhereCondition, empUpdate);
+            Result data = await _employeeRepository.UpdateMany(employeeWhereCondition, empUpdate);
 
             return data;
         }
