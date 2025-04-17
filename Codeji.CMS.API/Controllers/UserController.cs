@@ -94,8 +94,8 @@ public class UserController : BaseApiController
     [Route("AddEditEmployeeSummary")]
     [HttpPost]
     public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary)
-    {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+    {   
+        string userId = string.IsNullOrEmpty(userSummary.UserId) ? CurrentContext.UserId(_httpContextAccessor) : userSummary.UserId;
         return await _employeeService.AddEditEmployeeSummary(userSummary, userId);
     }
 
@@ -226,9 +226,8 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result> AddEditSkills(SkillsRequestModel skillsModel)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+        string userId = string.IsNullOrEmpty(skillsModel.UserId) ?  CurrentContext.UserId(_httpContextAccessor): skillsModel.UserId ;
         return await _employeeService.AddEditEmployeeSkills(skillsModel, userId);
-
     }
 
     [Route("GetEmployeeSkills")]

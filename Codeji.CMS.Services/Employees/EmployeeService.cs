@@ -294,10 +294,9 @@ namespace Codeji.CMS.Services.Employees
         public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId)
         {
             Expression<Func<EmpSummary, bool>> whereCondition = x => userId == x.UserId && x.Id == userSummary.SummaryId;
-            EmpSummary? employeesummary = await _employeeSummaryRepo.FirstOrDefault(x => x.UserId == userId);
-            bool success = false;
+            EmpSummary? employeesummary = await _employeeSummaryRepo.FirstOrDefault(whereCondition);
 
-            if (employeesummary == null && string.IsNullOrEmpty(userSummary.SummaryId))
+            if (employeesummary == null)
             {
                 EmpSummary summary = new EmpSummary()
                 {
@@ -310,7 +309,6 @@ namespace Codeji.CMS.Services.Employees
                     Success = true,
                     Message = "Summary Added Successfully"
                 };
-
             }
             else
             {
@@ -349,7 +347,6 @@ namespace Codeji.CMS.Services.Employees
                 {
                     Success = true,
                     Message = "Skills Updated Successfully"
-
                 };
             }
         }
@@ -481,7 +478,7 @@ namespace Codeji.CMS.Services.Employees
             {
                 return new EmployeeSummaryRequestModel()
                 {
-                    Summary = "No Summary Available"
+                    Summary =""
                 };
             }
             return new EmployeeSummaryRequestModel()
