@@ -371,7 +371,7 @@ namespace Codeji.CMS.Services.Employees
             };
         }
 
-        public async Task<Result> EditEmployeeEducation(EmpEducationDetails educationDetails, string userId)
+        public async Task<Result> EditEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId)
         {
             Expression<Func<EmpEducationDetails, bool>> whereCondition = x => x.UserId == userId && x.EducationId == educationDetails.EducationId;
             EmpEducationDetails? check = await _educationDetailsRepo.FirstOrDefault(whereCondition);
@@ -425,7 +425,7 @@ namespace Codeji.CMS.Services.Employees
             };
         }
 
-        public async Task<Result> EditEmployeeCertification(EmpCertificationDetails certificationDetails, string userId)
+        public async Task<Result> EditEmployeeCertification(EmployeeCertificationRequestModel certificationDetails, string userId)
         {
             Expression<Func<EmpCertificationDetails, bool>> whereCondition = x => x.UserId == userId && x.CertificationId == certificationDetails.CertificationId;
             EmpCertificationDetails? check = await _certificationDetailsRepo.FirstOrDefault(whereCondition);
@@ -455,7 +455,6 @@ namespace Codeji.CMS.Services.Employees
                 Message = "Certification Details Updated Sucessfully",
                 Success = true,
                 StatusCode = 200
-
             };
         }
 

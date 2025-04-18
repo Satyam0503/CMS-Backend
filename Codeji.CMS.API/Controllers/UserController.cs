@@ -103,16 +103,15 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+        string userId = string.IsNullOrEmpty(educationDetails.UserId) ? CurrentContext.UserId(_httpContextAccessor) : educationDetails.UserId;
         return await _employeeService.AddEmployeeEducation(educationDetails, userId);
-
     }
 
     [Route("EditEmployeeEducation")]
     [HttpPost]
-    public async Task<Result> EditEmployeeEducation(EmpEducationDetails educationDetails)
+    public async Task<Result> EditEmployeeEducation(EmployeeEducationRequestModel educationDetails)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+        string userId = string.IsNullOrEmpty(educationDetails.UserId) ? CurrentContext.UserId(_httpContextAccessor) : educationDetails.UserId;
         return await _employeeService.EditEmployeeEducation(educationDetails, userId);
     }
 
@@ -120,16 +119,16 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result<EmployeeCertificationRequestModel>> AddEmployeeCertification(EmployeeCertificationRequestModel certificationDetails)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+        string userId = string.IsNullOrEmpty(certificationDetails.UserId) ? CurrentContext.UserId(_httpContextAccessor) : certificationDetails.UserId;
         return await _employeeService.AddEmployeeCertification(certificationDetails, userId);
 
     }
 
     [Route("EditEmployeeCertification")]
     [HttpPost]
-    public async Task<Result> EditEmployeeCertification(EmpCertificationDetails certificationDetails)
+    public async Task<Result> EditEmployeeCertification(EmployeeCertificationRequestModel certificationDetails)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+        string userId = string.IsNullOrEmpty(certificationDetails.UserId) ? CurrentContext.UserId(_httpContextAccessor) : certificationDetails.UserId;
         return await _employeeService.EditEmployeeCertification(certificationDetails, userId);
     }
 
@@ -244,11 +243,11 @@ public class UserController : BaseApiController
 
     }
 
-    [Route("DeleteEducationDetails")]
+    [Route("DeleteEducationDetails/{educationId}")]
     [HttpDelete]
-    public async Task<Result> DeleteEducationDetails([FromQuery] string educationId)
+    public async Task<Result> DeleteEducationDetails(string educationId, [FromBody] string userId)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+        if(string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
         Result data = await _employeeService.DeleteEducationDetails(educationId, userId);
         if (data == null)
         {
@@ -267,11 +266,11 @@ public class UserController : BaseApiController
         };
     }
 
-    [Route("DeleteCertificationDetails")]
+    [Route("DeleteCertificationDetails/{certificationId}")]
     [HttpDelete]
-    public async Task<Result> DeleteCertificationDetails([FromQuery] string certificationId)
+    public async Task<Result> DeleteCertificationDetails(string certificationId,[FromBody] string userId)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+        if(string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
         Result data = await _employeeService.DeleteCertificationDetails(certificationId, userId);
         if (data == null)
         {

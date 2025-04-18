@@ -22,9 +22,9 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId);
         Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId);
         Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);
-        Task<Result> EditEmployeeEducation(EmpEducationDetails educationDetails, string userId);
+        Task<Result> EditEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);
         Task<Result<EmployeeCertificationRequestModel>> AddEmployeeCertification(EmployeeCertificationRequestModel cerificationDetails, string userId);
-        Task<Result> EditEmployeeCertification(EmpCertificationDetails certificationDetails, string userId);
+        Task<Result> EditEmployeeCertification(EmployeeCertificationRequestModel certificationDetails, string userId);
         Task<List<EmpEducationDetails>> GetEmployeeEducationDetails(string id);
         Task<EmployeeSummaryRequestModel> GetEmployeeSummary(string userId);
         Task<List<EmpCertificationDetails>> GetEmployeeCertificationDetails(string id);
