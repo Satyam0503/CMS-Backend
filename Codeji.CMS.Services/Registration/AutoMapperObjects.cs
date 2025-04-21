@@ -27,7 +27,7 @@ namespace Codeji.CMS.Services.Registration
             CreateMap<EmpCertificationDetails, EmployeeCertificationRequestModel>().ReverseMap();
             CreateMap<Roles, RoleModel>().ReverseMap();
             CreateMap<JobVacancy, JobVacancyModel>().ReverseMap();
-            CreateMap<Department, DepartmentViewModel>().ReverseMap();
+            CreateMap<Department, DepartmentDTO>().ReverseMap();
             CreateMap<Applicant, ApplicantViewModel>().ForMember(dest => dest.ApplyDate, opt => opt.MapFrom(src => src.CreatedDate)).ReverseMap();
 
         }

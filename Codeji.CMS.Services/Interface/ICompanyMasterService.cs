@@ -6,6 +6,6 @@ namespace Codeji.CMS.Services.Interface;
 
 public interface ICompanyMasterService
 {
-    Task<Result> AddEditDepartment(DepartmentRequestModel model);
-    Task<Result<DepartmentViewModel>> GetDepartmentList();
+    Task<Result> AddEditDepartment(DepartmentDTO model);
+    Task<Result<DepartmentDTO>> GetDepartmentList();
 }

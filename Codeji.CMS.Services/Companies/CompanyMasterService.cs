@@ -9,6 +9,7 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Interface;
+using Microsoft.AspNetCore.Http;
 
 namespace Codeji.CMS.Services.Companies;
 
@@ -21,7 +22,7 @@ public class CompanyMasterService : ICompanyMasterService
         _departmentRepository = departmentRepository;
         _mapper = mapper;
     }
-    public async Task<Result> AddEditDepartment(DepartmentRequestModel model)
+    public async Task<Result> AddEditDepartment(DepartmentDTO model)
     {
         Result result = new();
         Expression<Func<Department, bool>> whereCondition = x => x.DepartmentId == model.DepartmentId;
@@ -29,7 +30,8 @@ public class CompanyMasterService : ICompanyMasterService
         if (string.IsNullOrEmpty(dep.DepartmentId))
         {
             dep.DepartmentName = model.DepartmentName;
-            dep.DepartmentDescription = model.DepartmentDescription;
+            dep.IsActive = model.IsActive;
+            dep.Titles = model.Titles;
 
             result = await _departmentRepository.AddOne(dep);
             if (result.Success) result.Message = "Department Added Successfully";
@@ -37,32 +39,36 @@ public class CompanyMasterService : ICompanyMasterService
         else
         {
             dep.DepartmentName = model.DepartmentName;
-            dep.DepartmentDescription = model.DepartmentDescription;
-
+            dep.IsActive = model.IsActive;
+            dep.Titles = model.Titles;
             result = await _departmentRepository.Update(whereCondition, dep);
             if (result.Success) result.Message = "Department Edited Successfully";
         }
         return result;
     }
 
-    public async Task<Result<DepartmentViewModel>> GetDepartmentList()
+    public async Task<Result<DepartmentDTO>> GetDepartmentList()
     {
-        Result<DepartmentViewModel> result = new();
         IEnumerable<Department> departments = await _departmentRepository.GetAll(x => x.IsDeleted == false);
-        List<DepartmentViewModel> data = _mapper.Map<List<DepartmentViewModel>>(departments);
-
         if (departments == null || !departments.Any())
         {
-            result.Success = false;
-            result.Message = "No Department Found";
-            result.StatusCode = 404;
+            return new Result<DepartmentDTO>()
+            {
+                StatusCode = StatusCodes.Status404NotFound,
+                Success = false,
+                Message = "No Department Found"
+            };
         }
-        result.MethodResults = data.ToList();
-        result.TotalRecords = data.Count;
-        result.Success = true;
-        result.StatusCode = 200;
-        result.Message = "List Of Departments";
-        return result;
+
+        List<DepartmentDTO> data = _mapper.Map<List<DepartmentDTO>>(departments);
+        return new Result<DepartmentDTO>()
+        {
+            MethodResults = data.ToList(),
+            TotalRecords = data.Count,
+            Success = true,
+            StatusCode = 200,
+            Message = "List Of Departments",
+        };
     }
 }
 
