@@ -70,5 +70,17 @@ public class CompanyMasterService : ICompanyMasterService
             Message = "List Of Departments",
         };
     }
+
+    public async Task<bool> DeleteDepartment(string departmentId)
+    {
+        Expression<Func<Department, bool>> whereCondition = x => x.DepartmentId == departmentId;
+        Department? department = await _departmentRepository.FirstOrDefault(whereCondition);
+        if(department is null){
+            return false;
+        }
+        department.IsDeleted = true;
+        await _departmentRepository.Update(whereCondition, department);
+        return true;
+    }
 }
 

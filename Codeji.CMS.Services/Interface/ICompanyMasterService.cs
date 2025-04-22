@@ -8,4 +8,5 @@ public interface ICompanyMasterService
 {
     Task<Result> AddEditDepartment(DepartmentDTO model);
     Task<Result<DepartmentDTO>> GetDepartmentList();
+    Task<bool> DeleteDepartment(string departmentId);
 }

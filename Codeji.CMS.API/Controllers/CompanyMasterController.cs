@@ -39,4 +39,26 @@ public class CompanyMasterController : BaseApiController
         Result<DepartmentDTO> data = await _companyMasterService.GetDepartmentList();
         return data;
     }
+
+    [HttpDelete]
+    [Route("DeleteDepartment/{departmentId}")]
+    public async Task<Result> DeleteDepartment(string departmentId)
+    {
+        var success = await _companyMasterService.DeleteDepartment(departmentId);
+        if (!success)
+        {
+            return new Result()
+            {
+                Message = "Department Not Found",
+                Success = false,
+                StatusCode= 200,
+            };
+        }
+        return new Result()
+        {
+            Message = "Department Deleted Successfully",
+            StatusCode = 200,
+            Success = true,
+        };
+    }
 }
