@@ -3,6 +3,6 @@
     public class SkillsRequestModel
     {
         public string? UserId {get;set;}
-        public string TotalSkills { get; set; }
+        public List<string> Skills { get; set; }
     }
 }

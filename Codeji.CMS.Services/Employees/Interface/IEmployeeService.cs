@@ -4,6 +4,7 @@ using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.DTO.ResponseModel;
+using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
 
@@ -31,10 +32,12 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<string> GetUserExistingProfile(string userId);
         Task<string> AddUserProfileImage(string fileName, string userId, string filePath);
         Task<Result> AddEditEmployeeSkills(SkillsRequestModel skillsModel, string userId);
-        Task<EmpSkills> GetEmployeeSkills(string userId);
+        Task<EmployeeSkillsDTO> GetEmployeeSkills(string userId);
         Task<bool> CreateNewPassword(string password, string statusNumber);
         Task<Result> DeleteEducationDetails(string educationId, string userId);
         Task<Result> DeleteCertificationDetails(string certificationId, string userId);
         Task<Result> DeleteEmployee(string employeeId);
+        Task<Result<Skills>> GetSuggestedSkills(string query);
+        Task<Result> AddSkill(string skill);
     }
 }

@@ -1,8 +1,10 @@
 
+using System.Text.RegularExpressions;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.DTO.ResponseModel;
+using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility.middlewares;
@@ -221,7 +223,7 @@ public class UserController : BaseApiController
         }
     }
 
-    [Route("AddSkills")]
+    [Route("AddEditEmpSkills")]
     [HttpPost]
     public async Task<Result> AddEditSkills(SkillsRequestModel skillsModel)
     {
@@ -231,11 +233,11 @@ public class UserController : BaseApiController
 
     [Route("GetEmployeeSkills")]
     [HttpGet]
-    public async Task<Result<EmpSkills>> GetEmployeeSkills([FromQuery] string userId = null)
+    public async Task<Result<EmployeeSkillsDTO>> GetEmployeeSkills([FromQuery] string userId = null)
     {
         if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
-        EmpSkills result = await _employeeService.GetEmployeeSkills(userId);
-        return new Result<EmpSkills>()
+        var result = await _employeeService.GetEmployeeSkills(userId);
+        return new Result<EmployeeSkillsDTO>()
         {
             Success = true,
             MethodResult = result
@@ -311,5 +313,36 @@ public class UserController : BaseApiController
         };
     }
 
+    [HttpGet]
+    [Route("GetSuggestedSkills")]
+    public async Task<Result<Skills>> GetSuggestedSkills([FromQuery] string query){
+        var sanitizedQuery = query.Trim().ToLower();
+        if(string.IsNullOrEmpty(sanitizedQuery)){
+            return new Result<Skills>(){
+                Success=true,
+                MethodResults =[],
+                StatusCode =200,
+            };
+        }
+        return await _employeeService.GetSuggestedSkills(sanitizedQuery);
+    }
+
+    [HttpPost]
+    [Route("AddSkill")]
+    public async Task<Result> AddSkill([FromBody] string skill ){
+        var sanitizeSkill = skill.Trim().ToLower();
+        var regex = new Regex(@"^[a-zA-Z0-9\s\+\#\.\-]{2,30}$");
+        var isValid= regex.IsMatch(sanitizeSkill);
+
+        if(string.IsNullOrEmpty(sanitizeSkill) || !isValid){
+            return new Result(){
+                StatusCode = 200,
+                Success= false,
+                Message = "InValid Skill Name"
+            };
+        }
+        var result =  await  _employeeService.AddSkill(sanitizeSkill);
+        return result;
+    }
 
 }
