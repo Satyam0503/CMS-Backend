@@ -6,7 +6,6 @@ namespace Codeji.CMS.Repository.Entities.Company
     {
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
         public string DepartmentId { get; set; }
-        public string DepartmentName { get; set; }
         public bool IsActive {get;set;}
         public List<MultilingualModel> Titles {get;set;}
     }

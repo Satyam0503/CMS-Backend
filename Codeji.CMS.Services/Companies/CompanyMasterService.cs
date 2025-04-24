@@ -29,7 +29,6 @@ public class CompanyMasterService : ICompanyMasterService
         Department dep = _departmentRepository.FirstOrDefault(whereCondition)?.Result ?? new();
         if (string.IsNullOrEmpty(dep.DepartmentId))
         {
-            dep.DepartmentName = model.DepartmentName;
             dep.IsActive = model.IsActive;
             dep.Titles = model.Titles;
 
@@ -38,7 +37,6 @@ public class CompanyMasterService : ICompanyMasterService
         }
         else
         {
-            dep.DepartmentName = model.DepartmentName;
             dep.IsActive = model.IsActive;
             dep.Titles = model.Titles;
             result = await _departmentRepository.Update(whereCondition, dep);

@@ -197,7 +197,7 @@ namespace Codeji.CMS.Services.Employees
                             Email = emp.Email,
                             EmployeeId = emp.EmployeeId,
                             JobRole = emp.JobRole,
-                            Department = dept?.DepartmentName,
+                            Department = "",
                             PhoneNumber = emp.PhoneNumber,
                             DateOfBirth = emp.DateOfBirth,
                             FullProfileUrl = string.IsNullOrEmpty(emp.ProfileUrl) ? null : Common.GetEmployeeImageUrl(emp.ProfileUrl),
