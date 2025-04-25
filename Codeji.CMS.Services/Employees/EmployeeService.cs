@@ -20,6 +20,7 @@ using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Helpers;
+using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Bson;
 using MongoDB.Driver;
@@ -45,6 +46,7 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<Department> _departmentRepository;
 
         readonly IMongoDbRepository<Skills> _skillsRepository;
+        readonly IHttpContextAccessor _httpContextAccessor;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
@@ -80,6 +82,7 @@ namespace Codeji.CMS.Services.Employees
             _middlewareService = middlewareService;
             _departmentRepository = departmentRepository;
             _skillsRepository = skillsRepository;
+            _httpContextAccessor = httpContextAccessor;
         }
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
@@ -173,16 +176,23 @@ namespace Codeji.CMS.Services.Employees
             };
         }
         public async Task<UserModel> GetEmployeeById(string userId)
-        {
+        {   string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
             EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
+            EmpUser? teamLead =await _employeeRepository.FirstOrDefault(x=>x.UserId == user.TeamLead); 
+            EmpUser? reportingManager = await _employeeRepository.FirstOrDefault(x=>x.UserId == user.ReportingManager);
+            Department? department =await _departmentRepository.FirstOrDefault(x=>x.DepartmentId == user.Department);
             UserModel userModel = _mapper.Map<UserModel>(user);
+            userModel.Department = department?.Titles?.FirstOrDefault(x=>x.Language == acceptLanguage)?.Label; 
+            userModel.TeamLead= $"{teamLead?.FirstName} {teamLead?.LastName}";
+            userModel.ReportingManager= $"{reportingManager?.FirstName} {reportingManager?.LastName}";
             return userModel;
         }
         public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(int pageNo, int records)
         {
             pageNo = pageNo == 0 ? 1 : pageNo;
             records = records == 0 ? 10 : records;
-            var count = _employeeRepository.Count();
+            string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
+            var count = await _employeeRepository.Count();
             var empList = (await _employeeRepository.GetAggregateDataAsync<EmpUser>(pageNo: pageNo, pageSize: records)).ToList();
             string[] departmentList = empList.Select(x => x.Department).Distinct().ToArray();
             IEnumerable<Department> depList = await _departmentRepository.GetAll(x => departmentList.Contains(x.DepartmentId));
@@ -193,11 +203,11 @@ namespace Codeji.CMS.Services.Employees
                         select new GetAllEmployeeResponseModel
                         {
                             UserId = emp.UserId,
-                            FullName = $"{emp.FirstName} {emp.LastName ?? ""}",
+                            FullName = $"{emp?.FirstName} {emp?.LastName ?? ""}",
                             Email = emp.Email,
                             EmployeeId = emp.EmployeeId,
                             JobRole = emp.JobRole,
-                            Department = "",
+                            Department = dept?.Titles?.FirstOrDefault(x=>x.Language == acceptLanguage)?.Label,
                             PhoneNumber = emp.PhoneNumber,
                             DateOfBirth = emp.DateOfBirth,
                             FullProfileUrl = string.IsNullOrEmpty(emp.ProfileUrl) ? null : Common.GetEmployeeImageUrl(emp.ProfileUrl),
@@ -206,7 +216,7 @@ namespace Codeji.CMS.Services.Employees
             return new Result<GetAllEmployeeResponseModel>()
             {
                 Success = true,
-                TotalRecords = await count,
+                TotalRecords = count,
                 MethodResults = data,
             };
         }

@@ -223,7 +223,6 @@ public class RoleServices : IRoleService
                    join m in modules on mp.ModuleId equals m.ModuleId
                    join p in permissions on mp.PermissionId equals p.PermissionId
                    select String.Format($"{m.ModuleConstant}.{p.PermissionConstant}")).OrderBy(x => x).ToArray();
-
         }
         return res;
     }
