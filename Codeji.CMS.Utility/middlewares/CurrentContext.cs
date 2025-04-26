@@ -38,4 +38,9 @@ public static class CurrentContext
         ClaimsIdentity? identity = httpContextAccessor?.HttpContext?.User.Identity as ClaimsIdentity;
         return identity?.Claims.Where(a => a.Type == ClaimTypesEnum.admin_id.ToString()).Select(a => a.Value).SingleOrDefault() ?? "";
     }
+
+    public static string GetLanguage(IHttpContextAccessor httpContextAccessor){
+        var acceptLanguage= httpContextAccessor.HttpContext.Request.Headers["Accept-Language"].ToString();
+        return acceptLanguage;
+    }
 }

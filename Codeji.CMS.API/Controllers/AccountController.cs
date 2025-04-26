@@ -168,7 +168,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("account/getSignedUserDetails")]
-        [ModulePermission("Dashboard", "View")]
+        // [ModulePermission("Dashboard", "View")]
         public async Task<Result<LoginUserViewModel>> getUserByToken()
         {
             Result<LoginUserViewModel> result = new Result<LoginUserViewModel>();

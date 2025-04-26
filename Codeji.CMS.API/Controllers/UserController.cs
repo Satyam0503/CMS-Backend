@@ -1,8 +1,10 @@
 
+using System.Text.RegularExpressions;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.DTO.ResponseModel;
+using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility.middlewares;
@@ -94,8 +96,8 @@ public class UserController : BaseApiController
     [Route("AddEditEmployeeSummary")]
     [HttpPost]
     public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary)
-    {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+    {   
+        string userId = string.IsNullOrEmpty(userSummary.UserId) ? CurrentContext.UserId(_httpContextAccessor) : userSummary.UserId;
         return await _employeeService.AddEditEmployeeSummary(userSummary, userId);
     }
 
@@ -103,16 +105,15 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+        string userId = string.IsNullOrEmpty(educationDetails.UserId) ? CurrentContext.UserId(_httpContextAccessor) : educationDetails.UserId;
         return await _employeeService.AddEmployeeEducation(educationDetails, userId);
-
     }
 
     [Route("EditEmployeeEducation")]
     [HttpPost]
-    public async Task<Result> EditEmployeeEducation(EmpEducationDetails educationDetails)
+    public async Task<Result> EditEmployeeEducation(EmployeeEducationRequestModel educationDetails)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+        string userId = string.IsNullOrEmpty(educationDetails.UserId) ? CurrentContext.UserId(_httpContextAccessor) : educationDetails.UserId;
         return await _employeeService.EditEmployeeEducation(educationDetails, userId);
     }
 
@@ -120,16 +121,16 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result<EmployeeCertificationRequestModel>> AddEmployeeCertification(EmployeeCertificationRequestModel certificationDetails)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+        string userId = string.IsNullOrEmpty(certificationDetails.UserId) ? CurrentContext.UserId(_httpContextAccessor) : certificationDetails.UserId;
         return await _employeeService.AddEmployeeCertification(certificationDetails, userId);
 
     }
 
     [Route("EditEmployeeCertification")]
     [HttpPost]
-    public async Task<Result> EditEmployeeCertification(EmpCertificationDetails certificationDetails)
+    public async Task<Result> EditEmployeeCertification(EmployeeCertificationRequestModel certificationDetails)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+        string userId = string.IsNullOrEmpty(certificationDetails.UserId) ? CurrentContext.UserId(_httpContextAccessor) : certificationDetails.UserId;
         return await _employeeService.EditEmployeeCertification(certificationDetails, userId);
     }
 
@@ -222,22 +223,21 @@ public class UserController : BaseApiController
         }
     }
 
-    [Route("AddSkills")]
+    [Route("AddEditEmpSkills")]
     [HttpPost]
     public async Task<Result> AddEditSkills(SkillsRequestModel skillsModel)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+        string userId = string.IsNullOrEmpty(skillsModel.UserId) ?  CurrentContext.UserId(_httpContextAccessor): skillsModel.UserId ;
         return await _employeeService.AddEditEmployeeSkills(skillsModel, userId);
-
     }
 
     [Route("GetEmployeeSkills")]
     [HttpGet]
-    public async Task<Result<EmpSkills>> GetEmployeeSkills([FromQuery] string userId = null)
+    public async Task<Result<EmployeeSkillsDTO>> GetEmployeeSkills([FromQuery] string userId = null)
     {
         if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
-        EmpSkills result = await _employeeService.GetEmployeeSkills(userId);
-        return new Result<EmpSkills>()
+        var result = await _employeeService.GetEmployeeSkills(userId);
+        return new Result<EmployeeSkillsDTO>()
         {
             Success = true,
             MethodResult = result
@@ -245,11 +245,11 @@ public class UserController : BaseApiController
 
     }
 
-    [Route("DeleteEducationDetails")]
+    [Route("DeleteEducationDetails/{educationId}")]
     [HttpDelete]
-    public async Task<Result> DeleteEducationDetails([FromQuery] string educationId)
+    public async Task<Result> DeleteEducationDetails(string educationId, [FromBody] string userId)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+        if(string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
         Result data = await _employeeService.DeleteEducationDetails(educationId, userId);
         if (data == null)
         {
@@ -268,11 +268,11 @@ public class UserController : BaseApiController
         };
     }
 
-    [Route("DeleteCertificationDetails")]
+    [Route("DeleteCertificationDetails/{certificationId}")]
     [HttpDelete]
-    public async Task<Result> DeleteCertificationDetails([FromQuery] string certificationId)
+    public async Task<Result> DeleteCertificationDetails(string certificationId,[FromBody] string userId)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
+        if(string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
         Result data = await _employeeService.DeleteCertificationDetails(certificationId, userId);
         if (data == null)
         {
@@ -313,5 +313,36 @@ public class UserController : BaseApiController
         };
     }
 
+    [HttpGet]
+    [Route("GetSuggestedSkills")]
+    public async Task<Result<Skills>> GetSuggestedSkills([FromQuery] string query){
+        var sanitizedQuery = query.Trim().ToLower();
+        if(string.IsNullOrEmpty(sanitizedQuery)){
+            return new Result<Skills>(){
+                Success=true,
+                MethodResults =[],
+                StatusCode =200,
+            };
+        }
+        return await _employeeService.GetSuggestedSkills(sanitizedQuery);
+    }
+
+    [HttpPost]
+    [Route("AddSkill")]
+    public async Task<Result> AddSkill([FromBody] string skill ){
+        var sanitizeSkill = skill.Trim().ToLower();
+        var regex = new Regex(@"^[a-zA-Z0-9\s\+\#\.\-]{2,30}$");
+        var isValid= regex.IsMatch(sanitizeSkill);
+
+        if(string.IsNullOrEmpty(sanitizeSkill) || !isValid){
+            return new Result(){
+                StatusCode = 200,
+                Success= false,
+                Message = "InValid Skill Name"
+            };
+        }
+        var result =  await  _employeeService.AddSkill(sanitizeSkill);
+        return result;
+    }
 
 }

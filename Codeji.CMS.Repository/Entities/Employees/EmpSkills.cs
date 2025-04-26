@@ -7,6 +7,6 @@ namespace Codeji.CMS.Repository.Entities.Employees
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
         public string Id { get; set; }
         public string UserId { get; set; }
-        public string Skills { get; set; }
+        public List<string> Skills  { get; set; }
     }
 }

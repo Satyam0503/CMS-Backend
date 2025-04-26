@@ -2,6 +2,7 @@
 {
     public class SkillsRequestModel
     {
-        public string TotalSkills { get; set; }
+        public string? UserId {get;set;}
+        public List<string> Skills { get; set; }
     }
 }

@@ -21,7 +21,7 @@ public class CompanyMasterController : BaseApiController
 
     [HttpPost]
     [Route("AddEditDepartment")]
-    public async Task<Result> AddEditDepartment(DepartmentRequestModel model)
+    public async Task<Result> AddEditDepartment(DepartmentDTO model)
     {
         Result data = await _companyMasterService.AddEditDepartment(model);
         Result result = new()
@@ -34,9 +34,31 @@ public class CompanyMasterController : BaseApiController
     }
     [HttpGet]
     [Route("GetDepartmentList")]
-    public async Task<Result<DepartmentViewModel>> GetDepartmentList()
+    public async Task<Result<DepartmentDTO>> GetDepartmentList()
     {
-        Result<DepartmentViewModel> data = await _companyMasterService.GetDepartmentList();
+        Result<DepartmentDTO> data = await _companyMasterService.GetDepartmentList();
         return data;
+    }
+
+    [HttpDelete]
+    [Route("DeleteDepartment/{departmentId}")]
+    public async Task<Result> DeleteDepartment(string departmentId)
+    {
+        var success = await _companyMasterService.DeleteDepartment(departmentId);
+        if (!success)
+        {
+            return new Result()
+            {
+                Message = "Department Not Found",
+                Success = false,
+                StatusCode= 200,
+            };
+        }
+        return new Result()
+        {
+            Message = "Department Deleted Successfully",
+            StatusCode = 200,
+            Success = true,
+        };
     }
 }

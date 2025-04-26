@@ -4,6 +4,7 @@ using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.DTO.ResponseModel;
+using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
 
@@ -22,19 +23,21 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId);
         Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId);
         Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);
-        Task<Result> EditEmployeeEducation(EmpEducationDetails educationDetails, string userId);
+        Task<Result> EditEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);
         Task<Result<EmployeeCertificationRequestModel>> AddEmployeeCertification(EmployeeCertificationRequestModel cerificationDetails, string userId);
-        Task<Result> EditEmployeeCertification(EmpCertificationDetails certificationDetails, string userId);
+        Task<Result> EditEmployeeCertification(EmployeeCertificationRequestModel certificationDetails, string userId);
         Task<List<EmpEducationDetails>> GetEmployeeEducationDetails(string id);
         Task<EmployeeSummaryRequestModel> GetEmployeeSummary(string userId);
         Task<List<EmpCertificationDetails>> GetEmployeeCertificationDetails(string id);
         Task<string> GetUserExistingProfile(string userId);
         Task<string> AddUserProfileImage(string fileName, string userId, string filePath);
         Task<Result> AddEditEmployeeSkills(SkillsRequestModel skillsModel, string userId);
-        Task<EmpSkills> GetEmployeeSkills(string userId);
+        Task<EmployeeSkillsDTO> GetEmployeeSkills(string userId);
         Task<bool> CreateNewPassword(string password, string statusNumber);
         Task<Result> DeleteEducationDetails(string educationId, string userId);
         Task<Result> DeleteCertificationDetails(string certificationId, string userId);
         Task<Result> DeleteEmployee(string employeeId);
+        Task<Result<Skills>> GetSuggestedSkills(string query);
+        Task<Result> AddSkill(string skill);
     }
 }

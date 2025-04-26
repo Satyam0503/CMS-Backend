@@ -1,5 +1,6 @@
 ﻿using System.Linq.Expressions;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
@@ -9,6 +10,7 @@ using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.GenericRepository.Interfaces;
+using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
@@ -18,7 +20,9 @@ using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Helpers;
+using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
+using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Employees
@@ -41,6 +45,9 @@ namespace Codeji.CMS.Services.Employees
         private readonly IMiddlewareService _middlewareService;
         readonly IMongoDbRepository<Department> _departmentRepository;
 
+        readonly IMongoDbRepository<Skills> _skillsRepository;
+        readonly IHttpContextAccessor _httpContextAccessor;
+
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
             IMongoDbRepository<EmpSummary> userSummary,
@@ -55,7 +62,8 @@ namespace Codeji.CMS.Services.Employees
             IPriorityTaskQueue priorityTaskQueue,
             IMiddlewareService middlewareService,
             IHttpContextAccessor httpContextAccessor,
-            IMongoDbRepository<Department> departmentRepository
+            IMongoDbRepository<Department> departmentRepository,
+            IMongoDbRepository<Skills> skillsRepository
             )
         {
             _employeeRepository = employeeRepository;
@@ -73,6 +81,8 @@ namespace Codeji.CMS.Services.Employees
             _priorityTaskQueue = priorityTaskQueue;
             _middlewareService = middlewareService;
             _departmentRepository = departmentRepository;
+            _skillsRepository = skillsRepository;
+            _httpContextAccessor = httpContextAccessor;
         }
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
@@ -166,16 +176,23 @@ namespace Codeji.CMS.Services.Employees
             };
         }
         public async Task<UserModel> GetEmployeeById(string userId)
-        {
+        {   string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
             EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
+            EmpUser? teamLead =await _employeeRepository.FirstOrDefault(x=>x.UserId == user.TeamLead); 
+            EmpUser? reportingManager = await _employeeRepository.FirstOrDefault(x=>x.UserId == user.ReportingManager);
+            Department? department =await _departmentRepository.FirstOrDefault(x=>x.DepartmentId == user.Department);
             UserModel userModel = _mapper.Map<UserModel>(user);
+            userModel.Department = department?.Titles?.FirstOrDefault(x=>x.Language == acceptLanguage)?.Label; 
+            userModel.TeamLead= $"{teamLead?.FirstName} {teamLead?.LastName}";
+            userModel.ReportingManager= $"{reportingManager?.FirstName} {reportingManager?.LastName}";
             return userModel;
         }
         public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(int pageNo, int records)
         {
             pageNo = pageNo == 0 ? 1 : pageNo;
             records = records == 0 ? 10 : records;
-            var count = _employeeRepository.Count();
+            string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
+            var count = await _employeeRepository.Count();
             var empList = (await _employeeRepository.GetAggregateDataAsync<EmpUser>(pageNo: pageNo, pageSize: records)).ToList();
             string[] departmentList = empList.Select(x => x.Department).Distinct().ToArray();
             IEnumerable<Department> depList = await _departmentRepository.GetAll(x => departmentList.Contains(x.DepartmentId));
@@ -186,11 +203,11 @@ namespace Codeji.CMS.Services.Employees
                         select new GetAllEmployeeResponseModel
                         {
                             UserId = emp.UserId,
-                            FullName = $"{emp.FirstName} {emp.LastName ?? ""}",
+                            FullName = $"{emp?.FirstName} {emp?.LastName ?? ""}",
                             Email = emp.Email,
                             EmployeeId = emp.EmployeeId,
                             JobRole = emp.JobRole,
-                            Department = dept?.DepartmentName,
+                            Department = dept?.Titles?.FirstOrDefault(x=>x.Language == acceptLanguage)?.Label,
                             PhoneNumber = emp.PhoneNumber,
                             DateOfBirth = emp.DateOfBirth,
                             FullProfileUrl = string.IsNullOrEmpty(emp.ProfileUrl) ? null : Common.GetEmployeeImageUrl(emp.ProfileUrl),
@@ -199,7 +216,7 @@ namespace Codeji.CMS.Services.Employees
             return new Result<GetAllEmployeeResponseModel>()
             {
                 Success = true,
-                TotalRecords = await count,
+                TotalRecords = count,
                 MethodResults = data,
             };
         }
@@ -294,10 +311,9 @@ namespace Codeji.CMS.Services.Employees
         public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId)
         {
             Expression<Func<EmpSummary, bool>> whereCondition = x => userId == x.UserId && x.Id == userSummary.SummaryId;
-            EmpSummary? employeesummary = await _employeeSummaryRepo.FirstOrDefault(x => x.UserId == userId);
-            bool success = false;
+            EmpSummary? employeesummary = await _employeeSummaryRepo.FirstOrDefault(whereCondition);
 
-            if (employeesummary == null && string.IsNullOrEmpty(userSummary.SummaryId))
+            if (employeesummary == null)
             {
                 EmpSummary summary = new EmpSummary()
                 {
@@ -310,7 +326,6 @@ namespace Codeji.CMS.Services.Employees
                     Success = true,
                     Message = "Summary Added Successfully"
                 };
-
             }
             else
             {
@@ -332,7 +347,7 @@ namespace Codeji.CMS.Services.Employees
                 EmpSkills newSkill = new EmpSkills();
                 {
                     newSkill.UserId = userId;
-                    newSkill.Skills = skillsModel.TotalSkills;
+                    newSkill.Skills = skillsModel.Skills;
                 }
                 Result result = await _employeeSkillsRepository.AddOne(newSkill);
                 return new Result
@@ -343,13 +358,12 @@ namespace Codeji.CMS.Services.Employees
             }
             else
             {
-                employeSkills.Skills = skillsModel.TotalSkills;
+                employeSkills.Skills = skillsModel.Skills;
                 Result result = await _employeeSkillsRepository.Update(whereCondition, employeSkills);
                 return new Result
                 {
                     Success = true,
                     Message = "Skills Updated Successfully"
-
                 };
             }
         }
@@ -374,7 +388,7 @@ namespace Codeji.CMS.Services.Employees
             };
         }
 
-        public async Task<Result> EditEmployeeEducation(EmpEducationDetails educationDetails, string userId)
+        public async Task<Result> EditEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId)
         {
             Expression<Func<EmpEducationDetails, bool>> whereCondition = x => x.UserId == userId && x.EducationId == educationDetails.EducationId;
             EmpEducationDetails? check = await _educationDetailsRepo.FirstOrDefault(whereCondition);
@@ -428,7 +442,7 @@ namespace Codeji.CMS.Services.Employees
             };
         }
 
-        public async Task<Result> EditEmployeeCertification(EmpCertificationDetails certificationDetails, string userId)
+        public async Task<Result> EditEmployeeCertification(EmployeeCertificationRequestModel certificationDetails, string userId)
         {
             Expression<Func<EmpCertificationDetails, bool>> whereCondition = x => x.UserId == userId && x.CertificationId == certificationDetails.CertificationId;
             EmpCertificationDetails? check = await _certificationDetailsRepo.FirstOrDefault(whereCondition);
@@ -458,7 +472,6 @@ namespace Codeji.CMS.Services.Employees
                 Message = "Certification Details Updated Sucessfully",
                 Success = true,
                 StatusCode = 200
-
             };
         }
 
@@ -481,7 +494,7 @@ namespace Codeji.CMS.Services.Employees
             {
                 return new EmployeeSummaryRequestModel()
                 {
-                    Summary = "No Summary Available"
+                    Summary = ""
                 };
             }
             return new EmployeeSummaryRequestModel()
@@ -491,21 +504,22 @@ namespace Codeji.CMS.Services.Employees
             };
         }
 
-        public async Task<EmpSkills> GetEmployeeSkills(string userId)
+        public async Task<EmployeeSkillsDTO> GetEmployeeSkills(string userId)
         {
-            EmpSkills employeeSkills = await _employeeSkillsRepository.FirstOrDefault(x => x.UserId == userId);
+            EmployeeSkillsDTO EmpSkills = new();
+            EmpSkills? employeeSkills = await _employeeSkillsRepository.FirstOrDefault(x => x.UserId == userId);
             if (employeeSkills == null)
             {
-                return new EmpSkills()
-                {
-                    Skills = ""
-                };
+                EmpSkills.Skills = [];
             }
-            return new EmpSkills()
+            else
             {
-                Id = employeeSkills.Id,
-                Skills = employeeSkills.Skills
-            };
+                IEnumerable<Skills> skills = await _skillsRepository.GetAll(x => employeeSkills.Skills.Contains(x.Id));
+                EmpSkills.Id = employeeSkills.Id;
+                EmpSkills.Skills = _mapper.Map<List<SkillsDTO>>(skills);
+                EmpSkills.UserId = employeeSkills.UserId;
+            }
+            return EmpSkills;
         }
 
         public async Task<string> GetUserExistingProfile(string userId)
@@ -582,6 +596,37 @@ namespace Codeji.CMS.Services.Employees
         {
             bool IsUserActive = await _employeeRepository.Exist(x => x.UserId == userId && x.Status);
             return IsUserActive;
+        }
+
+        public async Task<Result> AddSkill(string skill)
+        {
+            var exist = await _skillsRepository.Exist(x => x.Name.Equals(skill, StringComparison.OrdinalIgnoreCase));
+            if (exist)
+            {
+                return new Result()
+                {
+                    StatusCode = 200,
+                    Success = false,
+                    Message = "Skill already exist"
+                };
+            }
+            Skills skills = new()
+            {
+                Name = skill,
+            };
+            return await _skillsRepository.AddOne(skills);
+        }
+
+        public async Task<Result<Skills>> GetSuggestedSkills(string query)
+        {
+            var skills = await _skillsRepository.GetAll(x => x.Name.Contains(query));
+            return new Result<Skills>()
+            {
+                MethodResults = skills == null ? [] : [.. skills],
+                StatusCode = 200,
+                TotalRecords = skills == null ? 0 : skills.Count(),
+                Success = true,
+            };
         }
     }
 }
