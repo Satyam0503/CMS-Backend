@@ -1,5 +1,6 @@
 ﻿using System.Data;
 using System.Linq.Expressions;
+using System.Reflection;
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
@@ -451,5 +452,11 @@ public class RoleServices : IRoleService
             Message = "ROLE.APP_ACCESS.UPDATED",
             Success = true
         };
+    }
+    public async Task<List<AllModuleDetailsResponseModel>> GetAllModulesDetails(string companyId)
+    {
+        IEnumerable<Module> allmodules = await _moduleRepository.GetAll() ?? null ;
+
+        return _mapper.Map<List<AllModuleDetailsResponseModel>>(allmodules);
     }
 }

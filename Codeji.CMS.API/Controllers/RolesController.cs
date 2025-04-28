@@ -123,5 +123,23 @@ namespace Codeji.CMS.API.Controllers
             var result = await _roleService.UpdateAppAccessForRole(roleId,hasAppAccess);
             return result;
         }
+
+        [HttpGet]
+        [Route("GetAllModuleDetails")]
+        [Authorize]
+        public async Task<Result<AllModuleDetailsResponseModel>> GetAllModuleDetails()
+        {
+
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+
+            var data = await _roleService.GetAllModulesDetails(companyId);
+            return new Result<AllModuleDetailsResponseModel>()
+            {
+                Message= "All Modules fetched successfully",
+                MethodResults = data
+            };
+
+        }
+
     }
 }
