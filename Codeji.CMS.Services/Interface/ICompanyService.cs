@@ -9,7 +9,5 @@ namespace Codeji.CMS.Services.Interface
         Task<Result> Register(CompanyRequestModel companyModel);
         Task<List<Company>> GetAllCompanyList();
         Task<bool> IsActiveCompanyExist(string companyId);
-
-
     }
 }
