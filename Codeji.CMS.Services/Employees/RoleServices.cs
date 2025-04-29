@@ -455,8 +455,28 @@ public class RoleServices : IRoleService
     }
     public async Task<List<AllModuleDetailsResponseModel>> GetAllModulesDetails(string companyId)
     {
-        IEnumerable<Module> allmodules = await _moduleRepository.GetAll() ?? null ;
+        //IEnumerable<Module> allmodules = await _moduleRepository.GetAll() ?? null ;
 
-        return _mapper.Map<List<AllModuleDetailsResponseModel>>(allmodules);
+        var allModules = await _moduleRepository.GetAll();
+        var allModulePermissions = await _modulePermissionRepository.GetAll();
+        var allRolePermission = await _rolePermissionRepository.GetAll(x=>x.CompanyId == companyId);
+
+        var queryResult = from module in allModules
+                          join modulePermission in allModulePermissions on module.ModuleId equals modulePermission.ModuleId into modulePermissionGroup
+                          from modulePermission in modulePermissionGroup.Take(1)
+                          join rolePermission in allRolePermission on modulePermission.ModulePermissionId equals rolePermission.ModulePermissionId into roleGroup
+                          from rolePermission in roleGroup.Take(1)
+                          select new AllModuleDetailsResponseModel
+                          {
+                              ModuleId = module.ModuleId,
+                              ModuleName = module.ModuleName,
+                              ModuleConstant = module.ModuleConstant,
+                              IsAccessible = rolePermission.IsAccessible,
+                          };
+
+        return queryResult.ToList();
+
+        //return role.ToList();
+        //return _mapper.Map<List<AllModuleDetailsResponseModel>>(allmodules);
     }
 }
