@@ -43,8 +43,6 @@ namespace Codeji.CMS.Services
 
         }
 
-
-
         public async Task<Result> Register(CompanyRequestModel companyModel)
         {
             Result result = new Result();

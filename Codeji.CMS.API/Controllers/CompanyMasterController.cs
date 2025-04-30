@@ -1,6 +1,7 @@
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.RequestModels.Company;
+using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.middlewares;
@@ -67,7 +68,7 @@ public class CompanyMasterController : BaseApiController
 
     [HttpPatch]
     [Route("UpdateModuleAccess/{moduleId}")]
-    public async Task<Result> UpdateModuleAccess(string moduleId, [FromBody] bool hasAccess)
+    public async Task<Result> UpdateModuleAccess(string moduleId)
     {
         if (string.IsNullOrEmpty(moduleId))
         {
@@ -76,21 +77,22 @@ public class CompanyMasterController : BaseApiController
                 Success = false,
             };
         }
-        Result result = await _companyMasterService.UpdateModuleAccess(moduleId, hasAccess);
+        Result result = await _companyMasterService.UpdateModuleAccess(moduleId);
         return result;
     }
 
     [HttpGet]
-    [Route("GetAllModules")]
-    public async Task<Result<ModuleDTO>> GetAllModules()
+    [Route("GetAllModuleDetails")]
+    [Authorize]
+    public async Task<Result<AllModuleDetailsResponseModel>> GetAllModuleDetails()
     {
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-        var data = await _companyMasterService.GetAllModules(companyId);
-        return new Result<ModuleDTO>()
+        var data = await _companyMasterService.GetAllModulesDetails(companyId);
+        return new Result<AllModuleDetailsResponseModel>()
         {
             MethodResults = data,
-            Success = true,
-            StatusCode = 200,
+            Success = true
         };
     }
+
 }

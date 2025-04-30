@@ -6,6 +6,7 @@ using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.RequestModels.Company;
+using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Recruitments;
@@ -98,7 +99,7 @@ public class CompanyMasterService : ICompanyMasterService
         return true;
     }
 
-    public async Task<Result> UpdateModuleAccess(string moduleId, bool hasAccess)
+    public async Task<Result> UpdateModuleAccess(string moduleId)
     {
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
         Module? module = await _moduleRepository.FirstOrDefault(x => x._id == moduleId);
@@ -107,23 +108,47 @@ public class CompanyMasterService : ICompanyMasterService
             return new Result()
             {
                 Success = false,
-                Message = "Failed To Updated"
+                Message = "Failed To Update"
             };
         }
         List<ModulePermission> modulesPermission = (await _modulePermissionRepository.GetAll(x => x.ModuleId == module.ModuleId)).ToList();
         int[] modulePermissionId = modulesPermission.Select(x => x.ModulePermissionId).ToArray();
         IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId && modulePermissionId.Contains(x.ModulePermissionId));
-
+        if (!rolePermissions.Any())
+        {
+            return new Result()
+            {
+                Success = false,
+                Message = "Failed To Update"
+            };
+        }
+        bool hasAccess = rolePermissions.Take(1).ToList()[0].IsAccessible;
         Expression<Func<RolePermission, bool>> whereCondition = x => x.CompanyId.Equals(companyId) && modulePermissionId.Contains(x.ModulePermissionId);
-        Result result = await _rolePermissionRepository.UpdateMany(whereCondition, Builders<RolePermission>.Update.Set(x => x.IsAccessible, hasAccess));
+        Result result = await _rolePermissionRepository.UpdateMany(whereCondition, Builders<RolePermission>.Update.Set(x => x.IsAccessible, !hasAccess));
         return result;
     }
 
-    public async Task<List<ModuleDTO>> GetAllModule(string companyId)
+
+    public async Task<List<AllModuleDetailsResponseModel>> GetAllModulesDetails(string companyId)
     {
-        IEnumerable<Module> modules = await _moduleRepository.GetAll();
-        IEnumerable<ModulePermission> modulePermissions = await _modulePermissionRepository.GetAll();
-        IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId);
+        var allModules = await _moduleRepository.GetAll();
+        var allModulePermissions = await _modulePermissionRepository.GetAll();
+        var allRolePermission = await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId);
+
+        var queryResult = from module in allModules
+                          join modulePermission in allModulePermissions on module.ModuleId equals modulePermission.ModuleId into modulePermissionGroup
+                          from modulePermission in modulePermissionGroup.Take(1)
+                          join rolePermission in allRolePermission on modulePermission.ModulePermissionId equals rolePermission.ModulePermissionId into roleGroup
+                          from rolePermission in roleGroup.Take(1)
+                          select new AllModuleDetailsResponseModel
+                          {
+                              ModuleId = module._id,
+                              ModuleName = module.ModuleName,
+                              ModuleConstant = module.ModuleConstant,
+                              IsAccessible = rolePermission.IsAccessible,
+                          };
+
+        return queryResult.ToList();
     }
 }
 
