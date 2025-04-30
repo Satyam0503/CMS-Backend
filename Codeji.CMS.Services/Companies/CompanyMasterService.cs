@@ -11,6 +11,7 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Repository.Entities.RolePermissions;
+using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
@@ -28,8 +29,9 @@ public class CompanyMasterService : ICompanyMasterService
 
     readonly IMongoDbRepository<RolePermission> _rolePermissionRepository;
     readonly IHttpContextAccessor _httpContextAccessor;
+    readonly IRoleService _roleService;
 
-    public CompanyMasterService(IMongoDbRepository<Department> departmentRepository, IMapper mapper, IMongoDbRepository<Module> moduleRepository, IMongoDbRepository<ModulePermission> modulePermissionRepository, IMongoDbRepository<Permission> permissionRepository, IMongoDbRepository<RolePermission> rolePermissionRepository, IHttpContextAccessor httpContextAccessor)
+    public CompanyMasterService(IRoleService roleService, IMongoDbRepository<Department> departmentRepository, IMapper mapper, IMongoDbRepository<Module> moduleRepository, IMongoDbRepository<ModulePermission> modulePermissionRepository, IMongoDbRepository<Permission> permissionRepository, IMongoDbRepository<RolePermission> rolePermissionRepository, IHttpContextAccessor httpContextAccessor)
     {
         _departmentRepository = departmentRepository;
         _mapper = mapper;
@@ -38,6 +40,7 @@ public class CompanyMasterService : ICompanyMasterService
         _permissionRepository = permissionRepository;
         _rolePermissionRepository = rolePermissionRepository;
         _httpContextAccessor = httpContextAccessor;
+        _roleService = roleService;
     }
     public async Task<Result> AddEditDepartment(DepartmentDTO model)
     {
@@ -99,16 +102,15 @@ public class CompanyMasterService : ICompanyMasterService
         return true;
     }
 
-    public async Task<Result> UpdateModuleAccess(string moduleId)
+    public async Task<Result<string[]>> UpdateModuleAccess(string moduleId)
     {
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
         Module? module = await _moduleRepository.FirstOrDefault(x => x._id == moduleId);
         if (module is null)
         {
-            return new Result()
+            return new Result<string[]>()
             {
                 Success = false,
-                Message = "Failed To Update"
             };
         }
         List<ModulePermission> modulesPermission = (await _modulePermissionRepository.GetAll(x => x.ModuleId == module.ModuleId)).ToList();
@@ -116,16 +118,22 @@ public class CompanyMasterService : ICompanyMasterService
         IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId && modulePermissionId.Contains(x.ModulePermissionId));
         if (!rolePermissions.Any())
         {
-            return new Result()
+            return new Result<string[]>()
             {
                 Success = false,
-                Message = "Failed To Update"
             };
         }
+        string roleId = CurrentContext.UserRoleId(_httpContextAccessor);
         bool hasAccess = rolePermissions.Take(1).ToList()[0].IsAccessible;
         Expression<Func<RolePermission, bool>> whereCondition = x => x.CompanyId.Equals(companyId) && modulePermissionId.Contains(x.ModulePermissionId);
         Result result = await _rolePermissionRepository.UpdateMany(whereCondition, Builders<RolePermission>.Update.Set(x => x.IsAccessible, !hasAccess));
-        return result;
+        string[] updatedPermissions = await _roleService.GetRolePermissionOfuser(roleId);
+        return new Result<string[]>()
+        {
+            Success = true,
+            Message = "Successfully Updated",
+            MethodResult = updatedPermissions
+        };
     }
 
 

@@ -68,16 +68,16 @@ public class CompanyMasterController : BaseApiController
 
     [HttpPatch]
     [Route("UpdateModuleAccess/{moduleId}")]
-    public async Task<Result> UpdateModuleAccess(string moduleId)
+    public async Task<Result<string[]>> UpdateModuleAccess(string moduleId)
     {
         if (string.IsNullOrEmpty(moduleId))
         {
-            return new Result()
+            return new Result<string[]>()
             {
                 Success = false,
             };
         }
-        Result result = await _companyMasterService.UpdateModuleAccess(moduleId);
+        var result = await _companyMasterService.UpdateModuleAccess(moduleId);
         return result;
     }
 

@@ -10,6 +10,6 @@ public interface ICompanyMasterService
     Task<Result> AddEditDepartment(DepartmentDTO model);
     Task<Result<DepartmentDTO>> GetDepartmentList();
     Task<bool> DeleteDepartment(string departmentId);
-    Task<Result> UpdateModuleAccess(string moduleId);
+    Task<Result<string[]>> UpdateModuleAccess(string moduleId);
     Task<List<AllModuleDetailsResponseModel>> GetAllModulesDetails(string companyId);
 }
