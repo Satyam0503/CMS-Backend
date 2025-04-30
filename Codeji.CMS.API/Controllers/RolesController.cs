@@ -10,6 +10,7 @@ namespace Codeji.CMS.API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class RolesController : BaseApiController
     {
         private readonly IRoleService _roleService;
@@ -31,7 +32,6 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetRoles")]
-        [Authorize]
         public async Task<Result<RoleModel>> GetRoles()
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -44,7 +44,6 @@ namespace Codeji.CMS.API.Controllers
         }
         [HttpGet]
         [Route("GetRolePermission")]
-        [Authorize]
         public async Task<Result<ModuleWithPermissionsModel>> GetRolePermission()
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -60,7 +59,6 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("AddEditRole")]
-        [Authorize]
         public async Task<Result> AddRole(RoleWithModuleAndPermissions model)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -75,7 +73,6 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetAllRolesWithPermission")]
-        [Authorize]
         public async Task<Result<ModuleWithPermissionsModel>> GetModulePermission()
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -90,7 +87,6 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetRoleWithPermissionById")]
-        [Authorize]
         public async Task<Result<ModuleWithPermissionsModel>> GetModulePermissionyId([FromQuery] string roleId)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -106,7 +102,6 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetRoleById/{roleId}")]
-        [Authorize]
         public async Task<Result<RoleModel>> GetRoleById(string roleId) {
             var data = await _roleService.GetRoleById(roleId);
             return new Result<RoleModel>(){
@@ -118,7 +113,6 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPatch]
         [Route("UpdateAppAccessForRole/{roleId}")]
-        [Authorize]
         public async Task<Result> UpdateAppAccessForRole( string roleId, [FromBody] bool hasAppAccess){
             var result = await _roleService.UpdateAppAccessForRole(roleId,hasAppAccess);
             return result;
@@ -126,7 +120,6 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetAllModuleDetails")]
-        [Authorize]
         public async Task<Result<AllModuleDetailsResponseModel>> GetAllModuleDetails()
         {
 
