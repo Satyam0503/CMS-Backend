@@ -455,9 +455,6 @@ public class RoleServices : IRoleService
     }
     public async Task<List<AllModuleDetailsResponseModel>> GetAllModulesDetails(string companyId)
     {
-        //IEnumerable<Module> allmodules = await _moduleRepository.GetAll() ?? null ;
-
-
         var allModules = await _moduleRepository.GetAll(x => x.ModuleName != "Company Details"); 
         // Not selecting "Company Details" as it will hide Module Accessibility Controls to Admin.
 
@@ -478,8 +475,5 @@ public class RoleServices : IRoleService
                           };
 
         return queryResult.ToList();
-
-        //return role.ToList();
-        //return _mapper.Map<List<AllModuleDetailsResponseModel>>(allmodules);
     }
 }
