@@ -139,7 +139,8 @@ public class CompanyMasterService : ICompanyMasterService
 
     public async Task<List<AllModuleDetailsResponseModel>> GetAllModulesDetails(string companyId)
     {
-        var allModules = await _moduleRepository.GetAll();
+        int[] excludedModuleIds = [11];
+        var allModules = await _moduleRepository.GetAll(x => !excludedModuleIds.Contains(x.ModuleId));
         var allModulePermissions = await _modulePermissionRepository.GetAll();
         var allRolePermission = await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId);
 

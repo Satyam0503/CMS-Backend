@@ -7,6 +7,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Helpers;
 
 namespace Codeji.CMS.Services
@@ -67,16 +68,18 @@ namespace Codeji.CMS.Services
                 CompanyId = companyId,
                 PrimaryContact = user.UserId,
                 CompanyName = companyModel.CompanyName,
+                PrimaryLanguage = Languages.English,
                 Status = true,
             };
 
-            await _companyRepo.AddOne(company);
-
-            Result addedUser = await _userRepo.AddOne(user);
-
-            result.Success = true;
-            return result;
+            Result result1 = await _companyRepo.AddOne(company);
+            if (!result1.Success)
+            {
+                return result1;
+            }
+            return await _userRepo.AddOne(user);
         }
+
         public async Task<List<Company>> GetAllCompanyList()
         {
             IEnumerable<Company> list = await _companyRepo.GetAll();

@@ -176,15 +176,16 @@ namespace Codeji.CMS.Services.Employees
             };
         }
         public async Task<UserModel> GetEmployeeById(string userId)
-        {   string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
+        {
+            string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
             EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
-            EmpUser? teamLead =await _employeeRepository.FirstOrDefault(x=>x.UserId == user.TeamLead); 
-            EmpUser? reportingManager = await _employeeRepository.FirstOrDefault(x=>x.UserId == user.ReportingManager);
-            Department? department =await _departmentRepository.FirstOrDefault(x=>x.DepartmentId == user.Department);
+            EmpUser? teamLead = await _employeeRepository.FirstOrDefault(x => x.UserId == user.TeamLead);
+            EmpUser? reportingManager = await _employeeRepository.FirstOrDefault(x => x.UserId == user.ReportingManager);
+            Department? department = await _departmentRepository.FirstOrDefault(x => x.DepartmentId == user.Department);
             UserModel userModel = _mapper.Map<UserModel>(user);
-            userModel.Department = department?.Titles?.FirstOrDefault(x=>x.Language == acceptLanguage)?.Label; 
-            userModel.TeamLead= $"{teamLead?.FirstName} {teamLead?.LastName}";
-            userModel.ReportingManager= $"{reportingManager?.FirstName} {reportingManager?.LastName}";
+            userModel.Department = department?.Titles?.FirstOrDefault(x => x.Language == acceptLanguage)?.Label;
+            userModel.TeamLead = $"{teamLead?.FirstName} {teamLead?.LastName}";
+            userModel.ReportingManager = $"{reportingManager?.FirstName} {reportingManager?.LastName}";
             return userModel;
         }
         public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(int pageNo, int records)
@@ -207,7 +208,7 @@ namespace Codeji.CMS.Services.Employees
                             Email = emp.Email,
                             EmployeeId = emp.EmployeeId,
                             JobRole = emp.JobRole,
-                            Department = dept?.Titles?.FirstOrDefault(x=>x.Language == acceptLanguage)?.Label,
+                            Department = dept?.Titles?.FirstOrDefault(x => x.Language == acceptLanguage)?.Label,
                             PhoneNumber = emp.PhoneNumber,
                             DateOfBirth = emp.DateOfBirth,
                             FullProfileUrl = string.IsNullOrEmpty(emp.ProfileUrl) ? null : Common.GetEmployeeImageUrl(emp.ProfileUrl),
