@@ -244,7 +244,7 @@ public class RoleServices : IRoleService
             List<RolePermission> permissions = rolePermissions.Where(x => x.RoleId == oldRoleId).ToList();
             foreach (RolePermission? item in permissions)
             {
-                Task<Domain.Models.Result> rolePermission = _rolePermissionRepository.AddOne(
+                Task<Result> rolePermission = _rolePermissionRepository.AddOne(
                     new RolePermission
                     {
                         ModulePermissionId = item.ModulePermissionId,
