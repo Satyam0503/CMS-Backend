@@ -13,6 +13,7 @@ using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
@@ -42,25 +43,25 @@ public class CompanyMasterService : ICompanyMasterService
         _httpContextAccessor = httpContextAccessor;
         _roleService = roleService;
     }
-    public async Task<Result> AddEditDepartment(DepartmentDTO model)
-    {
-        Result result = new();
-        Expression<Func<Department, bool>> whereCondition = x => x.DepartmentId == model.DepartmentId;
-        Department dep = _departmentRepository.FirstOrDefault(whereCondition)?.Result ?? new();
-        if (string.IsNullOrEmpty(dep.DepartmentId))
-        {
-            dep.IsActive = model.IsActive;
-            dep.Titles = model.Titles;
 
-            result = await _departmentRepository.AddOne(dep);
-            if (result.Success) result.Message = "Department Added Successfully";
-        }
-        else
+    public async Task<Result> UpdateDepartments(List<DepartmentDTO> departmentList, string userId)
+    {
+        List<Department> departments = new();
+        _mapper.Map(departmentList, departments);
+        Result result = new();
+        foreach (Department department in departments)
         {
-            dep.IsActive = model.IsActive;
-            dep.Titles = model.Titles;
-            result = await _departmentRepository.Update(whereCondition, dep);
-            if (result.Success) result.Message = "Department Edited Successfully";
+            if (string.IsNullOrEmpty(department.DepartmentId))
+            {
+                department.CreatedBy = userId;
+                department.CreatedDate = DateTime.UtcNow;
+                result = await _departmentRepository.AddOne(department);
+            }
+            else
+            {
+                Expression<Func<Department, bool>> whereCondition = x => x.DepartmentId == department.DepartmentId;
+                result = await _departmentRepository.UpdateMany(whereCondition, Builders<Department>.Update.Set(x => x.UpdatedBy, userId).Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.Titles, department.Titles).Set(x => x.IsActive, department.IsActive));
+            }
         }
         return result;
     }

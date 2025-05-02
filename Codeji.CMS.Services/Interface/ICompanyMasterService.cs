@@ -7,7 +7,7 @@ namespace Codeji.CMS.Services.Interface;
 
 public interface ICompanyMasterService
 {
-    Task<Result> AddEditDepartment(DepartmentDTO model);
+    Task<Result> UpdateDepartments(List<DepartmentDTO> model, string userId);
     Task<Result<DepartmentDTO>> GetDepartmentList();
     Task<bool> DeleteDepartment(string departmentId);
     Task<Result<string[]>> UpdateModuleAccess(string moduleId);

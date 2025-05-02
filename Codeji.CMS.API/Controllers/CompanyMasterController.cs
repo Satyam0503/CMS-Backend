@@ -24,18 +24,14 @@ public class CompanyMasterController : BaseApiController
     }
 
     [HttpPost]
-    [Route("AddEditDepartment")]
-    public async Task<Result> AddEditDepartment(DepartmentDTO model)
+    [Route("UpdateDepartment")]
+    public async Task<Result> AddEditDepartment(List<DepartmentDTO> model)
     {
-        Result data = await _companyMasterService.AddEditDepartment(model);
-        Result result = new()
-        {
-            Success = data.Success,
-            StatusCode = data.StatusCode,
-            Message = data.Message
-        };
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        Result result = await _companyMasterService.UpdateDepartments(model, userId);
         return result;
     }
+
     [HttpGet]
     [Route("GetDepartmentList")]
     public async Task<Result<DepartmentDTO>> GetDepartmentList()
