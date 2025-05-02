@@ -47,7 +47,20 @@ namespace Codeji.CMS.Services.Dashboard
 
         }
 
+        public async Task<List<GenderDetailsResponseModel>> GetAllGenderDetails(string companyId)
+        {
+            var allEmpUser = await _empUserRepository.GetAll(x => x.CompanyId == companyId);
+            var result = (from aeu in allEmpUser
+                         group aeu by aeu.Gender into genderGroup
+                         select new GenderDetailsResponseModel 
+                         {
+                             Gender = genderGroup.Key,
+                             Count= genderGroup.Count()
+                         }).ToList();
 
+            return result;
+
+        }
 
     }
 }
