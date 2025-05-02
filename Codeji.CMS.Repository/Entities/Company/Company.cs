@@ -11,8 +11,8 @@ namespace Codeji.CMS.Repository.Entities.Company
         public string CompanyName { get; set; }
         public string? CompanyLogo { get; set; }
         public string PrimaryContact { get; set; }
-        public string PrimaryLanguage { get; set; }
-        public string? SecondaryLanguage { get; set; }
+        public string DefaultLanguage { get; set; }
+        public List<string> ApplicationLanguage { get; set; }
         public string Country { get; set; }
         public string State { get; set; }
         public DateTime? CreatedDate { get; set; } = DateTime.UtcNow;

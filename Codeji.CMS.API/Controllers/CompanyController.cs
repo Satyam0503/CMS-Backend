@@ -1,6 +1,7 @@
 ﻿using Codeji.CMS.Domain.Models;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Codeji.CMS.API.Controllers
@@ -17,6 +18,7 @@ namespace Codeji.CMS.API.Controllers
             _companyService = companyService;
             _httpContextAccessor = httpContextAccessor;
         }
+
         [HttpGet]
         [Route("GetAllCompanyList")]
 
@@ -27,6 +29,15 @@ namespace Codeji.CMS.API.Controllers
             result.MethodResults = data;
             return result;
 
+        }
+
+        [HttpGet]
+        [Route("GetCompanyDetails")]
+        public async Task<Result<Company>> GetCompanyDetails()
+        {
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var result = await _companyService.GetCompanyDetails(companyId);
+            return result;
         }
 
     }

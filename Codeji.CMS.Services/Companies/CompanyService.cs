@@ -68,7 +68,8 @@ namespace Codeji.CMS.Services
                 CompanyId = companyId,
                 PrimaryContact = user.UserId,
                 CompanyName = companyModel.CompanyName,
-                PrimaryLanguage = Languages.English,
+                DefaultLanguage = Languages.English,
+                ApplicationLanguage = [Languages.English],
                 Status = true,
             };
 
@@ -92,6 +93,21 @@ namespace Codeji.CMS.Services
             return exist;
         }
 
-
+        public async Task<Result<Company>> GetCompanyDetails(string companyId)
+        {
+            Result<Company> result = new();
+            bool exist = await _companyRepo.Exist(x => x.CompanyId == companyId);
+            if (!exist)
+            {
+                result.Message = "Company Not Exist";
+                result.Success = false;
+            }
+            else
+            {
+                Company company = await _companyRepo.FirstOrDefault(x => x.CompanyId == companyId);
+                result.MethodResult = company;
+            }
+            return result;
+        }
     }
 }
