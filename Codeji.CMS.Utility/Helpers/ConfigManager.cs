@@ -40,6 +40,7 @@ public class FileSettings
     public string UploadUrl { get; set; }
     public string Employee_ImageUrl { get; set; }
     public string ViewResumeUrl { get; set; }
+    public string CompanyLogoUrl { get; set; }
     public string Default_User_Image { get; set; }
 }
 

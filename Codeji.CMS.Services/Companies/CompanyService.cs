@@ -1,5 +1,7 @@
-﻿using AutoMapper;
+﻿using System.Linq.Expressions;
+using AutoMapper;
 using Codeji.CMS.Domain.Models;
+using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
@@ -7,8 +9,11 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Helpers;
+using Microsoft.AspNetCore.Http;
+using MongoDB.Driver;
 
 namespace Codeji.CMS.Services
 {
@@ -96,18 +101,89 @@ namespace Codeji.CMS.Services
         public async Task<Result<Company>> GetCompanyDetails(string companyId)
         {
             Result<Company> result = new();
-            bool exist = await _companyRepo.Exist(x => x.CompanyId == companyId);
-            if (!exist)
+            Company? company = await _companyRepo.FirstOrDefault(x => x.CompanyId == companyId);
+            if (company is null)
             {
                 result.Message = "Company Not Exist";
                 result.Success = false;
             }
             else
             {
-                Company company = await _companyRepo.FirstOrDefault(x => x.CompanyId == companyId);
                 result.MethodResult = company;
             }
             return result;
+        }
+
+        public async Task<Result<Company>> UpdateCompanyDetails(UpdateCompanyInfoRequestModel model, string companyId)
+        {
+            Result<Company> result = new();
+            Expression<Func<Company, bool>> whereCondition = x => x.CompanyId == companyId;
+            Company? company = await _companyRepo.FirstOrDefault(whereCondition);
+            if (company is null)
+            {
+                result.Success = false;
+                return result;
+            }
+            company.ApplicationLanguage = model.ApplicationLanguage.Count != 0 ? model.ApplicationLanguage : company.ApplicationLanguage;
+            company.CompanyName = model.CompanyName ?? company.CompanyName;
+            company.DefaultLanguage = model.DefaultLanguage ?? company.DefaultLanguage;
+            company.CompanyLogo = model.CompanyLogo == null ? null : await UpdateCompanyLogo(model.CompanyLogo, companyId);
+
+            Result result1 = await _companyRepo.Update(whereCondition, company);
+            if (!result.Success)
+            {
+                result.Message = "Failed To Update Company";
+                return result;
+            }
+            result.MethodResult = company;
+            result.Success = true;
+            return result;
+        }
+
+        public async Task<string> UpdateCompanyLogo(IFormFile companyLogo, string companyId)
+        {
+            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\CompanyLogo\\");
+            string fileExtension = Path.GetExtension(companyLogo.FileName);
+
+            if (!Directory.Exists(uploadFolder))
+            {
+                Directory.CreateDirectory(uploadFolder);
+            }
+            string fileName = $"{Guid.NewGuid().ToString()}{fileExtension}";
+            string filePath = Path.Combine(uploadFolder, fileName);
+            using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
+            {
+                await companyLogo.CopyToAsync(fileStream);
+            }
+            ;
+
+            string logo = await GetCompanyExistingLogo(companyId);
+            if (!string.IsNullOrEmpty(logo))
+            {
+                string oldPath = Path.Combine(uploadFolder, logo);
+                FileInfo fileInfo = new(oldPath);
+                fileInfo.Delete(); // delete existing logo
+            }
+            bool success = await AddCompanyLogo(fileName, companyId);
+            return success ? Common.GetCompanyLogoUrl(fileName) : string.Empty;
+        }
+
+        public async Task<string> GetCompanyExistingLogo(string companyId)
+        {
+            Company? company = await _companyRepo.FirstOrDefault(x => x.CompanyId == companyId);
+            return company?.CompanyLogo ?? string.Empty;
+        }
+
+        public async Task<bool> AddCompanyLogo(string fileName, string companyId)
+        {
+            Expression<Func<Company, bool>> whereCondition = x => x.CompanyId == companyId;
+            Company? company = await _companyRepo.FirstOrDefault(whereCondition);
+            if (company == null)
+            {
+                return false;
+            }
+            Result resutl = await _companyRepo.UpdateMany(whereCondition, Builders<Company>.Update.Set(x => x.CompanyLogo, fileName).Set(x => x.UpdatedDate, DateTime.UtcNow));
+            return resutl.Success;
         }
     }
 }

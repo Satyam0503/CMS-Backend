@@ -8,10 +8,10 @@ namespace Codeji.CMS.Repository.Entities.Company
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
         public string CompanyId { get; set; }
         public bool Status { get; set; }
-        public string CompanyName { get; set; }
+        public required string CompanyName { get; set; }
         public string? CompanyLogo { get; set; }
         public string PrimaryContact { get; set; }
-        public string DefaultLanguage { get; set; }
+        public required string DefaultLanguage { get; set; }
         public List<string> ApplicationLanguage { get; set; }
         public string Country { get; set; }
         public string State { get; set; }

@@ -1,4 +1,5 @@
 ﻿using Codeji.CMS.Domain.Models;
+using Codeji.CMS.DTO.Company;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.middlewares;
@@ -37,6 +38,16 @@ namespace Codeji.CMS.API.Controllers
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
             var result = await _companyService.GetCompanyDetails(companyId);
+            return result;
+        }
+
+        [HttpPost]
+        [Route("UpdateCompanyDetails")]
+
+        public async Task<Result<Company>> UpdateCompanyDetails([FromForm] UpdateCompanyInfoRequestModel model)
+        {
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var result = await _companyService.UpdateCompanyDetails(model, companyId);
             return result;
         }
 

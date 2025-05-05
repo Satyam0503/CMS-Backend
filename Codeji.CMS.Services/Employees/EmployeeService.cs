@@ -284,30 +284,28 @@ namespace Codeji.CMS.Services.Employees
             return "No Access";
         }
 
-        public async Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId)
+        public async Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId, string companyId)
         {
 
             LoginUserViewModel returnModel = new LoginUserViewModel();
             UserModel? user = await GetEmployeeById(userId);
             Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == roleId);
-            Company? companyDetails = await _companyRepository.FirstOrDefault(x => true);
+            Company? companyDetails = await _companyRepository.FirstOrDefault(x => x.CompanyId == companyId);
             if (user is null)
             {
                 return null;
             }
             string[] allowedModulePermission = await _roleService.GetRolePermissionOfuser(role.RolesId);
             returnModel.UserId = user.UserId;
-            // returnModel.Role = role.Titles;
             returnModel.FirstName = user.FirstName;
             returnModel.LastName = user.LastName;
-            // returnModel.Permissions = [];
+            returnModel.CompanyId = companyDetails.CompanyId;
             returnModel.modulePermission = allowedModulePermission;
-            // returnModel.RoleId = role.RolesId;
-            // returnModel.CompanyId = role.CompanyId;
             returnModel.CompanyName = companyDetails.CompanyName;
+            returnModel.DefaultLanguage = companyDetails.DefaultLanguage;
+            returnModel.ApplicationLanguage = companyDetails.ApplicationLanguage;
             returnModel.ProfileImage = string.IsNullOrEmpty(user.FullProfileUrl) ? null : user.FullProfileUrl;
             return returnModel;
-
         }
         public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId)
         {
