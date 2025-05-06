@@ -4,7 +4,8 @@ namespace Codeji.CMS.Services.Employees.Interface;
 using System.Collections.Generic;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.Repository.Entities.RolePermissions;
-public interface IRoleService
+public interface
+    IRoleService
 {
     Task<string> AddEditRoles(RoleWithModuleAndPermissions roles, string companyId);
     Task<List<RoleModel>> GetRoles(string companyId);
@@ -19,5 +20,5 @@ public interface IRoleService
     Task<List<string>> GetUsersByRole(string[] roleIds, string companyId);
     Task<bool> VerifyUserAccess(string module, string[] Role, string userId, string companyId, UserCheckModel userForEdit = null);
     Task<List<ModuleWithPermissionsModel>> GetAllRolesWithPermission(string companyId);
-    Task<Result> UpdateAppAccessForRole(string roleId,bool hasAppAccess);
+    Task<Result> UpdateAppAccessForRole(string roleId, bool hasAppAccess);
 }

@@ -108,15 +108,11 @@ namespace Codeji.CMS.API.Controllers
                 return new Result()
                 {
                     Message = "Company Already Exist",
+                    Success = false,
                     StatusCode = StatusCodes.Status406NotAcceptable
                 };
             }
-            Result result = await _companyService.Register(companyModel);
-            return new Result()
-            {
-                Success = true,
-                StatusCode = StatusCodes.Status200OK,
-            };
+            return await _companyService.Register(companyModel);
         }
 
 
@@ -174,7 +170,8 @@ namespace Codeji.CMS.API.Controllers
             Result<LoginUserViewModel> result = new Result<LoginUserViewModel>();
             string userId = CurrentContext.UserId(_httpContextAccessor);
             string roleId = CurrentContext.UserRoleId(_httpContextAccessor);
-            LoginUserViewModel user = await _employeeService.GetSignedUserDetails(userId, roleId);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            LoginUserViewModel user = await _employeeService.GetSignedUserDetails(userId, roleId, companyId);
             if (user != null)
             {
                 result.MethodResult = user;

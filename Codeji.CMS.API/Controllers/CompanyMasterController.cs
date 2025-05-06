@@ -1,8 +1,10 @@
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.RequestModels.Company;
+using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,24 +16,22 @@ namespace Codeji.CMS.API.Controllers;
 public class CompanyMasterController : BaseApiController
 {
     readonly ICompanyMasterService _companyMasterService;
-    public CompanyMasterController(ICompanyMasterService companyService)
+    readonly IHttpContextAccessor _httpContextAccessor;
+    public CompanyMasterController(ICompanyMasterService companyService, IHttpContextAccessor httpContextAccessor)
     {
         _companyMasterService = companyService;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     [HttpPost]
-    [Route("AddEditDepartment")]
-    public async Task<Result> AddEditDepartment(DepartmentDTO model)
+    [Route("UpdateDepartment")]
+    public async Task<Result> AddEditDepartment(List<DepartmentDTO> model)
     {
-        Result data = await _companyMasterService.AddEditDepartment(model);
-        Result result = new()
-        {
-            Success = data.Success,
-            StatusCode = data.StatusCode,
-            Message = data.Message
-        };
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        Result result = await _companyMasterService.UpdateDepartments(model, userId);
         return result;
     }
+
     [HttpGet]
     [Route("GetDepartmentList")]
     public async Task<Result<DepartmentDTO>> GetDepartmentList()
@@ -51,7 +51,7 @@ public class CompanyMasterController : BaseApiController
             {
                 Message = "Department Not Found",
                 Success = false,
-                StatusCode= 200,
+                StatusCode = 200,
             };
         }
         return new Result()
@@ -61,4 +61,34 @@ public class CompanyMasterController : BaseApiController
             Success = true,
         };
     }
+
+    [HttpPatch]
+    [Route("UpdateModuleAccess/{moduleId}")]
+    public async Task<Result<string[]>> UpdateModuleAccess(string moduleId)
+    {
+        if (string.IsNullOrEmpty(moduleId))
+        {
+            return new Result<string[]>()
+            {
+                Success = false,
+            };
+        }
+        var result = await _companyMasterService.UpdateModuleAccess(moduleId);
+        return result;
+    }
+
+    [HttpGet]
+    [Route("GetAllModuleDetails")]
+    [Authorize]
+    public async Task<Result<AllModuleDetailsResponseModel>> GetAllModuleDetails()
+    {
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        var data = await _companyMasterService.GetAllModulesDetails(companyId);
+        return new Result<AllModuleDetailsResponseModel>()
+        {
+            MethodResults = data,
+            Success = true
+        };
+    }
+
 }

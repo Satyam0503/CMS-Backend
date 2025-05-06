@@ -31,10 +31,7 @@ namespace Codeji.CMS.Services.Registration
             CreateMap<Department, DepartmentDTO>().ReverseMap();
             CreateMap<Skills, SkillsDTO>().ReverseMap();
             CreateMap<Applicant, ApplicantViewModel>().ForMember(dest => dest.ApplyDate, opt => opt.MapFrom(src => src.CreatedDate)).ReverseMap();
-
         }
-
-
     }
 
 }

@@ -12,12 +12,16 @@ namespace Codeji.CMS.DTO.Employee
             get { return FirstName + " " + LastName; }
         }
         public string? ProfileImage { get; set; }
-        // public string CompanyId { get; set; }
+        public string CompanyId { get; set; }
         public string CompanyName { get; set; }
+
+        public string DefaultLanguage { get; set; }
+
+        public List<string> ApplicationLanguage { get; set; }
         // public string Role { get; set; }
         // public string RoleId { get; set; }
         public string[] modulePermission { get; set; }
-       
+
 
 
 
