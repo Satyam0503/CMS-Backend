@@ -469,7 +469,7 @@ public class RoleServices : IRoleService
                           from rolePermission in roleGroup.Take(1)
                           select new AllModuleDetailsResponseModel
                           {
-                              ModuleId = module.ModuleId,
+                              ModuleId = module._id,
                               ModuleName = module.ModuleName,
                               ModuleConstant = module.ModuleConstant,
                               IsAccessible = rolePermission.IsAccessible,
