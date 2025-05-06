@@ -17,5 +17,11 @@ namespace Codeji.CMS.Utility
                 return string.Empty;
             return ConfigManager.AppSettings.AppUrl + ConfigManager.FileSettings.Employee_ImageUrl + profileUrl;
         }
+        public static string GetCompanyLogoUrl(string logoUrl)
+        {
+            if (string.IsNullOrEmpty(logoUrl))
+                return string.Empty;
+            return ConfigManager.AppSettings.AppUrl + ConfigManager.FileSettings.CompanyLogoUrl + logoUrl;
+        }
     }
 }

@@ -244,7 +244,7 @@ public class RoleServices : IRoleService
             List<RolePermission> permissions = rolePermissions.Where(x => x.RoleId == oldRoleId).ToList();
             foreach (RolePermission? item in permissions)
             {
-                Task<Domain.Models.Result> rolePermission = _rolePermissionRepository.AddOne(
+                Task<Result> rolePermission = _rolePermissionRepository.AddOne(
                     new RolePermission
                     {
                         ModulePermissionId = item.ModulePermissionId,
@@ -447,7 +447,8 @@ public class RoleServices : IRoleService
             .Set(x => x.HasAppAccess, hasAppAccess)
             .Set(x => x.UpdatedDate, DateTime.UtcNow));
 
-        return new Result(){
+        return new Result()
+        {
             StatusCode = 200,
             Message = "ROLE.APP_ACCESS.UPDATED",
             Success = true

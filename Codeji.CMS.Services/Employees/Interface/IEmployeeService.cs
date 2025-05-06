@@ -12,7 +12,7 @@ namespace Codeji.CMS.Services.Employees.Interface
 {
     public interface IEmployeeService
     {
-        Task<Result<UserModel>> AddEmployee(UserModel user,string currentUserId);
+        Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId);
         Task<Result<UserModel>> EditEmployee(UserModel user, string userId);
         Task<bool> IsUserActive(string userId);
         Task<UserModel> GetEmployeeById(string userId);
@@ -20,7 +20,7 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<bool> IsEmailExist(string email);
         Task<bool> ResetPassword(string userId, string password, string oldPassword = "");
         Task<string> GetVerificationToken(string email, string password);
-        Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId);
+        Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId, string companyId);
         Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId);
         Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);
         Task<Result> EditEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);

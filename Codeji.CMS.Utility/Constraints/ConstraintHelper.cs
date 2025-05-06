@@ -14,5 +14,14 @@ namespace Codeji.CMS.Utility.Constraints
 
 
     }
-}
 
+    public static class Languages
+    {
+        public static readonly string English = "en";
+        public static readonly string Mandarin = "zh";
+        public static readonly string Spanish = "es";
+        public static readonly string Japanese = "ja";
+        public static readonly string German = "de";
+        public static readonly string French = "fr";
+    }
+}

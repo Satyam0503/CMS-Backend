@@ -36,7 +36,7 @@
 
         public enum MailType
         {
-            CreateNewPasswordMail=0,
+            CreateNewPasswordMail = 0,
             SelectedMail = 1,
             RejectedMail = 2,
             ApplyNowMailToHR = 3,
