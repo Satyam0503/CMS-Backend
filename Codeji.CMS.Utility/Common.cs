@@ -8,20 +8,20 @@ namespace Codeji.CMS.Utility
         {
             if (string.IsNullOrEmpty(resumeUrl))
                 return string.Empty;
-            return ConfigManager.AppSettings.AppUrl + ConfigManager.FileSettings.ViewResumeUrl + resumeUrl;
+            return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.ViewResumeUrl + resumeUrl;
         }
 
-        public static string GetEmployeeImageUrl(string profileUrl)
+        public static string GetEmployeeImageUrl(string? profileUrl)
         {
             if (string.IsNullOrEmpty(profileUrl))
-                return string.Empty;
-            return ConfigManager.AppSettings.AppUrl + ConfigManager.FileSettings.Employee_ImageUrl + profileUrl;
+                return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.Default_User_Image;
+            return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.Employee_ImageUrl + profileUrl;
         }
-        public static string GetCompanyLogoUrl(string logoUrl)
+        public static string GetCompanyLogoUrl(string? logoUrl)
         {
             if (string.IsNullOrEmpty(logoUrl))
-                return string.Empty;
-            return ConfigManager.AppSettings.AppUrl + ConfigManager.FileSettings.CompanyLogoUrl + logoUrl;
+                return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.Default_Company_logo;
+            return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.CompanyLogoUrl + logoUrl;
         }
     }
 }

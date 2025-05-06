@@ -99,7 +99,7 @@ namespace Codeji.CMS.API.Controllers
         //Registering Company
         [HttpPost]
         [Route("account/register")]
-        public async Task<Result> register([FromBody] CompanyRequestModel companyModel)
+        public async Task<Result> Register([FromBody] CompanyRequestModel companyModel)
         {
             //Validating Company Registration
             bool isEmailExist = await _employeeService.IsEmailExist(companyModel.Email);
@@ -119,7 +119,7 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("account/login")]
         [AllowAnonymous]
-        public async Task<Result> login([FromBody] LoginModel model)
+        public async Task<Result> Login([FromBody] LoginModel model)
         {
             Result result = new Result();
             bool isEmailExist = await _employeeService.IsEmailExist(model.Email);
@@ -165,9 +165,9 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("account/getSignedUserDetails")]
         // [ModulePermission("Dashboard", "View")]
-        public async Task<Result<LoginUserViewModel>> getUserByToken()
+        public async Task<Result<LoginUserViewModel>> GetUserByToken()
         {
-            Result<LoginUserViewModel> result = new Result<LoginUserViewModel>();
+            Result<LoginUserViewModel> result = new();
             string userId = CurrentContext.UserId(_httpContextAccessor);
             string roleId = CurrentContext.UserRoleId(_httpContextAccessor);
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);

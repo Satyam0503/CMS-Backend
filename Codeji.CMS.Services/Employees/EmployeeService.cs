@@ -186,6 +186,7 @@ namespace Codeji.CMS.Services.Employees
             userModel.Department = department?.Titles?.FirstOrDefault(x => x.Language == acceptLanguage)?.Label;
             userModel.TeamLead = $"{teamLead?.FirstName} {teamLead?.LastName}";
             userModel.ReportingManager = $"{reportingManager?.FirstName} {reportingManager?.LastName}";
+            userModel.FullProfileUrl = string.IsNullOrEmpty(user.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(user.ProfileUrl);
             return userModel;
         }
         public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(int pageNo, int records)
@@ -211,7 +212,7 @@ namespace Codeji.CMS.Services.Employees
                             Department = dept?.Titles?.FirstOrDefault(x => x.Language == acceptLanguage)?.Label,
                             PhoneNumber = emp.PhoneNumber,
                             DateOfBirth = emp.DateOfBirth,
-                            FullProfileUrl = string.IsNullOrEmpty(emp.ProfileUrl) ? null : Common.GetEmployeeImageUrl(emp.ProfileUrl),
+                            FullProfileUrl = string.IsNullOrEmpty(emp.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(emp.ProfileUrl),
                         }).ToList();
 
             return new Result<GetAllEmployeeResponseModel>()
@@ -286,8 +287,7 @@ namespace Codeji.CMS.Services.Employees
 
         public async Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId, string companyId)
         {
-
-            LoginUserViewModel returnModel = new LoginUserViewModel();
+            LoginUserViewModel returnModel = new();
             UserModel? user = await GetEmployeeById(userId);
             Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == roleId);
             Company? companyDetails = await _companyRepository.FirstOrDefault(x => x.CompanyId == companyId);
@@ -304,7 +304,8 @@ namespace Codeji.CMS.Services.Employees
             returnModel.CompanyName = companyDetails.CompanyName;
             returnModel.DefaultLanguage = companyDetails.DefaultLanguage;
             returnModel.ApplicationLanguage = companyDetails.ApplicationLanguage;
-            returnModel.ProfileImage = string.IsNullOrEmpty(user.FullProfileUrl) ? null : user.FullProfileUrl;
+            returnModel.ProfileImage = user.FullProfileUrl;
+            returnModel.CompanyLogo = string.IsNullOrEmpty(companyDetails.CompanyLogo) ? Common.GetCompanyLogoUrl(null) : Common.GetCompanyLogoUrl(companyDetails.CompanyLogo);
             return returnModel;
         }
         public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId)
