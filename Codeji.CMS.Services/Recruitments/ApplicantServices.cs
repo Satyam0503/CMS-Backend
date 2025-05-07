@@ -57,7 +57,7 @@ namespace Codeji.CMS.Services.Recruitments
             _employeeRepository = employeeRepository;
             _priorityTaskQueue = priorityTaskQueue;
             _middlewareService = middlewareService;
-            _httpContextAccessor= httpContextAccessor;
+            _httpContextAccessor = httpContextAccessor;
         }
         /// <summary>
         /// For Annonymous add and update applicants
@@ -76,14 +76,14 @@ namespace Codeji.CMS.Services.Recruitments
                 Email = applicantRegisterModel.Email,
                 Status = applicantRegisterModel.Status,
                 State = applicantRegisterModel.State,
-                CreatedBy = "new"
+                CreatedBy = ""
             };
             Result result = await _applicantRepository.AddOne(applicant);
 
             //Acknowledgement Email Logic
-            var vacancy = await _jobVacancyService.GetVacancyById(applicantRegisterModel.VacancyId); 
+            var vacancy = await _jobVacancyService.GetVacancyById(applicantRegisterModel.VacancyId);
             var currentUser = _middlewareService.GetUserById(CurrentContext.UserId(_httpContextAccessor));
-            
+
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 4);
             HtmlTemplate htmlTemplate = new HtmlTemplate();
             string replacedBody = htmlTemplate.Render(emailContent?.body ?? string.Empty, new
@@ -96,7 +96,7 @@ namespace Codeji.CMS.Services.Recruitments
             {
                 _middlewareService.EmailSendAndSave(new EmpEmailLogs()
                 {
-                    UserTo =applicant.Email,
+                    UserTo = applicant.Email,
                     Subject = emailContent.subject,
                     Body = replacedBody,
                     EmailLogType = Utility.Enums.EnumsHelper.MailType.ApplyNowMailToApplicant,
@@ -144,30 +144,22 @@ namespace Codeji.CMS.Services.Recruitments
         }
         public async Task<Result> GetApplicantsExistingId(string email)
         {
-            Applicant? res = await _applicantRepository.FirstOrDefault(x => x.Email == email);
-            if (res is null)
+            Result result = new();
+            Applicant? applicant = await _applicantRepository.FirstOrDefault(x => x.Email == email);
+            if (applicant is null)
             {
-                return new Result()
-                {
-                    Success = true,
-                };
+                result.Success = true;
             }
-            else if (res.CreatedDate > DateTime.Now.AddMonths(-6))
+            else if (applicant.CreatedDate > DateTime.Now.AddMonths(-6))
             {
-                return new Result()
-                {
-                    Success = false
-                };
+                result.Success = false;
             }
             else
             {
-                return new Result()
-                {
-                    Success = true,
-                    Message = res.ApplicantId
-                };
+                result.Message = applicant.ApplicantId;
+                result.Success = true;
             }
-
+            return result;
         }
 
         public async Task<string> GetApplicantExistingResume(string email)
