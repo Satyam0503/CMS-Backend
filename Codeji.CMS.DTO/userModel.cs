@@ -28,11 +28,5 @@ public class UserModel
     public bool? IsEmailVerified { get; set; }
     public string? Address { get; set; }
     public string? ProfileUrl { get; set; }
-    public string? FullProfileUrl
-    {
-        get
-        {
-            return !string.IsNullOrEmpty(ProfileUrl) ? Common.GetEmployeeImageUrl(ProfileUrl) : null;
-        }
-    }
+    public string? FullProfileUrl { get; set; }
 }
