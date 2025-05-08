@@ -42,7 +42,7 @@ public class UserController : BaseApiController
                 Message = "User Already Exist"
             };
         }
-        return await _employeeService.AddEmployee(user,currentUserId);
+        return await _employeeService.AddEmployee(user, currentUserId);
     }
 
     [Route("EditEmployees")]
@@ -96,7 +96,7 @@ public class UserController : BaseApiController
     [Route("AddEditEmployeeSummary")]
     [HttpPost]
     public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary)
-    {   
+    {
         string userId = string.IsNullOrEmpty(userSummary.UserId) ? CurrentContext.UserId(_httpContextAccessor) : userSummary.UserId;
         return await _employeeService.AddEditEmployeeSummary(userSummary, userId);
     }
@@ -227,7 +227,7 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result> AddEditSkills(SkillsRequestModel skillsModel)
     {
-        string userId = string.IsNullOrEmpty(skillsModel.UserId) ?  CurrentContext.UserId(_httpContextAccessor): skillsModel.UserId ;
+        string userId = string.IsNullOrEmpty(skillsModel.UserId) ? CurrentContext.UserId(_httpContextAccessor) : skillsModel.UserId;
         return await _employeeService.AddEditEmployeeSkills(skillsModel, userId);
     }
 
@@ -249,7 +249,7 @@ public class UserController : BaseApiController
     [HttpDelete]
     public async Task<Result> DeleteEducationDetails(string educationId, [FromBody] string userId)
     {
-        if(string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
+        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
         Result data = await _employeeService.DeleteEducationDetails(educationId, userId);
         if (data == null)
         {
@@ -270,9 +270,9 @@ public class UserController : BaseApiController
 
     [Route("DeleteCertificationDetails/{certificationId}")]
     [HttpDelete]
-    public async Task<Result> DeleteCertificationDetails(string certificationId,[FromBody] string userId)
+    public async Task<Result> DeleteCertificationDetails(string certificationId, [FromBody] string userId)
     {
-        if(string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
+        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
         Result data = await _employeeService.DeleteCertificationDetails(certificationId, userId);
         if (data == null)
         {
@@ -315,13 +315,16 @@ public class UserController : BaseApiController
 
     [HttpGet]
     [Route("GetSuggestedSkills")]
-    public async Task<Result<Skills>> GetSuggestedSkills([FromQuery] string query){
+    public async Task<Result<Skills>> GetSuggestedSkills([FromQuery] string query)
+    {
         var sanitizedQuery = query.Trim().ToLower();
-        if(string.IsNullOrEmpty(sanitizedQuery)){
-            return new Result<Skills>(){
-                Success=true,
-                MethodResults =[],
-                StatusCode =200,
+        if (string.IsNullOrEmpty(sanitizedQuery))
+        {
+            return new Result<Skills>()
+            {
+                Success = true,
+                MethodResults = [],
+                StatusCode = 200,
             };
         }
         return await _employeeService.GetSuggestedSkills(sanitizedQuery);
@@ -329,19 +332,22 @@ public class UserController : BaseApiController
 
     [HttpPost]
     [Route("AddSkill")]
-    public async Task<Result> AddSkill([FromBody] string skill ){
+    public async Task<Result> AddSkill([FromBody] string skill)
+    {
         var sanitizeSkill = skill.Trim().ToLower();
         var regex = new Regex(@"^[a-zA-Z0-9\s\+\#\.\-]{2,30}$");
-        var isValid= regex.IsMatch(sanitizeSkill);
+        var isValid = regex.IsMatch(sanitizeSkill);
 
-        if(string.IsNullOrEmpty(sanitizeSkill) || !isValid){
-            return new Result(){
+        if (string.IsNullOrEmpty(sanitizeSkill) || !isValid)
+        {
+            return new Result()
+            {
                 StatusCode = 200,
-                Success= false,
+                Success = false,
                 Message = "InValid Skill Name"
             };
         }
-        var result =  await  _employeeService.AddSkill(sanitizeSkill);
+        var result = await _employeeService.AddSkill(sanitizeSkill);
         return result;
     }
 
