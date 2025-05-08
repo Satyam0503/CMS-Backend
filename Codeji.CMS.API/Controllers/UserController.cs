@@ -2,6 +2,7 @@
 using System.Text.RegularExpressions;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
+using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Repository.Entities;
@@ -61,10 +62,10 @@ public class UserController : BaseApiController
     }
 
     [Route("GetAllEmployees")]
-    [HttpGet]
-    public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees([FromQuery] int pageNo, [FromQuery] int records)
+    [HttpPost]
+    public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel filters, [FromQuery] int pageNo, [FromQuery] int records)
     {
-        Result<GetAllEmployeeResponseModel> data = await _employeeService.GetAllEmployees(pageNo, records);
+        Result<GetAllEmployeeResponseModel> data = await _employeeService.GetAllEmployees(filters, pageNo, records);
         return data;
     }
     [Route("ChangePassword")]
