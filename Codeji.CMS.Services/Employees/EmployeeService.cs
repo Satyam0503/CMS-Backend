@@ -46,7 +46,7 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<Department> _departmentRepository;
 
         readonly IMongoDbRepository<Skills> _skillsRepository;
-        readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IHttpContextAccessor _httpContextAccessor;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
@@ -197,7 +197,7 @@ namespace Codeji.CMS.Services.Employees
 
             Expression<Func<EmpUser, bool>> whereCondition = x =>
             (filters.DepartmentId == null || !filters.DepartmentId.Any() || filters.DepartmentId.Contains(x.Department)) &&
-            (string.IsNullOrEmpty(filters.Name)
+             (string.IsNullOrEmpty(filters.Name)
             || x.FirstName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
             || x.LastName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
             || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));

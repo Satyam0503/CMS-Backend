@@ -9,6 +9,8 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Utility.middlewares;
+using Microsoft.AspNetCore.Http;
 
 namespace Codeji.CMS.Services.Dashboard
 {
@@ -18,19 +20,25 @@ namespace Codeji.CMS.Services.Dashboard
         private readonly IMongoDbRepository<Department> _departmentRepository;
         private readonly IMongoDbRepository<EmpUser> _empUserRepository;
         private readonly IMapper _mapper;
+        private readonly IHttpContextAccessor _httpContextAccessor;
         public DashboardServices(
             IMongoDbRepository<Department> departmentRepository,
             IMongoDbRepository<EmpUser> empUserRepository,
+            IHttpContextAccessor httpContextAccessor,
             IMapper mapper) 
         
         {
             _departmentRepository = departmentRepository;
             _empUserRepository = empUserRepository;
             _mapper = mapper;
+            _httpContextAccessor = httpContextAccessor;
         }
 
         public async Task<List<AllDepartmentDetailsResponseModel>> GetAllDepartmentsDetails(string companyId)
         {
+
+            string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
+
             var allDepartments = await _departmentRepository.GetAll(x => x.CompanyId == companyId && x.IsDeleted == false);
             var allEmpUser = await _empUserRepository.GetAll(x => x.CompanyId == companyId);
 
@@ -38,7 +46,7 @@ namespace Codeji.CMS.Services.Dashboard
                          join aeu in allEmpUser on ad.DepartmentId equals aeu.Department into empGroup
                          select new AllDepartmentDetailsResponseModel
                          {
-                             Titles = ad.Titles,
+                             Label = ad.Titles.FirstOrDefault(x => x.Language == acceptLanguage)?.Label,
                              DepartmentId = ad.DepartmentId,
                              EmployeeCount = empGroup.Count(),
                          };

@@ -8,7 +8,7 @@ namespace Codeji.CMS.DTO.Dashboard
 {
     public class AllDepartmentDetailsResponseModel
     {
-        public List<MultilingualModel> Titles { get; set; }
+        public string Label { get; set; }
         public string DepartmentId { get; set; }
         public int EmployeeCount { get; set; }
     }
