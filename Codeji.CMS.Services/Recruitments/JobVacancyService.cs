@@ -62,17 +62,21 @@ namespace Codeji.CMS.Services.Recruitments
             };
         }
 
-        public async Task<Result<JobVacancyModel>> GetAllVacancy(int pageNo, int records)
+        public async Task<Result<JobVacancyModel>> GetAllVacancy(JobSearchModel search, int pageNo, int records)
         {
             pageNo = pageNo == 0 ? 1 : pageNo;
             records = records == 0 ? 10 : records;
-            var totalRecord = _jobVacancyRepo.Count();
-            IEnumerable<JobVacancy> list = await _jobVacancyRepo.GetAggregateDataAsync<JobVacancy>(pageSize: records, pageNo: pageNo);
+            Expression<Func<JobVacancy, bool>> whereCondition = x => x.Title.Contains(search.name, StringComparison.CurrentCultureIgnoreCase);
+
+            var totalRecord = await _jobVacancyRepo.Count(whereCondition);
+
+            IEnumerable<JobVacancy> list = await _jobVacancyRepo.GetAggregateDataAsync<JobVacancy>(whereCondition, pageSize: records, pageNo: pageNo);
+
             List<JobVacancyModel> data = _mapper.Map<List<JobVacancyModel>>(list);
             Result<JobVacancyModel> result = new Result<JobVacancyModel>()
             {
                 Success = true,
-                TotalRecords = await totalRecord,
+                TotalRecords = totalRecord,
                 MethodResults = data,
             };
             return result;
