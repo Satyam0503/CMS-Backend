@@ -125,10 +125,22 @@ namespace Codeji.CMS.Services
                 result.Success = false;
                 return result;
             }
-            company.ApplicationLanguage = model.ApplicationLanguage.Count != 0 ? model.ApplicationLanguage : company.ApplicationLanguage;
+            if (model.ApplicationLanguage != null)
+            {
+                bool exist = model.ApplicationLanguage.Exists(x => x.Equals(model.DefaultLanguage));
+                if (!exist)
+                {
+                    model.ApplicationLanguage.Add(model.DefaultLanguage);
+                }
+                company.ApplicationLanguage = model.ApplicationLanguage;
+            }
+            else
+            {
+                company.ApplicationLanguage = [model.DefaultLanguage];
+            }
             company.CompanyName = model.CompanyName ?? company.CompanyName;
             company.DefaultLanguage = model.DefaultLanguage ?? company.DefaultLanguage;
-            company.CompanyLogo = model.CompanyLogo == null ? null : await UpdateCompanyLogo(model.CompanyLogo, companyId);
+            company.CompanyLogo = model.CompanyLogo == null ? company.CompanyLogo : await UpdateCompanyLogo(model.CompanyLogo, companyId);
 
             Result result1 = await _companyRepo.Update(whereCondition, company);
             if (!result.Success)
