@@ -16,7 +16,7 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<Result<UserModel>> EditEmployee(UserModel user, string userId);
         Task<bool> IsUserActive(string userId);
         Task<UserModel> GetEmployeeById(string userId);
-        Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel filters, int pageNo, int records);
+        Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel filters);
         Task<bool> IsEmailExist(string email);
         Task<bool> ResetPassword(string userId, string password, string oldPassword = "");
         Task<string> GetVerificationToken(string email, string password);

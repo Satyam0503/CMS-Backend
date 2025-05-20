@@ -15,6 +15,7 @@ using MongoDB.Driver.Linq;
 using Module = Codeji.CMS.Repository.Entities.RolePermissions.Module;
 
 namespace Codeji.CMS.Services.Employees;
+
 public class RoleServices : IRoleService
 {
     private readonly IMongoDbRepository<Roles> _RolesRepository;
@@ -453,28 +454,5 @@ public class RoleServices : IRoleService
             Message = "ROLE.APP_ACCESS.UPDATED",
             Success = true
         };
-    }
-    public async Task<List<AllModuleDetailsResponseModel>> GetAllModulesDetails(string companyId)
-    {
-        var allModules = await _moduleRepository.GetAll(x => x.ModuleName != "Company Details"); 
-        // Not selecting "Company Details" as it will hide Module Accessibility Controls to Admin.
-
-        var allModulePermissions = await _modulePermissionRepository.GetAll();
-        var allRolePermission = await _rolePermissionRepository.GetAll(x=>x.CompanyId == companyId);
-
-        var queryResult = from module in allModules
-                          join modulePermission in allModulePermissions on module.ModuleId equals modulePermission.ModuleId into modulePermissionGroup
-                          from modulePermission in modulePermissionGroup.Take(1)
-                          join rolePermission in allRolePermission on modulePermission.ModulePermissionId equals rolePermission.ModulePermissionId into roleGroup
-                          from rolePermission in roleGroup.Take(1)
-                          select new AllModuleDetailsResponseModel
-                          {
-                              ModuleId = module._id,
-                              ModuleName = module.ModuleName,
-                              ModuleConstant = module.ModuleConstant,
-                              IsAccessible = rolePermission.IsAccessible,
-                          };
-
-        return queryResult.ToList();
     }
 }

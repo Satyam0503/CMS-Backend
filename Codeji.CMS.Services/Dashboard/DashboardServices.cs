@@ -25,8 +25,8 @@ namespace Codeji.CMS.Services.Dashboard
             IMongoDbRepository<Department> departmentRepository,
             IMongoDbRepository<EmpUser> empUserRepository,
             IHttpContextAccessor httpContextAccessor,
-            IMapper mapper) 
-        
+            IMapper mapper)
+
         {
             _departmentRepository = departmentRepository;
             _empUserRepository = empUserRepository;
@@ -59,12 +59,12 @@ namespace Codeji.CMS.Services.Dashboard
         {
             var allEmpUser = await _empUserRepository.GetAll(x => x.CompanyId == companyId);
             var result = (from aeu in allEmpUser
-                         group aeu by aeu.Gender into genderGroup
-                         select new GenderDetailsResponseModel 
-                         {
-                             Gender = genderGroup.Key,
-                             Count= genderGroup.Count()
-                         }).ToList();
+                          group aeu by aeu.Gender into genderGroup
+                          select new GenderDetailsResponseModel
+                          {
+                              Gender = genderGroup.Key,
+                              Count = genderGroup.Count()
+                          }).ToList();
 
             return result;
 

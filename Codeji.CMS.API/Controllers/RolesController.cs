@@ -102,37 +102,23 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetRoleById/{roleId}")]
-        public async Task<Result<RoleModel>> GetRoleById(string roleId) {
+        public async Task<Result<RoleModel>> GetRoleById(string roleId)
+        {
             var data = await _roleService.GetRoleById(roleId);
-            return new Result<RoleModel>(){
+            return new Result<RoleModel>()
+            {
                 StatusCode = 200,
-                Success= true,
+                Success = true,
                 MethodResult = data,
             };
         }
 
         [HttpPatch]
         [Route("UpdateAppAccessForRole/{roleId}")]
-        public async Task<Result> UpdateAppAccessForRole( string roleId, [FromBody] bool hasAppAccess){
-            var result = await _roleService.UpdateAppAccessForRole(roleId,hasAppAccess);
+        public async Task<Result> UpdateAppAccessForRole(string roleId, [FromBody] bool hasAppAccess)
+        {
+            var result = await _roleService.UpdateAppAccessForRole(roleId, hasAppAccess);
             return result;
         }
-
-        [HttpGet]
-        [Route("GetAllModuleDetails")]
-        public async Task<Result<AllModuleDetailsResponseModel>> GetAllModuleDetails()
-        {
-
-            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-
-            var data = await _roleService.GetAllModulesDetails(companyId);
-            return new Result<AllModuleDetailsResponseModel>()
-            {
-                Message= "All Modules fetched successfully",
-                MethodResults = data
-            };
-
-        }
-
     }
 }

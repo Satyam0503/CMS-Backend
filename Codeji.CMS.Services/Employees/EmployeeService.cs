@@ -189,26 +189,28 @@ namespace Codeji.CMS.Services.Employees
             userModel.FullProfileUrl = string.IsNullOrEmpty(user.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(user.ProfileUrl);
             return userModel;
         }
-        public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel filters, int pageNo, int records)
+        public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel filters)
         {
-            pageNo = pageNo == 0 ? 1 : pageNo;
-            records = records == 0 ? 10 : records;
+            int pageNo = filters.PageNo == 0 ? 1 : filters.PageNo;
+            int records = filters.Records == 0 ? 10 : filters.Records;
             string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
 
             Expression<Func<EmpUser, bool>> whereCondition = x =>
-            (filters.DepartmentId == null || !filters.DepartmentId.Any() || filters.DepartmentId.Contains(x.Department)) &&
-             (string.IsNullOrEmpty(filters.Name)
-            || x.FirstName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
-            || x.LastName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
+            ((filters.DepartmentId.Count == 0) || filters.DepartmentId.Contains(x.Department)) &&
+            ((filters.Gender.Count == 0) || filters.Gender.Contains(x.Gender)) &&
+            (string.IsNullOrEmpty(filters.Name)
+            // || x.FirstName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
+            // || x.LastName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
             || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));
 
             var empList = (await _employeeRepository.GetAggregateDataAsync<EmpUser>(whereCondition, pageNo: pageNo, pageSize: records)).ToList();
-
-            var deptList = await _departmentRepository.GetAll();
+            string[] depId = empList.Select(x => x.Department).Distinct().ToArray();
+            var deptList = await _departmentRepository.GetAll(x => depId.Contains(x.DepartmentId));
 
             var data = (from emp in empList
                         join dept in deptList
-                        on emp.Department equals dept.DepartmentId
+                        on emp.Department equals dept.DepartmentId into empDepartmentGrp
+                        from department in empDepartmentGrp.DefaultIfEmpty()
                         select new GetAllEmployeeResponseModel
                         {
                             UserId = emp.UserId,
@@ -216,7 +218,7 @@ namespace Codeji.CMS.Services.Employees
                             Email = emp.Email,
                             EmployeeId = emp.EmployeeId,
                             JobRole = emp.JobRole,
-                            Department = dept?.Titles?.FirstOrDefault(x => x.Language == acceptLanguage)?.Label,
+                            Department = department?.Titles?.FirstOrDefault(x => x.Language == acceptLanguage)?.Label,
                             PhoneNumber = emp.PhoneNumber,
                             DateOfBirth = emp.DateOfBirth,
                             FullProfileUrl = string.IsNullOrEmpty(emp.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(emp.ProfileUrl),
