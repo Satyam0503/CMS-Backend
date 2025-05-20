@@ -40,12 +40,13 @@ public class JobVacancyController : BaseApiController
     {
         return await _jobVacancyService.EditJobVacancy(jobVacancy, jobId);
     }
+
     [Route("GetAllVacancy")]
-    [HttpGet]
+    [HttpPost]
     [AllowAnonymous]
-    public async Task<Result<JobVacancyModel>> GetAllVacancy([FromQuery] int pageNo, [FromQuery] int records)
+    public async Task<Result<JobVacancyModel>> GetAllVacancy(JobSearchModel search, [FromQuery] int pageNo, [FromQuery] int records)
     {
-        Result<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy(pageNo, records);
+        Result<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy(search, pageNo, records);
 
         return data;
     }

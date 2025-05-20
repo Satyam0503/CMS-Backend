@@ -4,12 +4,12 @@ using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Mvc;
-
+using Microsoft.AspNetCore.Authorization;
 namespace Codeji.CMS.API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    //[Authorize]
+    [Authorize]
     public class CompanyController : ControllerBase
     {
         private readonly ICompanyService _companyService;
