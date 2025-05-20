@@ -21,4 +21,5 @@ public interface
     Task<bool> VerifyUserAccess(string module, string[] Role, string userId, string companyId, UserCheckModel userForEdit = null);
     Task<List<ModuleWithPermissionsModel>> GetAllRolesWithPermission(string companyId);
     Task<Result> UpdateAppAccessForRole(string roleId, bool hasAppAccess);
+    Task<List<AllModuleDetailsResponseModel>> GetAllModulesDetails(string companyId);
 }

@@ -46,7 +46,7 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<Department> _departmentRepository;
 
         readonly IMongoDbRepository<Skills> _skillsRepository;
-        readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IHttpContextAccessor _httpContextAccessor;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
@@ -189,19 +189,26 @@ namespace Codeji.CMS.Services.Employees
             userModel.FullProfileUrl = string.IsNullOrEmpty(user.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(user.ProfileUrl);
             return userModel;
         }
-        public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(int pageNo, int records)
+        public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel filters, int pageNo, int records)
         {
             pageNo = pageNo == 0 ? 1 : pageNo;
             records = records == 0 ? 10 : records;
             string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
-            var count = await _employeeRepository.Count();
-            var empList = (await _employeeRepository.GetAggregateDataAsync<EmpUser>(pageNo: pageNo, pageSize: records)).ToList();
-            string[] departmentList = empList.Select(x => x.Department).Distinct().ToArray();
-            IEnumerable<Department> depList = await _departmentRepository.GetAll(x => departmentList.Contains(x.DepartmentId));
+
+            Expression<Func<EmpUser, bool>> whereCondition = x =>
+            (filters.DepartmentId == null || !filters.DepartmentId.Any() || filters.DepartmentId.Contains(x.Department)) &&
+             (string.IsNullOrEmpty(filters.Name)
+            || x.FirstName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
+            || x.LastName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
+            || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));
+
+            var empList = (await _employeeRepository.GetAggregateDataAsync<EmpUser>(whereCondition, pageNo: pageNo, pageSize: records)).ToList();
+
+            var deptList = await _departmentRepository.GetAll();
+
             var data = (from emp in empList
-                        join department in depList
-                        on emp.Department equals department.DepartmentId into deptGroup
-                        from dept in deptGroup.DefaultIfEmpty()
+                        join dept in deptList
+                        on emp.Department equals dept.DepartmentId
                         select new GetAllEmployeeResponseModel
                         {
                             UserId = emp.UserId,
@@ -215,10 +222,10 @@ namespace Codeji.CMS.Services.Employees
                             FullProfileUrl = string.IsNullOrEmpty(emp.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(emp.ProfileUrl),
                         }).ToList();
 
+
             return new Result<GetAllEmployeeResponseModel>()
             {
                 Success = true,
-                TotalRecords = count,
                 MethodResults = data,
             };
         }
