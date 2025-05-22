@@ -12,6 +12,7 @@ using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
@@ -84,7 +85,7 @@ namespace Codeji.CMS.Services.Recruitments
             var vacancy = await _jobVacancyService.GetVacancyById(applicantRegisterModel.VacancyId);
             var currentUser = _middlewareService.GetUserById(CurrentContext.UserId(_httpContextAccessor));
 
-            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 4);
+            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ApplyNowMailToApplicant);
             HtmlTemplate htmlTemplate = new HtmlTemplate();
             string replacedBody = htmlTemplate.Render(emailContent?.body ?? string.Empty, new
             {
@@ -99,7 +100,7 @@ namespace Codeji.CMS.Services.Recruitments
                     UserTo = applicant.Email,
                     Subject = emailContent.subject,
                     Body = replacedBody,
-                    EmailLogType = Utility.Enums.EnumsHelper.MailType.ApplyNowMailToApplicant,
+                    EmailLogType = EnumsHelper.MailType.ApplyNowMailToApplicant,
                     Email = applicant.Email,
                     UserFrom = currentUser != null ? currentUser.Email : string.Empty
                 });

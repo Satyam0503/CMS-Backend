@@ -46,6 +46,7 @@
             LeaveMailToHR = 7,
             LeaveReplyMail = 8,
             ResignationMail = 9,
+            ResetPassword = 10,
         }
     }
 }

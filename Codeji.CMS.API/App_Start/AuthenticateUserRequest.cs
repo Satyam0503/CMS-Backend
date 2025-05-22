@@ -29,6 +29,7 @@ namespace Codeji.CMS.API.App_Start
                  "/api/account/register",
                  "/api/account/login",
                  "/api/CreateNewPassword",
+                 "api/account/ResetPassword",
                  "/api/VerificationCaptch",
                  "/api/SendEmail",
                  "/fs/"};

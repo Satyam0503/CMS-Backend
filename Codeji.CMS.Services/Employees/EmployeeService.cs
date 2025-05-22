@@ -1,7 +1,9 @@
 ﻿using System.Linq.Expressions;
 using System.Reflection;
-using System.Text.RegularExpressions;
+using System.Security.Cryptography;
+using System.Text;
 using AutoMapper;
+using BCrypt.Net;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
@@ -19,6 +21,7 @@ using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
+using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
@@ -46,6 +49,7 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<Department> _departmentRepository;
 
         readonly IMongoDbRepository<Skills> _skillsRepository;
+        readonly IMongoDbRepository<PasswordResetTokens> _passwordResetTokens;
         private readonly IHttpContextAccessor _httpContextAccessor;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
@@ -63,7 +67,8 @@ namespace Codeji.CMS.Services.Employees
             IMiddlewareService middlewareService,
             IHttpContextAccessor httpContextAccessor,
             IMongoDbRepository<Department> departmentRepository,
-            IMongoDbRepository<Skills> skillsRepository
+            IMongoDbRepository<Skills> skillsRepository,
+            IMongoDbRepository<PasswordResetTokens> passwordResetTokens
             )
         {
             _employeeRepository = employeeRepository;
@@ -82,14 +87,16 @@ namespace Codeji.CMS.Services.Employees
             _middlewareService = middlewareService;
             _departmentRepository = departmentRepository;
             _skillsRepository = skillsRepository;
+            _passwordResetTokens = passwordResetTokens;
             _httpContextAccessor = httpContextAccessor;
         }
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
         {
+            var userId = Guid.NewGuid().ToString();
             EmpUser employee = new EmpUser()
             {
-                UserId = user.UserId,
+                UserId = userId,
                 FirstName = user.FirstName,
                 LastName = user.LastName,
                 Email = user.Email,
@@ -108,35 +115,45 @@ namespace Codeji.CMS.Services.Employees
                 EmergencyContact = user.EmergencyContact,
                 DateOfJoining = user.DateOfJoining,
                 Status = true,
-                StatusNumber = Guid.NewGuid().ToString(),
                 IsEmailVerified = false,
                 Address = user.Address
             };
 
             await _employeeRepository.AddOne(employee);
 
+            // password creation token
+            string token = TokenHelper.GenerateToken();
+            string tokenHash = TokenHelper.ComputeSha256Hash(token);
+            PasswordResetTokens passwordResetTokens = new()
+            {
+                UserId = userId,
+                TokenHash = tokenHash,
+                IsUsed = false,
+                Expiry = DateTime.UtcNow.AddMinutes(15),
+            };
+            var result2 = await _passwordResetTokens.AddOne(passwordResetTokens);
+
             UserModel currentUser = _middlewareService.GetUserById(currentUserId);
             Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
 
             //Acknowledgement Email Logic 
-            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 0);
+            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.CreateNewPasswordMail);
             HtmlTemplate htmlTemplate = new HtmlTemplate();
             string replacedBody = htmlTemplate.Render(emailContent.body, new
             {
                 RecipientName = employee.FirstName + " " + employee.LastName,
-                PasswordCreationLink = ConfigManager.AppSettings.AppUrl + "auth/createpassword",
-                statusNumber = employee.StatusNumber,
+                PasswordCreationLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={userId}",
                 CompanyName = company != null ? company.CompanyName : "",
             });
 
             _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
           {
-              _middlewareService.EmailSendAndSave(new Repository.Entities.EmpEmailLogs()
+              _middlewareService.EmailSendAndSave(new EmpEmailLogs()
               {
                   UserTo = employee.Email,
                   Subject = emailContent.subject,
                   Body = replacedBody,
-                  EmailLogType = Utility.Enums.EnumsHelper.MailType.CreateNewPasswordMail,
+                  EmailLogType = EnumsHelper.MailType.CreateNewPasswordMail,
                   Email = employee.Email,
                   UserFrom = currentUser.Email,
               });
@@ -237,6 +254,61 @@ namespace Codeji.CMS.Services.Employees
             return IsEmailExist;
 
         }
+        public async Task<bool> IsEmpExistAndActive(string email)
+        {
+            return await _employeeRepository.Exist(x => x.Email == email && x.Status && x.Password != null);
+        }
+        public async Task<Result> GenerateTokenAndSendEmail(string email)
+        {
+            Result result = new();
+            var emp = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(email));
+            if (emp is null) return result;
+            var token = TokenHelper.GenerateToken();
+            var hashedToken = TokenHelper.ComputeSha256Hash(token);
+
+            PasswordResetTokens passwordResetTokens = new()
+            {
+                UserId = emp.UserId,
+                TokenHash = hashedToken,
+                IsUsed = false,
+                Expiry = DateTime.UtcNow.AddMinutes(10),
+            };
+            var result2 = await _passwordResetTokens.AddOne(passwordResetTokens);
+            if (!result2.Success)
+            {
+                return result;
+            }
+            Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == emp.CompanyId);
+            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ResetPassword);
+            HtmlTemplate htmlTemplate = new HtmlTemplate();
+            string replacedBody = htmlTemplate.Render(emailContent?.body, new
+            {
+                EmployeeName = emp.FirstName + " " + emp.LastName,
+                PasswordResetLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={emp.UserId}",
+                CompanyName = company != null ? company.CompanyName : "",
+            });
+            string replacedSubject = htmlTemplate.Render(emailContent.subject, new
+            {
+                CompanyName = company != null ? company.CompanyName : ""
+            });
+
+            _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
+            {
+                _middlewareService.EmailSendAndSave(new EmpEmailLogs()
+                {
+                    UserTo = emp.Email,
+                    Subject = replacedSubject,
+                    Body = replacedBody,
+                    EmailLogType = EnumsHelper.MailType.ResetPassword,
+                    Email = emp.Email,
+                    UserFrom = "",
+                });
+            }, priority: 1);
+
+            result.Success = true;
+            result.Message = "Password reset link has been sent. Please check your mail";
+            return result;
+        }
 
         public async Task<bool> ResetPassword(string userId, string password, string oldPassword)
         {
@@ -256,22 +328,36 @@ namespace Codeji.CMS.Services.Employees
             return true;
         }
 
-        public async Task<bool> CreateNewPassword(string password, string statusNumber)
+        public async Task<Result> CreateNewPassword(CreateNewPasswordRequest model)
         {
-            EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.StatusNumber == statusNumber);
+            Result result = new();
+            var tokenHash = TokenHelper.ComputeSha256Hash(model.Token);
+            PasswordResetTokens? token = await _passwordResetTokens.FirstOrDefault(x => x.UserId == model.Uid && x.TokenHash == tokenHash && !x.IsUsed);
+            if (token is null)
+            {
+                result.Message = "Invalid or expired token";
+                return result;
+            }
+            if (token?.Expiry < DateTime.UtcNow)
+            {
+                result.Message = "This password reset link has expired. Please request a new one.";
+                return result;
+            }
+
+            EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == model.Uid);
             if (user is null)
             {
-                return false;
+                return result;
             }
-            if (!string.IsNullOrEmpty(user.Password))
-            {
-                return false;
-            }
-            user.Password = AuthenticationHandler.HashedPassword(password);
+            user.Password = AuthenticationHandler.HashedPassword(model.NewPassword);
             user.IsEmailVerified = true;
             Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == user.UserId;
             await _employeeRepository.Update(whereCondition, user);
-            return true;
+            Expression<Func<PasswordResetTokens, bool>> whereCondition2 = x => x.Id == token.Id;
+            var result2 = await _passwordResetTokens.Delete(whereCondition2);
+            result.Success = true;
+            result.Message = "Password has been reset";
+            return result;
         }
         // Logic for Login User and Employee by Email and Password
         public async Task<string> GetVerificationToken(string email, string password)
