@@ -66,9 +66,14 @@ public class CompanyMasterService : ICompanyMasterService
         return result;
     }
 
-    public async Task<Result<DepartmentDTO>> GetDepartmentList()
+    public async Task<Result<DepartmentDTO>> GetDepartmentList(bool? isActive)
     {
         IEnumerable<Department> departments = await _departmentRepository.GetAll(x => x.IsDeleted == false);
+        if (isActive.HasValue)
+        {
+            departments = departments.Where(x => x.IsActive == isActive.Value);
+        }
+
         if (departments == null || !departments.Any())
         {
             return new Result<DepartmentDTO>()

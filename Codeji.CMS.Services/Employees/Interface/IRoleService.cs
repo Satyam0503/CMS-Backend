@@ -8,7 +8,7 @@ public interface
     IRoleService
 {
     Task<string> AddEditRoles(RoleWithModuleAndPermissions roles, string companyId);
-    Task<List<RoleModel>> GetRoles(string companyId);
+    Task<List<RoleModel>> GetRoles(string companyId, bool? excludeAdmin);
     Task<RoleModel> GetRoleById(string roleId);
     //Task<RoleWithModuleAndPermissions> SaveRoleAndPermissions(RoleWithModuleAndPermissions roleWithModuleAndPermissions);
     Task<List<ModuleWithPermissionsModel>> GetRoleWithPermissions(string roleId, string companyId);

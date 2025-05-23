@@ -1,5 +1,4 @@
-﻿using Codeji.CMS.API.App_Start;
-using Codeji.CMS.Domain.Models;
+﻿using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility.middlewares;
@@ -22,23 +21,16 @@ namespace Codeji.CMS.API.Controllers
 
         }
 
-        //Add New Roles
-        //[Route("AddEditRoles")]
-        //[HttpPost]
-        //public async Task<Result<RoleModel>> AddEditRoles(RoleModel roles)
-        //{
-        //    return await _roleService.AddEditRoles(roles);
-        //}
-
         [HttpGet]
         [Route("GetRoles")]
-        public async Task<Result<RoleModel>> GetRoles()
+        public async Task<Result<RoleModel>> GetRoles([FromQuery] bool? excludeAdmin)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-            List<RoleModel> roles = await _roleService.GetRoles(companyId);
+            List<RoleModel> roles = await _roleService.GetRoles(companyId, excludeAdmin);
             return new Result<RoleModel>()
             {
                 MethodResults = roles ?? [],
+                TotalRecords = roles != null ? roles.Count : 0,
                 Success = true
             };
         }

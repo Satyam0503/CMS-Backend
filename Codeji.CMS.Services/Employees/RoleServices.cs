@@ -119,9 +119,13 @@ public class RoleServices : IRoleService
         }
     }
     //Get company's all roles
-    public async Task<List<RoleModel>> GetRoles(string companyId)
+    public async Task<List<RoleModel>> GetRoles(string companyId, bool? excludeAdmin)
     {
-        List<Roles> roles = (await _RolesRepository.GetAll(x => x.CompanyId == companyId)).ToList();
+        IEnumerable<Roles> roles = await _RolesRepository.GetAll(x => x.CompanyId == companyId);
+        if (excludeAdmin.HasValue && excludeAdmin.Value)
+        {
+            roles = roles.Where(x => x.RoleType != 1 && x.Titles != "Company Administrator");
+        }
         return _mapper.Map<List<RoleModel>>(roles);
     }
     //Fetch matched role with given Id

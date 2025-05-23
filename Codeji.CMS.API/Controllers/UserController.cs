@@ -63,7 +63,7 @@ public class UserController : BaseApiController
 
     [Route("GetAllEmployees")]
     [HttpPost]
-    public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel filters)
+    public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters)
     {
         Result<GetAllEmployeeResponseModel> data = await _employeeService.GetAllEmployees(filters);
         return data;
