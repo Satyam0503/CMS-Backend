@@ -100,7 +100,6 @@ namespace Codeji.CMS.Services.Employees
                 FirstName = user.FirstName,
                 LastName = user.LastName,
                 Email = user.Email,
-                Password = user.Password,
                 RoleId = user.RoleId,
                 Gender = user.Gender,
                 EmployeeId = user.EmployeeId,
@@ -166,10 +165,8 @@ namespace Codeji.CMS.Services.Employees
                 Success = true
             };
         }
-        public async Task<Result<UserModel>> EditEmployee(UserModel user, string userId)
+        public async Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId)
         {
-            //User? checkUser = await _employeeRepository.FirstOrDefault(x => x.UserId == id);
-            // Type t = user.GetType();
             UpdateDefinitionBuilder<EmpUser> update = Builders<EmpUser>.Update;
             List<UpdateDefinition<EmpUser>> updateDefinition = new();
             foreach (PropertyInfo property in user.GetType().GetProperties().Where(x => x.GetValue(user) != null))
@@ -184,12 +181,13 @@ namespace Codeji.CMS.Services.Employees
             updateDefinition.Add(update.Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.UpdatedBy, userId));
             UpdateDefinition<EmpUser> data = update.Combine(updateDefinition);
             Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == userId;
-            Task<Result> model = _employeeRepository.UpdateMany(whereCondition, data, true);
-            return new Result<UserModel>
+            Result result = await _employeeRepository.UpdateMany(whereCondition, data, true);
+            UserModel updatedUser = await GetEmployeeById(userId);
+            return new Result<UserModel>()
             {
-                Message = "User Updated",
                 Success = true,
-                MethodResult = user,
+                MethodResult = updatedUser,
+                Message = "Updated Successfully",
             };
         }
         public async Task<UserModel> GetEmployeeById(string userId)
@@ -200,15 +198,16 @@ namespace Codeji.CMS.Services.Employees
             EmpUser? reportingManager = await _employeeRepository.FirstOrDefault(x => x.UserId == user.ReportingManager);
             Department? department = await _departmentRepository.FirstOrDefault(x => x.DepartmentId == user.Department);
             UserModel userModel = _mapper.Map<UserModel>(user);
-            userModel.Department = department?.Titles?.FirstOrDefault(x => x.Language == acceptLanguage)?.Label;
-            userModel.TeamLead = $"{teamLead?.FirstName} {teamLead?.LastName}";
-            userModel.ReportingManager = $"{reportingManager?.FirstName} {reportingManager?.LastName}";
+            userModel.DepartmentName = department?.Titles?.FirstOrDefault(x => x.Language == acceptLanguage)?.Label;
+            userModel.TeamLeadName = teamLead != null ? $"{teamLead.FirstName} {teamLead.LastName}" : null;
+            userModel.ReportingManagerName = reportingManager != null ? $"{reportingManager?.FirstName} {reportingManager?.LastName}" : null;
             userModel.FullProfileUrl = string.IsNullOrEmpty(user.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(user.ProfileUrl);
             return userModel;
         }
         public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters)
         {
             List<EmpUser> employeeList = [];
+            var totalRecords = await _employeeRepository.Count();
             if (filters == null)
             {
                 employeeList = (await _employeeRepository.GetAll()).ToList();
@@ -229,6 +228,7 @@ namespace Codeji.CMS.Services.Employees
                 {
                     Success = true,
                     MethodResults = [],
+                    TotalRecords = 0,
                 };
             }
             string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
@@ -255,6 +255,7 @@ namespace Codeji.CMS.Services.Employees
             {
                 Success = true,
                 MethodResults = data,
+                TotalRecords = totalRecords
             };
         }
         public async Task<bool> IsEmailExist(string email)

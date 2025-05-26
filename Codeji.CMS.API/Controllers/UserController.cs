@@ -48,7 +48,7 @@ public class UserController : BaseApiController
 
     [Route("EditEmployees")]
     [HttpPost]
-    public async Task<Result<UserModel>> EditEmployees(UserModel user, string userId)
+    public async Task<Result<UserModel>> EditEmployees(EmployeePersonalInfo user, string userId)
     {
         UserModel isUserExist = await _employeeService.GetEmployeeById(userId);
         if (userId != isUserExist.UserId)

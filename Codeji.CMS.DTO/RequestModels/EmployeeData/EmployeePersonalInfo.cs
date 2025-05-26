@@ -2,9 +2,10 @@
 {
     public class EmployeePersonalInfo
     {
-        public string? FirstName { get; set; }
-        public string? LastName { get; set; }
+        public required string FirstName { get; set; }
+        public required string LastName { get; set; }
         public string? DateOfBirth { get; set; }
+        public string? DateOfJoining { get; set; }
         public string? PhoneNumber { get; set; }
         public string? Department { get; set; }
         public string? BloodGroup { get; set; }
