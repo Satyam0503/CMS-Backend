@@ -207,10 +207,11 @@ namespace Codeji.CMS.Services.Employees
         public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters)
         {
             List<EmpUser> employeeList = [];
-            var totalRecords = await _employeeRepository.Count();
+            int totalRecords = 0;
             if (filters == null)
             {
                 employeeList = (await _employeeRepository.GetAll()).ToList();
+                totalRecords = employeeList.Count;
             }
             else
             {
@@ -221,6 +222,7 @@ namespace Codeji.CMS.Services.Employees
                 || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));
 
                 employeeList = (await _employeeRepository.GetAggregateDataAsync<EmpUser>(whereCondition, pageNo: filters.PageNo, pageSize: filters.Records)).ToList();
+                totalRecords = await _employeeRepository.Count(whereCondition);
             }
             if (employeeList.Count == 0)
             {
@@ -228,7 +230,7 @@ namespace Codeji.CMS.Services.Employees
                 {
                     Success = true,
                     MethodResults = [],
-                    TotalRecords = 0,
+                    TotalRecords = totalRecords,
                 };
             }
             string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
