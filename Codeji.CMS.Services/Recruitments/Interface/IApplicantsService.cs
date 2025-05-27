@@ -13,10 +13,10 @@ namespace Codeji.CMS.Services.Recruitments.Interface
         Task<bool> IsEmailExist(string email);
         Task<Result> GetApplicantsExistingId(string email);
         Task<string> GetApplicantExistingResume(string email);
-        Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters, int pageNo, int records);
+        Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters? filters);
         Task<Result<ApplicantViewModel>> ApplicantById(string applicantId);
         Task<Result> AddAppicantResume(string fileName, string email, string filePath);
-        Task<Result<ApplicantLogResponseModel>> GetAllComment(string applicantId,int pageNo,int pageSize);
+        Task<Result<ApplicantLogResponseModel>> GetAllComment(string applicantId, int pageNo, int pageSize);
         Task<Result> AddComment(string userId, CommentRequestModel model);
         Task<Result<ApplicantLogResponseModel>> GetProcessLogData(ApplicantLogFilterModel model);
     }

@@ -26,9 +26,9 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("GetApplicantList")]
         //[CustomAuthorize(Module = "Applicant", Role = ["View"])]
-        public async Task<Result<ApplicantViewModel>> GetApplicantList(ApplicantResultFilters filters, [FromQuery] int pageNo, [FromQuery] int records)
+        public async Task<Result<ApplicantViewModel>> GetApplicantList(ApplicantResultFilters? filters)
         {
-            Result<ApplicantViewModel> data = await _applicantsService.GetApplicantsList(filters, pageNo, records);
+            Result<ApplicantViewModel> data = await _applicantsService.GetApplicantsList(filters);
             return data;
         }
         [HttpGet]
@@ -71,7 +71,7 @@ namespace Codeji.CMS.API.Controllers
         public async Task<Result> EditApplicants([FromBody] ApplicantAddEditModel model)
         {
             var result = await _applicantsService.UpdateApplicants(model);
-            result.Message ="MESSAGE.APPLICANT.UPDATED";
+            result.Message = "MESSAGE.APPLICANT.UPDATED";
             return result;
         }
 

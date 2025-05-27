@@ -62,25 +62,35 @@ namespace Codeji.CMS.Services.Recruitments
             };
         }
 
-        public async Task<Result<JobVacancyModel>> GetAllVacancy(JobSearchModel search, int pageNo, int records)
+        public async Task<Result<JobVacancyModel>> GetAllVacancy(JobRequestModel? model, bool? active)
         {
-            pageNo = pageNo == 0 ? 1 : pageNo;
-            records = records == 0 ? 10 : records;
-            Expression<Func<JobVacancy, bool>> whereCondition = x => x.Title.Contains(search.name, StringComparison.CurrentCultureIgnoreCase);
+            IEnumerable<JobVacancy> jobList = [];
+            int count = 0;
 
-            var totalRecord = await _jobVacancyRepo.Count(whereCondition);
-
-            IEnumerable<JobVacancy> list = await _jobVacancyRepo.GetAggregateDataAsync<JobVacancy>(whereCondition, pageSize: records, pageNo: pageNo);
-
-            List<JobVacancyModel> data = _mapper.Map<List<JobVacancyModel>>(list);
+            if (model is null)
+            {
+                jobList = await _jobVacancyRepo.GetAll();
+                count = jobList.Count();
+            }
+            else
+            {
+                Expression<Func<JobVacancy, bool>> whereCondition = x => x.Title.Contains(model.Search, StringComparison.CurrentCultureIgnoreCase);
+                jobList = await _jobVacancyRepo.GetAggregateDataAsync<JobVacancy>(whereCondition, pageSize: model.Records, pageNo: model.PageNo);
+                count = await _jobVacancyRepo.Count(whereCondition);
+            }
+            if (active.HasValue)
+            {
+                jobList = jobList.Where(x => x.Status == active.Value);
+                count = jobList.Count();
+            }
+            List<JobVacancyModel> data = _mapper.Map<List<JobVacancyModel>>(jobList);
             Result<JobVacancyModel> result = new Result<JobVacancyModel>()
             {
                 Success = true,
-                TotalRecords = totalRecord,
+                TotalRecords = count,
                 MethodResults = data,
             };
             return result;
-
         }
 
         public async Task<JobVacancyModel?> GetVacancyById(string vacancyId)

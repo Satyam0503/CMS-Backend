@@ -171,25 +171,32 @@ namespace Codeji.CMS.Services.Recruitments
 
 
         //Get Applicant List Using Filter Change this logic in Future
-        public async Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters, int pageNo, int records)
+        public async Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters? filters)
         {
-            pageNo = pageNo == 0 ? 1 : pageNo;
-            records = records == 0 ? 10 : records;
-            Expression<Func<Applicant, bool>> whereCondition = x =>
-            (!filters.FilterFrom.HasValue || (x.CreatedDate.HasValue && x.CreatedDate >= filters.FilterFrom && x.CreatedDate <= filters.FilterTo))
-            && (!filters.ActivityTypes.Any() || filters.ActivityTypes.Contains(x.ActivityType))
-            && (!filters.Status.Any() || filters.Status.Contains(x.Status))
-            && (!filters.VacancyIds.Any() || filters.VacancyIds.Contains(x.VacancyId))
-            && (!filters.MinExperience.HasValue || (x.Experience >= filters.MinExperience && x.Experience <= filters.MaxExperience))
-            && (string.IsNullOrEmpty(filters.Name)
-            || x.FirstName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
-            || x.LastName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
-            || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));
-
-            var count = _applicantRepository.Count(whereCondition);
-            var applicants = await _applicantRepository.GetAggregateDataAsync<Applicant>(whereCondition, pageNo: pageNo, pageSize: records);
+            IEnumerable<Applicant> applicantList = [];
+            int count = 0;
+            if (filters is null)
+            {
+                applicantList = await _applicantRepository.GetAll();
+                count = applicantList.Count();
+            }
+            else
+            {
+                Expression<Func<Applicant, bool>> whereCondition = x =>
+                (!filters.FilterFrom.HasValue || (x.CreatedDate.HasValue && x.CreatedDate >= filters.FilterFrom && x.CreatedDate <= filters.FilterTo))
+                && (!filters.ActivityTypes.Any() || filters.ActivityTypes.Contains(x.ActivityType))
+                && (!filters.Status.Any() || filters.Status.Contains(x.Status))
+                && (!filters.VacancyIds.Any() || filters.VacancyIds.Contains(x.VacancyId))
+                && (!filters.MinExperience.HasValue || (x.Experience >= filters.MinExperience && x.Experience <= filters.MaxExperience))
+                && (string.IsNullOrEmpty(filters.Name)
+                || x.FirstName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
+                || x.LastName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
+                || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));
+                applicantList = await _applicantRepository.GetAggregateDataAsync<Applicant>(whereCondition, pageNo: filters.PageNo, pageSize: filters.Records);
+                count = await _applicantRepository.Count(whereCondition);
+            }
             List<JobVacancy> vacancies = (await _jobVacancyRepository.GetAll()).ToList();
-            List<ApplicantViewModel> data = (from applicant in applicants
+            List<ApplicantViewModel> data = (from applicant in applicantList
                                              join vacancy in vacancies on applicant.VacancyId equals vacancy.JobId
                                              select new ApplicantViewModel
                                              {
@@ -211,7 +218,7 @@ namespace Codeji.CMS.Services.Recruitments
             return new Result<ApplicantViewModel>
             {
                 Success = true,
-                TotalRecords = await count,
+                TotalRecords = count,
                 MethodResults = data
             };
         }
