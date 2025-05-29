@@ -18,15 +18,14 @@ public class NotificationService : INotificationService
     /// <param name="Notify"></param>
     /// <returns></returns>
 
-    public Task AddGalleryNotifyProgress(string userId, UserNotificationModel Notify)
+    public Task SendNoticeNotification(string userId, UserNotificationModel Notify)
     {
-        return hubContext.Clients.User(userId).SendAsync("galleryNotify", Notify);
+        return hubContext.Clients.User(userId).SendAsync("noticeNofity", Notify);
     }
 
 
 }
 public interface INotificationService
 {
-    Task AddGalleryNotifyProgress(string userId, UserNotificationModel Notify);
-
+    Task SendNoticeNotification(string userId, UserNotificationModel Notify);
 }

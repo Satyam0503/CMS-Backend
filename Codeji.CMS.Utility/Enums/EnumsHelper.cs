@@ -48,6 +48,12 @@
             ResignationMail = 9,
             ResetPassword = 10,
         }
+        public enum NoticeType
+        {
+            General = 1,
+            Important = 2,
+            Urgent = 3
+        }
     }
 }
 

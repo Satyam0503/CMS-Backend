@@ -25,6 +25,7 @@ string corsName = "codeji";
 builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
 {
     builder.AllowCredentials().WithOrigins("http://127.0.0.1:5173", "http://localhost:5173").AllowAnyHeader().AllowAnyMethod();
+    // builder.AllowCredentials().AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
 }));
 
 // Swagger config
@@ -167,6 +168,8 @@ app.MapHub<NotificationHub>("/notificationhub", options =>
     options.ApplicationMaxBufferSize = 6000000;
     options.TransportMaxBufferSize = 6000000;
 });
+
+app.MapHub<NoticeBoardHub>("/notice-board");
 
 // Configure controller routes
 app.MapControllers();

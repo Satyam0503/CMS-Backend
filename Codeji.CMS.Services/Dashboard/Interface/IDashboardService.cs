@@ -6,6 +6,5 @@ namespace Codeji.CMS.Services.Interface
     {
         Task<List<AllDepartmentDetailsResponseModel>> GetAllDepartmentsDetails(string companyId);
         Task<List<GenderDetailsResponseModel>> GetAllGenderDetails(string companyId);
-
     }
 }

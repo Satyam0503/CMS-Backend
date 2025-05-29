@@ -1,0 +1,18 @@
+using System.ComponentModel.DataAnnotations;
+using Codeji.CMS.Utility.Enums;
+
+namespace Codeji.CMS.DTO.NoticeBoard
+{
+    public class AddNoticeRequestModel
+    {
+        [MinLength(5, ErrorMessage = "Title length should be atleast 5 characters")]
+        public string Title { get; set; }
+
+        [MinLength(10, ErrorMessage = "Message length should be atleast 5 characters")]
+        public string Message { get; set; }
+        public string Target { get; set; }
+
+        [Range(1, 3)]
+        public EnumsHelper.NoticeType NoticeType { get; set; }
+    }
+}
