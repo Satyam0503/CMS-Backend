@@ -44,7 +44,7 @@ public class NoticeBoardServices : INoticeBoardService
                     join emp in empUsers on notice.CreatedBy equals emp.UserId
                     select new NoticeViewModel
                     {
-                        UserName = $"{emp.FirstName} ${emp.LastName}",
+                        UserName = $"{emp.FirstName} {emp.LastName}",
                         UserDesignation = emp.JobRole,
                         NoticeMessage = notice.Message,
                         NoticeTitle = notice.Title,
