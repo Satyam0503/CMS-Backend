@@ -10,5 +10,6 @@ public class Notice : BaseClass
     public string Title { get; set; }
     public string Message { get; set; }
     public string Target { get; set; }
+    public string Departments { get; set; }
     public EnumsHelper.NoticeType NoticeType { get; set; }
 }

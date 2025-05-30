@@ -14,5 +14,7 @@ namespace Codeji.CMS.DTO.NoticeBoard
 
         [Range(1, 3)]
         public EnumsHelper.NoticeType NoticeType { get; set; }
+
+        public string Departments { get; set; }
     }
 }

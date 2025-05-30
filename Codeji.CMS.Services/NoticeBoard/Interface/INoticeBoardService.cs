@@ -8,6 +8,6 @@ namespace Codeji.CMS.Services.NoticeBoard
     public interface INoticeBoardService
     {
         Task<Result> PostNotice(AddNoticeRequestModel notice);
-        Task<Result<Notice>> GetAllNotices();
+        Task<Result<NoticeViewModel>> GetAllNotices(string userId);
     }
 }

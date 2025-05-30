@@ -1,7 +1,9 @@
+using System.Net;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.NoticeBoard;
 using Codeji.CMS.Repository.Entities.NoticeBoard;
 using Codeji.CMS.Services.NoticeBoard;
+using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -37,6 +39,8 @@ public class NoticeBoardController : BaseApiController
             if (result.Success)
             {
                 await _noticeHub.Clients.All.SendAsync("noticeNotify", notice);
+                result.Message = "Notice posted successfully";
+                result.StatusCode = StatusCodes.Status201Created;
             }
             return result;
         }
@@ -44,8 +48,9 @@ public class NoticeBoardController : BaseApiController
 
     [HttpGet]
     [Route("GetAllNotice")]
-    public async Task<Result<Notice>> GetAllNotices()
+    public async Task<Result<NoticeViewModel>> GetAllNotices()
     {
-        return await _noticeBoardServices.GetAllNotices();
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        return await _noticeBoardServices.GetAllNotices(currentUserId);
     }
 }
