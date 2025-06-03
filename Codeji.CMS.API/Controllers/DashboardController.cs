@@ -42,17 +42,14 @@ namespace Codeji.CMS.API.Controllers
         [Route("GetAllGenderDetails")]
         public async Task<Result<GenderDetailsResponseModel>> GetAllGenderDetails()
         {
-
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
 
             var data = await _dashboardService.GetAllGenderDetails(companyId);
 
             return new Result<GenderDetailsResponseModel>()
             {
-                Message = "Gender details fetched successfully",
                 MethodResults = data
             };
-
         }
 
         [HttpGet]

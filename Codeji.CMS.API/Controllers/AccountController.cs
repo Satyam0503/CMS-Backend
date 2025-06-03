@@ -182,39 +182,29 @@ namespace Codeji.CMS.API.Controllers
             return result;
         }
 
+        [AllowAnonymous]
         [Route("CreateNewPassword")]
         [HttpPost]
         public async Task<Result> CreateNewPassword(CreateNewPasswordRequest model)
         {
-            Result result = new Result();
-            bool user = await _employeeService.CreateNewPassword(model.NewPassword, model.StatusNumber);
-            if (!user)
+            Result result = await _employeeService.CreateNewPassword(model);
+            return result;
+        }
+
+        [AllowAnonymous]
+        [HttpPost]
+        [Route("account/ResetPassword")]
+        public async Task<Result> ResetPassword([FromBody] string email)
+        {
+            Result result = new();
+            bool exist = await _employeeService.IsEmpExistAndActive(email);
+            if (!exist)
             {
-                result.Success = false;
-                result.Message = "Password Not Created";
                 return result;
             }
-            result.Success = user;
-            result.Message = "Password Created Successfully";
-            return result;
-
+            return await _employeeService.GenerateTokenAndSendEmail(email);
         }
-        //[Route("applicant/getOpenings")]
-        //[HttpPost]
-        //public async Task<Result<JobVacancyModel>> getOpenings(ApplyNowVacancyModel model)
-        //{
-        //    Result<JobVacancyModel> data = new Result<JobVacancyModel>();
-        //    if (string.IsNullOrEmpty(model.companyId))
-        //    {
-        //        data.Success = false;
-        //        data.StatusCode = StatusCodes.Status401Unauthorized;
-        //        return data;
-        //    }
 
-        //    data = await _jobVacancyService.GetAllVacancy(model.companyId, 0, 0);
-
-        //    return data;
-        //}
         [HttpPost]
         [Route("applicant/applyJob")]
         [AllowAnonymous]

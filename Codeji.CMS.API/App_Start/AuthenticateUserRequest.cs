@@ -29,9 +29,11 @@ namespace Codeji.CMS.API.App_Start
                  "/api/account/register",
                  "/api/account/login",
                  "/api/CreateNewPassword",
+                 "api/account/ResetPassword",
                  "/api/VerificationCaptch",
                  "/api/SendEmail",
-                 "/fs/"};
+                 "/fs/",
+                };
             IEmployeeService? _employeeService = context.RequestServices.GetService(typeof(IEmployeeService)) as IEmployeeService;
             ICompanyService? _companyService = context.RequestServices.GetService(typeof(ICompanyService)) as ICompanyService;
 
@@ -79,19 +81,19 @@ namespace Codeji.CMS.API.App_Start
                     return context;
 
                 IRoleService? _roleServices = context.RequestServices.GetService(typeof(IRoleService)) as IRoleService;
-                try
-                {
-                    // Read the request body to get the userForEdit object
-                    HttpRequest? request = context.Request;
-                    request.EnableBuffering();
-                    using (StreamReader reader = new StreamReader(request.Body, Encoding.UTF8, false, 1024, true))
-                    {
-                        string content = await reader.ReadToEndAsync();
-                        var userForEdit = JsonConvert.DeserializeObject<UserCheckModel>(content) ?? new UserCheckModel();
-                        request.Body.Position = 0;
-                    }
-                }
-                catch (Exception) { }
+                // try
+                // {
+                //     // Read the request body to get the userForEdit object
+                //     HttpRequest? request = context.Request;
+                //     request.EnableBuffering();
+                //     using (StreamReader reader = new StreamReader(request.Body, Encoding.UTF8, false, 1024, true))
+                //     {
+                //         string content = await reader.ReadToEndAsync();
+                //         var userForEdit = JsonConvert.DeserializeObject<UserCheckModel>(content) ?? new UserCheckModel();
+                //         request.Body.Position = 0;
+                //     }
+                // }
+                // catch (Exception) { }
                 var permissionAttribute = permissionAttributes.FirstOrDefault();
                 bool isValid = await _roleServices.VerifyUserAccess(permissionAttribute.Module, permissionAttribute.Permissions, userId, company_Id);
                 // Check if the user has the required permissions for the module

@@ -13,11 +13,13 @@ namespace Codeji.CMS.Services.Employees.Interface
     public interface IEmployeeService
     {
         Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId);
-        Task<Result<UserModel>> EditEmployee(UserModel user, string userId);
+        Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId);
         Task<bool> IsUserActive(string userId);
         Task<UserModel> GetEmployeeById(string userId);
-        Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel filters, int pageNo, int records);
+        Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters);
         Task<bool> IsEmailExist(string email);
+        Task<bool> IsEmpExistAndActive(string email);
+        Task<Result> GenerateTokenAndSendEmail(string email);
         Task<bool> ResetPassword(string userId, string password, string oldPassword = "");
         Task<string> GetVerificationToken(string email, string password);
         Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId, string companyId);
@@ -33,7 +35,7 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<string> AddUserProfileImage(string fileName, string userId, string filePath);
         Task<Result> AddEditEmployeeSkills(SkillsRequestModel skillsModel, string userId);
         Task<EmployeeSkillsDTO> GetEmployeeSkills(string userId);
-        Task<bool> CreateNewPassword(string password, string statusNumber);
+        Task<Result> CreateNewPassword(CreateNewPasswordRequest model);
         Task<Result> DeleteEducationDetails(string educationId, string userId);
         Task<Result> DeleteCertificationDetails(string certificationId, string userId);
         Task<Result> DeleteEmployee(string employeeId);

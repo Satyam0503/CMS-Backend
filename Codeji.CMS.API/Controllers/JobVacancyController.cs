@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
 namespace Codeji.CMS.API.Controllers;
+
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
@@ -44,10 +45,9 @@ public class JobVacancyController : BaseApiController
     [Route("GetAllVacancy")]
     [HttpPost]
     [AllowAnonymous]
-    public async Task<Result<JobVacancyModel>> GetAllVacancy(JobSearchModel search, [FromQuery] int pageNo, [FromQuery] int records)
+    public async Task<Result<JobVacancyModel>> GetAllVacancy(JobRequestModel? model, [FromQuery] bool? active)
     {
-        Result<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy(search, pageNo, records);
-
+        Result<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy(model, active);
         return data;
     }
 

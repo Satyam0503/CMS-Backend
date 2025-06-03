@@ -12,6 +12,7 @@ using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
@@ -57,7 +58,7 @@ namespace Codeji.CMS.Services.Recruitments
             _employeeRepository = employeeRepository;
             _priorityTaskQueue = priorityTaskQueue;
             _middlewareService = middlewareService;
-            _httpContextAccessor= httpContextAccessor;
+            _httpContextAccessor = httpContextAccessor;
         }
         /// <summary>
         /// For Annonymous add and update applicants
@@ -76,15 +77,15 @@ namespace Codeji.CMS.Services.Recruitments
                 Email = applicantRegisterModel.Email,
                 Status = applicantRegisterModel.Status,
                 State = applicantRegisterModel.State,
-                CreatedBy = "new"
+                CreatedBy = ""
             };
             Result result = await _applicantRepository.AddOne(applicant);
 
             //Acknowledgement Email Logic
-            var vacancy = await _jobVacancyService.GetVacancyById(applicantRegisterModel.VacancyId); 
+            var vacancy = await _jobVacancyService.GetVacancyById(applicantRegisterModel.VacancyId);
             var currentUser = _middlewareService.GetUserById(CurrentContext.UserId(_httpContextAccessor));
-            
-            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == 4);
+
+            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ApplyNowMailToApplicant);
             HtmlTemplate htmlTemplate = new HtmlTemplate();
             string replacedBody = htmlTemplate.Render(emailContent?.body ?? string.Empty, new
             {
@@ -96,10 +97,10 @@ namespace Codeji.CMS.Services.Recruitments
             {
                 _middlewareService.EmailSendAndSave(new EmpEmailLogs()
                 {
-                    UserTo =applicant.Email,
+                    UserTo = applicant.Email,
                     Subject = emailContent.subject,
                     Body = replacedBody,
-                    EmailLogType = Utility.Enums.EnumsHelper.MailType.ApplyNowMailToApplicant,
+                    EmailLogType = EnumsHelper.MailType.ApplyNowMailToApplicant,
                     Email = applicant.Email,
                     UserFrom = currentUser != null ? currentUser.Email : string.Empty
                 });
@@ -144,30 +145,22 @@ namespace Codeji.CMS.Services.Recruitments
         }
         public async Task<Result> GetApplicantsExistingId(string email)
         {
-            Applicant? res = await _applicantRepository.FirstOrDefault(x => x.Email == email);
-            if (res is null)
+            Result result = new();
+            Applicant? applicant = await _applicantRepository.FirstOrDefault(x => x.Email == email);
+            if (applicant is null)
             {
-                return new Result()
-                {
-                    Success = true,
-                };
+                result.Success = true;
             }
-            else if (res.CreatedDate > DateTime.Now.AddMonths(-6))
+            else if (applicant.CreatedDate > DateTime.Now.AddMonths(-6))
             {
-                return new Result()
-                {
-                    Success = false
-                };
+                result.Success = false;
             }
             else
             {
-                return new Result()
-                {
-                    Success = true,
-                    Message = res.ApplicantId
-                };
+                result.Message = applicant.ApplicantId;
+                result.Success = true;
             }
-
+            return result;
         }
 
         public async Task<string> GetApplicantExistingResume(string email)
@@ -178,25 +171,32 @@ namespace Codeji.CMS.Services.Recruitments
 
 
         //Get Applicant List Using Filter Change this logic in Future
-        public async Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters filters, int pageNo, int records)
+        public async Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters? filters)
         {
-            pageNo = pageNo == 0 ? 1 : pageNo;
-            records = records == 0 ? 10 : records;
-            Expression<Func<Applicant, bool>> whereCondition = x =>
-            (!filters.FilterFrom.HasValue || (x.CreatedDate.HasValue && x.CreatedDate >= filters.FilterFrom && x.CreatedDate <= filters.FilterTo))
-            && (!filters.ActivityTypes.Any() || filters.ActivityTypes.Contains(x.ActivityType))
-            && (!filters.Status.Any() || filters.Status.Contains(x.Status))
-            && (!filters.VacancyIds.Any() || filters.VacancyIds.Contains(x.VacancyId))
-            && (!filters.MinExperience.HasValue || (x.Experience >= filters.MinExperience && x.Experience <= filters.MaxExperience))
-            && (string.IsNullOrEmpty(filters.Name)
-            || x.FirstName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
-            || x.LastName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
-            || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));
-
-            var count = _applicantRepository.Count(whereCondition);
-            var applicants = await _applicantRepository.GetAggregateDataAsync<Applicant>(whereCondition, pageNo: pageNo, pageSize: records);
+            IEnumerable<Applicant> applicantList = [];
+            int count = 0;
+            if (filters is null)
+            {
+                applicantList = await _applicantRepository.GetAll();
+                count = applicantList.Count();
+            }
+            else
+            {
+                Expression<Func<Applicant, bool>> whereCondition = x =>
+                (!filters.FilterFrom.HasValue || (x.CreatedDate.HasValue && x.CreatedDate >= filters.FilterFrom && x.CreatedDate <= filters.FilterTo))
+                && (!filters.ActivityTypes.Any() || filters.ActivityTypes.Contains(x.ActivityType))
+                && (!filters.Status.Any() || filters.Status.Contains(x.Status))
+                && (!filters.VacancyIds.Any() || filters.VacancyIds.Contains(x.VacancyId))
+                && (!filters.MinExperience.HasValue || (x.Experience >= filters.MinExperience && x.Experience <= filters.MaxExperience))
+                && (string.IsNullOrEmpty(filters.Name)
+                || x.FirstName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
+                || x.LastName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
+                || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));
+                applicantList = await _applicantRepository.GetAggregateDataAsync<Applicant>(whereCondition, pageNo: filters.PageNo, pageSize: filters.Records);
+                count = await _applicantRepository.Count(whereCondition);
+            }
             List<JobVacancy> vacancies = (await _jobVacancyRepository.GetAll()).ToList();
-            List<ApplicantViewModel> data = (from applicant in applicants
+            List<ApplicantViewModel> data = (from applicant in applicantList
                                              join vacancy in vacancies on applicant.VacancyId equals vacancy.JobId
                                              select new ApplicantViewModel
                                              {
@@ -218,7 +218,7 @@ namespace Codeji.CMS.Services.Recruitments
             return new Result<ApplicantViewModel>
             {
                 Success = true,
-                TotalRecords = await count,
+                TotalRecords = count,
                 MethodResults = data
             };
         }

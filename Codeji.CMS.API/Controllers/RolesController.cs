@@ -1,5 +1,4 @@
-﻿using Codeji.CMS.API.App_Start;
-using Codeji.CMS.Domain.Models;
+﻿using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility.middlewares;
@@ -22,23 +21,16 @@ namespace Codeji.CMS.API.Controllers
 
         }
 
-        //Add New Roles
-        //[Route("AddEditRoles")]
-        //[HttpPost]
-        //public async Task<Result<RoleModel>> AddEditRoles(RoleModel roles)
-        //{
-        //    return await _roleService.AddEditRoles(roles);
-        //}
-
         [HttpGet]
         [Route("GetRoles")]
-        public async Task<Result<RoleModel>> GetRoles()
+        public async Task<Result<RoleModel>> GetRoles([FromQuery] bool? excludeAdmin)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-            List<RoleModel> roles = await _roleService.GetRoles(companyId);
+            List<RoleModel> roles = await _roleService.GetRoles(companyId, excludeAdmin);
             return new Result<RoleModel>()
             {
                 MethodResults = roles ?? [],
+                TotalRecords = roles != null ? roles.Count : 0,
                 Success = true
             };
         }
@@ -102,37 +94,23 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetRoleById/{roleId}")]
-        public async Task<Result<RoleModel>> GetRoleById(string roleId) {
+        public async Task<Result<RoleModel>> GetRoleById(string roleId)
+        {
             var data = await _roleService.GetRoleById(roleId);
-            return new Result<RoleModel>(){
+            return new Result<RoleModel>()
+            {
                 StatusCode = 200,
-                Success= true,
+                Success = true,
                 MethodResult = data,
             };
         }
 
         [HttpPatch]
         [Route("UpdateAppAccessForRole/{roleId}")]
-        public async Task<Result> UpdateAppAccessForRole( string roleId, [FromBody] bool hasAppAccess){
-            var result = await _roleService.UpdateAppAccessForRole(roleId,hasAppAccess);
+        public async Task<Result> UpdateAppAccessForRole(string roleId, [FromBody] bool hasAppAccess)
+        {
+            var result = await _roleService.UpdateAppAccessForRole(roleId, hasAppAccess);
             return result;
         }
-
-        [HttpGet]
-        [Route("GetAllModuleDetails")]
-        public async Task<Result<AllModuleDetailsResponseModel>> GetAllModuleDetails()
-        {
-
-            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-
-            var data = await _roleService.GetAllModulesDetails(companyId);
-            return new Result<AllModuleDetailsResponseModel>()
-            {
-                Message= "All Modules fetched successfully",
-                MethodResults = data
-            };
-
-        }
-
     }
 }

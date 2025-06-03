@@ -48,7 +48,7 @@ public class UserController : BaseApiController
 
     [Route("EditEmployees")]
     [HttpPost]
-    public async Task<Result<UserModel>> EditEmployees(UserModel user, string userId)
+    public async Task<Result<UserModel>> EditEmployees(EmployeePersonalInfo user, string userId)
     {
         UserModel isUserExist = await _employeeService.GetEmployeeById(userId);
         if (userId != isUserExist.UserId)
@@ -63,11 +63,12 @@ public class UserController : BaseApiController
 
     [Route("GetAllEmployees")]
     [HttpPost]
-    public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel filters, [FromQuery] int pageNo, [FromQuery] int records)
+    public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters)
     {
-        Result<GetAllEmployeeResponseModel> data = await _employeeService.GetAllEmployees(filters, pageNo, records);
+        Result<GetAllEmployeeResponseModel> data = await _employeeService.GetAllEmployees(filters);
         return data;
     }
+
     [Route("ChangePassword")]
     [HttpPost]
     public async Task<Result> ChangePassword(ChangePasswordRequest passwordModel)

@@ -34,9 +34,9 @@ public class CompanyMasterController : BaseApiController
 
     [HttpGet]
     [Route("GetDepartmentList")]
-    public async Task<Result<DepartmentDTO>> GetDepartmentList()
+    public async Task<Result<DepartmentDTO>> GetDepartmentList([FromQuery] bool? isActive)
     {
-        Result<DepartmentDTO> data = await _companyMasterService.GetDepartmentList();
+        Result<DepartmentDTO> data = await _companyMasterService.GetDepartmentList(isActive);
         return data;
     }
 

@@ -8,7 +8,7 @@ public interface
     IRoleService
 {
     Task<string> AddEditRoles(RoleWithModuleAndPermissions roles, string companyId);
-    Task<List<RoleModel>> GetRoles(string companyId);
+    Task<List<RoleModel>> GetRoles(string companyId, bool? excludeAdmin);
     Task<RoleModel> GetRoleById(string roleId);
     //Task<RoleWithModuleAndPermissions> SaveRoleAndPermissions(RoleWithModuleAndPermissions roleWithModuleAndPermissions);
     Task<List<ModuleWithPermissionsModel>> GetRoleWithPermissions(string roleId, string companyId);
@@ -21,5 +21,4 @@ public interface
     Task<bool> VerifyUserAccess(string module, string[] Role, string userId, string companyId, UserCheckModel userForEdit = null);
     Task<List<ModuleWithPermissionsModel>> GetAllRolesWithPermission(string companyId);
     Task<Result> UpdateAppAccessForRole(string roleId, bool hasAppAccess);
-    Task<List<AllModuleDetailsResponseModel>> GetAllModulesDetails(string companyId);
 }
