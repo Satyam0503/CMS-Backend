@@ -1,4 +1,5 @@
 using System.Net;
+using Codeji.CMS.API.Notification;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.NoticeBoard;
 using Codeji.CMS.Repository.Entities.NoticeBoard;
@@ -15,14 +16,14 @@ namespace Codeji.CMS.API.Controllers;
 [Authorize]
 public class NoticeBoardController : BaseApiController
 {
-    private readonly IHubContext<NoticeBoardHub> _noticeHub;
     private readonly INoticeBoardService _noticeBoardServices;
+    private readonly INotificationService _notificationServices;
     private readonly IHttpContextAccessor _httpContextAccessor;
-    public NoticeBoardController(INoticeBoardService noticeBoardService, IHttpContextAccessor httpContextAccessor, IHubContext<NoticeBoardHub> noticeHub)
+    public NoticeBoardController(INoticeBoardService noticeBoardService, IHttpContextAccessor httpContextAccessor, INotificationService notificationService)
     {
         _noticeBoardServices = noticeBoardService;
         _httpContextAccessor = httpContextAccessor;
-        _noticeHub = noticeHub;
+        _notificationServices = notificationService;
     }
 
     [HttpPost]
@@ -38,7 +39,8 @@ public class NoticeBoardController : BaseApiController
             Result result = await _noticeBoardServices.PostNotice(notice);
             if (result.Success)
             {
-                await _noticeHub.Clients.All.SendAsync("noticeNotify", notice);
+                // await _notificationHub.Clients.All.SendAsync("noticeNotify", notice);
+                await _notificationServices.SendNoticeNotification(notice);
                 result.Message = "Notice posted successfully";
                 result.StatusCode = StatusCodes.Status201Created;
             }

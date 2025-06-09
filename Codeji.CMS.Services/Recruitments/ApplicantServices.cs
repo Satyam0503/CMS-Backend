@@ -214,7 +214,7 @@ namespace Codeji.CMS.Services.Recruitments
                                                  ApplyDate = applicant.CreatedDate,
                                                  UpdateDate = applicant.UpdatedDate,
                                                  ResumeUrl = applicant.ResumeUrl,
-                                             }).ToList();
+                                             }).OrderByDescending(x => x.ApplyDate).ToList();
             return new Result<ApplicantViewModel>
             {
                 Success = true,
@@ -314,7 +314,7 @@ namespace Codeji.CMS.Services.Recruitments
                             UserName = $"{user.FirstName} {user.LastName}",
                             CreatedDate = log.CreatedDate,
                             CreatedBy = log.CreatedBy,
-                        }).ToList();
+                        }).OrderByDescending(x => x.CreatedDate).ToList();
 
             Result<ApplicantLogResponseModel> result = new()
             {
@@ -352,7 +352,7 @@ namespace Codeji.CMS.Services.Recruitments
                             CompanyId = log.CompanyId,
                             CreatedBy = log.CreatedBy,
                             CreatedDate = log.CreatedDate,
-                        }).ToList();
+                        }).OrderByDescending(x => x.CreatedDate).ToList();
 
             Result<ApplicantLogResponseModel> result = new()
             {

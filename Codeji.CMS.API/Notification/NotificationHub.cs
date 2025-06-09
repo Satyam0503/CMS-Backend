@@ -3,23 +3,10 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace Codeji.CMS.API.Notification
 {
-    /// <summary>
-    /// Sent notification to live users
-    /// </summary>
     [Authorize]
     public class NotificationHub : Hub
     {
-        /// <summary>
-        /// sent gallery update notification 
-        /// </summary>
-        /// <param name="userId"></param>
-        /// <param name="Notify"></param>
-        /// <returns></returns>
 
-        public Task AddGalleryNotifyProgress(string userId, UserNotificationModel Notify)
-        {
-            return Clients.User(userId).SendAsync("galleryNotify", Notify);
-        }
     }
 
     public class UserNotificationModel

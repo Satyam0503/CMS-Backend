@@ -51,7 +51,7 @@ public class NoticeBoardServices : INoticeBoardService
                         CreatedDateTime = notice.CreatedDate,
                         NoticeType = notice.NoticeType,
                         UserProfile = string.IsNullOrEmpty(emp.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(emp.ProfileUrl),
-                    }).ToList();
+                    }).OrderByDescending(x => x.CreatedDateTime).ToList();
 
         return new Result<NoticeViewModel>()
         {

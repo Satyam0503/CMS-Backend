@@ -109,6 +109,21 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidAudience = ConfigManager.AppSettings.AppUrl,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:SecretKey"]))
         };
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                // If the request is for our hub...
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/notificationhub"))
+                {
+                    // Read the token out of the query string
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            }
+        };
     });
 
 builder.Services.AddAuthorization();
@@ -169,7 +184,7 @@ app.MapHub<NotificationHub>("/notificationhub", options =>
     options.TransportMaxBufferSize = 6000000;
 });
 
-app.MapHub<NoticeBoardHub>("/notice-board");
+// app.MapHub<NoticeBoardHub>("/notice-board");
 
 // Configure controller routes
 app.MapControllers();
