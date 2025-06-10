@@ -3,9 +3,11 @@ using AngleSharp.Text;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.NoticeBoard;
 using Codeji.CMS.GenericRepository.Interfaces;
+using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.NoticeBoard;
 using Codeji.CMS.Utility;
+using Codeji.CMS.Utility.Enums;
 
 namespace Codeji.CMS.Services.NoticeBoard;
 
@@ -13,13 +15,17 @@ public class NoticeBoardServices : INoticeBoardService
 {
     private readonly IMongoDbRepository<Notice> _notice;
     private readonly IMongoDbRepository<EmpUser> _empUser;
-    public NoticeBoardServices(IMongoDbRepository<Notice> notice, IMongoDbRepository<EmpUser> empUser)
+    private readonly IMongoDbRepository<Notifications> _notification;
+    private readonly IMongoDbRepository<UserNotifications> _userNotifications;
+    public NoticeBoardServices(IMongoDbRepository<Notice> notice, IMongoDbRepository<EmpUser> empUser, IMongoDbRepository<Notifications> notification, IMongoDbRepository<UserNotifications> userNotification)
     {
         _notice = notice;
         _empUser = empUser;
+        _notification = notification;
+        _userNotifications = userNotification;
     }
 
-    public async Task<Result> PostNotice(AddNoticeRequestModel model)
+    public async Task<Result> PostNotice(AddNoticeRequestModel model, string userId)
     {
         Notice notice = new Notice()
         {
@@ -29,7 +35,41 @@ public class NoticeBoardServices : INoticeBoardService
             NoticeType = model.NoticeType,
             Departments = model.Departments,
         };
-        return await _notice.AddOne(notice);
+        Result result = await _notice.AddOne(notice);
+        // if (result.Success)
+        // {
+        Expression<Func<EmpUser, bool>> whereCondition = x => (model.Departments.Equals("all") || x.Department.Equals(model.Departments))
+        && (model.Target.Equals("all") || x.RoleId.Equals(x.RoleId));
+
+        EmpUser currentUser = await _empUser.FirstOrDefault(x => x.UserId.Equals(userId));
+        string notificationId = Guid.NewGuid().ToString();
+        Notifications notification = new Notifications()
+        {
+            NotificationId = notificationId,
+            Title = $"{currentUser.FirstName} {currentUser.LastName} posted a notice",
+            CreatedDateTime = DateTime.Now,
+            NotificationType = EnumsHelper.NotificationTypes.Notice,
+            CreatedBy = $"{currentUser?.FirstName} {currentUser?.LastName}",
+        };
+        await _notification.AddOne(notification);
+        IEnumerable<EmpUser> empUsers = await _empUser.GetAll(whereCondition);
+        // if (empUsers.Any())
+        // {
+        List<UserNotifications> userNotifications = [];
+        foreach (EmpUser user in empUsers)
+        {
+            UserNotifications userNotification = new()
+            {
+                UserId = user.UserId,
+                NotificationId = notificationId,
+                IsRead = false,
+            };
+            userNotifications.Add(userNotification);
+        }
+        await _userNotifications.AddMany(userNotifications);
+        // }
+        return result;
+        // }
     }
 
     public async Task<Result<NoticeViewModel>> GetAllNotices(string userId)

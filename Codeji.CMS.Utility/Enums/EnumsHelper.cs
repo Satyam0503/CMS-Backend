@@ -54,6 +54,11 @@
             Important = 2,
             Urgent = 3
         }
+
+        public enum NotificationTypes
+        {
+            Notice = 1,
+        }
     }
 }
 

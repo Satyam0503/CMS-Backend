@@ -36,11 +36,12 @@ public class NoticeBoardController : BaseApiController
         }
         else
         {
-            Result result = await _noticeBoardServices.PostNotice(notice);
+            string userId = CurrentContext.UserId(_httpContextAccessor);
+            Result result = await _noticeBoardServices.PostNotice(notice, userId);
             if (result.Success)
             {
-                // await _notificationHub.Clients.All.SendAsync("noticeNotify", notice);
-                await _notificationServices.SendNoticeNotification(notice);
+                string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+                await _notificationServices.SendNoticeNotification(companyId, "New Notice Posted");
                 result.Message = "Notice posted successfully";
                 result.StatusCode = StatusCodes.Status201Created;
             }
