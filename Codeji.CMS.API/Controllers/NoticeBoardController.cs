@@ -2,8 +2,11 @@ using System.Net;
 using Codeji.CMS.API.Notification;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.NoticeBoard;
+using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Repository.Entities.NoticeBoard;
 using Codeji.CMS.Services.NoticeBoard;
+using Codeji.CMS.Utility.Enums;
+using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -41,7 +44,16 @@ public class NoticeBoardController : BaseApiController
             if (result.Success)
             {
                 string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-                await _notificationServices.SendNoticeNotification(companyId, "New Notice Posted");
+                NotificationViewModel newNotification = new()
+                {
+                    UserNotificationId = "",
+                    NotificationTypes = EnumsHelper.NotificationTypes.Notice,
+                    SentBy = userId,
+                    SentDateTime = DateTime.UtcNow,
+                    IsRead = false,
+                    Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice, notice.Title)
+                };
+                await _notificationServices.SendNoticeNotification(companyId, newNotification);
                 result.Message = "Notice posted successfully";
                 result.StatusCode = StatusCodes.Status201Created;
             }

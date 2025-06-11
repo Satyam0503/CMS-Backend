@@ -8,6 +8,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.NoticeBoard;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
+using Codeji.CMS.Utility.Helpers;
 
 namespace Codeji.CMS.Services.NoticeBoard;
 
@@ -36,40 +37,44 @@ public class NoticeBoardServices : INoticeBoardService
             Departments = model.Departments,
         };
         Result result = await _notice.AddOne(notice);
-        // if (result.Success)
-        // {
+        if (!result.Success)
+        {
+            return result;
+        }
         Expression<Func<EmpUser, bool>> whereCondition = x => (model.Departments.Equals("all") || x.Department.Equals(model.Departments))
-        && (model.Target.Equals("all") || x.RoleId.Equals(x.RoleId));
+        && (model.Target.Equals("all") || x.RoleId.Equals(model.Target));
 
         EmpUser currentUser = await _empUser.FirstOrDefault(x => x.UserId.Equals(userId));
-        string notificationId = Guid.NewGuid().ToString();
         Notifications notification = new Notifications()
         {
-            NotificationId = notificationId,
-            Title = $"{currentUser.FirstName} {currentUser.LastName} posted a notice",
-            CreatedDateTime = DateTime.Now,
+            NotificationId = Guid.NewGuid().ToString(),
+            Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice, model.Title),
+            CreatedDateTime = DateTime.UtcNow,
             NotificationType = EnumsHelper.NotificationTypes.Notice,
             CreatedBy = $"{currentUser?.FirstName} {currentUser?.LastName}",
         };
-        await _notification.AddOne(notification);
-        IEnumerable<EmpUser> empUsers = await _empUser.GetAll(whereCondition);
-        // if (empUsers.Any())
-        // {
-        List<UserNotifications> userNotifications = [];
-        foreach (EmpUser user in empUsers)
+        Result result1 = await _notification.AddOne(notification);
+        if (result1.Success)
         {
-            UserNotifications userNotification = new()
+            IEnumerable<EmpUser> empUsers = await _empUser.GetAll(whereCondition);
+            if (empUsers.Any())
             {
-                UserId = user.UserId,
-                NotificationId = notificationId,
-                IsRead = false,
-            };
-            userNotifications.Add(userNotification);
+                List<UserNotifications> userNotifications = [];
+
+                foreach (EmpUser user in empUsers)
+                {
+                    UserNotifications userNotification = new()
+                    {
+                        UserId = user.UserId,
+                        NotificationId = notification.NotificationId,
+                        IsRead = false,
+                    };
+                    userNotifications.Add(userNotification);
+                }
+                await _userNotifications.AddMany(userNotifications);
+            }
         }
-        await _userNotifications.AddMany(userNotifications);
-        // }
         return result;
-        // }
     }
 
     public async Task<Result<NoticeViewModel>> GetAllNotices(string userId)

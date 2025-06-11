@@ -20,13 +20,22 @@ public class NotificationService : INotificationService
         _notifications = notifications;
     }
 
-    public Task SendNoticeNotification(string groupName, string message)
+    public Task SendNoticeNotification(string groupName, NotificationViewModel model)
     {
-        return hubContext.Clients.Group(groupName).SendAsync("noticeNofity", message);
+        return hubContext.Clients.Group(groupName).SendAsync("noticeNofity", model);
     }
     public async Task<Result<NotificationViewModel>> GetAllNotifications(string userId)
     {
         IEnumerable<UserNotifications> userNotifications = await _userNotification.GetAll(x => x.UserId == userId);
+        if (!userNotifications.Any())
+        {
+            return new Result<NotificationViewModel>()
+            {
+                MethodResults = [],
+                Success = true,
+                TotalRecords = 0
+            };
+        }
         string[] notificationsId = userNotifications.Select(x => x.NotificationId).ToArray();
         IEnumerable<Notifications> notifications = await _notifications.GetAll(x => notificationsId.Contains(x.NotificationId));
         var data = (from usrNft in userNotifications
@@ -51,6 +60,6 @@ public class NotificationService : INotificationService
 
 public interface INotificationService
 {
-    Task SendNoticeNotification(string groupName, string message);
+    Task SendNoticeNotification(string groupName, NotificationViewModel notification);
     Task<Result<NotificationViewModel>> GetAllNotifications(string userId);
 }

@@ -15,7 +15,6 @@ namespace Codeji.CMS.API.Notification
         public override async Task OnConnectedAsync()
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-            Console.WriteLine(companyId);
             await Groups.AddToGroupAsync(Context.ConnectionId, companyId);
             await base.OnConnectedAsync();
         }
