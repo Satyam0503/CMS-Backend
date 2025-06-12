@@ -50,6 +50,7 @@ namespace Codeji.CMS.Services.Employees
 
         readonly IMongoDbRepository<Skills> _skillsRepository;
         readonly IMongoDbRepository<PasswordResetTokens> _passwordResetTokens;
+        readonly IMongoDbRepository<EmpWorkHistory> _empWorkHistory;
         private readonly IHttpContextAccessor _httpContextAccessor;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
@@ -68,7 +69,8 @@ namespace Codeji.CMS.Services.Employees
             IHttpContextAccessor httpContextAccessor,
             IMongoDbRepository<Department> departmentRepository,
             IMongoDbRepository<Skills> skillsRepository,
-            IMongoDbRepository<PasswordResetTokens> passwordResetTokens
+            IMongoDbRepository<PasswordResetTokens> passwordResetTokens,
+            IMongoDbRepository<EmpWorkHistory> empWorkHistory
             )
         {
             _employeeRepository = employeeRepository;
@@ -89,6 +91,7 @@ namespace Codeji.CMS.Services.Employees
             _skillsRepository = skillsRepository;
             _passwordResetTokens = passwordResetTokens;
             _httpContextAccessor = httpContextAccessor;
+            _empWorkHistory = empWorkHistory;
         }
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
@@ -697,8 +700,6 @@ namespace Codeji.CMS.Services.Employees
             return data;
         }
 
-
-
         public async Task<bool> IsUserActive(string userId)
         {
             bool IsUserActive = await _employeeRepository.Exist(x => x.UserId == userId && x.Status);
@@ -735,5 +736,41 @@ namespace Codeji.CMS.Services.Employees
                 Success = true,
             };
         }
+
+        public async Task<Result> AddUpdateWorkHistory(EmployeeWorkHistoryModel model)
+        {
+            EmpWorkHistory empWorkHistory = _mapper.Map<EmpWorkHistory>(model);
+            Result result = new();
+            string currentUser = CurrentContext.UserId(_httpContextAccessor);
+            if (string.IsNullOrEmpty(empWorkHistory.WorkHistoryId))
+            {
+                empWorkHistory.CreatedDate = DateTime.UtcNow;
+                empWorkHistory.CreatedBy = currentUser;
+                result = await _empWorkHistory.AddOne(empWorkHistory);
+            }
+            else
+            {
+                Expression<Func<EmpWorkHistory, bool>> whereCondition = x => x.UserId == model.UserId && x.WorkHistoryId == empWorkHistory.WorkHistoryId;
+                EmpWorkHistory? empWorkHistoryExist = await _empWorkHistory.FirstOrDefault(whereCondition);
+                if (empWorkHistoryExist is null)
+                {
+                    return result;
+                }
+                empWorkHistory.UpdatedBy = currentUser;
+                empWorkHistory.UpdatedDate = DateTime.UtcNow;
+                empWorkHistory.CreatedBy = empWorkHistoryExist.CreatedBy;
+                empWorkHistory.CreatedDate = empWorkHistoryExist.CreatedDate;
+                result = await _empWorkHistory.Update(whereCondition, empWorkHistory);
+            }
+            return result;
+        }
+
+        public async Task<List<EmployeeWorkHistoryModel>> GetEmpWorkHistory(string userId)
+        {
+            var list = await _empWorkHistory.GetAll(x => x.UserId.Equals(userId));
+            if (list.Any()) return _mapper.Map<List<EmployeeWorkHistoryModel>>(list);
+            return [];
+        }
+
     }
 }

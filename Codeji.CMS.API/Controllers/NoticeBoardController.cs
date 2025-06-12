@@ -41,9 +41,12 @@ public class NoticeBoardController : BaseApiController
         {
             string userId = CurrentContext.UserId(_httpContextAccessor);
             Result result = await _noticeBoardServices.PostNotice(notice, userId);
+
+            // modify and move this logic into services
             if (result.Success)
             {
                 string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+
                 NotificationViewModel newNotification = new()
                 {
                     UserNotificationId = "",

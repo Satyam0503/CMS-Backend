@@ -22,6 +22,7 @@ public class NotificationService : INotificationService
 
     public Task SendNoticeNotification(string groupName, NotificationViewModel model)
     {
+
         return hubContext.Clients.Group(groupName).SendAsync("noticeNofity", model);
     }
     public async Task<Result<NotificationViewModel>> GetAllNotifications(string userId)

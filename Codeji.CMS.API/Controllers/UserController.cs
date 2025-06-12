@@ -362,4 +362,30 @@ public class UserController : BaseApiController
         string userId = CurrentContext.UserId(_httpContextAccessor);
         return await _notificationService.GetAllNotifications(userId);
     }
+
+    [HttpPost]
+    [Route("AddUpdateWorkHistory")]
+    public async Task<Result> AddWorkHistory(EmployeeWorkHistoryModel model)
+    {
+        if (!ModelState.IsValid)
+        {
+            return new Result();
+        }
+        model.UserId = string.IsNullOrEmpty(model.UserId) ? CurrentContext.UserId(_httpContextAccessor) : model.UserId;
+        Result result = await _employeeService.AddUpdateWorkHistory(model);
+        return result;
+    }
+
+    [HttpGet]
+    [Route("GetEmpWorkHistory")]
+    public async Task<Result<EmployeeWorkHistoryModel>> GetEmpWorkHistory([FromQuery] string? userId)
+    {
+        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
+        var data = await _employeeService.GetEmpWorkHistory(userId);
+        return new Result<EmployeeWorkHistoryModel>()
+        {
+            MethodResults = data,
+            TotalRecords = data.Count
+        };
+    }
 }
