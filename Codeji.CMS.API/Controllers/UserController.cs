@@ -21,13 +21,11 @@ namespace Codeji.CMS.API.Controllers;
 public class UserController : BaseApiController
 {
     private readonly IEmployeeService _employeeService;
-    private readonly INotificationService _notificationService;
     private readonly IHttpContextAccessor _httpContextAccessor;
-    public UserController(IHttpContextAccessor httpContextAccessor, IEmployeeService employeeService, INotificationService notificationService)
+    public UserController(IHttpContextAccessor httpContextAccessor, IEmployeeService employeeService)
     {
         _httpContextAccessor = httpContextAccessor;
         _employeeService = employeeService;
-        _notificationService = notificationService;
     }
 
     [Route("AddEmployees")]
@@ -360,7 +358,7 @@ public class UserController : BaseApiController
     public async Task<Result<NotificationViewModel>> GetAllNotifications()
     {
         string userId = CurrentContext.UserId(_httpContextAccessor);
-        return await _notificationService.GetAllNotifications(userId);
+        return await _employeeService.GetAllNotifications(userId);
     }
 
     [HttpPost]

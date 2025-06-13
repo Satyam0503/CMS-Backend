@@ -1,7 +1,9 @@
 using System.Linq.Expressions;
 using AngleSharp.Text;
+using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.NoticeBoard;
+using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
@@ -14,21 +16,25 @@ namespace Codeji.CMS.Services.NoticeBoard;
 
 public class NoticeBoardServices : INoticeBoardService
 {
-    private readonly IMongoDbRepository<Notice> _notice;
-    private readonly IMongoDbRepository<EmpUser> _empUser;
-    private readonly IMongoDbRepository<Notifications> _notification;
-    private readonly IMongoDbRepository<UserNotifications> _userNotifications;
-    public NoticeBoardServices(IMongoDbRepository<Notice> notice, IMongoDbRepository<EmpUser> empUser, IMongoDbRepository<Notifications> notification, IMongoDbRepository<UserNotifications> userNotification)
+    readonly IMapper _mapper;
+    private readonly IMongoDbRepository<Notice> _noticeRepository;
+    private readonly IMongoDbRepository<EmpUser> _empUserRepository;
+    private readonly IMongoDbRepository<Notifications> _notificationRepository;
+    private readonly IMongoDbRepository<UserNotifications> _userNotificationsRepository;
+    private readonly INotificationService _notificationService;
+    public NoticeBoardServices(IMapper mapper, IMongoDbRepository<Notice> noticeRepository, IMongoDbRepository<EmpUser> empUserRepository, IMongoDbRepository<Notifications> notificationRepository, IMongoDbRepository<UserNotifications> userNotificationsRepository, INotificationService notificationService)
     {
-        _notice = notice;
-        _empUser = empUser;
-        _notification = notification;
-        _userNotifications = userNotification;
+        _mapper = mapper;
+        _noticeRepository = noticeRepository;
+        _empUserRepository = empUserRepository;
+        _notificationRepository = notificationRepository;
+        _userNotificationsRepository = userNotificationsRepository;
+        _notificationService = notificationService;
     }
 
     public async Task<Result> PostNotice(AddNoticeRequestModel model, string userId)
     {
-        Notice notice = new Notice()
+        Notice notice = new()
         {
             Title = model.Title,
             Message = model.Message,
@@ -36,27 +42,24 @@ public class NoticeBoardServices : INoticeBoardService
             NoticeType = model.NoticeType,
             Departments = model.Departments,
         };
-        Result result = await _notice.AddOne(notice);
+        Result result = await _noticeRepository.AddOne(notice);
         if (!result.Success)
         {
             return result;
         }
-        Expression<Func<EmpUser, bool>> whereCondition = x => (model.Departments.Equals("all") || x.Department.Equals(model.Departments))
-        && (model.Target.Equals("all") || x.RoleId.Equals(model.Target));
-
-        EmpUser currentUser = await _empUser.FirstOrDefault(x => x.UserId.Equals(userId));
-        Notifications notification = new Notifications()
+        Notifications notification = new()
         {
             NotificationId = Guid.NewGuid().ToString(),
             Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice, model.Title),
             CreatedDateTime = DateTime.UtcNow,
             NotificationType = EnumsHelper.NotificationTypes.Notice,
-            CreatedBy = $"{currentUser?.FirstName} {currentUser?.LastName}",
         };
-        Result result1 = await _notification.AddOne(notification);
+        Result result1 = await _notificationRepository.AddOne(notification);
         if (result1.Success)
         {
-            IEnumerable<EmpUser> empUsers = await _empUser.GetAll(whereCondition);
+            Expression<Func<EmpUser, bool>> whereCondition = x => (model.Departments.Equals("all") || x.Department.Equals(model.Departments))
+            && (model.Target.Equals("all") || x.RoleId.Equals(model.Target));
+            IEnumerable<EmpUser> empUsers = await _empUserRepository.GetAll(whereCondition);
             if (empUsers.Any())
             {
                 List<UserNotifications> userNotifications = [];
@@ -65,13 +68,32 @@ public class NoticeBoardServices : INoticeBoardService
                 {
                     UserNotifications userNotification = new()
                     {
+                        UserNotificationId = Guid.NewGuid().ToString(),
                         UserId = user.UserId,
                         NotificationId = notification.NotificationId,
                         IsRead = false,
                     };
                     userNotifications.Add(userNotification);
+                    // await _notificationService.SendNoticeNotificationToUser(user.UserId, new NotificationViewModel()
+                    // {
+                    //     Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice, model.Title),
+                    //     IsRead = false,
+                    //     SentDateTime = DateTime.UtcNow,
+                    //     SentBy = userId,
+                    //     NotificationTypes = EnumsHelper.NotificationTypes.Notice,
+                    //     UserNotificationId = userNotification.UserNotificationId,
+                    // });
                 }
-                await _userNotifications.AddMany(userNotifications);
+                await _userNotificationsRepository.AddMany(userNotifications);
+                await _notificationService.SendNoticeNotificationToUser(userId, new NotificationViewModel()
+                {
+                    Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice, model.Title),
+                    IsRead = false,
+                    SentDateTime = DateTime.UtcNow,
+                    SentBy = userId,
+                    NotificationTypes = EnumsHelper.NotificationTypes.Notice,
+                    UserNotificationId = "",
+                });
             }
         }
         return result;
@@ -79,12 +101,12 @@ public class NoticeBoardServices : INoticeBoardService
 
     public async Task<Result<NoticeViewModel>> GetAllNotices(string userId)
     {
-        EmpUser? employee = await _empUser.FirstOrDefault(x => x.UserId == userId);
+        EmpUser? employee = await _empUserRepository.FirstOrDefault(x => x.UserId == userId);
         Expression<Func<Notice, bool>> whereCondition = x => (x.Departments.Equals("all") || x.Departments.Equals(employee.Department))
         && (x.Target.Equals("all") || x.Target.Equals(employee.RoleId));
-        IEnumerable<Notice> noticeList = await _notice.GetAll(whereCondition);
+        IEnumerable<Notice> noticeList = await _noticeRepository.GetAll(whereCondition);
         List<string> empIdList = noticeList.Select(x => x.CreatedBy).Distinct().ToList();
-        IEnumerable<EmpUser> empUsers = await _empUser.GetAll(x => empIdList.Contains(x.UserId));
+        IEnumerable<EmpUser> empUsers = await _empUserRepository.GetAll(x => empIdList.Contains(x.UserId));
         var data = (from notice in noticeList
                     join emp in empUsers on notice.CreatedBy equals emp.UserId
                     select new NoticeViewModel
@@ -99,6 +121,17 @@ public class NoticeBoardServices : INoticeBoardService
                     }).OrderByDescending(x => x.CreatedDateTime).ToList();
 
         return new Result<NoticeViewModel>()
+        {
+            Success = true,
+            MethodResults = data,
+            TotalRecords = data.Count
+        };
+    }
+    public async Task<Result<MyNoticeDTO>> GetMyNotices(string userId)
+    {
+        IEnumerable<Notice> noticeList = await _noticeRepository.GetAll(x => x.CreatedBy.Equals(userId));
+        var data = _mapper.Map<List<MyNoticeDTO>>(noticeList).OrderByDescending(x => x.CreatedDate).ToList();
+        return new Result<MyNoticeDTO>()
         {
             Success = true,
             MethodResults = data,

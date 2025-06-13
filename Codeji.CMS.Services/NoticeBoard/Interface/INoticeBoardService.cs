@@ -9,5 +9,6 @@ namespace Codeji.CMS.Services.NoticeBoard
     {
         Task<Result> PostNotice(AddNoticeRequestModel notice, string userId);
         Task<Result<NoticeViewModel>> GetAllNotices(string userId);
+        Task<Result<MyNoticeDTO>> GetMyNotices(string userId);
     }
 }

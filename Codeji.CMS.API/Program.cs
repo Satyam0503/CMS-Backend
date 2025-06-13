@@ -2,6 +2,7 @@
 using System.Text;
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.API.Notification;
+using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.GenericRepository.Registration;
 using Codeji.CMS.GenericRepository.Settings;
 using Codeji.CMS.Services.BackgroundTasks;

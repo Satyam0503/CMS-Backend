@@ -1,16 +1,12 @@
-using System.Net;
 using Codeji.CMS.API.Notification;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.NoticeBoard;
-using Codeji.CMS.DTO.ResponseModel;
-using Codeji.CMS.Repository.Entities.NoticeBoard;
 using Codeji.CMS.Services.NoticeBoard;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.SignalR;
 
 namespace Codeji.CMS.API.Controllers;
 
@@ -20,13 +16,11 @@ namespace Codeji.CMS.API.Controllers;
 public class NoticeBoardController : BaseApiController
 {
     private readonly INoticeBoardService _noticeBoardServices;
-    private readonly INotificationService _notificationServices;
     private readonly IHttpContextAccessor _httpContextAccessor;
-    public NoticeBoardController(INoticeBoardService noticeBoardService, IHttpContextAccessor httpContextAccessor, INotificationService notificationService)
+    public NoticeBoardController(INoticeBoardService noticeBoardService, IHttpContextAccessor httpContextAccessor)
     {
         _noticeBoardServices = noticeBoardService;
         _httpContextAccessor = httpContextAccessor;
-        _notificationServices = notificationService;
     }
 
     [HttpPost]
@@ -42,21 +36,8 @@ public class NoticeBoardController : BaseApiController
             string userId = CurrentContext.UserId(_httpContextAccessor);
             Result result = await _noticeBoardServices.PostNotice(notice, userId);
 
-            // modify and move this logic into services
             if (result.Success)
             {
-                string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-
-                NotificationViewModel newNotification = new()
-                {
-                    UserNotificationId = "",
-                    NotificationTypes = EnumsHelper.NotificationTypes.Notice,
-                    SentBy = userId,
-                    SentDateTime = DateTime.UtcNow,
-                    IsRead = false,
-                    Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice, notice.Title)
-                };
-                await _notificationServices.SendNoticeNotification(companyId, newNotification);
                 result.Message = "Notice posted successfully";
                 result.StatusCode = StatusCodes.Status201Created;
             }
@@ -70,5 +51,13 @@ public class NoticeBoardController : BaseApiController
     {
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
         return await _noticeBoardServices.GetAllNotices(currentUserId);
+    }
+
+    [HttpGet]
+    [Route("GetMyNotices")]
+    public async Task<Result<MyNoticeDTO>> GetMyNotices()
+    {
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        return await _noticeBoardServices.GetMyNotices(currentUserId);
     }
 }

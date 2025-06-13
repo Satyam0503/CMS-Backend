@@ -11,5 +11,6 @@ namespace Codeji.CMS.Repository.Entities
         public EnumsHelper.NotificationTypes NotificationType { get; set; }
         public DateTime CreatedDateTime { get; set; }
         public string CreatedBy { get; set; }
+        public string CompanyId { get; set; }
     }
 }
