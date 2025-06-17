@@ -103,6 +103,7 @@ namespace Codeji.CMS.Services.Employees
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
         {
+            Result<UserModel> result = new();
             var userId = Guid.NewGuid().ToString();
             EmpUser employee = new EmpUser()
             {
@@ -128,9 +129,16 @@ namespace Codeji.CMS.Services.Employees
                 Address = user.Address
             };
 
-            await _employeeRepository.AddOne(employee);
+            Result result1 = await _employeeRepository.AddOne(employee);
+            if (!result1.Success)
+            {
+                result.Success = false;
+                return result;
+            }
+            UserModel currentUser = _middlewareService.GetUserById(currentUserId);
+            Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
 
-            // password creation token
+            // generate password creation token for newly added employee
             string token = TokenHelper.GenerateToken();
             string tokenHash = TokenHelper.ComputeSha256Hash(token);
             PasswordResetTokens passwordResetTokens = new()
@@ -141,9 +149,6 @@ namespace Codeji.CMS.Services.Employees
                 Expiry = DateTime.UtcNow.AddMinutes(15),
             };
             var result2 = await _passwordResetTokens.AddOne(passwordResetTokens);
-
-            UserModel currentUser = _middlewareService.GetUserById(currentUserId);
-            Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
 
             //Acknowledgement Email Logic 
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.CreateNewPasswordMail);
@@ -168,12 +173,9 @@ namespace Codeji.CMS.Services.Employees
               });
           }, priority: 1);
 
-            return new Result<UserModel>
-            {
-                MethodResult = user,
-                Message = "User added",
-                Success = true
-            };
+            result.MethodResult = user;
+            result.Message = "User added";
+            return result;
         }
         public async Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId)
         {
@@ -774,11 +776,18 @@ namespace Codeji.CMS.Services.Employees
 
         public async Task<List<EmployeeWorkHistoryModel>> GetEmpWorkHistory(string userId)
         {
-            var list = await _empWorkHistoryRepository.GetAll(x => x.UserId.Equals(userId));
+            var list = (await _empWorkHistoryRepository.GetAll(x => x.UserId.Equals(userId))).OrderByDescending(x => x.EndDate);
             if (list.Any()) return _mapper.Map<List<EmployeeWorkHistoryModel>>(list);
             return [];
         }
 
+        public async Task<Result> DeleteWorkHistory(string workId, string userId)
+        {
+            bool exits = await _empWorkHistoryRepository.Exist(x => x.WorkHistoryId.Equals(workId));
+            if (!exits) return new Result();
+            Expression<Func<EmpWorkHistory, bool>> whereCondition = x => x.WorkHistoryId == workId;
+            return await _empWorkHistoryRepository.UpdateMany(whereCondition, Builders<EmpWorkHistory>.Update.Set(x => x.IsDeleted, true));
+        }
         public async Task<Result<NotificationViewModel>> GetAllNotifications(string userId)
         {
             IEnumerable<UserNotifications> userNotifications = await _userNotificationRepository.GetAll(x => x.UserId == userId);

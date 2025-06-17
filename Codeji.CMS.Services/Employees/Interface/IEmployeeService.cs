@@ -43,6 +43,7 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<Result> AddSkill(string skill);
         Task<Result> AddUpdateWorkHistory(EmployeeWorkHistoryModel model);
         Task<List<EmployeeWorkHistoryModel>> GetEmpWorkHistory(string userId);
+        Task<Result> DeleteWorkHistory(string workId, string userId);
         Task<Result<NotificationViewModel>> GetAllNotifications(string userId);
     }
 }

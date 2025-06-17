@@ -369,7 +369,7 @@ public class UserController : BaseApiController
         {
             return new Result();
         }
-        model.UserId = string.IsNullOrEmpty(model.UserId) ? CurrentContext.UserId(_httpContextAccessor) : model.UserId;
+        if (string.IsNullOrEmpty(model.UserId)) model.UserId = CurrentContext.UserId(_httpContextAccessor);
         Result result = await _employeeService.AddUpdateWorkHistory(model);
         return result;
     }
@@ -385,5 +385,13 @@ public class UserController : BaseApiController
             MethodResults = data,
             TotalRecords = data.Count
         };
+    }
+
+    [HttpDelete]
+    [Route("DeleteWorkHistory/{workId}")]
+    public async Task<Result> DeleteWorkHistory(string workId, [FromBody] string? userId)
+    {
+        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _employeeService.DeleteWorkHistory(workId, userId);
     }
 }
