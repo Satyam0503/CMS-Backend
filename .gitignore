@@ -2,3 +2,7 @@
 */obj
 .vs
 */Uploads/*
+
+.fake
+Codeji.CMS.API/.DS_Store
+Codeji.CMS.API/Properties/.DS_Store
