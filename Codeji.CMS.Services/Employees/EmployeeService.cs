@@ -39,7 +39,7 @@ namespace Codeji.CMS.Services.Employees
         private readonly IPriorityTaskQueue _priorityTaskQueue;
         readonly IMongoDbRepository<EmpUser> _employeeRepository;
         readonly IMongoDbRepository<Roles> _rolesRepository;
-        private readonly IRoleService _roleService;
+        readonly IRoleService _roleService;
         readonly IMongoDbRepository<RolePermission> _rolePermissionRepository;
         readonly IMongoDbRepository<EmpSkills> _employeeSkillsRepository;
         readonly IMongoDbRepository<Company> _companyRepository;
@@ -50,7 +50,10 @@ namespace Codeji.CMS.Services.Employees
 
         readonly IMongoDbRepository<Skills> _skillsRepository;
         readonly IMongoDbRepository<PasswordResetTokens> _passwordResetTokens;
-        private readonly IHttpContextAccessor _httpContextAccessor;
+        readonly IMongoDbRepository<EmpWorkHistory> _empWorkHistoryRepository;
+        readonly IMongoDbRepository<UserNotifications> _userNotificationRepository;
+        readonly IMongoDbRepository<Notifications> _notificationsRepository;
+        readonly IHttpContextAccessor _httpContextAccessor;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
@@ -68,7 +71,11 @@ namespace Codeji.CMS.Services.Employees
             IHttpContextAccessor httpContextAccessor,
             IMongoDbRepository<Department> departmentRepository,
             IMongoDbRepository<Skills> skillsRepository,
-            IMongoDbRepository<PasswordResetTokens> passwordResetTokens
+            IMongoDbRepository<PasswordResetTokens> passwordResetTokens,
+            IMongoDbRepository<EmpWorkHistory> empWorkHistoryRepository,
+            IMongoDbRepository<UserNotifications> userNotificationRepository,
+            IMongoDbRepository<Notifications> notificationsRepository
+
             )
         {
             _employeeRepository = employeeRepository;
@@ -89,10 +96,14 @@ namespace Codeji.CMS.Services.Employees
             _skillsRepository = skillsRepository;
             _passwordResetTokens = passwordResetTokens;
             _httpContextAccessor = httpContextAccessor;
+            _empWorkHistoryRepository = empWorkHistoryRepository;
+            _userNotificationRepository = userNotificationRepository;
+            _notificationsRepository = notificationsRepository;
         }
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
         {
+            Result<UserModel> result = new();
             var userId = Guid.NewGuid().ToString();
             EmpUser employee = new EmpUser()
             {
@@ -118,9 +129,16 @@ namespace Codeji.CMS.Services.Employees
                 Address = user.Address
             };
 
-            await _employeeRepository.AddOne(employee);
+            Result result1 = await _employeeRepository.AddOne(employee);
+            if (!result1.Success)
+            {
+                result.Success = false;
+                return result;
+            }
+            UserModel currentUser = _middlewareService.GetUserById(currentUserId);
+            Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
 
-            // password creation token
+            // generate password creation token for newly added employee
             string token = TokenHelper.GenerateToken();
             string tokenHash = TokenHelper.ComputeSha256Hash(token);
             PasswordResetTokens passwordResetTokens = new()
@@ -131,9 +149,6 @@ namespace Codeji.CMS.Services.Employees
                 Expiry = DateTime.UtcNow.AddMinutes(15),
             };
             var result2 = await _passwordResetTokens.AddOne(passwordResetTokens);
-
-            UserModel currentUser = _middlewareService.GetUserById(currentUserId);
-            Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
 
             //Acknowledgement Email Logic 
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.CreateNewPasswordMail);
@@ -158,12 +173,9 @@ namespace Codeji.CMS.Services.Employees
               });
           }, priority: 1);
 
-            return new Result<UserModel>
-            {
-                MethodResult = user,
-                Message = "User added",
-                Success = true
-            };
+            result.MethodResult = user;
+            result.Message = "User added";
+            return result;
         }
         public async Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId)
         {
@@ -697,8 +709,6 @@ namespace Codeji.CMS.Services.Employees
             return data;
         }
 
-
-
         public async Task<bool> IsUserActive(string userId)
         {
             bool IsUserActive = await _employeeRepository.Exist(x => x.UserId == userId && x.Status);
@@ -733,6 +743,82 @@ namespace Codeji.CMS.Services.Employees
                 StatusCode = 200,
                 TotalRecords = skills == null ? 0 : skills.Count(),
                 Success = true,
+            };
+        }
+
+        public async Task<Result> AddUpdateWorkHistory(EmployeeWorkHistoryModel model)
+        {
+            EmpWorkHistory empWorkHistory = _mapper.Map<EmpWorkHistory>(model);
+            Result result = new();
+            string currentUser = CurrentContext.UserId(_httpContextAccessor);
+            if (string.IsNullOrEmpty(empWorkHistory.WorkHistoryId))
+            {
+                empWorkHistory.CreatedDate = DateTime.UtcNow;
+                empWorkHistory.CreatedBy = currentUser;
+                result = await _empWorkHistoryRepository.AddOne(empWorkHistory);
+            }
+            else
+            {
+                Expression<Func<EmpWorkHistory, bool>> whereCondition = x => x.UserId == model.UserId && x.WorkHistoryId == empWorkHistory.WorkHistoryId;
+                EmpWorkHistory? empWorkHistoryExist = await _empWorkHistoryRepository.FirstOrDefault(whereCondition);
+                if (empWorkHistoryExist is null)
+                {
+                    return result;
+                }
+                empWorkHistory.UpdatedBy = currentUser;
+                empWorkHistory.UpdatedDate = DateTime.UtcNow;
+                empWorkHistory.CreatedBy = empWorkHistoryExist.CreatedBy;
+                empWorkHistory.CreatedDate = empWorkHistoryExist.CreatedDate;
+                result = await _empWorkHistoryRepository.Update(whereCondition, empWorkHistory);
+            }
+            return result;
+        }
+
+        public async Task<List<EmployeeWorkHistoryModel>> GetEmpWorkHistory(string userId)
+        {
+            var list = (await _empWorkHistoryRepository.GetAll(x => x.UserId.Equals(userId))).OrderByDescending(x => x.EndDate);
+            if (list.Any()) return _mapper.Map<List<EmployeeWorkHistoryModel>>(list);
+            return [];
+        }
+
+        public async Task<Result> DeleteWorkHistory(string workId, string userId)
+        {
+            bool exits = await _empWorkHistoryRepository.Exist(x => x.WorkHistoryId.Equals(workId));
+            if (!exits) return new Result();
+            Expression<Func<EmpWorkHistory, bool>> whereCondition = x => x.WorkHistoryId == workId;
+            return await _empWorkHistoryRepository.UpdateMany(whereCondition, Builders<EmpWorkHistory>.Update.Set(x => x.IsDeleted, true));
+        }
+        public async Task<Result<NotificationViewModel>> GetAllNotifications(string userId)
+        {
+            IEnumerable<UserNotifications> userNotifications = await _userNotificationRepository.GetAll(x => x.UserId == userId);
+            if (!userNotifications.Any())
+            {
+                return new Result<NotificationViewModel>()
+                {
+                    MethodResults = [],
+                    Success = true,
+                    TotalRecords = 0
+                };
+            }
+
+            string[] notificationsId = userNotifications.Select(x => x.NotificationId).ToArray();
+            IEnumerable<Notifications> notifications = await _notificationsRepository.GetAll(x => notificationsId.Contains(x.NotificationId));
+            var data = (from usrNft in userNotifications
+                        join ntf in notifications on usrNft.NotificationId equals ntf.NotificationId
+                        select new NotificationViewModel
+                        {
+                            UserNotificationId = usrNft.UserNotificationId,
+                            IsRead = usrNft.IsRead,
+                            Title = ntf.Title,
+                            SentDateTime = ntf.CreatedDateTime,
+                            SentBy = ntf.CreatedBy,
+                            NotificationTypes = ntf.NotificationType
+                        }).OrderByDescending(x => x.SentDateTime).ToList();
+            return new Result<NotificationViewModel>()
+            {
+                MethodResults = data,
+                Success = true,
+                TotalRecords = data.Count
             };
         }
     }

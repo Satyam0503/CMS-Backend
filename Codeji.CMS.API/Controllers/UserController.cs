@@ -1,5 +1,6 @@
 
 using System.Text.RegularExpressions;
+using Codeji.CMS.API.Notification;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
@@ -20,16 +21,15 @@ namespace Codeji.CMS.API.Controllers;
 public class UserController : BaseApiController
 {
     private readonly IEmployeeService _employeeService;
-
     private readonly IHttpContextAccessor _httpContextAccessor;
     public UserController(IHttpContextAccessor httpContextAccessor, IEmployeeService employeeService)
     {
         _httpContextAccessor = httpContextAccessor;
         _employeeService = employeeService;
     }
+
     [Route("AddEmployees")]
     [HttpPost]
-
     public async Task<Result<UserModel>> AddEmployees(UserModel user)
     {
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
@@ -353,4 +353,45 @@ public class UserController : BaseApiController
         return result;
     }
 
+    [HttpGet]
+    [Route("GetAllNotifications")]
+    public async Task<Result<NotificationViewModel>> GetAllNotifications()
+    {
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _employeeService.GetAllNotifications(userId);
+    }
+
+    [HttpPost]
+    [Route("AddUpdateWorkHistory")]
+    public async Task<Result> AddWorkHistory(EmployeeWorkHistoryModel model)
+    {
+        if (!ModelState.IsValid)
+        {
+            return new Result();
+        }
+        if (string.IsNullOrEmpty(model.UserId)) model.UserId = CurrentContext.UserId(_httpContextAccessor);
+        Result result = await _employeeService.AddUpdateWorkHistory(model);
+        return result;
+    }
+
+    [HttpGet]
+    [Route("GetEmpWorkHistory")]
+    public async Task<Result<EmployeeWorkHistoryModel>> GetEmpWorkHistory([FromQuery] string? userId)
+    {
+        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
+        var data = await _employeeService.GetEmpWorkHistory(userId);
+        return new Result<EmployeeWorkHistoryModel>()
+        {
+            MethodResults = data,
+            TotalRecords = data.Count
+        };
+    }
+
+    [HttpDelete]
+    [Route("DeleteWorkHistory/{workId}")]
+    public async Task<Result> DeleteWorkHistory(string workId, [FromBody] string? userId)
+    {
+        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _employeeService.DeleteWorkHistory(workId, userId);
+    }
 }

@@ -1,12 +1,12 @@
-using System.Net;
+using Codeji.CMS.API.Notification;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.NoticeBoard;
-using Codeji.CMS.Repository.Entities.NoticeBoard;
 using Codeji.CMS.Services.NoticeBoard;
+using Codeji.CMS.Utility.Enums;
+using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.SignalR;
 
 namespace Codeji.CMS.API.Controllers;
 
@@ -15,14 +15,12 @@ namespace Codeji.CMS.API.Controllers;
 [Authorize]
 public class NoticeBoardController : BaseApiController
 {
-    private readonly IHubContext<NoticeBoardHub> _noticeHub;
     private readonly INoticeBoardService _noticeBoardServices;
     private readonly IHttpContextAccessor _httpContextAccessor;
-    public NoticeBoardController(INoticeBoardService noticeBoardService, IHttpContextAccessor httpContextAccessor, IHubContext<NoticeBoardHub> noticeHub)
+    public NoticeBoardController(INoticeBoardService noticeBoardService, IHttpContextAccessor httpContextAccessor)
     {
         _noticeBoardServices = noticeBoardService;
         _httpContextAccessor = httpContextAccessor;
-        _noticeHub = noticeHub;
     }
 
     [HttpPost]
@@ -35,10 +33,11 @@ public class NoticeBoardController : BaseApiController
         }
         else
         {
-            Result result = await _noticeBoardServices.PostNotice(notice);
+            string userId = CurrentContext.UserId(_httpContextAccessor);
+            Result result = await _noticeBoardServices.PostNotice(notice, userId);
+
             if (result.Success)
             {
-                await _noticeHub.Clients.All.SendAsync("noticeNotify", notice);
                 result.Message = "Notice posted successfully";
                 result.StatusCode = StatusCodes.Status201Created;
             }
@@ -52,5 +51,13 @@ public class NoticeBoardController : BaseApiController
     {
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
         return await _noticeBoardServices.GetAllNotices(currentUserId);
+    }
+
+    [HttpGet]
+    [Route("GetMyNotices")]
+    public async Task<Result<MyNoticeDTO>> GetMyNotices()
+    {
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        return await _noticeBoardServices.GetMyNotices(currentUserId);
     }
 }

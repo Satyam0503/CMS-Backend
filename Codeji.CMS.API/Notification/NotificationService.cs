@@ -1,3 +1,5 @@
+using Codeji.CMS.DTO.ResponseModel;
+using Codeji.CMS.GenericRepository.Interfaces;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Codeji.CMS.API.Notification;
@@ -11,21 +13,9 @@ public class NotificationService : INotificationService
         hubContext = _hubContext;
     }
 
-    /// <summary>
-    /// sent gallery update notification 
-    /// </summary>
-    /// <param name="userId"></param>
-    /// <param name="Notify"></param>
-    /// <returns></returns>
-
-    public Task SendNoticeNotification(string userId, UserNotificationModel Notify)
+    // hub methods are called by connected clients
+    public Task SendNoticeNotificationToUser(string userId, NotificationViewModel model)
     {
-        return hubContext.Clients.User(userId).SendAsync("noticeNofity", Notify);
+        return hubContext.Clients.User(userId).SendAsync("noticeNofity", model);
     }
-
-
-}
-public interface INotificationService
-{
-    Task SendNoticeNotification(string userId, UserNotificationModel Notify);
 }

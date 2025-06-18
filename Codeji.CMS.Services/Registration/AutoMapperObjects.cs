@@ -1,6 +1,7 @@
 ﻿using AutoMapper;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Company;
+using Codeji.CMS.DTO.NoticeBoard;
 using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.Company;
@@ -10,6 +11,7 @@ using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.NoticeBoard;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 
@@ -23,6 +25,7 @@ namespace Codeji.CMS.Services.Registration
             // CreateMap<EmpUser, UserModel>().ForMember(dest => dest.Password, opt => opt.Ignore()).ReverseMap();
             CreateMap<EmpUser, UserModel>().ReverseMap();
             CreateMap<EmpUser, GetAllEmployeeResponseModel>().ReverseMap();
+            CreateMap<EmpWorkHistory, EmployeeWorkHistoryModel>().ReverseMap();
             CreateMap<Company, CompanyRequestModel>().ReverseMap();
             CreateMap<EmpUser, CompanyRequestModel>().ReverseMap();
             CreateMap<EmpEducationDetails, EmployeeEducationRequestModel>().ReverseMap();
@@ -31,6 +34,7 @@ namespace Codeji.CMS.Services.Registration
             CreateMap<JobVacancy, JobVacancyModel>().ReverseMap();
             CreateMap<Department, DepartmentDTO>().ReverseMap();
             CreateMap<Skills, SkillsDTO>().ReverseMap();
+            CreateMap<Notice, MyNoticeDTO>().ReverseMap();
             CreateMap<Applicant, ApplicantViewModel>().ForMember(dest => dest.ApplyDate, opt => opt.MapFrom(src => src.CreatedDate)).ReverseMap();
         }
     }
