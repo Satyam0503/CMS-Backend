@@ -58,7 +58,7 @@ public class NoticeBoardServices : INoticeBoardService
         if (result1.Success)
         {
             Expression<Func<EmpUser, bool>> whereCondition = x => (model.Departments.Equals("all") || x.Department.Equals(model.Departments))
-            && (model.Target.Equals("all") || x.RoleId.Equals(model.Target));
+            && (model.Target.Equals("all") || x.RoleId.Equals(model.Target)) && x.UserId != userId;
             IEnumerable<EmpUser> empUsers = await _empUserRepository.GetAll(whereCondition);
             if (empUsers.Any())
             {
@@ -74,26 +74,17 @@ public class NoticeBoardServices : INoticeBoardService
                         IsRead = false,
                     };
                     userNotifications.Add(userNotification);
-                    // await _notificationService.SendNoticeNotificationToUser(user.UserId, new NotificationViewModel()
-                    // {
-                    //     Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice, model.Title),
-                    //     IsRead = false,
-                    //     SentDateTime = DateTime.UtcNow,
-                    //     SentBy = userId,
-                    //     NotificationTypes = EnumsHelper.NotificationTypes.Notice,
-                    //     UserNotificationId = userNotification.UserNotificationId,
-                    // });
+                    await _notificationService.SendNoticeNotificationToUser(user.UserId, new NotificationViewModel()
+                    {
+                        Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice, model.Title),
+                        IsRead = false,
+                        SentDateTime = DateTime.UtcNow,
+                        SentBy = userId,
+                        NotificationTypes = EnumsHelper.NotificationTypes.Notice,
+                        UserNotificationId = userNotification.UserNotificationId,
+                    });
                 }
                 await _userNotificationsRepository.AddMany(userNotifications);
-                await _notificationService.SendNoticeNotificationToUser(userId, new NotificationViewModel()
-                {
-                    Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice, model.Title),
-                    IsRead = false,
-                    SentDateTime = DateTime.UtcNow,
-                    SentBy = userId,
-                    NotificationTypes = EnumsHelper.NotificationTypes.Notice,
-                    UserNotificationId = "",
-                });
             }
         }
         return result;

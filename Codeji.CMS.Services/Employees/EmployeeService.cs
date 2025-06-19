@@ -821,5 +821,16 @@ namespace Codeji.CMS.Services.Employees
                 TotalRecords = data.Count
             };
         }
+
+        public async Task<Result> MarkNotificationAsRead(string userId, string userNotificationId)
+        {
+            bool isExist = await _userNotificationRepository.Exist(x => x.UserNotificationId == userNotificationId);
+            if (!isExist)
+            {
+                return new Result();
+            }
+            Expression<Func<UserNotifications, bool>> whereCondition = x => x.UserNotificationId == userNotificationId;
+            return await _userNotificationRepository.UpdateMany(whereCondition, Builders<UserNotifications>.Update.Set(x => x.IsRead, true));
+        }
     }
 }

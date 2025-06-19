@@ -361,6 +361,18 @@ public class UserController : BaseApiController
         return await _employeeService.GetAllNotifications(userId);
     }
 
+    [HttpPatch]
+    [Route("Notification/{userNotificationId}/MarkAsRead")]
+    public async Task<Result> MarkNotificationAsRead(string userNotificationId)
+    {
+        if (string.IsNullOrEmpty(userNotificationId))
+        {
+            return new Result();
+        }
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        return await _employeeService.MarkNotificationAsRead(currentUserId, userNotificationId);
+    }
+
     [HttpPost]
     [Route("AddUpdateWorkHistory")]
     public async Task<Result> AddWorkHistory(EmployeeWorkHistoryModel model)
