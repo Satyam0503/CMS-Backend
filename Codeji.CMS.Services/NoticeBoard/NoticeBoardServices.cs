@@ -99,18 +99,34 @@ public class NoticeBoardServices : INoticeBoardService
         return result;
     }
 
-    public async Task<Result<NoticeViewModel>> GetAllNotices(string userId)
+    public async Task<Result> UpdateMyNotice(MyNoticeDTO model, string userId)
+    {
+        Notice? existingNotice = await _noticeRepository.FirstOrDefault(x => x.NoticeId == model.NoticeId);
+        if (existingNotice is null)
+        {
+            return new Result();
+        }
+        Notice notice = _mapper.Map<Notice>(model);
+        notice.UpdatedBy = userId;
+        notice.UpdatedDate = DateTime.UtcNow;
+        notice.CreatedBy = existingNotice.CreatedBy;
+        Expression<Func<Notice, bool>> wherecondition = x => x.NoticeId == model.NoticeId;
+        return await _noticeRepository.Update(wherecondition, notice);
+    }
+    public async Task<Result<NoticeViewModel>> GetAllNotices(string userId, int pageNo, int records)
     {
         EmpUser? employee = await _empUserRepository.FirstOrDefault(x => x.UserId == userId);
         Expression<Func<Notice, bool>> whereCondition = x => (x.Departments.Equals("all") || x.Departments.Equals(employee.Department))
         && (x.Target.Equals("all") || x.Target.Equals(employee.RoleId));
-        IEnumerable<Notice> noticeList = await _noticeRepository.GetAll(whereCondition);
+        int totalRecords = await _noticeRepository.Count(whereCondition);
+        List<Notice> noticeList = (await _noticeRepository.GetAggregateDataAsync<Notice>(whereCondition, isAscending: false, orderedKey: "CreatedDate", pageNo: pageNo, pageSize: records)).ToList();
         List<string> empIdList = noticeList.Select(x => x.CreatedBy).Distinct().ToList();
         IEnumerable<EmpUser> empUsers = await _empUserRepository.GetAll(x => empIdList.Contains(x.UserId));
         var data = (from notice in noticeList
                     join emp in empUsers on notice.CreatedBy equals emp.UserId
                     select new NoticeViewModel
                     {
+                        NoticeId = notice.NoticeId,
                         UserName = $"{emp.FirstName} {emp.LastName}",
                         UserDesignation = emp.JobRole,
                         NoticeMessage = notice.Message,
@@ -124,18 +140,20 @@ public class NoticeBoardServices : INoticeBoardService
         {
             Success = true,
             MethodResults = data,
-            TotalRecords = data.Count
+            TotalRecords = totalRecords
         };
     }
-    public async Task<Result<MyNoticeDTO>> GetMyNotices(string userId)
+    public async Task<Result<MyNoticeDTO>> GetMyNotices(string userId, int pageNo, int records)
     {
-        IEnumerable<Notice> noticeList = await _noticeRepository.GetAll(x => x.CreatedBy.Equals(userId));
-        var data = _mapper.Map<List<MyNoticeDTO>>(noticeList).OrderByDescending(x => x.CreatedDate).ToList();
+        Expression<Func<Notice, bool>> whereCondition = x => x.CreatedBy.Equals(userId);
+        int totalRecords = await _noticeRepository.Count(whereCondition);
+        List<Notice> noticeList = (await _noticeRepository.GetAggregateDataAsync<Notice>(whereCondition, isAscending: false, orderedKey: "CreatedDate", pageNo: pageNo, pageSize: records)).ToList();
+        var data = _mapper.Map<List<MyNoticeDTO>>(noticeList);
         return new Result<MyNoticeDTO>()
         {
             Success = true,
             MethodResults = data,
-            TotalRecords = data.Count
+            TotalRecords = totalRecords
         };
     }
 }

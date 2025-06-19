@@ -47,17 +47,30 @@ public class NoticeBoardController : BaseApiController
 
     [HttpGet]
     [Route("GetAllNotice")]
-    public async Task<Result<NoticeViewModel>> GetAllNotices()
+    public async Task<Result<NoticeViewModel>> GetAllNotices([FromQuery] int pageNo, [FromQuery] int records)
     {
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
-        return await _noticeBoardServices.GetAllNotices(currentUserId);
+        return await _noticeBoardServices.GetAllNotices(currentUserId, pageNo, records);
     }
 
     [HttpGet]
     [Route("GetMyNotices")]
-    public async Task<Result<MyNoticeDTO>> GetMyNotices()
+    public async Task<Result<MyNoticeDTO>> GetMyNotices([FromQuery] int pageNo, [FromQuery] int records)
     {
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
-        return await _noticeBoardServices.GetMyNotices(currentUserId);
+        return await _noticeBoardServices.GetMyNotices(currentUserId, pageNo, records);
+    }
+
+    [HttpPut]
+    [Route("UpdateMyNotice")]
+    public async Task<Result> UpdateMyNotice([FromBody] MyNoticeDTO notice)
+    {
+        if (!ModelState.IsValid)
+        {
+            return new Result();
+        }
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        return await _noticeBoardServices.UpdateMyNotice(notice, currentUserId);
+
     }
 }

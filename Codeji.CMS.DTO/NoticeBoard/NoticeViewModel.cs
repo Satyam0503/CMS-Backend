@@ -4,6 +4,7 @@ namespace Codeji.CMS.DTO.NoticeBoard;
 
 public class NoticeViewModel
 {
+    public string NoticeId { get; set; }
     public string UserName { get; set; }
     public string UserProfile { get; set; }
     public string UserDesignation { get; set; }
