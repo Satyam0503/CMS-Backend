@@ -71,6 +71,18 @@ public class NoticeBoardController : BaseApiController
         }
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
         return await _noticeBoardServices.UpdateMyNotice(notice, currentUserId);
-
     }
+
+    [HttpDelete]
+    [Route("DeleteNotice/{noticeId}")]
+    public async Task<Result> DeleteNotice(string noticeId)
+    {
+        Result result = new();
+        if (string.IsNullOrEmpty(noticeId)) return result;
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        bool isDeleted = await _noticeBoardServices.DeleteNotice(currentUserId, noticeId);
+        if (isDeleted) result.Success = true;
+        return result;
+    }
+
 }

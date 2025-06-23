@@ -11,6 +11,7 @@ using Codeji.CMS.Repository.Entities.NoticeBoard;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
+using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.NoticeBoard;
 
@@ -146,5 +147,13 @@ public class NoticeBoardServices : INoticeBoardService
             MethodResults = data,
             TotalRecords = totalRecords
         };
+    }
+    public async Task<bool> DeleteNotice(string userId, string noticeId)
+    {
+        Expression<Func<Notice, bool>> whereCondition = x => x.CreatedBy == userId && x.NoticeId == noticeId;
+        bool isExist = await _noticeRepository.Exist(whereCondition);
+        if (!isExist) return false;
+        Result result = await _noticeRepository.UpdateMany(whereCondition, Builders<Notice>.Update.Set(x => x.IsDeleted, true));
+        return result.Success;
     }
 }
