@@ -810,6 +810,7 @@ namespace Codeji.CMS.Services.Employees
                             UserNotificationId = usrNft.UserNotificationId,
                             IsRead = usrNft.IsRead,
                             Title = ntf.Title,
+                            Body = ntf.Body,
                             SentDateTime = ntf.CreatedDateTime,
                             SentBy = ntf.CreatedBy,
                             NotificationTypes = ntf.NotificationType
