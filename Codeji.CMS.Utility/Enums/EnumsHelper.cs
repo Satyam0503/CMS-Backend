@@ -59,6 +59,14 @@
         {
             Notice = 1,
         }
+
+        public enum HolidayTypes
+        {
+            Cultural = 1,
+            Health = 2,
+            Religious = 3,
+            National = 4,
+        }
     }
 }
 

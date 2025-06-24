@@ -3,6 +3,8 @@ using Codeji.CMS.Services.Companies;
 using Codeji.CMS.Services.Dashboard;
 using Codeji.CMS.Services.Employees;
 using Codeji.CMS.Services.Employees.Interface;
+using Codeji.CMS.Services.Holiday;
+using Codeji.CMS.Services.Holiday.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.NoticeBoard;
 using Codeji.CMS.Services.Recruitments;
@@ -24,6 +26,7 @@ public static class ServicesRegistration
         services.AddScoped<ICompanyMasterService, CompanyMasterService>();
         services.AddScoped<IDashboardService, DashboardServices>();
         services.AddScoped<INoticeBoardService, NoticeBoardServices>();
+        services.AddScoped<IHolidayService, HolidayService>();
 
         return services;
     }
