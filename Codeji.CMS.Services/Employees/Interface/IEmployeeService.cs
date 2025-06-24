@@ -44,7 +44,8 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<Result> AddUpdateWorkHistory(EmployeeWorkHistoryModel model);
         Task<List<EmployeeWorkHistoryModel>> GetEmpWorkHistory(string userId);
         Task<Result> DeleteWorkHistory(string workId, string userId);
-        Task<Result<NotificationViewModel>> GetAllNotifications(string userId);
+        Task<Result<NotificationResponseModel>> GetAllNotifications(string userId, int page, int records);
         Task<Result> MarkNotificationAsRead(string userId, string userNotificationId);
+        Task<Result> MarkAllNotificationAsRead(string userId);
     }
 }

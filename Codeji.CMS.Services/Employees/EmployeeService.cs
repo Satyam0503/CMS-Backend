@@ -75,7 +75,6 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<EmpWorkHistory> empWorkHistoryRepository,
             IMongoDbRepository<UserNotifications> userNotificationRepository,
             IMongoDbRepository<Notifications> notificationsRepository
-
             )
         {
             _employeeRepository = employeeRepository;
@@ -788,19 +787,25 @@ namespace Codeji.CMS.Services.Employees
             Expression<Func<EmpWorkHistory, bool>> whereCondition = x => x.WorkHistoryId == workId;
             return await _empWorkHistoryRepository.UpdateMany(whereCondition, Builders<EmpWorkHistory>.Update.Set(x => x.IsDeleted, true));
         }
-        public async Task<Result<NotificationViewModel>> GetAllNotifications(string userId)
+        public async Task<Result<NotificationResponseModel>> GetAllNotifications(string userId, int page, int records)
         {
-            IEnumerable<UserNotifications> userNotifications = await _userNotificationRepository.GetAll(x => x.UserId == userId);
-            if (!userNotifications.Any())
+            Expression<Func<UserNotifications, bool>> wherecondition = x => x.UserId == userId;
+            int userNotificationsCount = await _userNotificationRepository.Count(wherecondition);
+            if (userNotificationsCount == 0)
             {
-                return new Result<NotificationViewModel>()
+                return new Result<NotificationResponseModel>()
                 {
-                    MethodResults = [],
+                    MethodResult = new NotificationResponseModel()
+                    {
+                        NotificationList = [],
+                        All = 0,
+                        Unread = 0
+                    },
                     Success = true,
-                    TotalRecords = 0
                 };
             }
-
+            int unReadNotification = await _userNotificationRepository.Count(x => x.UserId == userId && !x.IsRead);
+            List<UserNotifications> userNotifications = (await _userNotificationRepository.GetAggregateDataAsync<UserNotifications>(wherecondition, isAscending: false, orderedKey: "CreatedDateTime", pageNo: page, pageSize: records)).ToList();
             string[] notificationsId = userNotifications.Select(x => x.NotificationId).ToArray();
             IEnumerable<Notifications> notifications = await _notificationsRepository.GetAll(x => notificationsId.Contains(x.NotificationId));
             var data = (from usrNft in userNotifications
@@ -811,15 +816,20 @@ namespace Codeji.CMS.Services.Employees
                             IsRead = usrNft.IsRead,
                             Title = ntf.Title,
                             Body = ntf.Body,
-                            SentDateTime = ntf.CreatedDateTime,
+                            SentDateTime = usrNft.CreatedDateTime,
                             SentBy = ntf.CreatedBy,
                             NotificationTypes = ntf.NotificationType
-                        }).OrderByDescending(x => x.SentDateTime).ToList();
-            return new Result<NotificationViewModel>()
+                        }).ToList();
+            return new Result<NotificationResponseModel>()
             {
-                MethodResults = data,
+
+                MethodResult = new NotificationResponseModel()
+                {
+                    NotificationList = data,
+                    All = userNotificationsCount,
+                    Unread = unReadNotification,
+                },
                 Success = true,
-                TotalRecords = data.Count
             };
         }
 
@@ -831,6 +841,12 @@ namespace Codeji.CMS.Services.Employees
                 return new Result();
             }
             Expression<Func<UserNotifications, bool>> whereCondition = x => x.UserNotificationId == userNotificationId;
+            return await _userNotificationRepository.UpdateMany(whereCondition, Builders<UserNotifications>.Update.Set(x => x.IsRead, true));
+        }
+
+        public async Task<Result> MarkAllNotificationAsRead(string userId)
+        {
+            Expression<Func<UserNotifications, bool>> whereCondition = x => x.UserId == userId && !x.IsRead;
             return await _userNotificationRepository.UpdateMany(whereCondition, Builders<UserNotifications>.Update.Set(x => x.IsRead, true));
         }
     }

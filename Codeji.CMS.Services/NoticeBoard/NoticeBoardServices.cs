@@ -74,6 +74,8 @@ public class NoticeBoardServices : INoticeBoardService
                         UserId = user.UserId,
                         NotificationId = notification.NotificationId,
                         IsRead = false,
+                        CreatedDateTime = DateTime.UtcNow,
+                        IsDeleted = false,
                     };
                     userNotifications.Add(userNotification);
                     await _notificationService.SendNoticeNotificationToUser(user.UserId, new NotificationViewModel()

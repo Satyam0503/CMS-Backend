@@ -355,10 +355,10 @@ public class UserController : BaseApiController
 
     [HttpGet]
     [Route("GetAllNotifications")]
-    public async Task<Result<NotificationViewModel>> GetAllNotifications()
+    public async Task<Result<NotificationResponseModel>> GetAllNotifications([FromQuery] int page, [FromQuery] int records)
     {
         string userId = CurrentContext.UserId(_httpContextAccessor);
-        return await _employeeService.GetAllNotifications(userId);
+        return await _employeeService.GetAllNotifications(userId, page, records);
     }
 
     [HttpPatch]
@@ -405,5 +405,13 @@ public class UserController : BaseApiController
     {
         if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.DeleteWorkHistory(workId, userId);
+    }
+
+    [HttpPost]
+    [Route("MarkAllNotificationAsRead")]
+    public async Task<Result> MarkAllNotificationAsRead()
+    {
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _employeeService.MarkAllNotificationAsRead(userId);
     }
 }
