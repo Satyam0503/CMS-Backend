@@ -51,7 +51,8 @@ public class NoticeBoardServices : INoticeBoardService
         Notifications notification = new()
         {
             NotificationId = Guid.NewGuid().ToString(),
-            Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice, model.Title),
+            Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice),
+            Body = model.Title,
             CreatedDateTime = DateTime.UtcNow,
             NotificationType = EnumsHelper.NotificationTypes.Notice,
         };
@@ -77,7 +78,8 @@ public class NoticeBoardServices : INoticeBoardService
                     userNotifications.Add(userNotification);
                     await _notificationService.SendNoticeNotificationToUser(user.UserId, new NotificationViewModel()
                     {
-                        Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice, model.Title),
+                        Title = notification.Title,
+                        Body = notification.Body,
                         IsRead = false,
                         SentDateTime = DateTime.UtcNow,
                         SentBy = userId,
