@@ -6,6 +6,8 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.GenericRepository.Registration;
 using Codeji.CMS.GenericRepository.Settings;
 using Codeji.CMS.Services.BackgroundTasks;
+using Codeji.CMS.Services.Holiday;
+using Codeji.CMS.Services.Holiday.Interface;
 using Codeji.CMS.Services.Registration;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
