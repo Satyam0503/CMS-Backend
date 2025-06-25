@@ -72,9 +72,10 @@ public class HolidayService : IHolidayService
             Expression<Func<Holidays, bool>> whereCondition = h => h.HolidayId == holidayResponseDto.HolidayId;
             existingHoliday.HolidayName = holidayResponseDto.HolidayName;
             existingHoliday.Date = holidayResponseDto.Date;
-            existingHoliday.UpdatedBy = userId;
+            // existingHoliday.UpdatedBy = userId;
             existingHoliday.HolidayType = holidayResponseDto.HolidayType;
             existingHoliday.Detail = holidayResponseDto.Detail;
+            existingHoliday.UpdatedDate = DateTime.UtcNow;
             result = await _holidaysRepo.Update(whereCondition, existingHoliday);
         }
         return result;
@@ -92,12 +93,14 @@ public class HolidayService : IHolidayService
             Expression<Func<Holidays, bool>> whereCondition = h =>
                  (string.IsNullOrEmpty(filter.HolidayName) || h.HolidayName.ToLower().Contains(filter.HolidayName.ToLower())) &&
                  (filter.HolidayType == null || !filter.HolidayType.Any() || filter.HolidayType.Contains(h.HolidayType))
-                 &&(!filter.Date.HasValue || (h.Date>= filter.Date));
+                 &&(filter.Date == null || !filter.Date.HasValue || (h.Date>= filter.Date));
 
-            holidayList = await _holidaysRepo.GetAggregateDataAsync<Holidays>(whereCondition,pageNo: filter.PageNo, pageSize: filter.PageSize);
+            holidayList = (await _holidaysRepo.GetAggregateDataAsync<Holidays>(whereCondition,pageNo: filter.PageNo, pageSize: filter.PageSize)).ToList();
         }
+
+        List<string> usersId = holidayList.Select(h => h.CreatedBy).ToList();
        
-        List<EmpUser> users = (await _empUserRepo.GetAll()).ToList();
+        List<EmpUser> users = (await _empUserRepo.GetAll(u=> usersId.Contains(u.UserId))).ToList();
         List<HolidayRequestDto> holidayData = (from holiday in holidayList
                                                join user in users on holiday.CreatedBy equals user.UserId
                                                select new HolidayRequestDto
@@ -108,7 +111,9 @@ public class HolidayService : IHolidayService
                                                    Detail = holiday.Detail,
                                                    HolidayType = holiday.HolidayType,
                                                    CreatedAt = holiday.CreatedDate,
-                                                   CreatedBy = user.UserId
+                                                   CreatedBy = user.UserId,
+                                                   UpdatedDate = holiday.UpdatedDate,
+                                                   UpdatedBy = user.UpdatedBy
                                                }
                                             ).OrderByDescending(d => d.Date).ToList();
         return new Result<HolidayRequestDto>

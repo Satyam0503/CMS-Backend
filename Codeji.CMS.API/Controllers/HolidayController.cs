@@ -19,7 +19,7 @@ public class HolidayController : ControllerBase
         this.holidayService = holidayService;
     }
 
-    [Route("GetAllHoiday")]
+    [Route("GetAllHoliday")]
     [HttpPost]
     // [ModulePermission("Holidays","View")]
     public async Task<Result<HolidayRequestDto>> GetAllHoliday([FromBody] HolidayFilter? filter)

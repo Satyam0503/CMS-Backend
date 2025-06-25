@@ -11,6 +11,4 @@ public class HolidayResponseDto
     public DateTime Date { get; set; }
     public string Detail { get; set; }
     public EnumsHelper.HolidayTypes HolidayType { get; set; }
-    public string CreatedBy { get; set; }
-    public DateTime CreatedAt { get; set; }
 }

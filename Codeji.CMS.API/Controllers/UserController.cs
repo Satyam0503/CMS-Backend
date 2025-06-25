@@ -406,4 +406,11 @@ public class UserController : BaseApiController
         if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.DeleteWorkHistory(workId, userId);
     }
+
+    [HttpGet]
+    [Route("GetCollegeList")]
+    public async Task<Result<string>> GetCollegeList()
+    {
+        return await _employeeService.GetCollegeList();
+    }
 }
