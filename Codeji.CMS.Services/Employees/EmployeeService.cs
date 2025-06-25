@@ -215,6 +215,14 @@ namespace Codeji.CMS.Services.Employees
             userModel.FullProfileUrl = string.IsNullOrEmpty(user.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(user.ProfileUrl);
             return userModel;
         }
+
+        public async Task<List<EmployeeSearchResponseDTO>> SearchEmployeeByName(string name)
+        {
+            Expression<Func<EmpUser, bool>> whereCondition = x => x.FirstName.Contains(name, StringComparison.CurrentCultureIgnoreCase) || x.LastName.Contains(name, StringComparison.CurrentCultureIgnoreCase);
+            var data = await _employeeRepository.GetAll(whereCondition);
+            return _mapper.Map<List<EmployeeSearchResponseDTO>>(data);
+        }
+
         public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters)
         {
             List<EmpUser> employeeList = [];

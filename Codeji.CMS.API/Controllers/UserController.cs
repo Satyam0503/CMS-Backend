@@ -94,6 +94,22 @@ public class UserController : BaseApiController
         };
     }
 
+    [Route("Search")]
+    [HttpGet]
+    public async Task<Result<EmployeeSearchResponseDTO>> SearchEmployeeByName([FromQuery] string name)
+    {
+        Result<EmployeeSearchResponseDTO> result = new();
+        if (string.IsNullOrEmpty(name))
+        {
+            result.Success = false;
+            return result;
+        }
+        var empList = await _employeeService.SearchEmployeeByName(name);
+        result.MethodResults = empList;
+        result.Success = true;
+        return result;
+    }
+
     //Employee Details APIs
 
     [Route("AddEditEmployeeSummary")]

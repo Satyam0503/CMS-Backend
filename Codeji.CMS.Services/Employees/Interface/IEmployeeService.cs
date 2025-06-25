@@ -16,6 +16,7 @@ namespace Codeji.CMS.Services.Employees.Interface
         Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId);
         Task<bool> IsUserActive(string userId);
         Task<UserModel> GetEmployeeById(string userId);
+        Task<List<EmployeeSearchResponseDTO>> SearchEmployeeByName(string name);
         Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters);
         Task<bool> IsEmailExist(string email);
         Task<bool> IsEmpExistAndActive(string email);
