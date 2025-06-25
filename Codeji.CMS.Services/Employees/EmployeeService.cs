@@ -787,25 +787,25 @@ namespace Codeji.CMS.Services.Employees
             Expression<Func<EmpWorkHistory, bool>> whereCondition = x => x.WorkHistoryId == workId;
             return await _empWorkHistoryRepository.UpdateMany(whereCondition, Builders<EmpWorkHistory>.Update.Set(x => x.IsDeleted, true));
         }
-        public async Task<Result<NotificationResponseModel>> GetAllNotifications(string userId, int page, int records)
+        public async Task<NotificationResponseModel> GetAllNotifications(NotificationRequestDTO model, string userId)
         {
             Expression<Func<UserNotifications, bool>> wherecondition = x => x.UserId == userId;
             int userNotificationsCount = await _userNotificationRepository.Count(wherecondition);
             if (userNotificationsCount == 0)
             {
-                return new Result<NotificationResponseModel>()
+                return new NotificationResponseModel()
                 {
-                    MethodResult = new NotificationResponseModel()
-                    {
-                        NotificationList = [],
-                        All = 0,
-                        Unread = 0
-                    },
-                    Success = true,
+                    NotificationList = [],
+                    All = 0,
+                    Unread = 0
                 };
             }
-            int unReadNotification = await _userNotificationRepository.Count(x => x.UserId == userId && !x.IsRead);
-            List<UserNotifications> userNotifications = (await _userNotificationRepository.GetAggregateDataAsync<UserNotifications>(wherecondition, isAscending: false, orderedKey: "CreatedDateTime", pageNo: page, pageSize: records)).ToList();
+            if (model.Type != "all")
+            {
+                wherecondition = x => x.UserId == userId && !x.IsRead;
+            }
+            int unReadNotificationCount = await _userNotificationRepository.Count(x => x.UserId == userId && !x.IsRead);
+            List<UserNotifications> userNotifications = (await _userNotificationRepository.GetAggregateDataAsync<UserNotifications>(wherecondition, isAscending: false, orderedKey: "CreatedDateTime", pageNo: model.PageNo, pageSize: model.Records)).ToList();
             string[] notificationsId = userNotifications.Select(x => x.NotificationId).ToArray();
             IEnumerable<Notifications> notifications = await _notificationsRepository.GetAll(x => notificationsId.Contains(x.NotificationId));
             var data = (from usrNft in userNotifications
@@ -820,16 +820,11 @@ namespace Codeji.CMS.Services.Employees
                             SentBy = ntf.CreatedBy,
                             NotificationTypes = ntf.NotificationType
                         }).ToList();
-            return new Result<NotificationResponseModel>()
+            return new NotificationResponseModel()
             {
-
-                MethodResult = new NotificationResponseModel()
-                {
-                    NotificationList = data,
-                    All = userNotificationsCount,
-                    Unread = unReadNotification,
-                },
-                Success = true,
+                NotificationList = data,
+                All = userNotificationsCount,
+                Unread = unReadNotificationCount,
             };
         }
 

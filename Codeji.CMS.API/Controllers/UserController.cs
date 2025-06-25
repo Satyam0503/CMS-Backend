@@ -4,6 +4,7 @@ using Codeji.CMS.API.Notification;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
+using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Repository.Entities;
@@ -355,10 +356,20 @@ public class UserController : BaseApiController
 
     [HttpGet]
     [Route("GetAllNotifications")]
-    public async Task<Result<NotificationResponseModel>> GetAllNotifications([FromQuery] int page, [FromQuery] int records)
+    public async Task<Result<NotificationResponseModel>> GetAllNotifications([FromQuery] NotificationRequestDTO model)
     {
+        string[] supportedType = ["all", "unread"];
+        if (!supportedType.Contains(model.Type))
+        {
+            return new Result<NotificationResponseModel>();
+        }
         string userId = CurrentContext.UserId(_httpContextAccessor);
-        return await _employeeService.GetAllNotifications(userId, page, records);
+        var data = await _employeeService.GetAllNotifications(model, userId);
+        return new Result<NotificationResponseModel>()
+        {
+            Success = true,
+            MethodResult = data,
+        };
     }
 
     [HttpPatch]
