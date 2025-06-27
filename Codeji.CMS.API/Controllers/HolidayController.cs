@@ -30,7 +30,7 @@ public class HolidayController : ControllerBase
     [Route("CreateHoliday")]
     [HttpPost]
     // [ModulePermission("Holidays", "Create")]
-    public async Task<Result> CreateHoliday(HolidayResponseDto holidayResponseDto)
+    public async Task<Result> CreateUpdateHoliday(HolidayResponseDto holidayResponseDto)
     {
         return await holidayService.CreateEditHoliday(holidayResponseDto);
     }

@@ -67,7 +67,6 @@ public class HolidayService : IHolidayService
                 result.Success = false;
                 return result;
 
-
             }
             Expression<Func<Holidays, bool>> whereCondition = h => h.HolidayId == holidayResponseDto.HolidayId;
             existingHoliday.HolidayName = holidayResponseDto.HolidayName;
@@ -111,15 +110,15 @@ public class HolidayService : IHolidayService
                                                    Detail = holiday.Detail,
                                                    HolidayType = holiday.HolidayType,
                                                    CreatedAt = holiday.CreatedDate,
-                                                   CreatedBy = user.UserId,
-                                                   UpdatedDate = holiday.UpdatedDate,
-                                                   UpdatedBy = user.UpdatedBy
+                                                   CreatedBy = user.FirstName+" "+user.LastName
                                                }
                                             ).OrderByDescending(d => d.Date).ToList();
+        var list = await _holidaysRepo.GetAll();
+        var count = list.Count();
         return new Result<HolidayRequestDto>
         {
             Success = true,
-            // TotalRecords = count,
+            TotalRecords = count,
             MethodResults = holidayData
         };
 
