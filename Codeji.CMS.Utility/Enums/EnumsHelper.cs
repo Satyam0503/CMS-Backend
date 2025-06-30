@@ -67,6 +67,18 @@
             Religious = 3,
             National = 4,
         }
+
+        public enum LeaveTypes
+        {
+            Paid = 1,
+            UnPaid = 2,
+        }
+
+        public enum LeaveDuration
+        {
+            FullDay = 1,
+            HalfDay = 2,
+        }
     }
 }
 

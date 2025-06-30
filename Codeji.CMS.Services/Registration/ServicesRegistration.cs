@@ -6,6 +6,7 @@ using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Holiday;
 using Codeji.CMS.Services.Holiday.Interface;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Services.LeaveManagement.LeaveTypes;
 using Codeji.CMS.Services.NoticeBoard;
 using Codeji.CMS.Services.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
@@ -27,6 +28,7 @@ public static class ServicesRegistration
         services.AddScoped<IDashboardService, DashboardServices>();
         services.AddScoped<INoticeBoardService, NoticeBoardServices>();
         services.AddScoped<IHolidayService, HolidayService>();
+        services.AddScoped<ILeaveManagementService, LeaveManagementService>();
 
         return services;
     }

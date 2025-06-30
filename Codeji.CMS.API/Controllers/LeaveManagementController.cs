@@ -1,0 +1,44 @@
+using Codeji.CMS.Domain.Models;
+using Codeji.CMS.DTO.Leave;
+using Codeji.CMS.Services.LeaveManagement.LeaveTypes;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace Codeji.CMS.API.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class LeaveManagementController : ControllerBase
+{
+
+    private readonly ILeaveManagementService _leaveManagementService;
+
+    public LeaveManagementController(ILeaveManagementService leaveManagementService)
+    {
+        _leaveManagementService = leaveManagementService;
+    }
+
+    [Route("CreateLeaveType")]
+    [HttpPost]
+    public async Task<Result> CreateUpdateLeaveType(LeaveTypeResponseDto leaveTypeResponseDto)
+    {
+        return await _leaveManagementService.CreateUpdateLeaveType(leaveTypeResponseDto);
+    }
+
+    [Route("GetLeaveType")]
+    [HttpGet]
+    public async Task<Result<LeaveTypeRequestDto>> GetLeaveType()
+    {
+        return await _leaveManagementService.GetLeaveType();
+    }
+
+    [Route("DeleteLeaveType/{leaveTypeId}")]
+    [HttpDelete]
+    public async Task<Result> DeleteLeaveType(string leaveTypeId)
+    {
+        return await _leaveManagementService.DeleteLeaveType(leaveTypeId);
+    }
+
+
+}
