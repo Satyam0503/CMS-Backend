@@ -71,7 +71,6 @@ public class JobVacancyController : BaseApiController
             return new Result()
             {
                 Success = false,
-                Message = "Job Not Deleted ",
                 StatusCode = 400
             };
         }

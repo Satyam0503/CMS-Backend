@@ -218,7 +218,7 @@ namespace Codeji.CMS.Services.Employees
 
         public async Task<List<EmployeeSearchResponseDTO>> SearchEmployeeByName(string name)
         {
-            Expression<Func<EmpUser, bool>> whereCondition = x => x.FirstName.Contains(name, StringComparison.CurrentCultureIgnoreCase) || x.LastName.Contains(name, StringComparison.CurrentCultureIgnoreCase);
+            Expression<Func<EmpUser, bool>> whereCondition = x => (x.FirstName + " " + x.LastName).Contains(name, StringComparison.CurrentCultureIgnoreCase);
             var data = await _employeeRepository.GetAll(whereCondition);
             return _mapper.Map<List<EmployeeSearchResponseDTO>>(data);
         }

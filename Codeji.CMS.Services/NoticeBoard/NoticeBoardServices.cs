@@ -109,13 +109,21 @@ public class NoticeBoardServices : INoticeBoardService
         Expression<Func<Notice, bool>> wherecondition = x => x.NoticeId == model.NoticeId;
         return await _noticeRepository.Update(wherecondition, notice);
     }
-    public async Task<Result<NoticeViewModel>> GetAllNotices(string userId, int pageNo, int records)
+    public async Task<Result<NoticeViewModel>> GetAllNotices(string userId, GetNoticeRequest filter)
     {
+        List<string> empIdsList = [];
+        if (filter.PostedBy.Length > 0)
+        {
+            empIdsList = (await _empUserRepository.GetAll(x => (x.FirstName + " " + x.LastName).Contains(filter.PostedBy.Trim(), StringComparison.CurrentCultureIgnoreCase))).Select(x => x.UserId).ToList();
+        }
         EmpUser? employee = await _empUserRepository.FirstOrDefault(x => x.UserId == userId);
         Expression<Func<Notice, bool>> whereCondition = x => (x.Departments.Equals("all") || x.Departments.Equals(employee.Department))
-        && (x.Target.Equals("all") || x.Target.Equals(employee.RoleId));
+        && (x.Target.Equals("all") || x.Target.Equals(employee.RoleId))
+        && (filter.NoticeType.Length == 0 || filter.NoticeType.Contains(x.NoticeType))
+        && ((!filter.FilterFrom.HasValue || filter.FilterFrom.Value <= x.CreatedDate) && (!filter.FilterTo.HasValue || filter.FilterTo >= x.CreatedDate))
+        && (filter.PostedBy.Trim().Length == 0 || empIdsList.Contains(x.CreatedBy));
         int totalRecords = await _noticeRepository.Count(whereCondition);
-        List<Notice> noticeList = (await _noticeRepository.GetAggregateDataAsync<Notice>(whereCondition, isAscending: false, orderedKey: "CreatedDate", pageNo: pageNo, pageSize: records)).ToList();
+        List<Notice> noticeList = (await _noticeRepository.GetAggregateDataAsync<Notice>(whereCondition, isAscending: false, orderedKey: "CreatedDate", pageNo: filter.PageNo, pageSize: filter.Records)).ToList();
         List<string> empIdList = noticeList.Select(x => x.CreatedBy).Distinct().ToList();
         IEnumerable<EmpUser> empUsers = await _empUserRepository.GetAll(x => empIdList.Contains(x.UserId));
         var data = (from notice in noticeList

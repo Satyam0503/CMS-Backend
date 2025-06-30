@@ -45,12 +45,12 @@ public class NoticeBoardController : BaseApiController
         }
     }
 
-    [HttpGet]
+    [HttpPost]
     [Route("GetAllNotice")]
-    public async Task<Result<NoticeViewModel>> GetAllNotices([FromQuery] int pageNo, [FromQuery] int records)
+    public async Task<Result<NoticeViewModel>> GetAllNotices([FromBody] GetNoticeRequest filter)
     {
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
-        return await _noticeBoardServices.GetAllNotices(currentUserId, pageNo, records);
+        return await _noticeBoardServices.GetAllNotices(currentUserId, filter);
     }
 
     [HttpGet]
