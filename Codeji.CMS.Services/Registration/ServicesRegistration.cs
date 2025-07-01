@@ -29,7 +29,6 @@ public static class ServicesRegistration
         services.AddScoped<INoticeBoardService, NoticeBoardServices>();
         services.AddScoped<IHolidayService, HolidayService>();
         services.AddScoped<ILeaveManagementService, LeaveManagementService>();
-
         return services;
     }
 }

@@ -1,6 +1,8 @@
 using System.Linq.Expressions;
+using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Leave;
+using Codeji.CMS.DTO.Leave.LeaveBalance;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Leave;
@@ -14,22 +16,29 @@ public class LeaveManagementService : ILeaveManagementService
     private readonly IMongoDbRepository<LeaveType> _leaveTypeRepo;
     private readonly IMongoDbRepository<EmpUser> _empUser;
     private readonly IHttpContextAccessor _httpContextAccessor;
-    public LeaveManagementService(IMongoDbRepository<LeaveType> leaveTypeRepo, IMongoDbRepository<EmpUser> empUser, IHttpContextAccessor httpContextAccessor)
+    private readonly IMongoDbRepository<LeaveBalance> _leaveBalance;
+    private readonly IMapper _mapper;
+    public LeaveManagementService(IMongoDbRepository<LeaveType> leaveTypeRepo,
+    IMongoDbRepository<EmpUser> empUser,
+    IMongoDbRepository<LeaveBalance> leaveBalance,
+    IHttpContextAccessor httpContextAccessor, IMapper mapper)
     {
         _leaveTypeRepo = leaveTypeRepo;
         _httpContextAccessor = httpContextAccessor;
         _empUser = empUser;
+        _leaveBalance = leaveBalance;
+        _mapper = mapper;
     }
 
     public async Task<Result> CreateUpdateLeaveType(LeaveTypeResponseDto leaveTypeResponseDto)
     {
         Result result = new();
         // var userId = CurrentContext.UserId(_httpContextAccessor);
-         Expression<Func<LeaveType, bool>> leaveTypeNameCondition = l => l.LeaveTypeName.Equals(leaveTypeResponseDto.LeaveTypeName,StringComparison.CurrentCultureIgnoreCase);
+        Expression<Func<LeaveType, bool>> leaveTypeNameCondition = l => l.LeaveTypeName.Equals(leaveTypeResponseDto.LeaveTypeName, StringComparison.CurrentCultureIgnoreCase);
         if (string.IsNullOrEmpty(leaveTypeResponseDto.LeaveTypeId))
         {
             // Expression<Func<LeaveType,bool>> 
-            var existingLeaveType = await _leaveTypeRepo.FirstOrDefault(leaveTypeNameCondition,true);
+            var existingLeaveType = await _leaveTypeRepo.FirstOrDefault(leaveTypeNameCondition, true);
             if (existingLeaveType == null)
             {
                 var leaveTypeDomain = new LeaveType
@@ -55,8 +64,8 @@ public class LeaveManagementService : ILeaveManagementService
         }
         else
         {
-           
-            var existingLeaveTypeName = await _leaveTypeRepo.FirstOrDefault(leaveTypeNameCondition,true);
+
+            var existingLeaveTypeName = await _leaveTypeRepo.FirstOrDefault(leaveTypeNameCondition, true);
             Expression<Func<LeaveType, bool>> whereCondition = l => l.LeaveTypeId == leaveTypeResponseDto.LeaveTypeId;
             var existingLeaveType = await _leaveTypeRepo.FirstOrDefault(whereCondition);
             if (existingLeaveType == null)
@@ -126,7 +135,92 @@ public class LeaveManagementService : ILeaveManagementService
         Expression<Func<LeaveType, bool>> whereCondition = l => l.LeaveTypeId == leaveTypeId;
         var deletedLeaveType = await _leaveTypeRepo.FirstOrDefault(whereCondition);
         deletedLeaveType.IsDeleted = true;
-        result = await _leaveTypeRepo.Update(whereCondition,deletedLeaveType);
+        result = await _leaveTypeRepo.Update(whereCondition, deletedLeaveType);
         return result;
+    }
+
+
+
+    // leave balance 
+
+    public async Task<Result> CreateUpdateLeaveBalance(LeaveBalanceResponseDto leaveBalanceResponseDto)
+    {
+        Result result = new();
+
+        if (string.IsNullOrEmpty(leaveBalanceResponseDto.Id))
+        {
+            Expression<Func<LeaveBalance, bool>> whereCondition = l => l.EmployeeId == leaveBalanceResponseDto.EmployeeId && l.Year.Year == leaveBalanceResponseDto.Year.Year;
+
+            var existingEmployeeLeaveBalance = await _leaveBalance.FirstOrDefault(whereCondition);
+            if (existingEmployeeLeaveBalance == null)
+            {
+                InitializeRemainingBalance(leaveBalanceResponseDto);
+                var leaveBalanceDomain = _mapper.Map<LeaveBalance>(leaveBalanceResponseDto);
+                result = await _leaveBalance.AddOne(leaveBalanceDomain);
+                return result;
+            }
+            else
+            {
+                result.Message = "Leave Balance For Current Employee Already Exists";
+                return result;
+            }
+
+        }
+
+        return result;
+    }
+
+
+    public async Task<Result<LeaveBalanceRequestDto>> GetLeaveBalance(LeaveBalanceFilter? leaveBalanceFilter)
+    {
+        IEnumerable<LeaveBalance> leaveBalances = [];
+        var CompanyId = CurrentContext.CompanyId(_httpContextAccessor);
+        if (leaveBalanceFilter == null)
+        {
+            leaveBalances = await _leaveBalance.GetAll();
+        }
+        else
+        {
+            Expression<Func<LeaveBalance, bool>> whereCondition = l =>
+            (string.IsNullOrEmpty(leaveBalanceFilter.EmployeeId) || l.EmployeeId == leaveBalanceFilter.EmployeeId)
+            && (leaveBalanceFilter.Year == null || !leaveBalanceFilter.Year.HasValue || (l.Year >= leaveBalanceFilter.Year))
+            ;
+
+            leaveBalances = (await _leaveBalance.GetAggregateDataAsync<LeaveBalance>(whereCondition,pageNo:leaveBalanceFilter.PageNo,pageSize:leaveBalanceFilter.PageSize)).ToList();
+        }
+
+        List<EmpUser> users = (await _empUser.GetAll(e => CompanyId.Contains(e.CompanyId))).ToList();
+
+        List<LeaveBalanceRequestDto> LeaveBalanceList = (from leaveBalance in leaveBalances
+                                                         join user in users on leaveBalance.EmployeeId equals user.UserId
+                                                         join createdByUser in users on leaveBalance.CreatedBy equals createdByUser.UserId
+                                                         select new LeaveBalanceRequestDto
+                                                         {
+                                                             Id = leaveBalance.Id,
+                                                             EmployeeId = leaveBalance.Id,
+                                                             EmployeeName = user.FirstName + " " + user.LastName,
+                                                             CreatedBy = createdByUser.FirstName + " " + createdByUser.LastName,
+                                                             Year = leaveBalance.Year,
+                                                             LeaveTypeBalances = leaveBalance.LeaveTypeBalances
+                                                         }
+                                                         ).ToList();
+        return new Result<LeaveBalanceRequestDto>
+        {
+            Success = true,
+            MethodResults = LeaveBalanceList
+        };
+    }
+
+
+    private void InitializeRemainingBalance(LeaveBalanceResponseDto leaveBalanceResponseDto)
+    {
+        foreach (var leaveType in leaveBalanceResponseDto.LeaveTypeBalances)
+        {
+            if (leaveType.RemainingLeave.HasValue || leaveType.RemainingLeave == 0)
+            {
+                leaveType.RemainingLeave = leaveType.MaximumLeave;
+            }
+
+        }
     }
 }
