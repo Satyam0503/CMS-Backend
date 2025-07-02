@@ -1,4 +1,4 @@
-namespace Codeji.CMS.DTO.Leave.LeaveBalance;
+namespace Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
 
 public class LeaveBalanceRequestDto
 {
@@ -11,7 +11,8 @@ public class LeaveBalanceRequestDto
 }
 public class LeaveTypeBalance {
     public string LeaveTypeId { get; set; }
-    public int MaximumLeave { get; set; }
-    public int? RemainingLeave { get; set; }
+    public string? LeaveTypeName { get; set; }
+    public decimal MaximumLeave { get; set; }
+    public decimal? RemainingLeave { get; set; }
 }
 

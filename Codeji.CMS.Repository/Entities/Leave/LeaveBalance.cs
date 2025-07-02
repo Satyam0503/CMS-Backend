@@ -1,4 +1,4 @@
-using Codeji.CMS.DTO.Leave.LeaveBalance;
+using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
 using MongoDB.Bson.Serialization.Attributes;
 
 namespace Codeji.CMS.Repository.Entities.Leave;

@@ -1,6 +1,8 @@
 using Codeji.CMS.Domain.Models;
-using Codeji.CMS.DTO.Leave;
-using Codeji.CMS.DTO.Leave.LeaveBalance;
+using Codeji.CMS.DTO.Leave.LeaveRequest;
+using Codeji.CMS.DTO.LeaveManagement;
+using Codeji.CMS.DTO.LeaveManagement.Leave;
+using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
 
 namespace Codeji.CMS.Services.LeaveManagement.LeaveTypes;
 
@@ -14,4 +16,7 @@ public interface ILeaveManagementService
     Task<Result> CreateUpdateLeaveBalance(LeaveBalanceResponseDto leaveBalanceResponseDto);
     Task<Result<LeaveBalanceRequestDto>> GetLeaveBalance(LeaveBalanceFilter? leaveBalanceFilter);
 
+    // leave
+    Task<Result> CreateUpdateLeave(LeaveResponseDto leaveResponseDto);
+    // Task<Result<LeaveRequestDto>> GetLeave(LeaveFilter filter);
 }

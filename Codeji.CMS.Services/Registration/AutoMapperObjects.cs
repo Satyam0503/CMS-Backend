@@ -1,7 +1,7 @@
 ﻿using AutoMapper;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Company;
-using Codeji.CMS.DTO.Leave.LeaveBalance;
+using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
 using Codeji.CMS.DTO.NoticeBoard;
 using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels;

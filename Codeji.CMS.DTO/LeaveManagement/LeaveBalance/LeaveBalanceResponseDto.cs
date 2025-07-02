@@ -1,4 +1,4 @@
-namespace Codeji.CMS.DTO.Leave.LeaveBalance;
+namespace Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
 
 public class LeaveBalanceResponseDto
 {
