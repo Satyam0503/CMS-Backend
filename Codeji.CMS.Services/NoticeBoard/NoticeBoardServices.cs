@@ -37,6 +37,7 @@ public class NoticeBoardServices : INoticeBoardService
     {
         Notice notice = new()
         {
+            NoticeId = Guid.NewGuid().ToString(),
             Title = model.Title,
             Message = model.Message,
             Target = model.Target,
@@ -53,6 +54,7 @@ public class NoticeBoardServices : INoticeBoardService
             NotificationId = Guid.NewGuid().ToString(),
             Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice),
             Body = model.Title,
+            TargetId = notice.NoticeId,
             CreatedDateTime = DateTime.UtcNow,
             NotificationType = EnumsHelper.NotificationTypes.Notice,
         };
@@ -85,6 +87,7 @@ public class NoticeBoardServices : INoticeBoardService
                         IsRead = false,
                         SentDateTime = DateTime.UtcNow,
                         SentBy = userId,
+                        TargetId = notification.TargetId,
                         NotificationTypes = EnumsHelper.NotificationTypes.Notice,
                         UserNotificationId = userNotification.UserNotificationId,
                     });
@@ -147,6 +150,28 @@ public class NoticeBoardServices : INoticeBoardService
             TotalRecords = totalRecords
         };
     }
+
+    public async Task<NoticeViewModel?> GetNoticeById(string noticeId)
+    {
+        Notice? notice = await _noticeRepository.FirstOrDefault(x => x.NoticeId == noticeId);
+        if (notice is null) return null;
+        EmpUser? user = await _empUserRepository.FirstOrDefault(x => x.UserId == notice.CreatedBy);
+        if (user is null) return null;
+
+        var data = new NoticeViewModel()
+        {
+            NoticeId = notice.NoticeId,
+            UserName = $"{user.FirstName} {user.LastName}",
+            UserProfile = Common.GetEmployeeImageUrl(user.ProfileUrl),
+            UserDesignation = user.JobRole,
+            NoticeMessage = notice.Message,
+            NoticeTitle = notice.Title,
+            CreatedDateTime = notice.CreatedDate,
+            NoticeType = notice.NoticeType,
+        };
+        return data;
+    }
+
     public async Task<Result<MyNoticeDTO>> GetMyNotices(string userId, int pageNo, int records)
     {
         Expression<Func<Notice, bool>> whereCondition = x => x.CreatedBy.Equals(userId);

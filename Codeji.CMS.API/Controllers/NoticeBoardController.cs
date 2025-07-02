@@ -54,6 +54,24 @@ public class NoticeBoardController : BaseApiController
     }
 
     [HttpGet]
+    [Route("GetNoticeById/{noticeId}")]
+    public async Task<Result<NoticeViewModel>> GetNoticeById(string noticeId)
+    {
+        Result<NoticeViewModel> result = new();
+        var data = await _noticeBoardServices.GetNoticeById(noticeId);
+        if (data is null)
+        {
+            result.Success = false;
+        }
+        else
+        {
+            result.MethodResult = data;
+            result.Success = true;
+        }
+        return result;
+    }
+
+    [HttpGet]
     [Route("GetMyNotices")]
     public async Task<Result<MyNoticeDTO>> GetMyNotices([FromQuery] int pageNo, [FromQuery] int records)
     {

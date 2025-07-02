@@ -5,7 +5,7 @@ namespace Codeji.CMS.DTO.NoticeBoard
 {
     public class AddNoticeRequestModel
     {
-        [MinLength(5, ErrorMessage = "Title length should be atleast 5 characters")]
+        [MinLength(3, ErrorMessage = "Title length should be atleast 3 characters")]
         public string Title { get; set; }
 
         [MinLength(10, ErrorMessage = "Message length should be atleast 5 characters")]

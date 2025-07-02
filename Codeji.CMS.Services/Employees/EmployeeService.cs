@@ -824,9 +824,11 @@ namespace Codeji.CMS.Services.Employees
                             IsRead = usrNft.IsRead,
                             Title = ntf.Title,
                             Body = ntf.Body,
+                            TargetId = ntf.TargetId,
                             SentDateTime = usrNft.CreatedDateTime,
                             SentBy = ntf.CreatedBy,
                             NotificationTypes = ntf.NotificationType
+
                         }).ToList();
             return new NotificationResponseModel()
             {

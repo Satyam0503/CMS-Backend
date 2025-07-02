@@ -8,6 +8,7 @@ namespace Codeji.CMS.DTO.ResponseModel
         public bool IsRead { get; set; }
         public string Title { get; set; }
         public string Body { get; set; }
+        public string? TargetId { get; set; }
         public DateTime SentDateTime { get; set; }
         public string SentBy { get; set; }
         public EnumsHelper.NotificationTypes NotificationTypes { get; set; }
