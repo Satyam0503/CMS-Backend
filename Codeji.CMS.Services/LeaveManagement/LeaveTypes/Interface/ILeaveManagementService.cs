@@ -8,15 +8,15 @@ namespace Codeji.CMS.Services.LeaveManagement.LeaveTypes;
 
 public interface ILeaveManagementService
 {
-    Task<Result> CreateUpdateLeaveType(LeaveTypeResponseDto leaveTypeResponseDto);
-    Task<Result<LeaveTypeRequestDto>> GetLeaveType();
+    Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto);
+    Task<Result<LeaveTypeResponseDto>> GetLeaveType(bool? IsActive);
     Task<Result> DeleteLeaveType(string leaveTypeId);
 
     // leave balance 
-    Task<Result> CreateUpdateLeaveBalance(LeaveBalanceResponseDto leaveBalanceResponseDto);
-    Task<Result<LeaveBalanceRequestDto>> GetLeaveBalance(LeaveBalanceFilter? leaveBalanceFilter);
+    Task<Result> CreateUpdateLeaveBalance(LeaveBalanceRequestDto leaveBalanceRequestDto);
+    Task<Result<LeaveBalanceResponseDto>> GetLeaveBalance(LeaveBalanceFilter? leaveBalanceFilter);
 
     // leave
-    Task<Result> CreateUpdateLeave(LeaveResponseDto leaveResponseDto);
-    // Task<Result<LeaveRequestDto>> GetLeave(LeaveFilter filter);
+    Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto);
+    Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveFilter filter);
 }

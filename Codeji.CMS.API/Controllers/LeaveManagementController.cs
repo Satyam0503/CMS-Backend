@@ -1,4 +1,5 @@
 using Codeji.CMS.Domain.Models;
+using Codeji.CMS.DTO.Leave.LeaveRequest;
 using Codeji.CMS.DTO.LeaveManagement;
 using Codeji.CMS.DTO.LeaveManagement.Leave;
 using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
@@ -23,16 +24,16 @@ public class LeaveManagementController : ControllerBase
 
     [Route("CreateUpdateLeaveType")]
     [HttpPost]
-    public async Task<Result> CreateUpdateLeaveType(LeaveTypeResponseDto leaveTypeResponseDto)
+    public async Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto)
     {
-        return await _leaveManagementService.CreateUpdateLeaveType(leaveTypeResponseDto);
+        return await _leaveManagementService.CreateUpdateLeaveType(leaveTypeRequestDto);
     }
 
     [Route("GetLeaveType")]
     [HttpGet]
-    public async Task<Result<LeaveTypeRequestDto>> GetLeaveType()
+    public async Task<Result<LeaveTypeResponseDto>> GetLeaveType(bool? IsActive)
     {
-        return await _leaveManagementService.GetLeaveType();
+        return await _leaveManagementService.GetLeaveType(IsActive);
     }
 
     [Route("DeleteLeaveType/{leaveTypeId}")]
@@ -46,14 +47,13 @@ public class LeaveManagementController : ControllerBase
     // leave Balance
     [Route("CreateUpdateLeaveBalance")]
     [HttpPost]
-    public async Task<Result> CreateUpdateLeaveBalance(LeaveBalanceResponseDto leaveBalanceResponseDto)
+    public async Task<Result> CreateUpdateLeaveBalance(LeaveBalanceRequestDto LeaveBalanceRequestDto)
     {
-        return await _leaveManagementService.CreateUpdateLeaveBalance(leaveBalanceResponseDto);
+        return await _leaveManagementService.CreateUpdateLeaveBalance(LeaveBalanceRequestDto);
     }
-
     [Route("GetLeaveBalance")]
     [HttpPost]
-    public async Task<Result<LeaveBalanceRequestDto>> GetLeaveBalance(LeaveBalanceFilter? leaveBalanceFilter)
+    public async Task<Result<LeaveBalanceResponseDto>> GetLeaveBalance(LeaveBalanceFilter? leaveBalanceFilter)
     {
         return await _leaveManagementService.GetLeaveBalance(leaveBalanceFilter);
     }
@@ -62,8 +62,15 @@ public class LeaveManagementController : ControllerBase
     // leave request
     [Route("CreateUpdateLeave")]
     [HttpPost]
-    public async Task<Result> CreateUpdateLeave(LeaveResponseDto leaveResponseDto)
+    public async Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto)
     {
-        return await _leaveManagementService.CreateUpdateLeave(leaveResponseDto);
+        return await _leaveManagementService.CreateUpdateLeave(leaveRequestDto);
+    }
+
+    [Route("GetLeaveRequest")]
+    [HttpPost]
+    public async Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveFilter? leaveFilter)
+    {
+        return await _leaveManagementService.GetLeaveRequest(leaveFilter);
     }
 }

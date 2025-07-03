@@ -68,23 +68,23 @@
             National = 4,
         }
 
-        public enum LeaveTypes
-        {
-            Paid = 1,
-            UnPaid = 2,
-        }
-
-        public enum LeaveDuration
-        {
-            FullDay = 1,
-            HalfDay = 2,
-        }
-
         public enum LeaveRequestStatus
         {
             Pending = 1,
             Accepted = 2,
             Rejected = 3
+        }
+
+        public enum LeaveTypes
+        {
+            Sick = 1,
+            Casual = 2,
+            Earned = 3,
+            Maternity = 4,
+            Patrenity = 5,
+            Bereavement = 6,
+            Marriage = 7
+
         }
     }
 }
