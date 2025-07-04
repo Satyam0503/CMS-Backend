@@ -82,8 +82,6 @@
             Earned = 3,
             Maternity = 4,
             Patrenity = 5,
-            Bereavement = 6,
-            Marriage = 7
 
         }
     }

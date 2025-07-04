@@ -8,6 +8,7 @@ using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Leave;
+using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
@@ -249,8 +250,6 @@ public class LeaveManagementService : ILeaveManagementService
                                                               Year = leaveBalance.Year,
                                                               LeaveTypeBalances = leaveBalance.LeaveTypeBalances.Select(lb => new LeaveTypeBalance
                                                               {
-                                                                  //  LeaveTypeId = lb.LeaveTypeId,
-                                                                  //  LeaveTypeName = Enum.GetName(typeof(EnumsHelper.LeaveTypes),lb.LeaveTypeName),
                                                                   LeaveType = lb.LeaveType,
                                                                   MaximumLeave = lb.MaximumLeave,
                                                                   RemainingLeave = lb.RemainingLeave
@@ -302,8 +301,9 @@ public class LeaveManagementService : ILeaveManagementService
                 EmployeeId = leaveRequestDto.EmployeeId,
                 LeaveType = leaveRequestDto.LeaveType,
                 StartDate = leaveRequestDto.StartDate,
-                EndDate = leaveRequestDto.EndDate,
-                TotalDays = requestedDay,
+                EndDate = leaveRequestDto.IsHalfDay ? leaveRequestDto.StartDate : leaveRequestDto.EndDate,
+                TotalDays = leaveRequestDto.IsHalfDay ? 0.5m : requestedDay,
+                IsHalfDay = leaveRequestDto.IsHalfDay,
                 Reason = leaveRequestDto.Reason,
                 ReviewedBy = "",
                 Status = EnumsHelper.LeaveRequestStatus.Pending
@@ -319,20 +319,36 @@ public class LeaveManagementService : ILeaveManagementService
             if (leaveRequestDto.Status != EnumsHelper.LeaveRequestStatus.Pending)
             {
                 var reviewedBy = CurrentContext.UserId(_httpContextAccessor);
-                // var reviewedBy = await _empUser.FirstOrDefault(e => e.UserId == user);
+                var balance = selectedEmpLeaveBal.LeaveTypeBalances.FirstOrDefault(lb => lb.LeaveType == leaveRequestDto.LeaveType);
+                var requestedDay = (leaveRequestDto.EndDate.Day - leaveRequestDto.StartDate.Day) + 1;
+                bool isValid = await LeaveRequestValidation(selectedLeaveType, selectedEmpLeaveBal, _leave, leaveRequestDto, requestedDay, result);
                 if (leaveRequestDto.Status == EnumsHelper.LeaveRequestStatus.Rejected)
                 {
-                    existingLeaveRequest.Status = EnumsHelper.LeaveRequestStatus.Rejected;
+                    if (existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted && existingLeaveRequest.IsHalfDay == true)
+                    {
+                        balance.RemainingLeave += 0.5m;
+                    }
+                    else if (existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted)
+                    {
+                        balance.RemainingLeave += requestedDay;
+                    }
                     existingLeaveRequest.ReviewedBy = reviewedBy;
-                    result = await _leave.Update(whereCondition, existingLeaveRequest);
-                    return result;
+                    existingLeaveRequest.Status = EnumsHelper.LeaveRequestStatus.Rejected;
                 }
-              
-                existingLeaveRequest.Status = EnumsHelper.LeaveRequestStatus.Accepted;
-                existingLeaveRequest.ReviewedBy = reviewedBy;
+                else
+                {
+                    if (existingLeaveRequest.IsHalfDay == true && existingLeaveRequest.Status != EnumsHelper.LeaveRequestStatus.Accepted)
+                    {
+                        balance.RemainingLeave -= 0.5m;
+                    }
+                    else if (existingLeaveRequest.Status != EnumsHelper.LeaveRequestStatus.Accepted)
+                    {
+                        balance.RemainingLeave -= requestedDay;
+                    }
+                    existingLeaveRequest.Status = EnumsHelper.LeaveRequestStatus.Accepted;
+                    existingLeaveRequest.ReviewedBy = reviewedBy;
+                }
                 await _leave.Update(whereCondition, existingLeaveRequest);
-                var balance = selectedEmpLeaveBal.LeaveTypeBalances.FirstOrDefault(lb => lb.LeaveType == leaveRequestDto.LeaveType);
-                balance.RemainingLeave -= 1;
                 result = await _leaveBalance.Update(leaveBalanceCondition, selectedEmpLeaveBal);
                 return result;
             }
@@ -346,7 +362,8 @@ public class LeaveManagementService : ILeaveManagementService
                 }
                 existingLeaveRequest.StartDate = leaveRequestDto.StartDate;
                 existingLeaveRequest.EndDate = leaveRequestDto.EndDate;
-                existingLeaveRequest.TotalDays = (leaveRequestDto.EndDate.Day - leaveRequestDto.StartDate.Day) + 1;
+                existingLeaveRequest.IsHalfDay = leaveRequestDto.IsHalfDay;
+                existingLeaveRequest.TotalDays = leaveRequestDto.IsHalfDay ? 0.5m : requestedDay;
                 existingLeaveRequest.LeaveType = leaveRequestDto.LeaveType;
 
                 result = await _leave.Update(whereCondition, existingLeaveRequest);
@@ -367,9 +384,9 @@ public class LeaveManagementService : ILeaveManagementService
         {
             Expression<Func<LeaveRequest, bool>> whereCondition = l =>
             (leaveFilter.EmployeeId == null || l.EmployeeId == leaveFilter.EmployeeId)
-            &&(leaveFilter.LeaveType == null || !leaveFilter.LeaveType.Any() || leaveFilter.LeaveType.Contains(l.LeaveType))
-            && (leaveFilter.StartDate == null || !leaveFilter.StartDate.HasValue || (l.EndDate >= leaveFilter.EndDate))
-            && (leaveFilter.EndDate == null || !leaveFilter.EndDate.HasValue || (l.StartDate >= leaveFilter.StartDate))
+            && (leaveFilter.LeaveType == null || !leaveFilter.LeaveType.Any() || leaveFilter.LeaveType.Contains(l.LeaveType))
+            && (leaveFilter.StartDate == null || !leaveFilter.StartDate.HasValue || (l.StartDate >= leaveFilter.StartDate))
+            && (leaveFilter.EndDate == null || !leaveFilter.EndDate.HasValue || (l.EndDate <= leaveFilter.EndDate))
             && (leaveFilter.Status == null || !leaveFilter.Status.Any() || leaveFilter.Status.Contains(l.Status));
 
             leaveRequestList = (await _leave.GetAggregateDataAsync<LeaveRequest>(whereCondition, pageNo: leaveFilter.PageNo, pageSize: leaveFilter.PageSize)).ToList();
@@ -379,15 +396,16 @@ public class LeaveManagementService : ILeaveManagementService
 
         List<LeaveResponseDto> FinalLeaveRequestList = (from leave in leaveRequestList
                                                         join user in users on leave.EmployeeId equals user.UserId
-                                                         join reviewerGroup in users on leave.ReviewedBy equals reviewerGroup.UserId into approvedUsers
+                                                        join reviewerGroup in users on leave.ReviewedBy equals reviewerGroup.UserId into approvedUsers
                                                         from approvedUser in approvedUsers.DefaultIfEmpty()
                                                         select new LeaveResponseDto
                                                         {
                                                             LeaveRequestId = leave.LeaveRequestId,
                                                             EmployeeId = leave.EmployeeId,
                                                             EmployeeName = user.FirstName + " " + user.LastName,
-                                                            ProfileUrl = user.ProfileUrl,
+                                                            ProfileUrl = Common.GetEmployeeImageUrl(user.ProfileUrl),
                                                             JobRole = user.JobRole,
+                                                            IsHalfDay = leave.IsHalfDay,
                                                             LeaveType = leave.LeaveType,
                                                             StartDate = leave.StartDate,
                                                             EndDate = leave.EndDate,
@@ -407,6 +425,15 @@ public class LeaveManagementService : ILeaveManagementService
         };
     }
 
+    public async Task<Result> DeleteLeaveRequest(string leaveRequestId)
+    {
+        Expression<Func<LeaveRequest, bool>> whereCondition = lr => lr.LeaveRequestId == leaveRequestId;
+        var existingLeaveRequest = await _leave.FirstOrDefault(whereCondition);
+
+        existingLeaveRequest.IsDeleted = true;
+        Result result = await _leave.Update(whereCondition, existingLeaveRequest);
+        return result;   
+    }
 
     private bool InitializeRemainingBalance(LeaveBalanceRequestDto leaveBalanceRequestDto)
     {
@@ -435,7 +462,6 @@ public class LeaveManagementService : ILeaveManagementService
         {
             result.Success = false;
             result.Message = $"Leave must be applied at least {selectedLeaveType.MinAdvanceNoticeDate} days in advance";
-            // return result;
             return false;
         }
 
@@ -444,7 +470,6 @@ public class LeaveManagementService : ILeaveManagementService
         {
             result.Success = false;
             result.Message = $"Insufficient leave balance for ";
-            // return result;
             return false;
         }
 
@@ -455,16 +480,11 @@ public class LeaveManagementService : ILeaveManagementService
             && (l.StartDate.Year == DateTime.UtcNow.Year)
             && (l.Status != EnumsHelper.LeaveRequestStatus.Rejected)
         );
-
-
-        // var requestedDay = (leaveRequestDto.EndDate.Day - leaveRequestDto.StartDate.Day) + 1;
-
         if (selectedLeaveType.LeaveTypes.Equals(3)
             && (annualLeaveTaken + requestedDay) >= earnedAnnualDayTillNow)
         {
             result.Success = false;
             result.Message = "Insufficient leave balance for current month";
-            // return result;
             return false;
         }
 
@@ -472,7 +492,6 @@ public class LeaveManagementService : ILeaveManagementService
         {
             result.Success = false;
             result.Message = $"Only {balance.RemainingLeave} days available";
-            // return result;
             return false;
         }
         return true;

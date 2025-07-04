@@ -19,4 +19,5 @@ public interface ILeaveManagementService
     // leave
     Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto);
     Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveFilter filter);
+    Task<Result> DeleteLeaveRequest(string leaveRequestId);
 }

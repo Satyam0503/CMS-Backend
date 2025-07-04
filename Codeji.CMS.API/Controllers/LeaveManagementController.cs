@@ -73,4 +73,11 @@ public class LeaveManagementController : ControllerBase
     {
         return await _leaveManagementService.GetLeaveRequest(leaveFilter);
     }
+
+    [Route("DeleteLeaveRequest")]
+    [HttpDelete]
+    public async Task<Result> DeleteLeaveRequest(string leaveRequestId)
+    {
+        return await _leaveManagementService.DeleteLeaveRequest(leaveRequestId);
+    }
 }
