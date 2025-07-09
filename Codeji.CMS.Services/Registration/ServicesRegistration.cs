@@ -6,7 +6,7 @@ using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Holiday;
 using Codeji.CMS.Services.Holiday.Interface;
 using Codeji.CMS.Services.Interface;
-using Codeji.CMS.Services.LeaveManagement.LeaveTypes;
+using Codeji.CMS.Services.LeaveManagement;
 using Codeji.CMS.Services.NoticeBoard;
 using Codeji.CMS.Services.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;

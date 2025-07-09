@@ -4,7 +4,7 @@ using Codeji.CMS.DTO.LeaveManagement;
 using Codeji.CMS.DTO.LeaveManagement.Leave;
 using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
 
-namespace Codeji.CMS.Services.LeaveManagement.LeaveTypes;
+namespace Codeji.CMS.Services.LeaveManagement;
 
 public interface ILeaveManagementService
 {

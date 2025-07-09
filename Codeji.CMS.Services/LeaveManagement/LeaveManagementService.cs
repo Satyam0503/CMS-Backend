@@ -5,6 +5,7 @@ using Codeji.CMS.DTO.Leave.LeaveRequest;
 using Codeji.CMS.DTO.LeaveManagement;
 using Codeji.CMS.DTO.LeaveManagement.Leave;
 using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
+using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Leave;
@@ -13,21 +14,23 @@ using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
 
-namespace Codeji.CMS.Services.LeaveManagement.LeaveTypes;
+namespace Codeji.CMS.Services.LeaveManagement;
 
 public class LeaveManagementService : ILeaveManagementService
 {
-    private readonly IMongoDbRepository<LeaveType> _leaveTypeRepo;
+    private readonly IMongoDbRepository<LeaveTypes> _leaveTypeRepo;
     private readonly IMongoDbRepository<EmpUser> _empUser;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IMongoDbRepository<LeaveBalance> _leaveBalance;
     private readonly IMongoDbRepository<LeaveRequest> _leave;
+    private readonly INotificationService _notificationService;
     private readonly IMapper _mapper;
-    public LeaveManagementService(IMongoDbRepository<LeaveType> leaveTypeRepo,
+    public LeaveManagementService(IMongoDbRepository<LeaveTypes> leaveTypeRepo,
     IMongoDbRepository<EmpUser> empUser,
     IMongoDbRepository<LeaveBalance> leaveBalance,
     IMongoDbRepository<LeaveRequest> leave,
-    IHttpContextAccessor httpContextAccessor, IMapper mapper)
+    IHttpContextAccessor httpContextAccessor, IMapper mapper,
+    INotificationService notificationService)
     {
         _leaveTypeRepo = leaveTypeRepo;
         _httpContextAccessor = httpContextAccessor;
@@ -35,6 +38,7 @@ public class LeaveManagementService : ILeaveManagementService
         _leaveBalance = leaveBalance;
         _leave = leave;
         _mapper = mapper;
+        _notificationService = notificationService;
     }
 
     public async Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto)
@@ -47,20 +51,21 @@ public class LeaveManagementService : ILeaveManagementService
             result.Message = "Leave type doesn't exists";
             return result;
         }
-        Expression<Func<LeaveType, bool>> leaveTypeCondition = l => l.LeaveTypes == leaveTypeRequestDto.LeaveType;
+        Expression<Func<LeaveTypes, bool>> leaveTypeCondition = l => l.LeaveType == leaveTypeRequestDto.LeaveType;
 
         if (string.IsNullOrEmpty(leaveTypeRequestDto.LeaveTypeId))
         {
             var existingLeaveType = await _leaveTypeRepo.FirstOrDefault(leaveTypeCondition, true);
             if (existingLeaveType == null)
             {
-                var leaveTypeDomain = new LeaveType
+                var leaveTypeDomain = new LeaveTypes
                 {
                     // LeaveTypeName = leaveTypeResponseDto.LeaveTypeName,
                     MinAdvanceNoticeDate = leaveTypeRequestDto.MinAdvanceNoticeDate,
                     IsHalfDay = leaveTypeRequestDto.IsHalfDay,
-                    LeaveTypes = leaveTypeRequestDto.LeaveType,
+                    LeaveType = leaveTypeRequestDto.LeaveType,
                     IsActive = leaveTypeRequestDto.IsActive,
+                    MaxLeaveDays = leaveTypeRequestDto.MaxLeaveDays,
                     CreatedDate = DateTime.UtcNow
                 };
                 result = await _leaveTypeRepo.AddOne(leaveTypeDomain);
@@ -70,8 +75,9 @@ public class LeaveManagementService : ILeaveManagementService
             {
                 existingLeaveType.IsDeleted = false;
                 existingLeaveType.MinAdvanceNoticeDate = leaveTypeRequestDto.MinAdvanceNoticeDate;
-                existingLeaveType.LeaveTypes = leaveTypeRequestDto.LeaveType;
+                existingLeaveType.LeaveType = leaveTypeRequestDto.LeaveType;
                 existingLeaveType.IsActive = leaveTypeRequestDto.IsActive;
+                existingLeaveType.MaxLeaveDays = leaveTypeRequestDto.MaxLeaveDays;
                 await _leaveTypeRepo.Update(leaveTypeCondition, existingLeaveType);
                 result.Success = true;
             }
@@ -81,20 +87,21 @@ public class LeaveManagementService : ILeaveManagementService
         {
 
             var existingLeaveTypeName = await _leaveTypeRepo.FirstOrDefault(leaveTypeCondition, true);
-            Expression<Func<LeaveType, bool>> whereCondition = l => l.LeaveTypeId == leaveTypeRequestDto.LeaveTypeId;
+            Expression<Func<LeaveTypes, bool>> whereCondition = l => l.LeaveTypeId == leaveTypeRequestDto.LeaveTypeId;
             var existingLeaveType = await _leaveTypeRepo.FirstOrDefault(whereCondition);
             if (existingLeaveType == null)
             {
                 result.Success = false;
                 return result;
             }
-            if (existingLeaveTypeName != null && existingLeaveTypeName.LeaveTypes == leaveTypeRequestDto.LeaveType && existingLeaveTypeName.LeaveTypeId != leaveTypeRequestDto.LeaveTypeId)
+            if (existingLeaveTypeName != null && existingLeaveTypeName.LeaveType == leaveTypeRequestDto.LeaveType && existingLeaveTypeName.LeaveTypeId != leaveTypeRequestDto.LeaveTypeId)
             {
                 if (existingLeaveTypeName.IsDeleted == true)
                 {
                     // state change of already exist leave type
                     existingLeaveTypeName.IsDeleted = false;
-                    existingLeaveTypeName.LeaveTypes = leaveTypeRequestDto.LeaveType;
+                    existingLeaveTypeName.LeaveType = leaveTypeRequestDto.LeaveType;
+                    existingLeaveTypeName.MaxLeaveDays = leaveTypeRequestDto.MaxLeaveDays;
                     existingLeaveType.MinAdvanceNoticeDate = leaveTypeRequestDto.MinAdvanceNoticeDate;
                     existingLeaveType.IsHalfDay = leaveTypeRequestDto.IsHalfDay;
                     existingLeaveType.IsActive = leaveTypeRequestDto.IsActive;
@@ -110,7 +117,8 @@ public class LeaveManagementService : ILeaveManagementService
                 return result;
             }
             // existingLeaveType.LeaveTypeName = leaveTypeResponseDto.LeaveTypeName;
-            existingLeaveType.LeaveTypes = leaveTypeRequestDto.LeaveType;
+            existingLeaveType.LeaveType = leaveTypeRequestDto.LeaveType;
+            existingLeaveType.MaxLeaveDays = leaveTypeRequestDto.MaxLeaveDays;
             existingLeaveType.IsHalfDay = leaveTypeRequestDto.IsHalfDay;
             existingLeaveType.IsActive = leaveTypeRequestDto.IsActive;
             existingLeaveType.MinAdvanceNoticeDate = leaveTypeRequestDto.MinAdvanceNoticeDate;
@@ -122,15 +130,15 @@ public class LeaveManagementService : ILeaveManagementService
 
     public async Task<Result<LeaveTypeResponseDto>> GetLeaveType(bool? IsActive)
     {
-        // Expression<Func<LeaveType, bool>> whereCondition = l => !l.IsDeleted;
-        IEnumerable<LeaveType> leaveTypeList = [];
-        if (IsActive == false)
+
+        IEnumerable<LeaveTypes> leaveTypeList = [];
+        if ( !IsActive.HasValue || IsActive == false)
         {
             leaveTypeList = await _leaveTypeRepo.GetAll();
         }
         else
         {
-            Expression<Func<LeaveType, bool>> isActiveCondition = l => !l.IsDeleted && l.IsActive;
+            Expression<Func<LeaveTypes, bool>> isActiveCondition = l => !l.IsDeleted && l.IsActive;
             leaveTypeList = await _leaveTypeRepo.GetAll(isActiveCondition);
         }
 
@@ -144,7 +152,8 @@ public class LeaveManagementService : ILeaveManagementService
                                                     {
                                                         LeaveTypeId = leaveType.LeaveTypeId,
                                                         //    LeaveTypeName = Enum.GetName(typeof(EnumsHelper.LeaveTypes),leaveType.LeaveTypes)?? "Not Defined",
-                                                        LeaveTypes = leaveType.LeaveTypes,
+                                                        LeaveTypes = leaveType.LeaveType,
+                                                        MaxLeaveDays = leaveType.MaxLeaveDays,
                                                         MinAdvanceNoticeDate = leaveType.MinAdvanceNoticeDate,
                                                         IsHalfDay = leaveType.IsHalfDay,
                                                         IsActive = leaveType.IsActive,
@@ -162,7 +171,7 @@ public class LeaveManagementService : ILeaveManagementService
     public async Task<Result> DeleteLeaveType(string leaveTypeId)
     {
         Result result = new();
-        Expression<Func<LeaveType, bool>> whereCondition = l => l.LeaveTypeId == leaveTypeId;
+        Expression<Func<LeaveTypes, bool>> whereCondition = l => l.LeaveTypeId == leaveTypeId;
         var deletedLeaveType = await _leaveTypeRepo.FirstOrDefault(whereCondition);
         deletedLeaveType.IsDeleted = true;
         result = await _leaveTypeRepo.Update(whereCondition, deletedLeaveType);
@@ -187,11 +196,15 @@ public class LeaveManagementService : ILeaveManagementService
             result.Message = "Remaining Leave Should Be Less Than Maximum Leave";
             return result;
         }
-
+        IEnumerable<LeaveTypes> leaveTypes = await _leaveTypeRepo.GetAll();
+        if (LeaveBalanceValidation(leaveBalanceRequestDto, result, leaveTypes) == false)
+        {
+            return result;
+        }
         if (string.IsNullOrEmpty(leaveBalanceRequestDto.Id))
         {
             Expression<Func<LeaveBalance, bool>> whereCondition = l => l.EmployeeId == leaveBalanceRequestDto.EmployeeId && l.Year.Year == leaveBalanceRequestDto.Year.Year;
-
+            
             var existingEmployeeLeaveBalance = await _leaveBalance.FirstOrDefault(whereCondition);
             if (existingEmployeeLeaveBalance == null)
             {
@@ -204,7 +217,6 @@ public class LeaveManagementService : ILeaveManagementService
                 result.Message = "Leave Balance For Current Employee Already Exists";
                 return result;
             }
-
         }
         else
         {
@@ -227,17 +239,19 @@ public class LeaveManagementService : ILeaveManagementService
             leaveBalances = await _leaveBalance.GetAll();
         }
         else
-        {
+        {  
+            List<string> empId = !string.IsNullOrEmpty(leaveBalanceFilter.EmployeeName)?(await _empUser.GetAll(e => e.FirstName.ToLower().Contains(leaveBalanceFilter.EmployeeName) || e.LastName.ToLower().Contains(leaveBalanceFilter.EmployeeName))).Select(e=> e.UserId).ToList(): null;
             Expression<Func<LeaveBalance, bool>> whereCondition = l =>
             (string.IsNullOrEmpty(leaveBalanceFilter.EmployeeId) || l.EmployeeId == leaveBalanceFilter.EmployeeId)
-            && (leaveBalanceFilter.Year == null || (l.Year.Year >= leaveBalanceFilter.Year))
+            &&(string.IsNullOrEmpty(leaveBalanceFilter.EmployeeName) ||  empId.Contains(l.EmployeeId))
+            && (leaveBalanceFilter.Year == null || (l.Year.Year == leaveBalanceFilter.Year))
             ;
 
             leaveBalances = (await _leaveBalance.GetAggregateDataAsync<LeaveBalance>(whereCondition, pageNo: leaveBalanceFilter.PageNo, pageSize: leaveBalanceFilter.PageSize)).ToList();
         }
 
         List<EmpUser> users = (await _empUser.GetAll(e => CompanyId.Contains(e.CompanyId))).ToList();
-        List<LeaveType> leaveTypes = (await _leaveTypeRepo.GetAll()).ToList();
+        List<LeaveTypes> leaveTypes = (await _leaveTypeRepo.GetAll()).ToList();
         List<LeaveBalanceResponseDto> LeaveBalanceList = (from leaveBalance in leaveBalances
                                                           join user in users on leaveBalance.EmployeeId equals user.UserId
                                                           join createdByUser in users on leaveBalance.CreatedBy equals createdByUser.UserId
@@ -248,12 +262,11 @@ public class LeaveManagementService : ILeaveManagementService
                                                               EmployeeName = user.FirstName + " " + user.LastName,
                                                               CreatedBy = createdByUser.FirstName + " " + createdByUser.LastName,
                                                               Year = leaveBalance.Year,
-                                                              LeaveTypeBalances = leaveBalance.LeaveTypeBalances.Select(lb => new LeaveTypeBalance
-                                                              {
-                                                                  LeaveType = lb.LeaveType,
-                                                                  MaximumLeave = lb.MaximumLeave,
-                                                                  RemainingLeave = lb.RemainingLeave
-                                                              }).ToList()
+                                                              SickLeave = leaveBalance.LeaveTypeBalances.Find(x => x.LeaveType == EnumsHelper.LeaveTypes.Sick) ?? null,
+                                                              EarnedLeave = leaveBalance.LeaveTypeBalances.Find(x => x.LeaveType == EnumsHelper.LeaveTypes.Earned) ?? null,
+                                                              CasualLeave = leaveBalance.LeaveTypeBalances.Find(x => x.LeaveType == EnumsHelper.LeaveTypes.Casual) ?? null,
+                                                              PaternityLeave = leaveBalance.LeaveTypeBalances.Find(x => x.LeaveType == EnumsHelper.LeaveTypes.Paternity) ?? null,
+                                                              MaternityLeave = leaveBalance.LeaveTypeBalances.Find(x => x.LeaveType == EnumsHelper.LeaveTypes.Maternity) ?? null,
                                                           }
                                                          ).ToList();
         return new Result<LeaveBalanceResponseDto>
@@ -269,7 +282,7 @@ public class LeaveManagementService : ILeaveManagementService
     {
         Result result = new();
 
-        var selectedLeaveType = await _leaveTypeRepo.FirstOrDefault(lt => lt.LeaveTypes == leaveRequestDto.LeaveType);
+        var selectedLeaveType = await _leaveTypeRepo.FirstOrDefault(lt => lt.LeaveType == leaveRequestDto.LeaveType);
         if (selectedLeaveType == null)
         {
             result.Success = false;
@@ -290,6 +303,7 @@ public class LeaveManagementService : ILeaveManagementService
 
         if (string.IsNullOrEmpty(leaveRequestDto.LeaveRequestId))
         {
+            
             var requestedDay = (leaveRequestDto.EndDate.Day - leaveRequestDto.StartDate.Day) + 1;
             bool IsValid = await LeaveRequestValidation(selectedLeaveType, selectedEmpLeaveBal, _leave, leaveRequestDto, requestedDay, result);
             if (IsValid == false)
@@ -310,6 +324,23 @@ public class LeaveManagementService : ILeaveManagementService
             };
 
             result = await _leave.AddOne(leaveDomain);
+            Expression<Func<EmpUser, bool>> whereCondition = x => (x.UserId.Contains(leaveRequestDto.EmployeeId));
+            // IEnumerable<EmpUser> empUsers = (await _empUser.GetAll(whereCondition)).Select(x => x.ReportingManager).ToList();
+            var empUser =await _empUser.FirstOrDefault(whereCondition);
+            if (!string.IsNullOrEmpty(empUser.ReportingManager))
+            {
+                await _notificationService.SendNoticeNotificationToUser(empUser.UserId, new NotificationViewModel()
+                {
+                    Title = Enum.GetName(typeof(EnumsHelper.LeaveTypes), leaveRequestDto.LeaveType),
+                    Body = leaveRequestDto.Reason,
+                    IsRead = false,
+                    SentDateTime = DateTime.UtcNow,
+                    SentBy = CurrentContext.UserId(_httpContextAccessor),
+                    TargetId = leaveRequestDto.LeaveRequestId,
+                    NotificationTypes = EnumsHelper.NotificationTypes.Notice,
+                    UserNotificationId = empUser.UserId
+                });
+            }
             return result;
         }
         else
@@ -451,8 +482,29 @@ public class LeaveManagementService : ILeaveManagementService
         return true;
     }
 
+    private bool LeaveBalanceValidation(LeaveBalanceRequestDto leaveBalanceRequestDto, Result result, IEnumerable<LeaveTypes> leaveTypes)
+    {
+        foreach (var leavetype in leaveBalanceRequestDto.LeaveTypeBalances)
+        {
+            var leave = leaveTypes.FirstOrDefault(lt => lt.LeaveType == leavetype.LeaveType);
+            if (leave == null)
+            {
+                result.Success = false;
+                result.Message = "Leave Type Not Exists";
+                return false;
+            }
+            if (leavetype.MaximumLeave > leave.MaxLeaveDays)
+            {
+                result.Success = false;
+                result.Message = $"Maximum Leave For {leavetype.LeaveType} is greater than maximum allowed leave days ";
+                return false;
+            }
+        }
+        return true;
+    }
 
-    private async Task<bool> LeaveRequestValidation(LeaveType selectedLeaveType, LeaveBalance selectedEmpLeaveBal, IMongoDbRepository<LeaveRequest> _leave, LeaveRequestDto leaveRequestDto, int requestedDay, Result result)
+
+    private async Task<bool> LeaveRequestValidation(LeaveTypes selectedLeaveType, LeaveBalance selectedEmpLeaveBal, IMongoDbRepository<LeaveRequest> _leave, LeaveRequestDto leaveRequestDto, int requestedDay, Result result)
     {
         var currentMonth = DateTime.UtcNow.Month;
         var earnedAnnualDayTillNow = currentMonth;
@@ -480,7 +532,7 @@ public class LeaveManagementService : ILeaveManagementService
             && (l.StartDate.Year == DateTime.UtcNow.Year)
             && (l.Status != EnumsHelper.LeaveRequestStatus.Rejected)
         );
-        if (selectedLeaveType.LeaveTypes.Equals(3)
+        if (selectedLeaveType.LeaveType.Equals(3)
             && (annualLeaveTaken + requestedDay) >= earnedAnnualDayTillNow)
         {
             result.Success = false;

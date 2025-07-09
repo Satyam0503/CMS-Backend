@@ -3,7 +3,7 @@ using Codeji.CMS.DTO.Leave.LeaveRequest;
 using Codeji.CMS.DTO.LeaveManagement;
 using Codeji.CMS.DTO.LeaveManagement.Leave;
 using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
-using Codeji.CMS.Services.LeaveManagement.LeaveTypes;
+using Codeji.CMS.Services.LeaveManagement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

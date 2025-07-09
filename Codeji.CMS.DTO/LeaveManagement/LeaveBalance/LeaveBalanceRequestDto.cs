@@ -8,7 +8,6 @@ public class LeaveBalanceRequestDto
     public string EmployeeId { get; set; }
     public DateTime Year { get; set; }
     public List<LeaveTypeBalance> LeaveTypeBalances { get; set; }
-
 }
 public class LeaveTypeBalance {
     // public string LeaveTypeId { get; set; }

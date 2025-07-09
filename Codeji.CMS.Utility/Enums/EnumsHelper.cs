@@ -81,7 +81,7 @@
             Casual = 2,
             Earned = 3,
             Maternity = 4,
-            Patrenity = 5,
+            Paternity = 5,
 
         }
     }
