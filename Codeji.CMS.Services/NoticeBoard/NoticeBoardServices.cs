@@ -37,6 +37,7 @@ public class NoticeBoardServices : INoticeBoardService
     {
         Notice notice = new()
         {
+            NoticeId = Guid.NewGuid().ToString(),
             Title = model.Title,
             Message = model.Message,
             Target = model.Target,
@@ -53,6 +54,7 @@ public class NoticeBoardServices : INoticeBoardService
             NotificationId = Guid.NewGuid().ToString(),
             Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice),
             Body = model.Title,
+            TargetId = notice.NoticeId,
             CreatedDateTime = DateTime.UtcNow,
             NotificationType = EnumsHelper.NotificationTypes.Notice,
         };
@@ -74,6 +76,8 @@ public class NoticeBoardServices : INoticeBoardService
                         UserId = user.UserId,
                         NotificationId = notification.NotificationId,
                         IsRead = false,
+                        CreatedDateTime = DateTime.UtcNow,
+                        IsDeleted = false,
                     };
                     userNotifications.Add(userNotification);
                     await _notificationService.SendNoticeNotificationToUser(user.UserId, new NotificationViewModel()
@@ -83,6 +87,7 @@ public class NoticeBoardServices : INoticeBoardService
                         IsRead = false,
                         SentDateTime = DateTime.UtcNow,
                         SentBy = userId,
+                        TargetId = notification.TargetId,
                         NotificationTypes = EnumsHelper.NotificationTypes.Notice,
                         UserNotificationId = userNotification.UserNotificationId,
                     });
@@ -107,13 +112,21 @@ public class NoticeBoardServices : INoticeBoardService
         Expression<Func<Notice, bool>> wherecondition = x => x.NoticeId == model.NoticeId;
         return await _noticeRepository.Update(wherecondition, notice);
     }
-    public async Task<Result<NoticeViewModel>> GetAllNotices(string userId, int pageNo, int records)
+    public async Task<Result<NoticeViewModel>> GetAllNotices(string userId, GetNoticeRequest filter)
     {
+        List<string> empIdsList = [];
+        if (filter.PostedBy.Length > 0)
+        {
+            empIdsList = (await _empUserRepository.GetAll(x => (x.FirstName + " " + x.LastName).Contains(filter.PostedBy.Trim(), StringComparison.CurrentCultureIgnoreCase))).Select(x => x.UserId).ToList();
+        }
         EmpUser? employee = await _empUserRepository.FirstOrDefault(x => x.UserId == userId);
         Expression<Func<Notice, bool>> whereCondition = x => (x.Departments.Equals("all") || x.Departments.Equals(employee.Department))
-        && (x.Target.Equals("all") || x.Target.Equals(employee.RoleId));
+        && (x.Target.Equals("all") || x.Target.Equals(employee.RoleId))
+        && (filter.NoticeType.Length == 0 || filter.NoticeType.Contains(x.NoticeType))
+        && ((!filter.FilterFrom.HasValue || filter.FilterFrom.Value <= x.CreatedDate) && (!filter.FilterTo.HasValue || filter.FilterTo >= x.CreatedDate))
+        && (filter.PostedBy.Trim().Length == 0 || empIdsList.Contains(x.CreatedBy));
         int totalRecords = await _noticeRepository.Count(whereCondition);
-        List<Notice> noticeList = (await _noticeRepository.GetAggregateDataAsync<Notice>(whereCondition, isAscending: false, orderedKey: "CreatedDate", pageNo: pageNo, pageSize: records)).ToList();
+        List<Notice> noticeList = (await _noticeRepository.GetAggregateDataAsync<Notice>(whereCondition, isAscending: false, orderedKey: "CreatedDate", pageNo: filter.PageNo, pageSize: filter.Records)).ToList();
         List<string> empIdList = noticeList.Select(x => x.CreatedBy).Distinct().ToList();
         IEnumerable<EmpUser> empUsers = await _empUserRepository.GetAll(x => empIdList.Contains(x.UserId));
         var data = (from notice in noticeList
@@ -137,6 +150,28 @@ public class NoticeBoardServices : INoticeBoardService
             TotalRecords = totalRecords
         };
     }
+
+    public async Task<NoticeViewModel?> GetNoticeById(string noticeId)
+    {
+        Notice? notice = await _noticeRepository.FirstOrDefault(x => x.NoticeId == noticeId);
+        if (notice is null) return null;
+        EmpUser? user = await _empUserRepository.FirstOrDefault(x => x.UserId == notice.CreatedBy);
+        if (user is null) return null;
+
+        var data = new NoticeViewModel()
+        {
+            NoticeId = notice.NoticeId,
+            UserName = $"{user.FirstName} {user.LastName}",
+            UserProfile = Common.GetEmployeeImageUrl(user.ProfileUrl),
+            UserDesignation = user.JobRole,
+            NoticeMessage = notice.Message,
+            NoticeTitle = notice.Title,
+            CreatedDateTime = notice.CreatedDate,
+            NoticeType = notice.NoticeType,
+        };
+        return data;
+    }
+
     public async Task<Result<MyNoticeDTO>> GetMyNotices(string userId, int pageNo, int records)
     {
         Expression<Func<Notice, bool>> whereCondition = x => x.CreatedBy.Equals(userId);

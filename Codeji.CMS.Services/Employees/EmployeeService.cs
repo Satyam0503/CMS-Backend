@@ -75,7 +75,6 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<EmpWorkHistory> empWorkHistoryRepository,
             IMongoDbRepository<UserNotifications> userNotificationRepository,
             IMongoDbRepository<Notifications> notificationsRepository
-
             )
         {
             _employeeRepository = employeeRepository;
@@ -216,6 +215,14 @@ namespace Codeji.CMS.Services.Employees
             userModel.FullProfileUrl = string.IsNullOrEmpty(user.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(user.ProfileUrl);
             return userModel;
         }
+
+        public async Task<List<EmployeeSearchResponseDTO>> SearchEmployeeByName(string name)
+        {
+            Expression<Func<EmpUser, bool>> whereCondition = x => (x.FirstName + " " + x.LastName).Contains(name, StringComparison.CurrentCultureIgnoreCase);
+            var data = await _employeeRepository.GetAll(whereCondition);
+            return _mapper.Map<List<EmployeeSearchResponseDTO>>(data);
+        }
+
         public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters)
         {
             List<EmpUser> employeeList = [];
@@ -788,19 +795,25 @@ namespace Codeji.CMS.Services.Employees
             Expression<Func<EmpWorkHistory, bool>> whereCondition = x => x.WorkHistoryId == workId;
             return await _empWorkHistoryRepository.UpdateMany(whereCondition, Builders<EmpWorkHistory>.Update.Set(x => x.IsDeleted, true));
         }
-        public async Task<Result<NotificationViewModel>> GetAllNotifications(string userId)
+        public async Task<NotificationResponseModel> GetAllNotifications(NotificationRequestDTO model, string userId)
         {
-            IEnumerable<UserNotifications> userNotifications = await _userNotificationRepository.GetAll(x => x.UserId == userId);
-            if (!userNotifications.Any())
+            Expression<Func<UserNotifications, bool>> wherecondition = x => x.UserId == userId;
+            int userNotificationsCount = await _userNotificationRepository.Count(wherecondition);
+            if (userNotificationsCount == 0)
             {
-                return new Result<NotificationViewModel>()
+                return new NotificationResponseModel()
                 {
-                    MethodResults = [],
-                    Success = true,
-                    TotalRecords = 0
+                    NotificationList = [],
+                    All = 0,
+                    Unread = 0
                 };
             }
-
+            if (model.Type != "all")
+            {
+                wherecondition = x => x.UserId == userId && !x.IsRead;
+            }
+            int unReadNotificationCount = await _userNotificationRepository.Count(x => x.UserId == userId && !x.IsRead);
+            List<UserNotifications> userNotifications = (await _userNotificationRepository.GetAggregateDataAsync<UserNotifications>(wherecondition, isAscending: false, orderedKey: "CreatedDateTime", pageNo: model.PageNo, pageSize: model.Records)).ToList();
             string[] notificationsId = userNotifications.Select(x => x.NotificationId).ToArray();
             IEnumerable<Notifications> notifications = await _notificationsRepository.GetAll(x => notificationsId.Contains(x.NotificationId));
             var data = (from usrNft in userNotifications
@@ -811,15 +824,17 @@ namespace Codeji.CMS.Services.Employees
                             IsRead = usrNft.IsRead,
                             Title = ntf.Title,
                             Body = ntf.Body,
-                            SentDateTime = ntf.CreatedDateTime,
+                            TargetId = ntf.TargetId,
+                            SentDateTime = usrNft.CreatedDateTime,
                             SentBy = ntf.CreatedBy,
                             NotificationTypes = ntf.NotificationType
-                        }).OrderByDescending(x => x.SentDateTime).ToList();
-            return new Result<NotificationViewModel>()
+
+                        }).ToList();
+            return new NotificationResponseModel()
             {
-                MethodResults = data,
-                Success = true,
-                TotalRecords = data.Count
+                NotificationList = data,
+                All = userNotificationsCount,
+                Unread = unReadNotificationCount,
             };
         }
 
@@ -834,10 +849,16 @@ namespace Codeji.CMS.Services.Employees
             return await _userNotificationRepository.UpdateMany(whereCondition, Builders<UserNotifications>.Update.Set(x => x.IsRead, true));
         }
 
+        public async Task<Result> MarkAllNotificationAsRead(string userId)
+        {
+            Expression<Func<UserNotifications, bool>> whereCondition = x => x.UserId == userId && !x.IsRead;
+            return await _userNotificationRepository.UpdateMany(whereCondition, Builders<UserNotifications>.Update.Set(x => x.IsRead, true));
+        }
+
 
         public async Task<Result<string>> GetCollegeList()
         {
-            var educationDetails =  _educationDetailsRepo.Get();
+            var educationDetails = _educationDetailsRepo.Get();
             List<string> collegeList = educationDetails.Select(x => x.CollegeName).ToList();
             return new Result<string>
             {

@@ -9,6 +9,7 @@ namespace Codeji.CMS.Repository.Entities
         public string NotificationId { get; set; }
         public string Title { get; set; }
         public string Body { get; set; }
+        public string? TargetId { get; set; }
         public EnumsHelper.NotificationTypes NotificationType { get; set; }
         public DateTime CreatedDateTime { get; set; }
         public string CreatedBy { get; set; }

@@ -5,6 +5,7 @@ using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
+using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Recruitments
 {
@@ -69,13 +70,13 @@ namespace Codeji.CMS.Services.Recruitments
 
             if (model is null)
             {
-                jobList = await _jobVacancyRepo.GetAll();
+                jobList = (await _jobVacancyRepo.GetAll()).OrderByDescending(x => x.CreatedDate);
                 count = jobList.Count();
             }
             else
             {
                 Expression<Func<JobVacancy, bool>> whereCondition = x => x.Title.Contains(model.Search, StringComparison.CurrentCultureIgnoreCase);
-                jobList = await _jobVacancyRepo.GetAggregateDataAsync<JobVacancy>(whereCondition, pageSize: model.Records, pageNo: model.PageNo);
+                jobList = await _jobVacancyRepo.GetAggregateDataAsync<JobVacancy>(whereCondition, isAscending: false, orderedKey: "CreatedDate", pageSize: model.Records, pageNo: model.PageNo);
                 count = await _jobVacancyRepo.Count(whereCondition);
             }
             if (active.HasValue)
@@ -106,6 +107,7 @@ namespace Codeji.CMS.Services.Recruitments
         public async Task<Result> DeleteJobVacancy(string vacancyId)
         {
             Expression<Func<JobVacancy, bool>> whereCondition = x => x.JobId == vacancyId;
+            Result result = await _jobVacancyRepo.UpdateMany(whereCondition, Builders<JobVacancy>.Update.Set(x => x.IsDeleted, true));
             Result data = await _jobVacancyRepo.Delete(whereCondition);
             return data;
         }

@@ -4,6 +4,7 @@ using Codeji.CMS.API.Notification;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
+using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Repository.Entities;
@@ -91,6 +92,22 @@ public class UserController : BaseApiController
             Success = true,
             MethodResult = result
         };
+    }
+
+    [Route("Search")]
+    [HttpGet]
+    public async Task<Result<EmployeeSearchResponseDTO>> SearchEmployeeByName([FromQuery] string name)
+    {
+        Result<EmployeeSearchResponseDTO> result = new();
+        if (string.IsNullOrEmpty(name))
+        {
+            result.Success = false;
+            return result;
+        }
+        var empList = await _employeeService.SearchEmployeeByName(name);
+        result.MethodResults = empList;
+        result.Success = true;
+        return result;
     }
 
     //Employee Details APIs
@@ -355,10 +372,20 @@ public class UserController : BaseApiController
 
     [HttpGet]
     [Route("GetAllNotifications")]
-    public async Task<Result<NotificationViewModel>> GetAllNotifications()
+    public async Task<Result<NotificationResponseModel>> GetAllNotifications([FromQuery] NotificationRequestDTO model)
     {
+        string[] supportedType = ["all", "unread"];
+        if (!supportedType.Contains(model.Type))
+        {
+            return new Result<NotificationResponseModel>();
+        }
         string userId = CurrentContext.UserId(_httpContextAccessor);
-        return await _employeeService.GetAllNotifications(userId);
+        var data = await _employeeService.GetAllNotifications(model, userId);
+        return new Result<NotificationResponseModel>()
+        {
+            Success = true,
+            MethodResult = data,
+        };
     }
 
     [HttpPatch]
@@ -405,6 +432,14 @@ public class UserController : BaseApiController
     {
         if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.DeleteWorkHistory(workId, userId);
+    }
+
+    [HttpPost]
+    [Route("MarkAllNotificationAsRead")]
+    public async Task<Result> MarkAllNotificationAsRead()
+    {
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _employeeService.MarkAllNotificationAsRead(userId);
     }
 
     [HttpGet]
