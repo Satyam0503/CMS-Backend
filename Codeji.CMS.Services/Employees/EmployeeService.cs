@@ -1,4 +1,4 @@
-﻿using System.Linq.Expressions;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -853,6 +853,18 @@ namespace Codeji.CMS.Services.Employees
         {
             Expression<Func<UserNotifications, bool>> whereCondition = x => x.UserId == userId && !x.IsRead;
             return await _userNotificationRepository.UpdateMany(whereCondition, Builders<UserNotifications>.Update.Set(x => x.IsRead, true));
+        }
+
+
+        public async Task<Result<string>> GetCollegeList()
+        {
+            var educationDetails = _educationDetailsRepo.Get();
+            List<string> collegeList = educationDetails.Select(x => x.CollegeName).ToList();
+            return new Result<string>
+            {
+                Success = true,
+                MethodResults = collegeList
+            };
         }
     }
 }

@@ -441,4 +441,11 @@ public class UserController : BaseApiController
         string userId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.MarkAllNotificationAsRead(userId);
     }
+
+    [HttpGet]
+    [Route("GetCollegeList")]
+    public async Task<Result<string>> GetCollegeList()
+    {
+        return await _employeeService.GetCollegeList();
+    }
 }

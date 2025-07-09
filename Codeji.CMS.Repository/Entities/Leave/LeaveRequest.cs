@@ -1,0 +1,20 @@
+using Codeji.CMS.Utility.Enums;
+using MongoDB.Bson.Serialization.Attributes;
+
+namespace Codeji.CMS.Repository.Entities.Leave;
+
+public class LeaveRequest : BaseClass
+{
+    [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
+    public string LeaveRequestId { get; set; }
+    public string EmployeeId { get; set; }
+    public bool IsHalfDay { get; set; }
+    public EnumsHelper.LeaveTypes LeaveType { get; set; }
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public decimal TotalDays { get; set; }
+    public string Reason { get; set; }
+    public string? ReviewedBy { get; set; }
+    public EnumsHelper.LeaveRequestStatus Status { get; set; }
+    
+}
