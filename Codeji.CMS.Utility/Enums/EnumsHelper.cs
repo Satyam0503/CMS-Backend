@@ -59,6 +59,31 @@
         {
             Notice = 1,
         }
+
+        public enum HolidayTypes
+        {
+            Cultural = 1,
+            Health = 2,
+            Religious = 3,
+            National = 4,
+        }
+
+        public enum LeaveRequestStatus
+        {
+            Pending = 1,
+            Accepted = 2,
+            Rejected = 3
+        }
+
+        public enum LeaveTypes
+        {
+            Sick = 1,
+            Casual = 2,
+            Earned = 3,
+            Maternity = 4,
+            Patrenity = 5,
+
+        }
     }
 }
 

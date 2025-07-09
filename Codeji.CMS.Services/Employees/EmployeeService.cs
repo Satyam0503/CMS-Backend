@@ -1,4 +1,4 @@
-﻿using System.Linq.Expressions;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -810,6 +810,7 @@ namespace Codeji.CMS.Services.Employees
                             UserNotificationId = usrNft.UserNotificationId,
                             IsRead = usrNft.IsRead,
                             Title = ntf.Title,
+                            Body = ntf.Body,
                             SentDateTime = ntf.CreatedDateTime,
                             SentBy = ntf.CreatedBy,
                             NotificationTypes = ntf.NotificationType
@@ -831,6 +832,18 @@ namespace Codeji.CMS.Services.Employees
             }
             Expression<Func<UserNotifications, bool>> whereCondition = x => x.UserNotificationId == userNotificationId;
             return await _userNotificationRepository.UpdateMany(whereCondition, Builders<UserNotifications>.Update.Set(x => x.IsRead, true));
+        }
+
+
+        public async Task<Result<string>> GetCollegeList()
+        {
+            var educationDetails =  _educationDetailsRepo.Get();
+            List<string> collegeList = educationDetails.Select(x => x.CollegeName).ToList();
+            return new Result<string>
+            {
+                Success = true,
+                MethodResults = collegeList
+            };
         }
     }
 }

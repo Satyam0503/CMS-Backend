@@ -11,6 +11,7 @@ using Codeji.CMS.Repository.Entities.NoticeBoard;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
+using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.NoticeBoard;
 
@@ -50,7 +51,8 @@ public class NoticeBoardServices : INoticeBoardService
         Notifications notification = new()
         {
             NotificationId = Guid.NewGuid().ToString(),
-            Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice, model.Title),
+            Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice),
+            Body = model.Title,
             CreatedDateTime = DateTime.UtcNow,
             NotificationType = EnumsHelper.NotificationTypes.Notice,
         };
@@ -76,7 +78,8 @@ public class NoticeBoardServices : INoticeBoardService
                     userNotifications.Add(userNotification);
                     await _notificationService.SendNoticeNotificationToUser(user.UserId, new NotificationViewModel()
                     {
-                        Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice, model.Title),
+                        Title = notification.Title,
+                        Body = notification.Body,
                         IsRead = false,
                         SentDateTime = DateTime.UtcNow,
                         SentBy = userId,
@@ -146,5 +149,13 @@ public class NoticeBoardServices : INoticeBoardService
             MethodResults = data,
             TotalRecords = totalRecords
         };
+    }
+    public async Task<bool> DeleteNotice(string userId, string noticeId)
+    {
+        Expression<Func<Notice, bool>> whereCondition = x => x.CreatedBy == userId && x.NoticeId == noticeId;
+        bool isExist = await _noticeRepository.Exist(whereCondition);
+        if (!isExist) return false;
+        Result result = await _noticeRepository.UpdateMany(whereCondition, Builders<Notice>.Update.Set(x => x.IsDeleted, true));
+        return result.Success;
     }
 }

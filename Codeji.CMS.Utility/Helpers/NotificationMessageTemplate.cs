@@ -3,12 +3,12 @@ namespace Codeji.CMS.Utility.Helpers;
 
 public static class NotificationMessageTemplate
 {
-    public static string Create(NotificationTypes type, string title)
+    public static string Create(NotificationTypes type)
     {
         return type switch
         {
             NotificationTypes.Notice =>
-                $"New notice posted: {title}",
+                $"New notice posted",
             _ => "You have new notification",
         };
     }

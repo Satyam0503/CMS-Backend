@@ -10,5 +10,6 @@ namespace Codeji.CMS.Services.NoticeBoard
         Task<Result<NoticeViewModel>> GetAllNotices(string userId, int pageNo, int records);
         Task<Result<MyNoticeDTO>> GetMyNotices(string userId, int pageNo, int records);
         Task<Result> UpdateMyNotice(MyNoticeDTO notice, string userId);
+        Task<bool> DeleteNotice(string userId, string noticeId);
     }
 }
