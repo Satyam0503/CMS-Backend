@@ -80,4 +80,13 @@ public class LeaveManagementController : ControllerBase
     {
         return await _leaveManagementService.DeleteLeaveRequest(leaveRequestId);
     }
+
+    [Route("GetEmployeeLeaveBalance/{employeeId}")]
+    [HttpGet]
+    public async Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string? employeeId)
+    {
+        var result = await _leaveManagementService.GetEmployeeLeaveBalance(employeeId);
+        return result;
+    }
+
 }

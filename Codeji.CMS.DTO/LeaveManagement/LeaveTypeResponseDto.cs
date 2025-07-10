@@ -11,6 +11,6 @@ public class LeaveTypeResponseDto
     public bool IsActive { get; set; }
     public DateTime? CreatedOn { get; set; } = DateTime.UtcNow;
     public string CreatedBy { get; set; }
-    public EnumsHelper.LeaveTypes LeaveTypes { get; set; }
-    
+    public EnumsHelper.LeaveTypes LeaveType { get; set; }
+
 }
