@@ -4,6 +4,7 @@ using Codeji.CMS.DTO.LeaveManagement;
 using Codeji.CMS.DTO.LeaveManagement.Leave;
 using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
 using Codeji.CMS.Services.LeaveManagement;
+using Codeji.CMS.Utility.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -79,5 +80,12 @@ public class LeaveManagementController : ControllerBase
     public async Task<Result> DeleteLeaveRequest(string leaveRequestId)
     {
         return await _leaveManagementService.DeleteLeaveRequest(leaveRequestId);
+    }
+
+    [Route("LeaveRequest/{leaveRequestId}/Status")]
+    [HttpPatch]
+    public async Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, [FromBody] EnumsHelper.LeaveRequestStatus status)
+    {
+        return await _leaveManagementService.UpdateLeaveRequestStatus(leaveRequestId, status);
     }
 }
