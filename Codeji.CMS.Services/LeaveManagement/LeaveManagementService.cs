@@ -276,15 +276,18 @@ public class LeaveManagementService : ILeaveManagementService
         };
     }
 
-    public async Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string? employeeId)
+    public async Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string employeeId)
     {
         Result<EmployeeLeaveBalanceResponseDto> result = new();
-        if (string.IsNullOrEmpty(employeeId))
+        bool isEmpExist = await _empUser.Exist(x => x.UserId == employeeId);
+        if (!isEmpExist)
         {
-            employeeId = CurrentContext.UserId(_httpContextAccessor);
+            result.Message = "Employee doesn't exist";
+            result.Success = false;
+            return result;
         }
         // add current year check here
-        LeaveBalance? empLeaveBalances = await _leaveBalance.FirstOrDefault(x => x.EmployeeId == employeeId);
+        LeaveBalance? empLeaveBalances = await _leaveBalance.FirstOrDefault(x => x.EmployeeId == employeeId && x.Year.Year == DateTime.UtcNow.Year);
         if (empLeaveBalances is null)
         {
             return result;
@@ -292,13 +295,13 @@ public class LeaveManagementService : ILeaveManagementService
         // List<EnumsHelper.LeaveTypes> employeeLeaveTypes = leaveBalance.LeaveTypeBalances.Select(x => x.LeaveType).ToList();
         List<LeaveTypes> leaveTypes = (await _leaveTypeRepo.GetAll()).ToList();
         List<EmployeeLeaveBalanceResponseDto> employeeLeaveBalanceList = (
-            from empLeaveBalance in empLeaveBalances.LeaveTypeBalances
-            join leaveType in leaveTypes on empLeaveBalance.LeaveType equals leaveType.LeaveType
+            from empLeaveTypeBalance in empLeaveBalances.LeaveTypeBalances
+            join leaveType in leaveTypes on empLeaveTypeBalance.LeaveType equals leaveType.LeaveType
             select new EmployeeLeaveBalanceResponseDto
             {
-                LeaveType = empLeaveBalance.LeaveType,
-                MaximumLeave = empLeaveBalance.MaximumLeave,
-                RemainingLeave = empLeaveBalance.RemainingLeave ?? 0,
+                LeaveType = empLeaveTypeBalance.LeaveType,
+                MaximumLeave = empLeaveTypeBalance.MaximumLeave,
+                RemainingLeave = empLeaveTypeBalance.RemainingLeave ?? 0,
                 MinAdvanceNoticeDate = leaveType.MinAdvanceNoticeDate ?? 0,
                 IsHalfDay = leaveType.IsHalfDay,
             }
@@ -306,6 +309,7 @@ public class LeaveManagementService : ILeaveManagementService
 
         result.MethodResults = employeeLeaveBalanceList;
         result.Success = true;
+        result.TotalRecords = employeeLeaveBalanceList.Count;
         return result;
     }
 

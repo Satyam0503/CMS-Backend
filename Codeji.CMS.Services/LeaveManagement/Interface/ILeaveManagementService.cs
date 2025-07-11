@@ -15,7 +15,7 @@ public interface ILeaveManagementService
     // leave balance 
     Task<Result> CreateUpdateLeaveBalance(LeaveBalanceRequestDto leaveBalanceRequestDto);
     Task<Result<LeaveBalanceResponseDto>> GetLeaveBalance(LeaveBalanceFilter? leaveBalanceFilter);
-    Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string? employeeId);
+    Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string employeeId);
 
     // leave
     Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto);
