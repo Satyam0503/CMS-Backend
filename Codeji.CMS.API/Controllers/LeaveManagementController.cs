@@ -75,7 +75,7 @@ public class LeaveManagementController : ControllerBase
         return await _leaveManagementService.GetLeaveRequest(leaveFilter);
     }
 
-    [Route("DeleteLeaveRequest")]
+    [Route("DeleteLeaveRequest/{leaveRequestId}")]
     [HttpDelete]
     public async Task<Result> DeleteLeaveRequest(string leaveRequestId)
     {

@@ -259,6 +259,8 @@ public class LeaveManagementService : ILeaveManagementService
                                                               Id = leaveBalance.Id,
                                                               EmployeeId = leaveBalance.EmployeeId,
                                                               EmployeeName = user.FirstName + " " + user.LastName,
+                                                              ProfileUrl = Common.GetEmployeeImageUrl(user.ProfileUrl),
+                                                              JobRole = user.JobRole,
                                                               CreatedBy = createdByUser.FirstName + " " + createdByUser.LastName,
                                                               Year = leaveBalance.Year,
                                                               SickLeave = leaveBalance.LeaveTypeBalances.Find(x => x.LeaveType == EnumsHelper.LeaveTypes.Sick) ?? null,
@@ -496,8 +498,8 @@ public class LeaveManagementService : ILeaveManagementService
     public async Task<Result> DeleteLeaveRequest(string leaveRequestId)
     {
         Expression<Func<LeaveRequest, bool>> whereCondition = lr => lr.LeaveRequestId == leaveRequestId;
-        var existingLeaveRequest = await _leave.FirstOrDefault(whereCondition);
-
+        LeaveRequest? existingLeaveRequest = await _leave.FirstOrDefault(whereCondition);
+        if (existingLeaveRequest is null) return new Result();
         existingLeaveRequest.IsDeleted = true;
         Result result = await _leave.Update(whereCondition, existingLeaveRequest);
         return result;

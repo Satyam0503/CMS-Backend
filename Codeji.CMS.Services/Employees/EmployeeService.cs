@@ -265,6 +265,7 @@ namespace Codeji.CMS.Services.Employees
                             UserId = emp.UserId,
                             FullName = $"{emp?.FirstName} {emp?.LastName ?? ""}",
                             Email = emp.Email,
+                            Gender = emp.Gender,
                             EmployeeId = emp.EmployeeId,
                             JobRole = emp.JobRole,
                             Department = department?.Titles?.FirstOrDefault(x => x.Language == acceptLanguage)?.Label,
