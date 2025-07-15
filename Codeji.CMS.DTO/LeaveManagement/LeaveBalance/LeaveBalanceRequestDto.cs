@@ -6,7 +6,7 @@ public class LeaveBalanceRequestDto
 {
     public string? Id { get; set; }
     public string EmployeeId { get; set; }
-    public DateTime Year { get; set; }
+    public DateTime? Year { get; set; } = DateTime.UtcNow;
     public List<LeaveTypeBalance> LeaveTypeBalances { get; set; }
 }
 public class LeaveTypeBalance {
