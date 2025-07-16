@@ -9,6 +9,12 @@ public static class NotificationMessageTemplate
         {
             NotificationTypes.Notice =>
                 $"New notice posted",
+            NotificationTypes.LeaveRequest =>
+                "New leave request",
+            NotificationTypes.LeaveRequestApproved =>
+                "Leave request approved",
+            NotificationTypes.LeaveRequestReject =>
+                "Leave request rejected",
             _ => "You have new notification",
         };
     }

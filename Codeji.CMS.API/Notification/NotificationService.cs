@@ -16,6 +16,6 @@ public class NotificationService : INotificationService
     // hub methods are called by connected clients
     public Task SendNoticeNotificationToUser(string userId, NotificationViewModel model)
     {
-        return hubContext.Clients.User(userId).SendAsync("noticeNofity", model);
+        return hubContext.Clients.User(userId).SendAsync("notification", model);
     }
 }

@@ -58,7 +58,9 @@
         public enum NotificationTypes
         {
             Notice = 1,
-            Leave = 2
+            LeaveRequest = 2,
+            LeaveRequestApproved = 3,
+            LeaveRequestReject = 4
         }
 
         public enum HolidayTypes

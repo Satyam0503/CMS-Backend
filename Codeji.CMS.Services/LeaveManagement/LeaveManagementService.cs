@@ -11,10 +11,12 @@ using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Holidays;
 using Codeji.CMS.Repository.Entities.Leave;
+using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
+using EllipticCurve.Utils;
 using Microsoft.AspNetCore.Http;
 
 namespace Codeji.CMS.Services.LeaveManagement;
@@ -22,6 +24,7 @@ namespace Codeji.CMS.Services.LeaveManagement;
 public class LeaveManagementService : ILeaveManagementService
 {
     private readonly IMongoDbRepository<LeaveTypes> _leaveTypeRepo;
+    private readonly IMongoDbRepository<Roles> _roleRepository;
     private readonly IMongoDbRepository<EmpUser> _empUser;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IMongoDbRepository<LeaveBalance> _leaveBalance;
@@ -37,7 +40,8 @@ public class LeaveManagementService : ILeaveManagementService
     IHttpContextAccessor httpContextAccessor, IMapper mapper,
     INotificationService notificationService,
     IMongoDbRepository<Notifications> notificationsRepo,
-    IMongoDbRepository<UserNotifications> userNotificationsRepo)
+    IMongoDbRepository<UserNotifications> userNotificationsRepo,
+    IMongoDbRepository<Roles> roleRepository)
     {
         _leaveTypeRepo = leaveTypeRepo;
         _httpContextAccessor = httpContextAccessor;
@@ -48,6 +52,7 @@ public class LeaveManagementService : ILeaveManagementService
         _notificationService = notificationService;
         _notificationsRepo = notificationsRepo;
         _userNotificationsRepo = userNotificationsRepo;
+        _roleRepository = roleRepository;
     }
 
     public async Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto)
@@ -244,11 +249,10 @@ public class LeaveManagementService : ILeaveManagementService
         List<string> empId = !string.IsNullOrEmpty(leaveBalanceFilter.EmployeeName) ? (await _empUser.GetAll(e => e.FirstName.ToLower().Contains(leaveBalanceFilter.EmployeeName) || e.LastName.ToLower().Contains(leaveBalanceFilter.EmployeeName))).Select(e => e.UserId).ToList() : null;
         Expression<Func<LeaveBalance, bool>> whereCondition = l =>
         (string.IsNullOrEmpty(leaveBalanceFilter.EmployeeName) || empId.Contains(l.EmployeeId))
-        && (leaveBalanceFilter.Year == null || (l.Year.Year == leaveBalanceFilter.Year))
-        ;
+        && (leaveBalanceFilter.Year == null || (l.Year.Year == leaveBalanceFilter.Year));
+        int count = await _leaveBalance.Count(whereCondition);
 
         leaveBalances = (await _leaveBalance.GetAggregateDataAsync<LeaveBalance>(whereCondition, pageNo: leaveBalanceFilter.PageNo, pageSize: leaveBalanceFilter.PageSize, isAscending: false, orderedKey: "CreatedDate")).ToList();
-        int count = leaveBalances.Count();
         List<EmpUser> users = (await _empUser.GetAll(e => CompanyId.Contains(e.CompanyId))).ToList();
         List<LeaveTypes> leaveTypes = (await _leaveTypeRepo.GetAll()).ToList();
         List<LeaveBalanceResponseDto> LeaveBalanceList = (from leaveBalance in leaveBalances
@@ -319,7 +323,6 @@ public class LeaveManagementService : ILeaveManagementService
     public async Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto)
     {
         Result result = new();
-
         var selectedLeaveType = await _leaveTypeRepo.FirstOrDefault(lt => lt.LeaveType == leaveRequestDto.LeaveType);
         if (selectedLeaveType == null)
         {
@@ -335,26 +338,22 @@ public class LeaveManagementService : ILeaveManagementService
             result.Message = "Leave balance not found for the employee";
             return result;
         }
-
-        var currentMonth = DateTime.UtcNow.Month;
-        var earnedAnnualDayTillNow = currentMonth;
+        var totalRequestedLeaveDays = leaveRequestDto.EndDate.Day - leaveRequestDto.StartDate.Day + 1;
+        bool IsValid = await LeaveRequestValidation(selectedLeaveType, selectedEmpLeaveBal, leaveRequestDto, totalRequestedLeaveDays, result);
+        if (IsValid == false)
+        {
+            return result;
+        }
 
         if (string.IsNullOrEmpty(leaveRequestDto.LeaveRequestId))
         {
-
-            var requestedDay = (leaveRequestDto.EndDate.Day - leaveRequestDto.StartDate.Day) + 1;
-            bool IsValid = await LeaveRequestValidation(selectedLeaveType, selectedEmpLeaveBal, _leave, leaveRequestDto, requestedDay, result);
-            if (IsValid == false)
-            {
-                return result;
-            }
             var leaveDomain = new LeaveRequest
             {
                 EmployeeId = leaveRequestDto.EmployeeId,
                 LeaveType = leaveRequestDto.LeaveType,
                 StartDate = leaveRequestDto.StartDate,
                 EndDate = leaveRequestDto.IsHalfDay ? leaveRequestDto.StartDate : leaveRequestDto.EndDate,
-                TotalDays = leaveRequestDto.IsHalfDay ? 0.5m : requestedDay,
+                TotalDays = leaveRequestDto.IsHalfDay ? 0.5m : totalRequestedLeaveDays,
                 IsHalfDay = leaveRequestDto.IsHalfDay,
                 Reason = leaveRequestDto.Reason,
                 ReviewedBy = "",
@@ -362,9 +361,11 @@ public class LeaveManagementService : ILeaveManagementService
             };
 
             result = await _leave.AddOne(leaveDomain);
-            LeaveNotification(leaveDomain, leaveRequestDto.Status);
+            if (result.Success)
+            {
+                LeaveNotification(leaveDomain, leaveDomain.Status);
+            }
             return result;
-
         }
         else
         {
@@ -372,16 +373,10 @@ public class LeaveManagementService : ILeaveManagementService
             var existingLeaveRequest = await _leave.FirstOrDefault(whereCondition);
             if (existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Pending)
             {
-                var requestedDay = (leaveRequestDto.EndDate.Day - leaveRequestDto.StartDate.Day) + 1;
-                bool IsValid = await LeaveRequestValidation(selectedLeaveType, selectedEmpLeaveBal, _leave, leaveRequestDto, requestedDay, result);
-                if (IsValid == false)
-                {
-                    return result;
-                }
                 existingLeaveRequest.StartDate = leaveRequestDto.StartDate;
                 existingLeaveRequest.EndDate = leaveRequestDto.EndDate;
                 existingLeaveRequest.IsHalfDay = leaveRequestDto.IsHalfDay;
-                existingLeaveRequest.TotalDays = leaveRequestDto.IsHalfDay ? 0.5m : requestedDay;
+                existingLeaveRequest.TotalDays = leaveRequestDto.IsHalfDay ? 0.5m : totalRequestedLeaveDays;
                 existingLeaveRequest.LeaveType = leaveRequestDto.LeaveType;
                 existingLeaveRequest.Reason = leaveRequestDto.Reason;
                 result = await _leave.Update(whereCondition, existingLeaveRequest);
@@ -392,10 +387,12 @@ public class LeaveManagementService : ILeaveManagementService
 
     public async Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveFilter? leaveFilter)
     {
+        int count;
         IEnumerable<LeaveRequest> leaveRequestList = [];
         if (leaveFilter == null)
         {
             leaveRequestList = await _leave.GetAll();
+            count = await _leave.Count();
         }
         else
         {
@@ -405,10 +402,9 @@ public class LeaveManagementService : ILeaveManagementService
             && (leaveFilter.StartDate == null || !leaveFilter.StartDate.HasValue || (l.StartDate >= leaveFilter.StartDate))
             && (leaveFilter.EndDate == null || !leaveFilter.EndDate.HasValue || (l.EndDate <= leaveFilter.EndDate))
             && (leaveFilter.Status == null || !leaveFilter.Status.Any() || leaveFilter.Status.Contains(l.Status));
-
+            count = await _leave.Count(whereCondition);
             leaveRequestList = (await _leave.GetAggregateDataAsync<LeaveRequest>(whereCondition, pageNo: leaveFilter.PageNo, pageSize: leaveFilter.PageSize, isAscending: false, orderedKey: "CreatedDate")).ToList();
         }
-        int count = leaveRequestList.Count();
         var users = await _empUser.GetAll();
 
         List<LeaveResponseDto> FinalLeaveRequestList = (from leave in leaveRequestList
@@ -447,11 +443,8 @@ public class LeaveManagementService : ILeaveManagementService
         Result result = new();
         Expression<Func<LeaveRequest, bool>> leaveRequestCond = lr => lr.LeaveRequestId == leaveRequestId;
         var existingLeaveRequest = await _leave.FirstOrDefault(leaveRequestCond);
+        if (existingLeaveRequest == null || status == EnumsHelper.LeaveRequestStatus.Pending || status == existingLeaveRequest.Status) return result;
 
-        if (existingLeaveRequest == null)
-        {
-            return result;
-        }
         Expression<Func<LeaveBalance, bool>> leaveBalanceCond = lb => lb.EmployeeId == existingLeaveRequest.EmployeeId;
         var selectedEmpLeaveBal = await _leaveBalance.FirstOrDefault(leaveBalanceCond);
         if (selectedEmpLeaveBal == null)
@@ -468,30 +461,32 @@ public class LeaveManagementService : ILeaveManagementService
             {
                 balance.RemainingLeave += 0.5m;
             }
-            else if (existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted)
+            if (existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted && existingLeaveRequest.IsHalfDay == false)
             {
-                balance.RemainingLeave += requestedDay;
+                balance.RemainingLeave += existingLeaveRequest.TotalDays;
             }
             existingLeaveRequest.ReviewedBy = reviewedBy;
             existingLeaveRequest.Status = EnumsHelper.LeaveRequestStatus.Rejected;
         }
-        else
+        if (status == EnumsHelper.LeaveRequestStatus.Accepted)
         {
             if (existingLeaveRequest.IsHalfDay == true && existingLeaveRequest.Status != EnumsHelper.LeaveRequestStatus.Accepted)
             {
                 balance.RemainingLeave -= 0.5m;
             }
-            else if (existingLeaveRequest.Status != EnumsHelper.LeaveRequestStatus.Accepted)
+            if (existingLeaveRequest.Status != EnumsHelper.LeaveRequestStatus.Accepted && existingLeaveRequest.IsHalfDay == false)
             {
-                balance.RemainingLeave -= requestedDay;
+                balance.RemainingLeave -= existingLeaveRequest.TotalDays;
             }
             existingLeaveRequest.Status = EnumsHelper.LeaveRequestStatus.Accepted;
             existingLeaveRequest.ReviewedBy = reviewedBy;
         }
         await _leave.Update(leaveRequestCond, existingLeaveRequest);
         result = await _leaveBalance.Update(leaveBalanceCond, selectedEmpLeaveBal);
-
-        LeaveNotification(existingLeaveRequest, status);
+        if (result.Success)
+        {
+            LeaveNotification(existingLeaveRequest, status);
+        }
         return result;
     }
 
@@ -543,13 +538,12 @@ public class LeaveManagementService : ILeaveManagementService
     }
 
 
-    private async Task<bool> LeaveRequestValidation(LeaveTypes selectedLeaveType, LeaveBalance selectedEmpLeaveBal, IMongoDbRepository<LeaveRequest> _leave, LeaveRequestDto leaveRequestDto, int requestedDay, Result result)
+    private async Task<bool> LeaveRequestValidation(LeaveTypes selectedLeaveType, LeaveBalance selectedEmpLeaveBal, LeaveRequestDto leaveRequestDto, int requestedDay, Result result)
     {
-        var currentMonth = DateTime.UtcNow.Month;
-        var earnedAnnualDayTillNow = currentMonth;
-        var daysInLeave = (leaveRequestDto.StartDate.Date - DateTime.UtcNow.Date).TotalDays;
+        var earnedAnnualDayTillNow = DateTime.UtcNow.Month;
+        var totalAdvanceNoticeDays = (leaveRequestDto.StartDate.Date - DateTime.UtcNow.Date).TotalDays;
 
-        if (selectedLeaveType.MinAdvanceNoticeDate > 0 && selectedLeaveType.MinAdvanceNoticeDate > daysInLeave)
+        if (selectedLeaveType.MinAdvanceNoticeDate > 0 && selectedLeaveType.MinAdvanceNoticeDate > totalAdvanceNoticeDays)
         {
             result.Success = false;
             result.Message = $"Leave must be applied at least {selectedLeaveType.MinAdvanceNoticeDate} days in advance";
@@ -564,14 +558,14 @@ public class LeaveManagementService : ILeaveManagementService
             return false;
         }
 
-
+        // redefine logic
         var annualLeaveTaken = await _leave.Count(l =>
             (l.EmployeeId == leaveRequestDto.EmployeeId)
             && (l.LeaveType == leaveRequestDto.LeaveType)
             && (l.StartDate.Year == DateTime.UtcNow.Year)
             && (l.Status != EnumsHelper.LeaveRequestStatus.Rejected)
         );
-        if (selectedLeaveType.LeaveType.Equals(3)
+        if (selectedLeaveType.LeaveType.Equals(EnumsHelper.LeaveTypes.Earned)
             && (annualLeaveTaken + requestedDay) >= earnedAnnualDayTillNow)
         {
             result.Success = false;
@@ -589,73 +583,66 @@ public class LeaveManagementService : ILeaveManagementService
     }
 
 
-    private async void LeaveNotification(LeaveRequest leaveDomain, EnumsHelper.LeaveRequestStatus? status)
+    private async void LeaveNotification(LeaveRequest leaveDomain, EnumsHelper.LeaveRequestStatus status)
     {
-
         Notifications notification = new()
         {
             NotificationId = Guid.NewGuid().ToString(),
-            Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Leave),
-            Body = leaveDomain.Reason,
             TargetId = leaveDomain.LeaveRequestId,
             CreatedDateTime = DateTime.UtcNow,
-            NotificationType = EnumsHelper.NotificationTypes.Leave
-
         };
-
-        Result result1 = await _notificationsRepo.AddOne(notification);
-        if (!result1.Success)
+        List<string> targetUserIds = [];
+        if (status == EnumsHelper.LeaveRequestStatus.Pending)
         {
-            return;
+            string company_id = CurrentContext.CompanyId(_httpContextAccessor);
+            List<string> roleIds = (await _roleRepository.GetAll(x => x.CompanyId == company_id && x.RoleType == Convert.ToInt32(EnumsHelper.Roles.Administrator) || x.RoleType == Convert.ToInt32(EnumsHelper.Roles.HR))).Select(x => x.RolesId).ToList();
+            targetUserIds = (await _empUser.GetAll(x => roleIds.Contains(x.RoleId))).Select(x => x.UserId).ToList();
+            notification.Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.LeaveRequest);
+            notification.Body = leaveDomain.Reason;
+            notification.NotificationType = EnumsHelper.NotificationTypes.LeaveRequest;
         }
-        var empUser = await GetNotificationReceipent(leaveDomain, status);
-
-        List<UserNotifications> userNotifications = [];
-        foreach (var user in empUser)
+        else if (status == EnumsHelper.LeaveRequestStatus.Accepted)
         {
-            var userNotifiedId = leaveDomain.Status != EnumsHelper.LeaveRequestStatus.Pending ? user.UserId : user.ReportingManager ?? user.UserId;
+            targetUserIds.Add(leaveDomain.EmployeeId);
+            notification.Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.LeaveRequestApproved);
+            notification.Body = leaveDomain.Reason;
+            notification.NotificationType = EnumsHelper.NotificationTypes.LeaveRequestApproved;
+        }
+        else
+        {
+            targetUserIds.Add(leaveDomain.EmployeeId);
+            notification.Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.LeaveRequestReject);
+            notification.Body = leaveDomain.Reason;
+            notification.NotificationType = EnumsHelper.NotificationTypes.LeaveRequestReject;
+        }
+        if (targetUserIds.Count == 0) return;
+        Result result1 = await _notificationsRepo.AddOne(notification);
+        if (!result1.Success) return;
+        List<UserNotifications> userNotifications = [];
+        foreach (var user in targetUserIds)
+        {
             UserNotifications userNotification = new()
             {
                 UserNotificationId = Guid.NewGuid().ToString(),
-                UserId = userNotifiedId,
+                UserId = user,
                 NotificationId = notification.NotificationId,
                 IsRead = false,
                 CreatedDateTime = DateTime.UtcNow,
                 IsDeleted = false
             };
             userNotifications.Add(userNotification);
-            await _notificationService.SendNoticeNotificationToUser(userNotifiedId, new NotificationViewModel()
+            await _notificationService.SendNoticeNotificationToUser(user, new NotificationViewModel()
             {
                 Title = notification.Title,
                 Body = notification.Body,
                 IsRead = false,
                 SentDateTime = DateTime.UtcNow,
-                SentBy = CurrentContext.UserId(_httpContextAccessor),
                 TargetId = notification.TargetId,
-                NotificationTypes = EnumsHelper.NotificationTypes.Leave,
+                NotificationTypes = notification.NotificationType,
                 UserNotificationId = userNotification.UserNotificationId
             });
         }
         await _userNotificationsRepo.AddMany(userNotifications);
     }
-
-
-    private async Task<IEnumerable<EmpUser>> GetNotificationReceipent(LeaveRequest leaveDomain, EnumsHelper.LeaveRequestStatus? status)
-    {
-        if (status != EnumsHelper.LeaveRequestStatus.Pending)
-        {
-            return await _empUser.GetAll(x => x.UserId == leaveDomain.EmployeeId);
-        }
-
-        var employee = await _empUser.FirstOrDefault(e => e.UserId == leaveDomain.EmployeeId);
-        if (employee != null && !string.IsNullOrEmpty(employee.ReportingManager)) // sent to reporting manager if it exists
-        {
-            return await _empUser.GetAll(x => x.UserId == leaveDomain.EmployeeId);
-        }
-
-        const string HRRoleId = "24ce1419-6524-49d5-a3ee-99a914d63fb4";
-        return await _empUser.GetAll(x => x.RoleId == HRRoleId);
-    }
-
-
 }
+
