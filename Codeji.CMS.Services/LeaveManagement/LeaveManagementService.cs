@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Threading.Tasks;
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Leave.LeaveRequest;
@@ -202,14 +203,14 @@ public class LeaveManagementService : ILeaveManagementService
             result.Message = "Employee Doesn't Exists";
             return result;
         }
-        if (InitializeRemainingBalance(leaveBalanceRequestDto) == false)
+        IEnumerable<LeaveTypes> leaveTypes = await _leaveTypeRepo.GetAll();
+        if (ValidateLeaveBalance(leaveBalanceRequestDto, result, leaveTypes) == false)
         {
-            result.Message = "Remaining Leave Should Be Less Than Maximum Leave";
             return result;
         }
-        IEnumerable<LeaveTypes> leaveTypes = await _leaveTypeRepo.GetAll();
-        if (LeaveBalanceValidation(leaveBalanceRequestDto, result, leaveTypes) == false)
+        if (await InitializeLeaveBalance(leaveBalanceRequestDto, result) == false)
         {
+            result.Message = "Remaining Leave Should Be Less Than Maximum Leave";
             return result;
         }
         if (string.IsNullOrEmpty(leaveBalanceRequestDto.Id))
@@ -236,7 +237,6 @@ public class LeaveManagementService : ILeaveManagementService
             existingLeaveBalance.LeaveTypeBalances = leaveBalanceRequestDto.LeaveTypeBalances;
             result = await _leaveBalance.Update(whereCondition, existingLeaveBalance);
         }
-
         return result;
     }
 
@@ -453,7 +453,6 @@ public class LeaveManagementService : ILeaveManagementService
         }
         var balance = selectedEmpLeaveBal.LeaveTypeBalances.FirstOrDefault(lt => lt.LeaveType == existingLeaveRequest.LeaveType);
 
-        var requestedDay = (existingLeaveRequest.EndDate.Day - existingLeaveRequest.StartDate.Day) + 1;
         var reviewedBy = CurrentContext.UserId(_httpContextAccessor);
         if (status == EnumsHelper.LeaveRequestStatus.Rejected)
         {
@@ -500,43 +499,72 @@ public class LeaveManagementService : ILeaveManagementService
         return result;
     }
 
-    private bool InitializeRemainingBalance(LeaveBalanceRequestDto leaveBalanceRequestDto)
+    private async Task<bool> InitializeLeaveBalance(LeaveBalanceRequestDto leaveBalanceRequestDto, Result result)
     {
-        foreach (var leaveType in leaveBalanceRequestDto.LeaveTypeBalances)
+        if (string.IsNullOrEmpty(leaveBalanceRequestDto.Id))
         {
-            if (leaveType.MaximumLeave < leaveType.RemainingLeave)
+            // add logic
+            foreach (var leaveTypeBalance in leaveBalanceRequestDto.LeaveTypeBalances)
             {
+                if (leaveTypeBalance.RemainingLeave is null) leaveTypeBalance.RemainingLeave = leaveTypeBalance.MaximumLeave;
+            }
+        }
+        else
+        {
+            // updateLogic
+            LeaveBalance? empLeaveBalances = await _leaveBalance.FirstOrDefault(lb => lb.Id == leaveBalanceRequestDto.Id && lb.Year.Year == DateTime.UtcNow.Year);
+            if (empLeaveBalances is null)
+            {
+                result.Success = false;
+                result.Message = "Leave Balance doesn't exist for employee";
                 return false;
             }
-            else if (leaveType.RemainingLeave == null)
+            foreach (var leaveTypeBalance in leaveBalanceRequestDto.LeaveTypeBalances)
             {
-                leaveType.RemainingLeave = leaveType.MaximumLeave;
+                LeaveTypeBalance? existingLeaveBalance = empLeaveBalances.LeaveTypeBalances.Find(lb => lb.LeaveType == leaveTypeBalance.LeaveType);
+                if (existingLeaveBalance is null)
+                {
+                    leaveTypeBalance.RemainingLeave = leaveTypeBalance.MaximumLeave;
+                }
+                else if (existingLeaveBalance.MaximumLeave == leaveTypeBalance.MaximumLeave)
+                {
+                    leaveTypeBalance.RemainingLeave = existingLeaveBalance.RemainingLeave;
+                }
+                else if (leaveTypeBalance.MaximumLeave > existingLeaveBalance.MaximumLeave)
+                {
+                    leaveTypeBalance.RemainingLeave = existingLeaveBalance.RemainingLeave + leaveTypeBalance.MaximumLeave - existingLeaveBalance.MaximumLeave;
+                }
+                else
+                {
+                    decimal leaveTaken = (decimal)(existingLeaveBalance.MaximumLeave - existingLeaveBalance.RemainingLeave);
+                    leaveTaken = Math.Max(leaveTaken, 0);
+                    leaveTypeBalance.RemainingLeave = leaveTaken > 0 ? Math.Max(leaveTypeBalance.MaximumLeave - leaveTaken, 0) : leaveTypeBalance.MaximumLeave;
+                }
             }
         }
         return true;
     }
 
-    private bool LeaveBalanceValidation(LeaveBalanceRequestDto leaveBalanceRequestDto, Result result, IEnumerable<LeaveTypes> leaveTypes)
+    private static bool ValidateLeaveBalance(LeaveBalanceRequestDto leaveBalanceRequestDto, Result result, IEnumerable<LeaveTypes> leaveTypes)
     {
-        foreach (var leavetype in leaveBalanceRequestDto.LeaveTypeBalances)
+        foreach (var leaveTypeBalance in leaveBalanceRequestDto.LeaveTypeBalances)
         {
-            var leave = leaveTypes.FirstOrDefault(lt => lt.LeaveType == leavetype.LeaveType);
-            if (leave == null)
+            LeaveTypes? leaveType = leaveTypes.FirstOrDefault(lt => lt.LeaveType == leaveTypeBalance.LeaveType && lt.IsActive);
+            if (leaveType is null)
             {
                 result.Success = false;
                 result.Message = "Leave Type Not Exists";
                 return false;
             }
-            if (leavetype.MaximumLeave > leave.MaxLeaveDays)
+            else if (leaveType.MaxLeaveDays < leaveTypeBalance.MaximumLeave)
             {
                 result.Success = false;
-                result.Message = $"Maximum Leave For {leavetype.LeaveType} is greater than maximum allowed leave days ";
+                result.Message = $"Maximum Leave For {leaveTypeBalance.LeaveType} is greater than maximum allowed leave days ";
                 return false;
             }
         }
         return true;
     }
-
 
     private async Task<bool> LeaveRequestValidation(LeaveTypes selectedLeaveType, LeaveBalance selectedEmpLeaveBal, LeaveRequestDto leaveRequestDto, int requestedDay, Result result)
     {

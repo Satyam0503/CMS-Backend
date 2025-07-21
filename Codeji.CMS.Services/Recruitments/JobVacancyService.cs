@@ -38,9 +38,7 @@ namespace Codeji.CMS.Services.Recruitments
                 MethodResult = jobVacancy,
                 Message = "Vacacny Added Successfully",
                 Success = true
-
             };
-
         }
         public async Task<Result<JobVacancyModel>> EditJobVacancy(JobVacancyModel jobVacancy, string jobId)
         {
@@ -75,7 +73,10 @@ namespace Codeji.CMS.Services.Recruitments
             }
             else
             {
-                Expression<Func<JobVacancy, bool>> whereCondition = x => x.Title.Contains(model.Search, StringComparison.CurrentCultureIgnoreCase);
+                Expression<Func<JobVacancy, bool>> whereCondition = x =>
+                model.JobTypes.Count == 0 || model.JobTypes.Contains(x.JobType) &&
+                !model.Status.HasValue || x.Status == model.Status.Value &&
+                x.Title.Contains(model.Search, StringComparison.CurrentCultureIgnoreCase);
                 jobList = await _jobVacancyRepo.GetAggregateDataAsync<JobVacancy>(whereCondition, isAscending: false, orderedKey: "CreatedDate", pageSize: model.Records, pageNo: model.PageNo);
                 count = await _jobVacancyRepo.Count(whereCondition);
             }
