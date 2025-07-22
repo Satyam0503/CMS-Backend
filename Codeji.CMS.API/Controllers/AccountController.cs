@@ -15,6 +15,7 @@ using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.Constraints;
+using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Antiforgery;
@@ -213,16 +214,21 @@ namespace Codeji.CMS.API.Controllers
 
             Result result = new Result();
             if (string.IsNullOrEmpty(applicantRegisterModel.Email))
+            {
                 return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
+            }
             Result ApplicantId = await _applicantsServices.GetApplicantsExistingId(applicantRegisterModel.Email);
             if (ApplicantId.Success)
             {
                 applicantRegisterModel.ActivityType = string.IsNullOrEmpty(ApplicantId.Message)
-                ? Utility.Enums.EnumsHelper.ActivityType.New :
-                Utility.Enums.EnumsHelper.ActivityType.ReApply;
+                ? EnumsHelper.ActivityType.New :
+                EnumsHelper.ActivityType.ReApply;
+                applicantRegisterModel.Status = EnumsHelper.ActivityStatus.Active;
                 result = await _applicantsServices.RegisterApplicants(applicantRegisterModel);
-                result.Success = true;
-                result.Message = "Your application has been submitted successfully";
+                if (result.Success)
+                {
+                    result.Message = "Your application has been submitted successfully";
+                }
             }
             else
             {

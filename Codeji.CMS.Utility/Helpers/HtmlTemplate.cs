@@ -2,11 +2,7 @@
 {
     public class HtmlTemplate
     {
-        public HtmlTemplate()
-        {
-
-        }
-        public string Render(string htmlTemplate, object values)
+        public static string Render(string htmlTemplate, object values)
         {
             string output = htmlTemplate;
             foreach (System.Reflection.PropertyInfo p in values.GetType().GetProperties())

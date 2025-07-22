@@ -151,8 +151,7 @@ namespace Codeji.CMS.Services.Employees
 
             //Acknowledgement Email Logic 
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.CreateNewPasswordMail);
-            HtmlTemplate htmlTemplate = new HtmlTemplate();
-            string replacedBody = htmlTemplate.Render(emailContent.body, new
+            string replacedBody = HtmlTemplate.Render(emailContent.body, new
             {
                 RecipientName = employee.FirstName + " " + employee.LastName,
                 PasswordCreationLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={userId}",
@@ -312,14 +311,13 @@ namespace Codeji.CMS.Services.Employees
             }
             Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == emp.CompanyId);
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ResetPassword);
-            HtmlTemplate htmlTemplate = new HtmlTemplate();
-            string replacedBody = htmlTemplate.Render(emailContent?.body, new
+            string replacedBody = HtmlTemplate.Render(emailContent?.body, new
             {
                 EmployeeName = emp.FirstName + " " + emp.LastName,
                 PasswordResetLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={emp.UserId}",
                 CompanyName = company != null ? company.CompanyName : "",
             });
-            string replacedSubject = htmlTemplate.Render(emailContent.subject, new
+            string replacedSubject = HtmlTemplate.Render(emailContent.subject, new
             {
                 CompanyName = company != null ? company.CompanyName : ""
             });

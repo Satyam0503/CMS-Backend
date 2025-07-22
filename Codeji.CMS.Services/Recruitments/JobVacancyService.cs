@@ -88,8 +88,6 @@ namespace Codeji.CMS.Services.Recruitments
             JobVacancy? data = await _jobVacancyRepo.FirstOrDefault(x => x.JobId == vacancyId);
             if (data == null) return null;
             var result = _mapper.Map<JobVacancyModel>(data);
-            int TotalSubmissions = await _applicantRepository.Count(x => x.VacancyId == data.JobId);
-            result.TotalSubmissions = TotalSubmissions;
             return result;
         }
 

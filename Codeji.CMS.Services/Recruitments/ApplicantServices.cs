@@ -80,32 +80,11 @@ namespace Codeji.CMS.Services.Recruitments
                 CreatedBy = ""
             };
             Result result = await _applicantRepository.AddOne(applicant);
-
             //Acknowledgement Email Logic
-            var vacancy = await _jobVacancyService.GetVacancyById(applicantRegisterModel.VacancyId);
-            var currentUser = _middlewareService.GetUserById(CurrentContext.UserId(_httpContextAccessor));
-
-            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ApplyNowMailToApplicant);
-            HtmlTemplate htmlTemplate = new HtmlTemplate();
-            string replacedBody = htmlTemplate.Render(emailContent?.body ?? string.Empty, new
+            if (result.Success)
             {
-                CandidateName = applicantRegisterModel.FirstName + " " + applicantRegisterModel.LastName,
-                JobTitle = vacancy != null ? vacancy.Title : string.Empty
-            });
-
-            _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
-            {
-                _middlewareService.EmailSendAndSave(new EmpEmailLogs()
-                {
-                    UserTo = applicant.Email,
-                    Subject = emailContent.subject,
-                    Body = replacedBody,
-                    EmailLogType = EnumsHelper.MailType.ApplyNowMailToApplicant,
-                    Email = applicant.Email,
-                    UserFrom = currentUser != null ? currentUser.Email : string.Empty
-                });
-            }, priority: 1);
-
+                await SendEmailToApplicant(applicantRegisterModel);
+            }
             return result;
         }
 
@@ -122,19 +101,21 @@ namespace Codeji.CMS.Services.Recruitments
                     Message = "Applicant Not Found"
                 };
             }
-            entity.UpdatedBy = "";
             entity.UpdatedDate = DateTime.Now;
             entity.Experience = model.Experience;
             entity.VacancyId = model.VacancyId;
             entity.FirstName = model.FirstName;
             entity.LastName = model.LastName;
             entity.Phone = model.Phone;
-            //entity.VacancyName = model.VacancyName;
             entity.VacancyId = model.VacancyId;
             entity.ActivityType = model.ActivityType;
             entity.Status = model.Status;
             entity.State = model.State;
             Result res = await _applicantRepository.Update(whereCondition, entity);
+            if (res.Success)
+            {
+                await SendEmailToApplicant(model);
+            }
             return res;
         }
 
@@ -169,7 +150,6 @@ namespace Codeji.CMS.Services.Recruitments
             return res?.ResumeUrl ?? string.Empty;
         }
 
-
         //Get Applicant List Using Filter Change this logic in Future
         public async Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters? filters)
         {
@@ -183,7 +163,7 @@ namespace Codeji.CMS.Services.Recruitments
             else
             {
                 Expression<Func<Applicant, bool>> whereCondition = x =>
-                (!filters.FilterFrom.HasValue || (x.CreatedDate.HasValue && x.CreatedDate >= filters.FilterFrom && x.CreatedDate <= filters.FilterTo))
+                ((!filters.FilterFrom.HasValue || filters.FilterFrom.Value <= x.CreatedDate) && (!filters.FilterTo.HasValue || filters.FilterTo >= x.CreatedDate))
                 && (!filters.ActivityTypes.Any() || filters.ActivityTypes.Contains(x.ActivityType))
                 && (!filters.Status.Any() || filters.Status.Contains(x.Status))
                 && (!filters.VacancyIds.Any() || filters.VacancyIds.Contains(x.VacancyId))
@@ -361,6 +341,40 @@ namespace Codeji.CMS.Services.Recruitments
                 TotalRecords = logCount,
             };
             return result;
+        }
+
+        private async Task SendEmailToApplicant(ApplicantAddEditModel applicant)
+        {
+            var vacancy = await _jobVacancyService.GetVacancyById(applicant.VacancyId);
+            if (vacancy is null) return;
+            var currentUser = _middlewareService.GetUserById(CurrentContext.UserId(_httpContextAccessor));
+            MailTemplate? emailContent = applicant.ActivityType switch
+            {
+                EnumsHelper.ActivityType.New => await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ApplyNowMailToApplicant),
+                EnumsHelper.ActivityType.Selected => await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.SelectedMail),
+                EnumsHelper.ActivityType.Rejected => await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.RejectedMail),
+                _ => null
+            };
+            if (emailContent == null) return;
+
+            string emailBody = HtmlTemplate.Render(emailContent.body, new
+            {
+                CandidateName = applicant.FirstName + " " + applicant.LastName,
+                JobTitle = vacancy.Title,
+            });
+
+            _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
+            {
+                _middlewareService.EmailSendAndSave(new EmpEmailLogs()
+                {
+                    UserTo = applicant.Email,
+                    Subject = emailContent.subject ?? "",
+                    Body = emailBody,
+                    EmailLogType = emailContent.mailType,
+                    Email = applicant.Email,
+                    UserFrom = currentUser != null ? currentUser.Email : string.Empty
+                });
+            }, priority: 1);
         }
     }
 }
