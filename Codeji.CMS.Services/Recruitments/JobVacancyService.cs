@@ -12,6 +12,7 @@ namespace Codeji.CMS.Services.Recruitments
     public class JobVacancyService : IJobVacancy
     {
         readonly IMongoDbRepository<JobVacancy> _jobVacancyRepo;
+        readonly IMongoDbRepository<Applicant> _applicantRepository;
         readonly IMapper _mapper;
 
         public JobVacancyService(IMongoDbRepository<JobVacancy> jobVacancyRepo, IMapper mapper)
@@ -61,30 +62,17 @@ namespace Codeji.CMS.Services.Recruitments
             };
         }
 
-        public async Task<Result<JobVacancyModel>> GetAllVacancy(JobRequestModel? model, bool? active)
+        public async Task<Result<JobVacancyModel>> GetAllVacancy(JobRequestModel model)
         {
             IEnumerable<JobVacancy> jobList = [];
             int count = 0;
+            Expression<Func<JobVacancy, bool>> whereCondition = x =>
+           (model.JobTypes.Count == 0 || model.JobTypes.Contains(x.JobType)) &&
+            (model.Status == null || x.Status == model.Status) &&
+            (string.IsNullOrEmpty(model.Search) || x.Title.Contains(model.Search, StringComparison.CurrentCultureIgnoreCase));
 
-            if (model is null)
-            {
-                jobList = (await _jobVacancyRepo.GetAll()).OrderByDescending(x => x.CreatedDate);
-                count = jobList.Count();
-            }
-            else
-            {
-                Expression<Func<JobVacancy, bool>> whereCondition = x =>
-                model.JobTypes.Count == 0 || model.JobTypes.Contains(x.JobType) &&
-                !model.Status.HasValue || x.Status == model.Status.Value &&
-                x.Title.Contains(model.Search, StringComparison.CurrentCultureIgnoreCase);
-                jobList = await _jobVacancyRepo.GetAggregateDataAsync<JobVacancy>(whereCondition, isAscending: false, orderedKey: "CreatedDate", pageSize: model.Records, pageNo: model.PageNo);
-                count = await _jobVacancyRepo.Count(whereCondition);
-            }
-            if (active.HasValue)
-            {
-                jobList = jobList.Where(x => x.Status == active.Value);
-                count = jobList.Count();
-            }
+            jobList = await _jobVacancyRepo.GetAggregateDataAsync<JobVacancy>(whereCondition, isAscending: false, orderedKey: "CreatedDate", pageSize: model.Records, pageNo: model.PageNo);
+            count = await _jobVacancyRepo.Count(whereCondition);
             List<JobVacancyModel> data = _mapper.Map<List<JobVacancyModel>>(jobList);
             Result<JobVacancyModel> result = new Result<JobVacancyModel>()
             {
@@ -98,11 +86,11 @@ namespace Codeji.CMS.Services.Recruitments
         public async Task<JobVacancyModel?> GetVacancyById(string vacancyId)
         {
             JobVacancy? data = await _jobVacancyRepo.FirstOrDefault(x => x.JobId == vacancyId);
-            if (data == null)
-            {
-                return null;
-            }
-            return _mapper.Map<JobVacancyModel>(data);
+            if (data == null) return null;
+            var result = _mapper.Map<JobVacancyModel>(data);
+            int TotalSubmissions = await _applicantRepository.Count(x => x.VacancyId == data.JobId);
+            result.TotalSubmissions = TotalSubmissions;
+            return result;
         }
 
         public async Task<Result> DeleteJobVacancy(string vacancyId)

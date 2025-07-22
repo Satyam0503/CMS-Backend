@@ -8,5 +8,6 @@
         public int JobType { get; set; }
         public bool Status { get; set; }
         public string Description { get; set; }
+        public int? TotalSubmissions { get; set; } = null;
     }
 }

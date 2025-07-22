@@ -45,9 +45,9 @@ public class JobVacancyController : BaseApiController
     [Route("GetAllVacancy")]
     [HttpPost]
     [AllowAnonymous]
-    public async Task<Result<JobVacancyModel>> GetAllVacancy(JobRequestModel? model, [FromQuery] bool? active)
+    public async Task<Result<JobVacancyModel>> GetAllVacancy(JobRequestModel model)
     {
-        Result<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy(model, active);
+        Result<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy(model);
         return data;
     }
 
