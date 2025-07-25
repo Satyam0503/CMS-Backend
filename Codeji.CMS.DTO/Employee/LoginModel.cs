@@ -5,9 +5,6 @@ namespace Codeji.CMS.DTO.Employee
 {
     public class LoginModel
     {
-        public LoginModel()
-        {
-        }
         [Required]
         [EmailAddress]
         public string Email { get; set; }

@@ -9,6 +9,7 @@ using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.ApplyNow;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
+using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
@@ -120,46 +121,15 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("account/login")]
         [AllowAnonymous]
-        public async Task<Result> Login([FromBody] LoginModel model)
+        public async Task<Result<TokenResponseDto>> Login([FromBody] LoginModel model)
         {
-            Result result = new Result();
-            bool isEmailExist = await _employeeService.IsEmailExist(model.Email);
-            if (!isEmailExist)
-            {
-                result.Message = "Incorrect Credentials";
-                result.Success = false;
-                result.StatusCode = 400;
-                return result;
-
-            }
+            Result<TokenResponseDto> result = new();
             if (!ModelState.IsValid)
-                return result;
-
-            string token = await _employeeService.GetVerificationToken(model.Email, model.Password);
-            if (string.IsNullOrEmpty(token))
             {
-                result.Message = "Email or Password not matched.";
                 result.Success = false;
-                result.StatusCode = 404;
                 return result;
             }
-            if (token == "false")
-            {
-                result.Message = "Please Verify Email First";
-                result.Success = false;
-                result.StatusCode = 404;
-                return result;
-            }
-            if (token == "No Access")
-            {
-                result.Message = "MESSAGE.APPLICATION.ACCESS_DENIED";
-                result.Success = false;
-                result.StatusCode = 401;
-                return result;
-
-            }
-            result.Message = token;
-            result.Success = true;
+            result = await _employeeService.VerifyAndGenerateToken(model);
             return result;
         }
 

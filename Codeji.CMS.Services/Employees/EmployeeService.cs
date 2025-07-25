@@ -53,6 +53,7 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<EmpWorkHistory> _empWorkHistoryRepository;
         readonly IMongoDbRepository<UserNotifications> _userNotificationRepository;
         readonly IMongoDbRepository<Notifications> _notificationsRepository;
+        readonly IMongoDbRepository<RefreshToken> _refreshTokenRepository;
         readonly IHttpContextAccessor _httpContextAccessor;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
@@ -74,7 +75,8 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<PasswordResetTokens> passwordResetTokens,
             IMongoDbRepository<EmpWorkHistory> empWorkHistoryRepository,
             IMongoDbRepository<UserNotifications> userNotificationRepository,
-            IMongoDbRepository<Notifications> notificationsRepository
+            IMongoDbRepository<Notifications> notificationsRepository,
+            IMongoDbRepository<RefreshToken> refreshTokenRepository
             )
         {
             _employeeRepository = employeeRepository;
@@ -98,6 +100,7 @@ namespace Codeji.CMS.Services.Employees
             _empWorkHistoryRepository = empWorkHistoryRepository;
             _userNotificationRepository = userNotificationRepository;
             _notificationsRepository = notificationsRepository;
+            _refreshTokenRepository = refreshTokenRepository;
         }
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
@@ -390,24 +393,62 @@ namespace Codeji.CMS.Services.Employees
             return result;
         }
         // Logic for Login User and Employee by Email and Password
-        public async Task<string> GetVerificationToken(string email, string password)
+        public async Task<Result<TokenResponseDto>> VerifyAndGenerateToken(LoginModel model)
         {
-            EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
-            Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == user.RoleId);
-            if (role.HasAppAccess)
+            Result<TokenResponseDto> result = new();
+            bool isEmailExist = await IsEmailExist(model.Email);
+            if (!isEmailExist)
             {
-                if (string.IsNullOrEmpty(user.Password))
-                {
-                    return "false";
-                }
-                if (user != null && AuthenticationHandler.VerifyPassword(password, user.Password))
-                {
-                    List<string> roles = new List<string>() { "admin", "employee" };
-                    return AuthenticationHandler.GenerateJwtToken(user.UserId, user.CompanyId, user.RoleId, roles);
-                }
-                return string.Empty;
+                result.Message = "Invalid credentials";
+                result.Success = false;
+                result.StatusCode = 400;
+                return result;
             }
-            return "No Access";
+            EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase));
+            if (!user.IsEmailVerified)
+            {
+                result.Message = "Please Verify Email First";
+                result.Success = false;
+                return result;
+            }
+            Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == user.RoleId);
+            if (!role.HasAppAccess)
+            {
+                result.Message = "MESSAGE.APPLICATION.ACCESS_DENIED";
+                result.Success = false;
+                result.StatusCode = 403;
+                return result;
+            }
+            bool isPasswordValid = AuthenticationHandler.VerifyPassword(model.Password, user.Password);
+            if (!isPasswordValid)
+            {
+                result.Message = "Invalid credentials";
+                result.Success = false;
+                result.StatusCode = 400;
+                return result;
+            }
+            List<string> roles = new List<string>() { "admin", "employee" };
+            string token = AuthenticationHandler.GenerateJwtToken(user.UserId, user.CompanyId, user.RoleId, roles);
+            string refreshToken = TokenHelper.GenerateToken();
+            string hashedRefreshToken = TokenHelper.ComputeSha256Hash(refreshToken);
+
+            RefreshToken refreshTokenEntity = new()
+            {
+                Id = Guid.NewGuid().ToString(),
+                UserId = user.UserId,
+                Token = hashedRefreshToken,
+                ExpireAt = DateTime.UtcNow.AddDays(30),
+                CreatedAt = DateTime.UtcNow
+            };
+            var result2 = await _refreshTokenRepository.AddOne(refreshTokenEntity);
+            result.MethodResult = new TokenResponseDto()
+            {
+                Token = token,
+                RefreshToken = refreshToken
+            };
+            result.Success = true;
+            result.StatusCode = 200;
+            return result;
         }
 
         public async Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId, string companyId)

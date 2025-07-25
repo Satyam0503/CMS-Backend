@@ -22,7 +22,7 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<bool> IsEmpExistAndActive(string email);
                 Task<Result> GenerateTokenAndSendEmail(string email);
                 Task<bool> ResetPassword(string userId, string password, string oldPassword = "");
-                Task<string> GetVerificationToken(string email, string password);
+                Task<Result<TokenResponseDto>> VerifyAndGenerateToken(LoginModel model);
                 Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId, string companyId);
                 Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId);
                 Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);
