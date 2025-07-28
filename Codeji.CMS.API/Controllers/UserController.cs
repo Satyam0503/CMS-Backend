@@ -9,6 +9,7 @@ using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.Account.Interface;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
@@ -21,12 +22,14 @@ namespace Codeji.CMS.API.Controllers;
 [Authorize]
 public class UserController : BaseApiController
 {
+    readonly IAccountServices _accountServices;
     private readonly IEmployeeService _employeeService;
     private readonly IHttpContextAccessor _httpContextAccessor;
-    public UserController(IHttpContextAccessor httpContextAccessor, IEmployeeService employeeService)
+    public UserController(IHttpContextAccessor httpContextAccessor, IEmployeeService employeeService, IAccountServices accountServices)
     {
         _httpContextAccessor = httpContextAccessor;
         _employeeService = employeeService;
+        _accountServices = accountServices;
     }
 
     [Route("AddEmployees")]
@@ -76,7 +79,7 @@ public class UserController : BaseApiController
     {
         Result result = new Result();
         string userId = CurrentContext.UserId(_httpContextAccessor);
-        result.Success = await _employeeService.ResetPassword(userId, passwordModel.Password, passwordModel.OldPassword);
+        result.Success = await _accountServices.ResetPassword(userId, passwordModel.Password, passwordModel.OldPassword);
         return result;
     }
 

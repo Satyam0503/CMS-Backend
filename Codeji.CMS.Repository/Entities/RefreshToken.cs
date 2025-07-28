@@ -9,5 +9,7 @@ public class RefreshToken
     public required string Token { get; set; }
     public required string UserId { get; set; }
     public required DateTime ExpireAt { get; set; }
-    public required DateTime CreatedAt { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public bool IsRevoked { get; set; } = false;
+    public DateTime? RevokedAt { get; set; }
 }

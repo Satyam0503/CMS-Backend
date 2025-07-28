@@ -10,6 +10,7 @@ using Codeji.CMS.DTO.RequestModels.ApplyNow;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.DTO.ResponseModel;
+using Codeji.CMS.Services.Account.Interface;
 using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
@@ -31,6 +32,7 @@ namespace Codeji.CMS.API.Controllers
     [Route("api")]
     public class AccountController : BaseApiController
     {
+        private readonly IAccountServices _accountService;
         private readonly IAntiforgery _antiforgery;
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly ICompanyService _companyService;
@@ -49,7 +51,9 @@ namespace Codeji.CMS.API.Controllers
             IMapper mapper,
             HttpClient httpClient,
             IPriorityTaskQueue priorityTaskQueue,
-            IMiddlewareService middlewareService)
+            IMiddlewareService middlewareService,
+            IAccountServices accountServices
+            )
         {
             _antiforgery = antiforgery;
             _httpContextAccessor = httpContextAccessor;
@@ -59,6 +63,7 @@ namespace Codeji.CMS.API.Controllers
             _companyService = companyService;
             _priorityTaskQueue = priorityTaskQueue;
             _middlewareService = middlewareService;
+            _accountService = accountServices;
         }
         /// This block contains pure anonymous API
         [HttpGet]
@@ -129,7 +134,35 @@ namespace Codeji.CMS.API.Controllers
                 result.Success = false;
                 return result;
             }
-            result = await _employeeService.VerifyAndGenerateToken(model);
+            result = await _accountService.VerifyAndGenerateToken(model);
+            return result;
+        }
+
+        [AllowAnonymous]
+        [HttpPost]
+        [Route("account/refresh-token")]
+        public async Task<Result<TokenResponseDto>> RefreshToken([FromBody] RefreshTokenRequestDto model)
+        {
+            Result<TokenResponseDto> result = new();
+            if (!ModelState.IsValid)
+            {
+                result.Success = false;
+                return result;
+            }
+            return await _accountService.RefreshToken(model);
+        }
+
+        [HttpPost]
+        [Route("account/logout")]
+        [Authorize]
+        public async Task<Result> LogOut([FromBody] string refreshToken)
+        {
+            if (string.IsNullOrEmpty(refreshToken))
+            {
+                return new Result();
+            }
+            string currentUser = CurrentContext.UserId(_httpContextAccessor);
+            var result = await _accountService.LogOut(refreshToken, currentUser);
             return result;
         }
 
@@ -158,7 +191,7 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         public async Task<Result> CreateNewPassword(CreateNewPasswordRequest model)
         {
-            Result result = await _employeeService.CreateNewPassword(model);
+            Result result = await _accountService.CreateNewPassword(model);
             return result;
         }
 
@@ -173,12 +206,12 @@ namespace Codeji.CMS.API.Controllers
             {
                 return result;
             }
-            return await _employeeService.GenerateTokenAndSendEmail(email);
+            return await _accountService.GenerateTokenAndSendEmail(email);
         }
 
+        [AllowAnonymous]
         [HttpPost]
         [Route("applicant/applyJob")]
-        [AllowAnonymous]
         public async Task<Result> RegisterApplicants([FromBody] ApplicantAddEditModel applicantRegisterModel)
         {
 

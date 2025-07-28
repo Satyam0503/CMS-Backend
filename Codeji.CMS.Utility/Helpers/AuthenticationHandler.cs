@@ -14,7 +14,7 @@ namespace Codeji.CMS.Utility.Helpers
             // Retrieve JWT settings from configuration
             IConfigurationSection jwtSettings = ConfigurationHelper.config.GetSection("jwt");
             byte[] key = Encoding.UTF8.GetBytes(jwtSettings["SecretKey"]);
-            int expiryDays = int.Parse(jwtSettings["Expiry"]);
+            int expiryMinutes = int.Parse(jwtSettings["Expiry"]);
 
             // Define claims
             List<Claim> claims = new List<Claim>
@@ -39,7 +39,8 @@ namespace Codeji.CMS.Utility.Helpers
                 issuer: ConfigManager.AppSettings.APIUrl,
                 audience: ConfigManager.AppSettings.AppUrl,
                 claims: claims,
-                expires: DateTime.UtcNow.AddDays(expiryDays),
+                // expires: DateTime.UtcNow.AddDays(expiryDays),
+                expires: DateTime.UtcNow.AddMinutes(3),
                 signingCredentials: credentials
             );
 
