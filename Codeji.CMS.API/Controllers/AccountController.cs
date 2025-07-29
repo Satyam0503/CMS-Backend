@@ -155,14 +155,14 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("account/logout")]
         [Authorize]
-        public async Task<Result> LogOut([FromBody] string refreshToken)
+        public async Task<Result> LogOut([FromBody] RefreshTokenRequestDto model)
         {
-            if (string.IsNullOrEmpty(refreshToken))
+            if (string.IsNullOrEmpty(model.RefreshToken))
             {
                 return new Result();
             }
             string currentUser = CurrentContext.UserId(_httpContextAccessor);
-            var result = await _accountService.LogOut(refreshToken, currentUser);
+            var result = await _accountService.LogOut(model.RefreshToken, currentUser);
             return result;
         }
 

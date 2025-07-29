@@ -16,6 +16,8 @@ using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
+using Codeji.CMS.Utility.middlewares;
+using Microsoft.AspNetCore.Http;
 
 namespace Codeji.CMS.Services.Account;
 
@@ -223,13 +225,8 @@ public class AccountServices : IAccountServices
         {
             Success = false
         };
-        EmpUser? empUser = await _employeeRepository.FirstOrDefault(e => e.UserId == model.UserId);
-        if (empUser == null)
-        {
-            return result;
-        }
         string hashedRequestToken = TokenHelper.ComputeSha256Hash(model.RefreshToken);
-        Expression<Func<RefreshToken, bool>> whereCondition = rt => rt.Token == hashedRequestToken && rt.UserId == model.UserId;
+        Expression<Func<RefreshToken, bool>> whereCondition = rt => rt.Token == hashedRequestToken;
         RefreshToken? storedRefreshToken = await _refreshTokenRepository.FirstOrDefault(whereCondition);
         if (storedRefreshToken == null)
         {
@@ -246,7 +243,12 @@ public class AccountServices : IAccountServices
             result.Message = "Refresh Token Expired";
             return result;
         }
-
+        EmpUser? empUser = await _employeeRepository.FirstOrDefault(x => x.UserId == storedRefreshToken.UserId);
+        if (empUser == null)
+        {
+            result.Message = "Invalid Refresh Token";
+            return result;
+        }
         string newRefreshToken = TokenHelper.GenerateToken();
         string newRefreshTokenHashed = TokenHelper.ComputeSha256Hash(newRefreshToken);
         List<string> roles = ["admin", "employee"];
