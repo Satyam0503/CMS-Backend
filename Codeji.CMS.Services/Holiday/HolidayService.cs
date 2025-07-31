@@ -92,14 +92,13 @@ public class HolidayService : IHolidayService
             Expression<Func<Holidays, bool>> whereCondition = h =>
                  (string.IsNullOrEmpty(filter.HolidayName) || h.HolidayName.ToLower().Contains(filter.HolidayName.ToLower())) &&
                  (filter.HolidayType == null || !filter.HolidayType.Any() || filter.HolidayType.Contains(h.HolidayType))
-                 &&(filter.Date == null || !filter.Date.HasValue || (h.Date>= filter.Date));
-
-            holidayList = (await _holidaysRepo.GetAggregateDataAsync<Holidays>(whereCondition,pageNo: filter.PageNo, pageSize: filter.PageSize)).ToList();
+                 && (filter.Date == null || !filter.Date.HasValue || (h.Date >= filter.Date));
+            holidayList = (await _holidaysRepo.GetAggregateDataAsync<Holidays>(whereCondition, pageNo: filter.PageNo, pageSize: filter.PageSize, isAscending: true, orderedKey: "Date")).ToList();
         }
 
         List<string> usersId = holidayList.Select(h => h.CreatedBy).ToList();
-       
-        List<EmpUser> users = (await _empUserRepo.GetAll(u=> usersId.Contains(u.UserId))).ToList();
+
+        List<EmpUser> users = (await _empUserRepo.GetAll(u => usersId.Contains(u.UserId))).ToList();
         List<HolidayRequestDto> holidayData = (from holiday in holidayList
                                                join user in users on holiday.CreatedBy equals user.UserId
                                                select new HolidayRequestDto
@@ -110,9 +109,9 @@ public class HolidayService : IHolidayService
                                                    Detail = holiday.Detail,
                                                    HolidayType = holiday.HolidayType,
                                                    CreatedAt = holiday.CreatedDate,
-                                                   CreatedBy = user.FirstName+" "+user.LastName
+                                                   CreatedBy = user.FirstName + " " + user.LastName
                                                }
-                                            ).OrderByDescending(d => d.Date).ToList();
+                                            ).ToList();
         var list = await _holidaysRepo.GetAll();
         var count = list.Count();
         return new Result<HolidayRequestDto>

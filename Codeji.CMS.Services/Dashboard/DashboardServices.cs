@@ -1,13 +1,16 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Text;
 using System.Threading.Tasks;
 using AutoMapper;
+using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Dashboard;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
@@ -21,17 +24,20 @@ namespace Codeji.CMS.Services.Dashboard
         private readonly IMongoDbRepository<EmpUser> _empUserRepository;
         private readonly IMapper _mapper;
         private readonly IHttpContextAccessor _httpContextAccessor;
+        readonly IMongoDbRepository<Applicant> _applicantRepository;
         public DashboardServices(
             IMongoDbRepository<Department> departmentRepository,
             IMongoDbRepository<EmpUser> empUserRepository,
             IHttpContextAccessor httpContextAccessor,
-            IMapper mapper)
+            IMongoDbRepository<Applicant> applicantRepository,
+        IMapper mapper)
 
         {
             _departmentRepository = departmentRepository;
             _empUserRepository = empUserRepository;
             _mapper = mapper;
             _httpContextAccessor = httpContextAccessor;
+            _applicantRepository = applicantRepository;
         }
 
         public async Task<List<AllDepartmentDetailsResponseModel>> GetAllDepartmentsDetails(string companyId)
@@ -69,6 +75,27 @@ namespace Codeji.CMS.Services.Dashboard
             return result;
 
         }
-
+        public async Task<Result<ApplicationDataResponseDto>> GetApplicationStatusData(string? vacancyId)
+        {
+            Result<ApplicationDataResponseDto> result = new();
+            List<Applicant> applicantList = [];
+            if (vacancyId != null)
+            {
+                applicantList = (await _applicantRepository.GetAll(ap => ap.VacancyId == vacancyId)).ToList();
+            }
+            applicantList = (await _applicantRepository.GetAll()).ToList();
+            if (applicantList.Count == 0) return result;
+            var groupedApplicantData = applicantList.GroupBy(ap => ap.ActivityType).Select(apg => new ApplicationStatusTypeData()
+            {
+                ActivityType = apg.Key,
+                Count = apg.Count()
+            }).ToList();
+            result.MethodResult = new ApplicationDataResponseDto()
+            {
+                TotalApplications = applicantList.Count,
+                ApplicationStatusData = groupedApplicantData
+            };
+            return result;
+        }
     }
 }

@@ -53,6 +53,14 @@ namespace Codeji.CMS.API.Controllers
         }
 
         [HttpGet]
+        [Route("GetApplicationStatusData")]
+        public async Task<Result<ApplicationDataResponseDto>> GetApplicationStatusData([FromQuery] string? vacancyId)
+        {
+            var result = await _dashboardService.GetApplicationStatusData(vacancyId);
+            return result;
+        }
+
+        [HttpGet]
         [Route("GetAllDepartmentDetails")]
         public async Task<Result<AllDepartmentDetailsResponseModel>> GetAllDepartmentDetails()
         {
