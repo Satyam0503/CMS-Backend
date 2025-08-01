@@ -83,7 +83,10 @@ namespace Codeji.CMS.Services.Dashboard
             {
                 applicantList = (await _applicantRepository.GetAll(ap => ap.VacancyId == vacancyId)).ToList();
             }
-            applicantList = (await _applicantRepository.GetAll()).ToList();
+            else
+            {
+                applicantList = (await _applicantRepository.GetAll()).ToList();
+            }
             if (applicantList.Count == 0) return result;
             var groupedApplicantData = applicantList.GroupBy(ap => ap.ActivityType).Select(apg => new ApplicationStatusTypeData()
             {

@@ -4,7 +4,7 @@ namespace Codeji.CMS.DTO.Dashboard;
 
 public class ApplicationDataResponseDto
 {
-    public int TotalApplications { get; set; }
+    public int TotalApplications { get; set; } = 0;
     public List<ApplicationStatusTypeData> ApplicationStatusData { get; set; } = [];
 }
 

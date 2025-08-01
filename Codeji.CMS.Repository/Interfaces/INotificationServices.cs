@@ -3,5 +3,5 @@ namespace Codeji.CMS.GenericRepository.Interfaces;
 
 public interface INotificationService
 {
-    Task SendNoticeNotificationToUser(string userId, NotificationViewModel notification);
+    Task SendNotificationToUser(string userId, NotificationViewModel notification);
 }

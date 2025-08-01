@@ -659,7 +659,7 @@ public class LeaveManagementService : ILeaveManagementService
                 IsDeleted = false
             };
             userNotifications.Add(userNotification);
-            await _notificationService.SendNoticeNotificationToUser(user, new NotificationViewModel()
+            await _notificationService.SendNotificationToUser(user, new NotificationViewModel()
             {
                 Title = notification.Title,
                 Body = notification.Body,

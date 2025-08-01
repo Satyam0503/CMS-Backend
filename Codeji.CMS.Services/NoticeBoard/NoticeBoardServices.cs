@@ -80,7 +80,7 @@ public class NoticeBoardServices : INoticeBoardService
                         IsDeleted = false,
                     };
                     userNotifications.Add(userNotification);
-                    await _notificationService.SendNoticeNotificationToUser(user.UserId, new NotificationViewModel()
+                    await _notificationService.SendNotificationToUser(user.UserId, new NotificationViewModel()
                     {
                         Title = notification.Title,
                         Body = notification.Body,
