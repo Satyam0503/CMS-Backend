@@ -13,13 +13,4 @@ public class HolidayRequestDto
     public string Detail { get; set; }
     public EnumsHelper.HolidayTypes HolidayType { get; set; }
     public IFormFile? HolidayImage { get; set; }
-    public string? HolidayImageUrl { get; set; }
-    public string? HolidayCoverImageUrl
-    {
-        get
-        {
-            return !string.IsNullOrEmpty(HolidayImageUrl) ? Common.GetHolidayCoverImagePath(HolidayName) : null;
-        }
-    }
-
 }
