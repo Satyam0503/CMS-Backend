@@ -1,4 +1,5 @@
 namespace Codeji.CMS.Utility.Helpers;
+
 public class ConfigManager
 {
     public static AppConfiguration Settings { get; private set; } = new();
@@ -43,6 +44,7 @@ public class FileSettings
     public string CompanyLogoUrl { get; set; }
     public string Default_User_Image { get; set; }
     public string Default_Company_logo { get; set; }
+    public string HolidayCoverImage { get; set; }
 
 }
 

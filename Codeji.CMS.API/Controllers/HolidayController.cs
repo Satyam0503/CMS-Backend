@@ -22,17 +22,17 @@ public class HolidayController : ControllerBase
     [Route("GetAllHoliday")]
     [HttpPost]
     // [ModulePermission("Holidays","View")]
-    public async Task<Result<HolidayRequestDto>> GetAllHoliday([FromBody] HolidayFilter? filter)
+    public async Task<Result<HolidayResponseDto>> GetAllHoliday([FromBody] HolidayFilter? filter)
     {
         return await holidayService.GetAllHoliday(filter);
     }
 
-    [Route("CreateHoliday")]
     [HttpPost]
+    [Route("CreateHoliday")]
     // [ModulePermission("Holidays", "Create")]
-    public async Task<Result> CreateUpdateHoliday(HolidayResponseDto holidayResponseDto)
+    public async Task<Result> CreateUpdateHoliday([FromForm] HolidayRequestDto model)
     {
-        return await holidayService.CreateEditHoliday(holidayResponseDto);
+        return await holidayService.CreateEditHoliday(model);
     }
 
     [Route("DeleteHoliday/{holidayId}")]

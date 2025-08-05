@@ -115,7 +115,7 @@ public class AccountServices : IAccountServices
             Id = Guid.NewGuid().ToString(),
             UserId = user.UserId,
             Token = hashedRefreshToken,
-            ExpireAt = DateTime.UtcNow.AddDays(30),
+            ExpireAt = DateTime.UtcNow.AddDays(7),
             CreatedAt = DateTime.UtcNow
         };
 
@@ -257,7 +257,7 @@ public class AccountServices : IAccountServices
         {
             UserId = empUser.UserId,
             Token = newRefreshTokenHashed,
-            ExpireAt = DateTime.UtcNow.AddDays(30),
+            ExpireAt = DateTime.UtcNow.AddDays(7),
         };
         Result result1 = await _refreshTokenRepository.AddOne(refreshToken);
         if (!result1.Success) return result;

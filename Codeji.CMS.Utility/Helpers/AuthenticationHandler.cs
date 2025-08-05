@@ -40,7 +40,7 @@ namespace Codeji.CMS.Utility.Helpers
                 audience: ConfigManager.AppSettings.AppUrl,
                 claims: claims,
                 // expires: DateTime.UtcNow.AddDays(expiryDays),
-                expires: DateTime.UtcNow.AddMinutes(3),
+                expires: DateTime.UtcNow.AddMinutes(expiryMinutes),
                 signingCredentials: credentials
             );
 
