@@ -10,8 +10,10 @@ using Codeji.CMS.DTO.Dashboard;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.Holidays;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
 
@@ -25,11 +27,13 @@ namespace Codeji.CMS.Services.Dashboard
         private readonly IMapper _mapper;
         private readonly IHttpContextAccessor _httpContextAccessor;
         readonly IMongoDbRepository<Applicant> _applicantRepository;
+        readonly IMongoDbRepository<Holidays> _holidayRepository;
         public DashboardServices(
             IMongoDbRepository<Department> departmentRepository,
             IMongoDbRepository<EmpUser> empUserRepository,
             IHttpContextAccessor httpContextAccessor,
             IMongoDbRepository<Applicant> applicantRepository,
+            IMongoDbRepository<Holidays> holidayRepository,
         IMapper mapper)
 
         {
@@ -38,6 +42,7 @@ namespace Codeji.CMS.Services.Dashboard
             _mapper = mapper;
             _httpContextAccessor = httpContextAccessor;
             _applicantRepository = applicantRepository;
+            _holidayRepository = holidayRepository;
         }
 
         public async Task<List<AllDepartmentDetailsResponseModel>> GetAllDepartmentsDetails(string companyId)
@@ -100,5 +105,24 @@ namespace Codeji.CMS.Services.Dashboard
             };
             return result;
         }
+
+        public async Task<Result<UpComingHolidayResponseDto>> GetUpComingHolidays()
+        {
+            Result<UpComingHolidayResponseDto> result = new();
+            Expression<Func<Holidays, bool>> whereCondition = h => h.Date.Date >= DateTime.UtcNow.Date;
+            var data = (await _holidayRepository.GetAggregateDataAsync<Holidays>(whereCondition, isAscending: true, orderedKey: "Date", pageSize: 10)).ToList();
+            if (!data.Any()) return result;
+            result.MethodResults = data.Select(x =>
+                new UpComingHolidayResponseDto()
+                {
+                    HolidayId = x.HolidayId,
+                    HolidayName = x.HolidayName,
+                    Date = x.Date,
+                    HolidayCoverImageUrl = string.IsNullOrEmpty(x.HolidayImageUrl) ? null : Common.GetHolidayCoverImagePath(x.HolidayImageUrl)
+                }
+            ).ToList();
+            return result;
+        }
     }
 }
+

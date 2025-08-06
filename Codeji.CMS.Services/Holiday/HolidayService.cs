@@ -79,6 +79,7 @@ public class HolidayService : IHolidayService
                 if (existingHoliday.HolidayImageUrl != null)
                 {
                     DeleteExistingCoverImage(existingHoliday.HolidayImageUrl);
+                    existingHoliday.HolidayImageUrl = null;
                 }
             }
             existingHoliday.HolidayName = model.HolidayName;
@@ -117,9 +118,12 @@ public class HolidayService : IHolidayService
     {
         Result result = new();
         Expression<Func<Holidays, bool>> whereCondition = h => h.HolidayId == holidayId;
-        // var existingHoliday = await _holidaysRepo.FirstOrDefault(whereCondition);
-        // existingHoliday.IsDeleted = true;
-        // result = await _holidaysRepo.Update(whereCondition,existingHoliday);
+        var existingHoliday = await _holidaysRepo.FirstOrDefault(whereCondition);
+        if (existingHoliday is null) return result;
+        if (existingHoliday.HolidayImageUrl != null)
+        {
+            DeleteExistingCoverImage(existingHoliday.HolidayImageUrl);
+        }
         result = await _holidaysRepo.Delete(whereCondition);
         return result;
     }

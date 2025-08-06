@@ -7,7 +7,6 @@ namespace Codeji.CMS.DTO.Holiday;
 public class HolidayResponseDto
 {
     public string? HolidayId { get; set; }
-    // [Required]
     public string HolidayName { get; set; }
     public DateTime Date { get; set; }
     public string Detail { get; set; }
