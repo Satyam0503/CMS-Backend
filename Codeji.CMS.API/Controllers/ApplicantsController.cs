@@ -44,24 +44,12 @@ namespace Codeji.CMS.API.Controllers
         //[CustomAuthorize(Module = "Applicant", Role = ["Create"])]
         public async Task<Result> AddApplicant([FromBody] ApplicantAddEditModel applicantRegisterModel)
         {
-
             Result result = new Result();
-            if (string.IsNullOrEmpty(applicantRegisterModel.Email))
-                return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
-            var isExist = await _applicantsService.IsEmailExist(applicantRegisterModel.Email);
-            if (isExist == false)
-
+            if (!ModelState.IsValid)
             {
-                result = await _applicantsService.RegisterApplicants(applicantRegisterModel);
-                result.Success = true;
-                result.Message = "MESSAGE.APPLICANT.ADD_SUCCESS";
+                return result;
             }
-
-            else
-            {
-                result.Success = false;
-                result.Message = "MESSAGE.APPLICANT.ALREADY_APPLIED";
-            }
+            result = await _applicantsService.RegisterApplicants(applicantRegisterModel);
             return result;
         }
 
@@ -71,7 +59,6 @@ namespace Codeji.CMS.API.Controllers
         public async Task<Result> EditApplicants([FromBody] ApplicantAddEditModel model)
         {
             var result = await _applicantsService.UpdateApplicants(model);
-            result.Message = "MESSAGE.APPLICANT.UPDATED";
             return result;
         }
 
@@ -122,7 +109,6 @@ namespace Codeji.CMS.API.Controllers
             Result result = new Result()
             {
                 Success = true,
-                Message = "MESSAGE.COMMENT.ADD_SUCCESS",
                 StatusCode = StatusCodes.Status200OK,
             };
             return result;

@@ -11,6 +11,7 @@ using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Account.Interface;
 using Codeji.CMS.Services.Employees.Interface;
+using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -43,8 +44,8 @@ public class UserController : BaseApiController
         {
             return new Result<UserModel>
             {
-                Success = false,
-                Message = "User Already Exist"
+                StatusCode = CustomStatusCode.EmployeeAlreadyExist,
+                Success = false
             };
         }
         return await _employeeService.AddEmployee(user, currentUserId);
@@ -59,7 +60,8 @@ public class UserController : BaseApiController
         {
             return new Result<UserModel>
             {
-                Message = "User Not Exist"
+                Success = false,
+                StatusCode = CustomStatusCode.EmployeeNotExist
             };
         }
         return await _employeeService.EditEmployee(user, userId);
@@ -117,7 +119,7 @@ public class UserController : BaseApiController
 
     [Route("AddEditEmployeeSummary")]
     [HttpPost]
-    public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary)
+    public async Task<Result> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary)
     {
         string userId = string.IsNullOrEmpty(userSummary.UserId) ? CurrentContext.UserId(_httpContextAccessor) : userSummary.UserId;
         return await _employeeService.AddEditEmployeeSummary(userSummary, userId);
@@ -125,7 +127,7 @@ public class UserController : BaseApiController
 
     [Route("AddEmployeeEducation")]
     [HttpPost]
-    public async Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails)
+    public async Task<Result> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails)
     {
         string userId = string.IsNullOrEmpty(educationDetails.UserId) ? CurrentContext.UserId(_httpContextAccessor) : educationDetails.UserId;
         return await _employeeService.AddEmployeeEducation(educationDetails, userId);
@@ -141,11 +143,10 @@ public class UserController : BaseApiController
 
     [Route("AddEmployeeCertification")]
     [HttpPost]
-    public async Task<Result<EmployeeCertificationRequestModel>> AddEmployeeCertification(EmployeeCertificationRequestModel certificationDetails)
+    public async Task<Result> AddEmployeeCertification(EmployeeCertificationRequestModel certificationDetails)
     {
         string userId = string.IsNullOrEmpty(certificationDetails.UserId) ? CurrentContext.UserId(_httpContextAccessor) : certificationDetails.UserId;
         return await _employeeService.AddEmployeeCertification(certificationDetails, userId);
-
     }
 
     [Route("EditEmployeeCertification")]
@@ -272,22 +273,7 @@ public class UserController : BaseApiController
     public async Task<Result> DeleteEducationDetails(string educationId, [FromBody] string userId)
     {
         if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
-        Result data = await _employeeService.DeleteEducationDetails(educationId, userId);
-        if (data == null)
-        {
-            return new Result()
-            {
-                Success = false,
-                Message = "Education Detail Not Deleted ",
-                StatusCode = 400
-            };
-        }
-        return new Result()
-        {
-            Success = true,
-            Message = "Education Detail Deleted Successfully",
-            StatusCode = 200
-        };
+        return await _employeeService.DeleteEducationDetails(educationId, userId);
     }
 
     [Route("DeleteCertificationDetails/{certificationId}")]
@@ -295,22 +281,7 @@ public class UserController : BaseApiController
     public async Task<Result> DeleteCertificationDetails(string certificationId, [FromBody] string userId)
     {
         if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
-        Result data = await _employeeService.DeleteCertificationDetails(certificationId, userId);
-        if (data == null)
-        {
-            return new Result()
-            {
-                Success = false,
-                Message = "Certification Detail Not Deleted ",
-                StatusCode = 400
-            };
-        }
-        return new Result()
-        {
-            Success = true,
-            Message = "Certification Detail Deleted Successfully",
-            StatusCode = 200
-        };
+        return await _employeeService.DeleteCertificationDetails(certificationId, userId);
     }
 
     [Route("DeleteEmployee")]

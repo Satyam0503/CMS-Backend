@@ -106,6 +106,13 @@ namespace Codeji.CMS.Services.Employees
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
         {
             Result<UserModel> result = new();
+            bool IsEmpIdExist = await _employeeRepository.Exist(e => e.EmployeeId.Equals(user.EmployeeId, StringComparison.OrdinalIgnoreCase));
+            if (IsEmpIdExist)
+            {
+                result.Success = false;
+                result.StatusCode = CustomStatusCode.EmployeeIdAlreadyExist;
+                return result;
+            }
             var userId = Guid.NewGuid().ToString();
             EmpUser employee = new EmpUser()
             {
@@ -175,7 +182,6 @@ namespace Codeji.CMS.Services.Employees
           }, priority: 1);
 
             result.MethodResult = user;
-            result.Message = "User added";
             return result;
         }
         public async Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId)
@@ -200,7 +206,6 @@ namespace Codeji.CMS.Services.Employees
             {
                 Success = true,
                 MethodResult = updatedUser,
-                Message = "Updated Successfully",
             };
         }
         public async Task<UserModel> GetEmployeeById(string userId)
@@ -316,7 +321,7 @@ namespace Codeji.CMS.Services.Employees
             returnModel.CompanyLogo = string.IsNullOrEmpty(companyDetails.CompanyLogo) ? Common.GetCompanyLogoUrl(null) : Common.GetCompanyLogoUrl(companyDetails.CompanyLogo);
             return returnModel;
         }
-        public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId)
+        public async Task<Result> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId)
         {
             Expression<Func<EmpSummary, bool>> whereCondition = x => userId == x.UserId && x.Id == userSummary.SummaryId;
             EmpSummary? employeesummary = await _employeeSummaryRepo.FirstOrDefault(whereCondition);
@@ -328,22 +333,12 @@ namespace Codeji.CMS.Services.Employees
                     UserId = userId,
                     Summary = userSummary.Summary
                 };
-                Result result = await _employeeSummaryRepo.AddOne(summary);
-                return new Result<EmployeeSummaryRequestModel>
-                {
-                    Success = true,
-                    Message = "Summary Added Successfully"
-                };
+                return await _employeeSummaryRepo.AddOne(summary);
             }
             else
             {
                 employeesummary.Summary = userSummary.Summary;
-                Result result = await _employeeSummaryRepo.Update(whereCondition, employeesummary);
-                return new Result<EmployeeSummaryRequestModel>
-                {
-                    Success = true,
-                    Message = "Summary Updated Successfully"
-                };
+                return await _employeeSummaryRepo.Update(whereCondition, employeesummary);
             }
         }
         public async Task<Result> AddEditEmployeeSkills(SkillsRequestModel skillsModel, string userId)
@@ -357,25 +352,15 @@ namespace Codeji.CMS.Services.Employees
                     newSkill.UserId = userId;
                     newSkill.Skills = skillsModel.Skills;
                 }
-                Result result = await _employeeSkillsRepository.AddOne(newSkill);
-                return new Result
-                {
-                    Success = true,
-                    Message = "Skills Addded Successfully"
-                };
+                return await _employeeSkillsRepository.AddOne(newSkill);
             }
             else
             {
                 employeSkills.Skills = skillsModel.Skills;
-                Result result = await _employeeSkillsRepository.Update(whereCondition, employeSkills);
-                return new Result
-                {
-                    Success = true,
-                    Message = "Skills Updated Successfully"
-                };
+                return await _employeeSkillsRepository.Update(whereCondition, employeSkills);
             }
         }
-        public async Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId)
+        public async Task<Result> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId)
         {
             EmpEducationDetails educationDetail = new EmpEducationDetails()
             {
@@ -386,30 +371,15 @@ namespace Codeji.CMS.Services.Employees
                 EndDate = educationDetails.EndDate,
                 Type = educationDetails.Type,
             };
-            await _educationDetailsRepo.AddOne(educationDetail);
-            return new Result<EmployeeEducationRequestModel>
-            {
-                MethodResult = educationDetails,
-                Message = "Education Details Added",
-                Success = true
-
-            };
+            return await _educationDetailsRepo.AddOne(educationDetail);
         }
 
         public async Task<Result> EditEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId)
         {
+            Result result = new();
             Expression<Func<EmpEducationDetails, bool>> whereCondition = x => x.UserId == userId && x.EducationId == educationDetails.EducationId;
             EmpEducationDetails? check = await _educationDetailsRepo.FirstOrDefault(whereCondition);
-            if (check == null)
-            {
-                return new Result()
-                {
-                    Message = "Education Details Not Updated",
-                    Success = false,
-                    StatusCode = 400
-
-                };
-            }
+            if (check == null) return result;
             EmpEducationDetails data = new EmpEducationDetails()
             {
                 EducationId = educationDetails.EducationId,
@@ -420,17 +390,11 @@ namespace Codeji.CMS.Services.Employees
                 StartDate = educationDetails.StartDate,
                 Type = educationDetails.Type
             };
-            await _educationDetailsRepo.Update(whereCondition, data);
-            return new Result()
-            {
-                Message = "Education Details Updated Sucessfully",
-                Success = true,
-                StatusCode = 200
-
-            };
+            result = await _educationDetailsRepo.Update(whereCondition, data);
+            return result;
         }
 
-        public async Task<Result<EmployeeCertificationRequestModel>> AddEmployeeCertification(EmployeeCertificationRequestModel cerificationDetails, string userId)
+        public async Task<Result> AddEmployeeCertification(EmployeeCertificationRequestModel cerificationDetails, string userId)
         {
             EmpCertificationDetails certificatinDetail = new EmpCertificationDetails()
             {
@@ -441,29 +405,15 @@ namespace Codeji.CMS.Services.Employees
                 EndDate = cerificationDetails.EndDate,
                 Mode = cerificationDetails.Mode,
             };
-            await _certificationDetailsRepo.AddOne(certificatinDetail);
-            return new Result<EmployeeCertificationRequestModel>
-            {
-                MethodResult = cerificationDetails,
-                Message = "Certification Details Added",
-                Success = true
-            };
+            return await _certificationDetailsRepo.AddOne(certificatinDetail);
         }
 
         public async Task<Result> EditEmployeeCertification(EmployeeCertificationRequestModel certificationDetails, string userId)
         {
+            Result result = new();
             Expression<Func<EmpCertificationDetails, bool>> whereCondition = x => x.UserId == userId && x.CertificationId == certificationDetails.CertificationId;
             EmpCertificationDetails? check = await _certificationDetailsRepo.FirstOrDefault(whereCondition);
-            if (check == null)
-            {
-                return new Result()
-                {
-                    Message = "Certification Details Not Updated",
-                    Success = false,
-                    StatusCode = 400
-
-                };
-            }
+            if (check == null) return result;
             EmpCertificationDetails data = new EmpCertificationDetails()
             {
                 CertificationId = certificationDetails.CertificationId,
@@ -474,13 +424,8 @@ namespace Codeji.CMS.Services.Employees
                 StartDate = certificationDetails.StartDate,
                 Mode = certificationDetails.Mode
             };
-            await _certificationDetailsRepo.Update(whereCondition, data);
-            return new Result()
-            {
-                Message = "Certification Details Updated Sucessfully",
-                Success = true,
-                StatusCode = 200
-            };
+            result = await _certificationDetailsRepo.Update(whereCondition, data);
+            return result;
         }
 
         public async Task<List<EmpEducationDetails>> GetEmployeeEducationDetails(string userId)
@@ -611,9 +556,8 @@ namespace Codeji.CMS.Services.Employees
             {
                 return new Result()
                 {
-                    StatusCode = 200,
+                    StatusCode = CustomStatusCode.SkillsAlreadyExist,
                     Success = false,
-                    Message = "Skill already exist"
                 };
             }
             Skills skills = new()

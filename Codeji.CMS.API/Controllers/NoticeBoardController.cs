@@ -35,12 +35,6 @@ public class NoticeBoardController : BaseApiController
         {
             string userId = CurrentContext.UserId(_httpContextAccessor);
             Result result = await _noticeBoardServices.PostNotice(notice, userId);
-
-            if (result.Success)
-            {
-                result.Message = "Notice posted successfully";
-                result.StatusCode = StatusCodes.Status201Created;
-            }
             return result;
         }
     }

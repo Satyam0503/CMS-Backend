@@ -49,14 +49,12 @@ public class CompanyMasterController : BaseApiController
         {
             return new Result()
             {
-                Message = "Department Not Found",
                 Success = false,
                 StatusCode = 200,
             };
         }
         return new Result()
         {
-            Message = "Department Deleted Successfully",
             StatusCode = 200,
             Success = true,
         };

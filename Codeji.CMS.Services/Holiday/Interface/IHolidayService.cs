@@ -9,5 +9,4 @@ public interface IHolidayService
     Task<Result> CreateEditHoliday(HolidayRequestDto model);
     Task<Result<HolidayResponseDto>> GetAllHoliday(HolidayFilter? filter);
     Task<Result> DeleteHoliday(string holidayId);
-    // Task<Result> EditHoliday(string id, HolidayRequestDto holidayRequestDto);
 }

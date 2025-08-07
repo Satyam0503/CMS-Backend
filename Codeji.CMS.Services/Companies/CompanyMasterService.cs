@@ -91,7 +91,6 @@ public class CompanyMasterService : ICompanyMasterService
             TotalRecords = data.Count,
             Success = true,
             StatusCode = 200,
-            Message = "List Of Departments",
         };
     }
 
@@ -137,7 +136,6 @@ public class CompanyMasterService : ICompanyMasterService
         return new Result<string[]>()
         {
             Success = true,
-            Message = "Successfully Updated",
             MethodResult = updatedPermissions
         };
     }

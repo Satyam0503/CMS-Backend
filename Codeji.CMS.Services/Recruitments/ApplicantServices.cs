@@ -67,6 +67,14 @@ namespace Codeji.CMS.Services.Recruitments
         /// <returns></returns>
         public async Task<Result> RegisterApplicants(ApplicantAddEditModel applicantRegisterModel)
         {
+            Result result = new();
+            bool isApplicantExist = await _applicantRepository.Exist(ap => ap.Email == applicantRegisterModel.Email);
+            if (isApplicantExist)
+            {
+                result.StatusCode = CustomStatusCode.ApplicantAlreadyExist;
+                return result;
+            }
+
             Applicant applicant = new Applicant()
             {
                 FirstName = applicantRegisterModel.FirstName,
@@ -77,10 +85,8 @@ namespace Codeji.CMS.Services.Recruitments
                 Email = applicantRegisterModel.Email,
                 Status = applicantRegisterModel.Status,
                 State = applicantRegisterModel.State,
-                CreatedBy = ""
             };
-            Result result = await _applicantRepository.AddOne(applicant);
-            //Acknowledgement Email Logic
+            result = await _applicantRepository.AddOne(applicant);
             if (result.Success)
             {
                 await SendEmailToApplicant(applicantRegisterModel);
@@ -93,14 +99,7 @@ namespace Codeji.CMS.Services.Recruitments
             Expression<Func<Applicant, bool>> whereCondition = x => x.ApplicantId == model.ApplicantId && x.Email == model.Email;
             //to do improvement
             Applicant? entity = await _applicantRepository.FirstOrDefault(whereCondition);
-            if (entity == null)
-            {
-                return new Result()
-                {
-                    Success = false,
-                    Message = "Applicant Not Found"
-                };
-            }
+            if (entity == null) return new Result();
             entity.UpdatedDate = DateTime.Now;
             entity.Experience = model.Experience;
             entity.VacancyId = model.VacancyId;
@@ -270,7 +269,6 @@ namespace Codeji.CMS.Services.Recruitments
             Result result = new()
             {
                 Success = true,
-                Message = "Comment Added Successfully",
                 StatusCode = StatusCodes.Status200OK,
             };
             return result;

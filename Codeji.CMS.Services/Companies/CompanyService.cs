@@ -104,7 +104,6 @@ namespace Codeji.CMS.Services
             Company? company = await _companyRepo.FirstOrDefault(x => x.CompanyId == companyId);
             if (company is null)
             {
-                result.Message = "Company Not Exist";
                 result.Success = false;
             }
             else

@@ -200,7 +200,7 @@ public class LeaveManagementService : ILeaveManagementService
         var employeeExist = await _empUser.FirstOrDefault(e => e.UserId == leaveBalanceRequestDto.EmployeeId);
         if (employeeExist == null)
         {
-            result.Message = "Employee Doesn't Exists";
+            result.StatusCode = CustomStatusCode.EmployeeNotExist;
             return result;
         }
         IEnumerable<LeaveTypes> leaveTypes = await _leaveTypeRepo.GetAll();
@@ -288,7 +288,6 @@ public class LeaveManagementService : ILeaveManagementService
         bool isEmpExist = await _empUser.Exist(x => x.UserId == employeeId);
         if (!isEmpExist)
         {
-            result.Message = "Employee doesn't exist";
             result.Success = false;
             return result;
         }
@@ -335,7 +334,6 @@ public class LeaveManagementService : ILeaveManagementService
         if (selectedEmpLeaveBal == null)
         {
             result.Success = false;
-            result.Message = "Leave balance not found for the employee";
             return result;
         }
         var totalRequestedLeaveDays = leaveRequestDto.EndDate.Day - leaveRequestDto.StartDate.Day + 1;
@@ -516,7 +514,7 @@ public class LeaveManagementService : ILeaveManagementService
             if (empLeaveBalances is null)
             {
                 result.Success = false;
-                result.Message = "Leave Balance doesn't exist for employee";
+                result.StatusCode = CustomStatusCode.LeaveBalanceNotExist;
                 return false;
             }
             foreach (var leaveTypeBalance in leaveBalanceRequestDto.LeaveTypeBalances)

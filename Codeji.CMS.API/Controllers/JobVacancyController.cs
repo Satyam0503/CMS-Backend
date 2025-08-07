@@ -77,7 +77,6 @@ public class JobVacancyController : BaseApiController
         return new Result()
         {
             Success = true,
-            Message = "Job Deleted Successfully",
             StatusCode = 200
         };
     }

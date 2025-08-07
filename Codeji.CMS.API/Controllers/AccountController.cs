@@ -114,9 +114,8 @@ namespace Codeji.CMS.API.Controllers
             {
                 return new Result()
                 {
-                    Message = "Company Already Exist",
                     Success = false,
-                    StatusCode = StatusCodes.Status406NotAcceptable
+                    StatusCode = CustomStatusCode.CompanyAlreadyExist,
                 };
             }
             return await _companyService.Register(companyModel);
@@ -204,6 +203,7 @@ namespace Codeji.CMS.API.Controllers
             bool exist = await _employeeService.IsEmpExistAndActive(email);
             if (!exist)
             {
+                result.StatusCode = CustomStatusCode.InvalidCredential;
                 return result;
             }
             return await _accountService.GenerateTokenAndSendEmail(email);
@@ -214,11 +214,10 @@ namespace Codeji.CMS.API.Controllers
         [Route("applicant/applyJob")]
         public async Task<Result> RegisterApplicants([FromBody] ApplicantAddEditModel applicantRegisterModel)
         {
-
             Result result = new Result();
-            if (string.IsNullOrEmpty(applicantRegisterModel.Email))
+            if (!ModelState.IsValid)
             {
-                return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
+                return result;
             }
             Result ApplicantId = await _applicantsServices.GetApplicantsExistingId(applicantRegisterModel.Email);
             if (ApplicantId.Success)

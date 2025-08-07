@@ -48,8 +48,9 @@ public class RoleServices : IRoleService
     }
 
     //Add New Roles
-    public async Task<string> AddEditRoles(RoleWithModuleAndPermissions roles, string companyId)
+    public async Task<Result> AddEditRoles(RoleWithModuleAndPermissions roles, string companyId)
     {
+        Result result = new();
         List<Roles> roleData = (await _RolesRepository.GetAll(x => x.CompanyId == companyId)).ToList();
         List<RolePermission> roleWithModulePermission = (await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId)).ToList();
         if (string.IsNullOrEmpty(roles.RoleId))
@@ -63,12 +64,12 @@ public class RoleServices : IRoleService
                 HasAppAccess = roles.HasAppAccess,
                 IsNotEditable = false,
                 CreatedDate = DateTime.Now
-
             };
             await _RolesRepository.AddOne(newRole);
+            List<RolePermission> rolePermissions = [];
             foreach (ModuleRolePermissionsModel permission in roles.RolePermissions)
             {
-                await _rolePermissionRepository.AddOne(new RolePermission
+                rolePermissions.Add(new RolePermission
                 {
                     RolePermissionId = permission.RolePermissionId,
                     CompanyId = companyId,
@@ -77,7 +78,8 @@ public class RoleServices : IRoleService
                     HasAccess = permission.HasAccess
                 });
             }
-            return "ROLE.ADD.SUCCESS";
+            result = await _rolePermissionRepository.AddMany(rolePermissions);
+            return result;
         }
         else
         {
@@ -115,7 +117,8 @@ public class RoleServices : IRoleService
                     }
                 }
             }
-            return "ROLE.UPDATE.SUCCESS";
+            result.Success = true;
+            return result;
         }
     }
     //Get company's all roles
@@ -442,8 +445,6 @@ public class RoleServices : IRoleService
         {
             return new Result()
             {
-                StatusCode = 200,
-                Message = "ROLE.NOT_EXIST",
                 Success = false
             };
         }
@@ -454,8 +455,6 @@ public class RoleServices : IRoleService
 
         return new Result()
         {
-            StatusCode = 200,
-            Message = "ROLE.APP_ACCESS.UPDATED",
             Success = true
         };
     }

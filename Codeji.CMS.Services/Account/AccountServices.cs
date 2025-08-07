@@ -77,32 +77,29 @@ public class AccountServices : IAccountServices
         bool isEmailExist = await _employeeService.IsEmailExist(model.Email);
         if (!isEmailExist)
         {
-            result.Message = "Invalid credentials";
             result.Success = false;
-            result.StatusCode = 400;
+            result.StatusCode = CustomStatusCode.InvalidCredential;
             return result;
         }
         EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase));
         if (!user.IsEmailVerified)
         {
-            result.Message = "Please Verify Email First";
             result.Success = false;
+            result.StatusCode = CustomStatusCode.UnVerifiedMail;
             return result;
         }
         Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == user.RoleId);
         if (!role.HasAppAccess)
         {
-            result.Message = "You Don't have app access";
             result.Success = false;
-            result.StatusCode = 403;
+            result.StatusCode = CustomStatusCode.UnauthorizedAppAccess;
             return result;
         }
         bool isPasswordValid = AuthenticationHandler.VerifyPassword(model.Password, user.Password);
         if (!isPasswordValid)
         {
-            result.Message = "Invalid credentials";
             result.Success = false;
-            result.StatusCode = 400;
+            result.StatusCode = CustomStatusCode.InvalidCredential;
             return result;
         }
         List<string> roles = ["admin", "employee"];
@@ -182,7 +179,7 @@ public class AccountServices : IAccountServices
         }, priority: 1);
 
         result.Success = true;
-        result.Message = "Password reset link has been sent. Please check your mail";
+        result.StatusCode = CustomStatusCode.PasswordResetLinkSent;
         return result;
     }
 
@@ -193,12 +190,12 @@ public class AccountServices : IAccountServices
         PasswordResetTokens? token = await _passwordResetTokens.FirstOrDefault(x => x.UserId == model.Uid && x.TokenHash == tokenHash && !x.IsUsed);
         if (token is null)
         {
-            result.Message = "Invalid or expired token";
+            result.StatusCode = CustomStatusCode.InvalidExpiredToken;
             return result;
         }
         if (token?.Expiry < DateTime.UtcNow)
         {
-            result.Message = "This password reset link has expired. Please request a new one.";
+            result.StatusCode = CustomStatusCode.PasswordResetLinkExpired;
             return result;
         }
 
@@ -214,7 +211,7 @@ public class AccountServices : IAccountServices
         Expression<Func<PasswordResetTokens, bool>> whereCondition2 = x => x.Id == token.Id;
         var result2 = await _passwordResetTokens.Delete(whereCondition2);
         result.Success = true;
-        result.Message = "Password has been reset";
+        result.StatusCode = CustomStatusCode.PasswordResetSuccess;
         return result;
     }
     // Logic for Login User and Employee by Email and Password
@@ -230,23 +227,23 @@ public class AccountServices : IAccountServices
         RefreshToken? storedRefreshToken = await _refreshTokenRepository.FirstOrDefault(whereCondition);
         if (storedRefreshToken == null)
         {
-            result.Message = "Invalid Refresh Token";
+            result.StatusCode = CustomStatusCode.InvalidRefreshToken;
             return result;
         }
         if (storedRefreshToken.IsRevoked)
         {
-            result.Message = "Refresh token has been revoked";
+            result.StatusCode = CustomStatusCode.RefreshTokenRevoked;
             return result;
         }
         if (storedRefreshToken.ExpireAt < DateTime.UtcNow)
         {
-            result.Message = "Refresh Token Expired";
+            result.StatusCode = CustomStatusCode.RefreshTokenExpired;
             return result;
         }
         EmpUser? empUser = await _employeeRepository.FirstOrDefault(x => x.UserId == storedRefreshToken.UserId);
         if (empUser == null)
         {
-            result.Message = "Invalid Refresh Token";
+            result.StatusCode = CustomStatusCode.InvalidRefreshToken;
             return result;
         }
         string newRefreshToken = TokenHelper.GenerateToken();
@@ -281,12 +278,12 @@ public class AccountServices : IAccountServices
         RefreshToken? storedRefreshToken = await _refreshTokenRepository.FirstOrDefault(whereCondition);
         if (storedRefreshToken == null)
         {
-            result.Message = "Invalid Refresh Token";
+            result.StatusCode = CustomStatusCode.InvalidRefreshToken;
             return result;
         }
         if (storedRefreshToken.IsRevoked)
         {
-            result.Message = "Refresh token already revoked";
+            result.StatusCode = CustomStatusCode.RefreshTokenRevoked;
             return result;
         }
         storedRefreshToken.IsRevoked = true;

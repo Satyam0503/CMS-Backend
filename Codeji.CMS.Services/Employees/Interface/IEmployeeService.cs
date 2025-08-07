@@ -21,10 +21,10 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<bool> IsEmailExist(string email);
                 Task<bool> IsEmpExistAndActive(string email);
                 Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId, string companyId);
-                Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId);
-                Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);
+                Task<Result> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId);
+                Task<Result> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);
                 Task<Result> EditEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);
-                Task<Result<EmployeeCertificationRequestModel>> AddEmployeeCertification(EmployeeCertificationRequestModel cerificationDetails, string userId);
+                Task<Result> AddEmployeeCertification(EmployeeCertificationRequestModel cerificationDetails, string userId);
                 Task<Result> EditEmployeeCertification(EmployeeCertificationRequestModel certificationDetails, string userId);
                 Task<List<EmpEducationDetails>> GetEmployeeEducationDetails(string id);
                 Task<EmployeeSummaryRequestModel> GetEmployeeSummary(string userId);

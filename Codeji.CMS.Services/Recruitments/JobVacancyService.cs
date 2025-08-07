@@ -37,7 +37,6 @@ namespace Codeji.CMS.Services.Recruitments
             return new Result<JobVacancyModel>
             {
                 MethodResult = jobVacancy,
-                Message = "Vacacny Added Successfully",
                 Success = true
             };
         }
@@ -58,7 +57,6 @@ namespace Codeji.CMS.Services.Recruitments
             {
                 MethodResult = jobVacancy,
                 Success = true,
-                Message = "Job Updated"
             };
         }
 

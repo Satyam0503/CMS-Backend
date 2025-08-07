@@ -71,7 +71,6 @@ namespace Codeji.CMS.API.Controllers
 
             return new Result<AllDepartmentDetailsResponseModel>()
             {
-                Message = "Department details fetched successfully",
                 MethodResults = data
             };
 
