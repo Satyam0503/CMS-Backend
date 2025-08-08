@@ -102,7 +102,6 @@ public class HolidayService : IHolidayService
         else
         {
             Expression<Func<Holidays, bool>> whereCondition = h =>
-                 (string.IsNullOrEmpty(filter.HolidayName) || h.HolidayName.ToLower().Contains(filter.HolidayName.ToLower())) &&
                  (filter.HolidayType == null || !filter.HolidayType.Any() || filter.HolidayType.Contains(h.HolidayType))
                  && (filter.Date == null ? h.Date.Year == DateTime.UtcNow.Year : !filter.Date.HasValue || (h.Date >= filter.Date));
             holidayList = (await _holidaysRepo.GetAll(whereCondition)).ToList();

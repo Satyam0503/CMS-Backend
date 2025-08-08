@@ -223,6 +223,12 @@ namespace Codeji.CMS.Services.Employees
             return userModel;
         }
 
+        public async Task<string> GetEmployeeNameById(string employeeId)
+        {
+            EmpUser? empUser = await _employeeRepository.FirstOrDefault(emp => emp.UserId == employeeId);
+            if (empUser == null) return string.Empty;
+            return $"{empUser.FirstName} {empUser.LastName}";
+        }
         public async Task<List<EmployeeSearchResponseDTO>> SearchEmployeeByName(string name)
         {
             Expression<Func<EmpUser, bool>> whereCondition = x => (x.FirstName + " " + x.LastName).Contains(name, StringComparison.CurrentCultureIgnoreCase);
@@ -689,6 +695,26 @@ namespace Codeji.CMS.Services.Employees
                 Success = true,
                 MethodResults = collegeList
             };
+        }
+
+        public async Task<Result> RemoveProfileImage(string userId)
+        {
+            Result result = new();
+            EmpUser? empUser = await _employeeRepository.FirstOrDefault(e => e.UserId == userId);
+            if (empUser is null) return result;
+            if (empUser.ProfileUrl != null)
+            {
+                string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\ProfileImage\\");
+                string oldPath = Path.Combine(uploadFolder, empUser.ProfileUrl);
+                FileInfo fileInfo = new(oldPath);
+                fileInfo.Delete();
+                Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == userId;
+                return await _employeeRepository.UpdateMany(whereCondition, Builders<EmpUser>.Update.Set(x => x.ProfileUrl, null));
+            }
+            else
+            {
+                return result;
+            }
         }
     }
 }

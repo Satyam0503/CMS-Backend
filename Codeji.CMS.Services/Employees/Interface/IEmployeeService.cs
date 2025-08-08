@@ -16,6 +16,7 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId);
                 Task<bool> IsUserActive(string userId);
                 Task<UserModel> GetEmployeeById(string userId);
+                Task<string> GetEmployeeNameById(string employeeId);
                 Task<List<EmployeeSearchResponseDTO>> SearchEmployeeByName(string name);
                 Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters);
                 Task<bool> IsEmailExist(string email);
@@ -45,5 +46,6 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<Result> MarkNotificationAsRead(string userId, string userNotificationId);
                 Task<Result> MarkAllNotificationAsRead(string userId);
                 Task<Result<string>> GetCollegeList();
+                Task<Result> RemoveProfileImage(string userId);
         }
 }

@@ -422,4 +422,12 @@ public class UserController : BaseApiController
     {
         return await _employeeService.GetCollegeList();
     }
+
+    [HttpDelete]
+    [Route("RemoveProfileImage")]
+    public async Task<Result> RemoveProfileImage()
+    {
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _employeeService.RemoveProfileImage(userId);
+    }
 }

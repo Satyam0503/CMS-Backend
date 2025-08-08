@@ -4,7 +4,6 @@ namespace Codeji.CMS.DTO.Holiday;
 
 public class HolidayFilter
 {
-    public string? HolidayName { get; set; }
     public EnumsHelper.HolidayTypes[]? HolidayType { get; set; }
     public DateTime? Date { get; set; }
 }

@@ -13,6 +13,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Holidays;
 using Codeji.CMS.Repository.Entities.Leave;
 using Codeji.CMS.Repository.Entities.RolePermissions;
+using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
@@ -34,6 +35,7 @@ public class LeaveManagementService : ILeaveManagementService
     private readonly IMongoDbRepository<Notifications> _notificationsRepo;
     private readonly IMongoDbRepository<UserNotifications> _userNotificationsRepo;
     private readonly IMapper _mapper;
+    private readonly IEmployeeService _employeeService;
     public LeaveManagementService(IMongoDbRepository<LeaveTypes> leaveTypeRepo,
     IMongoDbRepository<EmpUser> empUser,
     IMongoDbRepository<LeaveBalance> leaveBalance,
@@ -42,7 +44,8 @@ public class LeaveManagementService : ILeaveManagementService
     INotificationService notificationService,
     IMongoDbRepository<Notifications> notificationsRepo,
     IMongoDbRepository<UserNotifications> userNotificationsRepo,
-    IMongoDbRepository<Roles> roleRepository)
+    IMongoDbRepository<Roles> roleRepository,
+    IEmployeeService employeeService)
     {
         _leaveTypeRepo = leaveTypeRepo;
         _httpContextAccessor = httpContextAccessor;
@@ -54,6 +57,7 @@ public class LeaveManagementService : ILeaveManagementService
         _notificationsRepo = notificationsRepo;
         _userNotificationsRepo = userNotificationsRepo;
         _roleRepository = roleRepository;
+        _employeeService = employeeService;
     }
 
     public async Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto)
@@ -329,12 +333,22 @@ public class LeaveManagementService : ILeaveManagementService
             result.Message = "Invalid Leave Type";
             return result;
         }
-        Expression<Func<LeaveBalance, bool>> leaveBalanceCondition = lb => lb.EmployeeId == leaveRequestDto.EmployeeId;
+        Expression<Func<LeaveBalance, bool>> leaveBalanceCondition = lb => lb.EmployeeId == leaveRequestDto.EmployeeId && lb.Year.Year == DateTime.UtcNow.Year;
         var selectedEmpLeaveBal = await _leaveBalance.FirstOrDefault(leaveBalanceCondition);
         if (selectedEmpLeaveBal == null)
         {
             result.Success = false;
             return result;
+        }
+        if (leaveRequestDto.LeaveRequestId == null)
+        {
+            int pendingLeaves = await _leave.Count(l => l.EmployeeId == leaveRequestDto.EmployeeId && l.Status == EnumsHelper.LeaveRequestStatus.Pending);
+            if (pendingLeaves > 0)
+            {
+                result.Success = false;
+                result.StatusCode = CustomStatusCode.PendingLeaveExist;
+                return result;
+            }
         }
         var totalRequestedLeaveDays = leaveRequestDto.EndDate.Day - leaveRequestDto.StartDate.Day + 1;
         bool IsValid = await LeaveRequestValidation(selectedLeaveType, selectedEmpLeaveBal, leaveRequestDto, totalRequestedLeaveDays, result);
@@ -551,13 +565,11 @@ public class LeaveManagementService : ILeaveManagementService
             if (leaveType is null)
             {
                 result.Success = false;
-                result.Message = "Leave Type Not Exists";
                 return false;
             }
             else if (leaveType.MaxLeaveDays < leaveTypeBalance.MaximumLeave)
             {
                 result.Success = false;
-                result.Message = $"Maximum Leave For {leaveTypeBalance.LeaveType} is greater than maximum allowed leave days ";
                 return false;
             }
         }
@@ -566,44 +578,33 @@ public class LeaveManagementService : ILeaveManagementService
 
     private async Task<bool> LeaveRequestValidation(LeaveTypes selectedLeaveType, LeaveBalance selectedEmpLeaveBal, LeaveRequestDto leaveRequestDto, int requestedDay, Result result)
     {
-        var earnedAnnualDayTillNow = DateTime.UtcNow.Month;
-        var totalAdvanceNoticeDays = (leaveRequestDto.StartDate.Date - DateTime.UtcNow.Date).TotalDays;
+        var totalAdvanceNoticeDays = (leaveRequestDto.StartDate.Date - DateTime.UtcNow.Date).TotalDays + 1;
 
         if (selectedLeaveType.MinAdvanceNoticeDate > 0 && selectedLeaveType.MinAdvanceNoticeDate > totalAdvanceNoticeDays)
         {
             result.Success = false;
-            result.Message = $"Leave must be applied at least {selectedLeaveType.MinAdvanceNoticeDate} days in advance";
+            result.StatusCode = CustomStatusCode.MinAdvanceLeaveNoticeDays;
             return false;
         }
 
         var balance = selectedEmpLeaveBal.LeaveTypeBalances.FirstOrDefault(lb => lb.LeaveType == leaveRequestDto.LeaveType);
-        if (balance == null || balance.RemainingLeave == null || balance.RemainingLeave <= 0)
+        if (balance == null || balance.RemainingLeave == null || balance.RemainingLeave <= 0 || balance.RemainingLeave < requestedDay)
         {
             result.Success = false;
-            result.Message = $"Insufficient leave balance for ";
+            result.StatusCode = CustomStatusCode.InsufficientLeaveBalanc;
             return false;
         }
-
-        // redefine logic
-        var annualLeaveTaken = await _leave.Count(l =>
-            (l.EmployeeId == leaveRequestDto.EmployeeId)
-            && (l.LeaveType == leaveRequestDto.LeaveType)
-            && (l.StartDate.Year == DateTime.UtcNow.Year)
-            && (l.Status != EnumsHelper.LeaveRequestStatus.Rejected)
-        );
-        if (selectedLeaveType.LeaveType.Equals(EnumsHelper.LeaveTypes.Earned)
-            && (annualLeaveTaken + requestedDay) >= earnedAnnualDayTillNow)
+        if (leaveRequestDto.LeaveType == EnumsHelper.LeaveTypes.Earned)
         {
-            result.Success = false;
-            result.Message = "Insufficient leave balance for current month";
-            return false;
-        }
-
-        if (balance.RemainingLeave < requestedDay || (balance.RemainingLeave - requestedDay) < annualLeaveTaken - earnedAnnualDayTillNow)
-        {
-            result.Success = false;
-            result.Message = $"Only {balance.RemainingLeave} days available";
-            return false;
+            var earnedAnnualDayTillNow = DateTime.UtcNow.Month;
+            var remainingMonthLeave = balance.MaximumLeave - earnedAnnualDayTillNow;
+            var availableEarnedLeave = balance.RemainingLeave - remainingMonthLeave;
+            if (availableEarnedLeave <= 0 || availableEarnedLeave < requestedDay)
+            {
+                result.Success = false;
+                result.StatusCode = CustomStatusCode.InsufficientMonthLeaveBalance;
+                return false;
+            }
         }
         return true;
     }
@@ -611,6 +612,7 @@ public class LeaveManagementService : ILeaveManagementService
 
     private async void LeaveNotification(LeaveRequest leaveDomain, EnumsHelper.LeaveRequestStatus status)
     {
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
         Notifications notification = new()
         {
             NotificationId = Guid.NewGuid().ToString(),
@@ -623,22 +625,24 @@ public class LeaveManagementService : ILeaveManagementService
             string company_id = CurrentContext.CompanyId(_httpContextAccessor);
             List<string> roleIds = (await _roleRepository.GetAll(x => x.CompanyId == company_id && x.RoleType == Convert.ToInt32(EnumsHelper.Roles.Administrator) || x.RoleType == Convert.ToInt32(EnumsHelper.Roles.HR))).Select(x => x.RolesId).ToList();
             targetUserIds = (await _empUser.GetAll(x => roleIds.Contains(x.RoleId))).Select(x => x.UserId).ToList();
+            if (targetUserIds.Contains(leaveDomain.EmployeeId))
+            {
+                targetUserIds.Remove(leaveDomain.EmployeeId);
+            }
             notification.Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.LeaveRequest);
-            notification.Body = leaveDomain.Reason;
+            notification.Body = await _employeeService.GetEmployeeNameById(leaveDomain.EmployeeId);
             notification.NotificationType = EnumsHelper.NotificationTypes.LeaveRequest;
         }
         else if (status == EnumsHelper.LeaveRequestStatus.Accepted)
         {
             targetUserIds.Add(leaveDomain.EmployeeId);
-            notification.Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.LeaveRequestApproved);
-            notification.Body = leaveDomain.Reason;
+            notification.Body = await _employeeService.GetEmployeeNameById(currentUserId);
             notification.NotificationType = EnumsHelper.NotificationTypes.LeaveRequestApproved;
         }
         else
         {
             targetUserIds.Add(leaveDomain.EmployeeId);
-            notification.Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.LeaveRequestReject);
-            notification.Body = leaveDomain.Reason;
+            notification.Body = await _employeeService.GetEmployeeNameById(currentUserId);
             notification.NotificationType = EnumsHelper.NotificationTypes.LeaveRequestReject;
         }
         if (targetUserIds.Count == 0) return;

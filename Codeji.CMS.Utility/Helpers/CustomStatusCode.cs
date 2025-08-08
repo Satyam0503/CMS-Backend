@@ -19,6 +19,9 @@ public static class CustomStatusCode
     public const int SkillsAlreadyExist = 15;
     public const int ApplicantAlreadyExist = 16;
     public const int LeaveBalanceNotExist = 17;
-
+    public const int MinAdvanceLeaveNoticeDays = 18;
+    public const int PendingLeaveExist = 19;
+    public const int InsufficientLeaveBalanc = 20;
+    public const int InsufficientMonthLeaveBalance = 21;
 
 }
