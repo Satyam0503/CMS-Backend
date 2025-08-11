@@ -77,6 +77,7 @@ namespace Codeji.CMS.Services.Recruitments
 
             Applicant applicant = new Applicant()
             {
+                ApplicantId = Guid.NewGuid().ToString(),
                 FirstName = applicantRegisterModel.FirstName,
                 LastName = applicantRegisterModel.LastName,
                 Experience = applicantRegisterModel.Experience,
@@ -89,7 +90,7 @@ namespace Codeji.CMS.Services.Recruitments
             result = await _applicantRepository.AddOne(applicant);
             if (result.Success)
             {
-                await SendEmailToApplicant(applicantRegisterModel);
+                await SendEmailToApplicant(applicant);
             }
             return result;
         }
@@ -113,7 +114,7 @@ namespace Codeji.CMS.Services.Recruitments
             Result res = await _applicantRepository.Update(whereCondition, entity);
             if (res.Success)
             {
-                await SendEmailToApplicant(model);
+                await SendEmailToApplicant(entity);
             }
             return res;
         }
@@ -341,7 +342,7 @@ namespace Codeji.CMS.Services.Recruitments
             return result;
         }
 
-        private async Task SendEmailToApplicant(ApplicantAddEditModel applicant)
+        private async Task SendEmailToApplicant(Applicant applicant)
         {
             var vacancy = await _jobVacancyService.GetVacancyById(applicant.VacancyId);
             if (vacancy is null) return;
@@ -365,12 +366,12 @@ namespace Codeji.CMS.Services.Recruitments
             {
                 _middlewareService.EmailSendAndSave(new EmpEmailLogs()
                 {
-                    UserTo = applicant.Email,
+                    UserTo = applicant.ApplicantId,
                     Subject = emailContent.subject ?? "",
                     Body = emailBody,
                     EmailLogType = emailContent.mailType,
                     Email = applicant.Email,
-                    UserFrom = currentUser != null ? currentUser.Email : string.Empty
+                    UserFrom = currentUser != null ? currentUser.UserId : string.Empty
                 });
             }, priority: 1);
         }

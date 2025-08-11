@@ -26,7 +26,7 @@ namespace Codeji.CMS.GenericRepository.Interfaces
         /// <param name="whereCondition"></param>
         /// <param name="WithDeletedObjects"></param>
         /// <returns>Return the list of data as Enumerable </returns>
-        Task<IEnumerable<TEntity>> GetAll(Expression<Func<TEntity, bool>> whereCondition = null, bool WithDeletedObjects = false);
+        Task<IEnumerable<TEntity>> GetAll(Expression<Func<TEntity, bool>> whereCondition = null, bool WithDeletedObjects = false, bool withDefaultFilter = true);
         /// <summary>
         /// Get Single records from collection within filters
         /// </summary>

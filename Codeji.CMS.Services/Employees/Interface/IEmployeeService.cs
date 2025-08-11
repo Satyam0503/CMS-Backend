@@ -45,7 +45,7 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<NotificationResponseModel> GetAllNotifications(NotificationRequestDTO model, string userId);
                 Task<Result> MarkNotificationAsRead(string userId, string userNotificationId);
                 Task<Result> MarkAllNotificationAsRead(string userId);
-                Task<Result<string>> GetCollegeList();
                 Task<Result> RemoveProfileImage(string userId);
+                Task<List<string>> GetCollegeNameSuggestions(string searchValue);
         }
 }

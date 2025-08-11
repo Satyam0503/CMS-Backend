@@ -87,11 +87,11 @@ namespace Codeji.CMS.GenericRepository
         }
         #endregion
 
-        private IFindFluent<TEntity, TEntity> GetQuery(Expression<Func<TEntity, bool>> filter = null, bool WithDeletedObjects = false)
+        private IFindFluent<TEntity, TEntity> GetQuery(Expression<Func<TEntity, bool>> filter = null, bool WithDeletedObjects = false, bool withDefaultFilter = true)
         {
             filter = filter ?? (x => true);
             // IQueryable<TEntity> query = _dbSet.AsQueryable()(WithDeletedObjects, GetCompanyId()).Where(filter);
-            var filterDefinition = IQueryableCustomExtensions.ApplyDefaultFilters(filter, WithDeletedObjects, GetCompanyId());
+            var filterDefinition = IQueryableCustomExtensions.ApplyDefaultFilters(filter, WithDeletedObjects, withDefaultFilter ? GetCompanyId() : "");
             return _dbSet.Find(filterDefinition);
         }
 
@@ -103,12 +103,11 @@ namespace Codeji.CMS.GenericRepository
             return query.AsQueryable();
         }
 
-        public async Task<IEnumerable<TEntity>> GetAll(Expression<Func<TEntity, bool>> whereCondition, bool WithDeletedObjects = false)
+        public async Task<IEnumerable<TEntity>> GetAll(Expression<Func<TEntity, bool>> whereCondition, bool WithDeletedObjects = false, bool withDefaultFilter = true)
         {
             whereCondition = whereCondition ?? (x => true);
-            var query = GetQuery(whereCondition, WithDeletedObjects);
+            var query = GetQuery(whereCondition, WithDeletedObjects, withDefaultFilter);
             return await Task.Run(() => query.ToEnumerable());
-
         }
         public async Task<int> Count(Expression<Func<TEntity, bool>> filter, bool WithDeletedObjects = false)
         {

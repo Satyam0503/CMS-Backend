@@ -139,13 +139,13 @@ public class AccountServices : IAccountServices
         if (emp is null) return result;
         var token = TokenHelper.GenerateToken();
         var hashedToken = TokenHelper.ComputeSha256Hash(token);
-
+        int tokenExpiryMinutes = 15;
         PasswordResetTokens passwordResetTokens = new()
         {
             UserId = emp.UserId,
             TokenHash = hashedToken,
             IsUsed = false,
-            Expiry = DateTime.UtcNow.AddMinutes(10),
+            Expiry = DateTime.UtcNow.AddMinutes(tokenExpiryMinutes),
         };
         var result2 = await _passwordResetTokens.AddOne(passwordResetTokens);
         if (!result2.Success)
@@ -159,6 +159,7 @@ public class AccountServices : IAccountServices
             EmployeeName = emp.FirstName + " " + emp.LastName,
             PasswordResetLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={emp.UserId}",
             CompanyName = company != null ? company.CompanyName : "",
+            LinkExpiryTime = $"{tokenExpiryMinutes} Minutes"
         });
         string replacedSubject = HtmlTemplate.Render(emailContent.subject, new
         {
@@ -166,17 +167,17 @@ public class AccountServices : IAccountServices
         });
 
         _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
-        {
-            _middlewareService.EmailSendAndSave(new EmpEmailLogs()
             {
-                UserTo = emp.Email,
-                Subject = replacedSubject,
-                Body = replacedBody,
-                EmailLogType = EnumsHelper.MailType.ResetPassword,
-                Email = emp.Email,
-                UserFrom = "",
-            });
-        }, priority: 1);
+                _middlewareService.EmailSendAndSave(new EmpEmailLogs()
+                {
+                    UserTo = emp.UserId,
+                    Subject = replacedSubject,
+                    Body = replacedBody,
+                    EmailLogType = EnumsHelper.MailType.ResetPassword,
+                    Email = emp.Email,
+                    UserFrom = "",
+                });
+            }, priority: 1);
 
         result.Success = true;
         result.StatusCode = CustomStatusCode.PasswordResetLinkSent;

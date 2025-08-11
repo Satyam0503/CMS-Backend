@@ -150,12 +150,13 @@ namespace Codeji.CMS.Services.Employees
             // generate password creation token for newly added employee
             string token = TokenHelper.GenerateToken();
             string tokenHash = TokenHelper.ComputeSha256Hash(token);
+            int tokenExpiryTime = 24;
             PasswordResetTokens passwordResetTokens = new()
             {
                 UserId = userId,
                 TokenHash = tokenHash,
                 IsUsed = false,
-                Expiry = DateTime.UtcNow.AddMinutes(15),
+                Expiry = DateTime.UtcNow.AddHours(tokenExpiryTime),
             };
             var result2 = await _passwordResetTokens.AddOne(passwordResetTokens);
 
@@ -172,12 +173,12 @@ namespace Codeji.CMS.Services.Employees
           {
               _middlewareService.EmailSendAndSave(new EmpEmailLogs()
               {
-                  UserTo = employee.Email,
+                  UserTo = employee.UserId,
                   Subject = emailContent.subject,
                   Body = replacedBody,
                   EmailLogType = EnumsHelper.MailType.CreateNewPasswordMail,
                   Email = employee.Email,
-                  UserFrom = currentUser.Email,
+                  UserFrom = currentUser.UserId,
               });
           }, priority: 1);
 
@@ -686,16 +687,6 @@ namespace Codeji.CMS.Services.Employees
             Expression<Func<UserNotifications, bool>> whereCondition = x => x.UserId == userId && !x.IsRead;
             return await _userNotificationRepository.UpdateMany(whereCondition, Builders<UserNotifications>.Update.Set(x => x.IsRead, true));
         }
-        public async Task<Result<string>> GetCollegeList()
-        {
-            var educationDetails = _educationDetailsRepo.Get();
-            List<string> collegeList = educationDetails.Select(x => x.CollegeName).ToList();
-            return new Result<string>
-            {
-                Success = true,
-                MethodResults = collegeList
-            };
-        }
 
         public async Task<Result> RemoveProfileImage(string userId)
         {
@@ -715,6 +706,13 @@ namespace Codeji.CMS.Services.Employees
             {
                 return result;
             }
+        }
+
+        public async Task<List<string>> GetCollegeNameSuggestions(string searchValue)
+        {
+            Expression<Func<EmpEducationDetails, bool>> expression = e => e.CollegeName.ToLower().Contains(searchValue.ToLower());
+            List<string> collegeList = (await _educationDetailsRepo.GetAll(expression, true, false)).Select(e => e.CollegeName).ToList();
+            return collegeList;
         }
     }
 }

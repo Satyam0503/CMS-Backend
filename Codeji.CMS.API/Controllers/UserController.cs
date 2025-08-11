@@ -416,18 +416,25 @@ public class UserController : BaseApiController
         return await _employeeService.MarkAllNotificationAsRead(userId);
     }
 
-    [HttpGet]
-    [Route("GetCollegeList")]
-    public async Task<Result<string>> GetCollegeList()
-    {
-        return await _employeeService.GetCollegeList();
-    }
-
     [HttpDelete]
     [Route("RemoveProfileImage")]
     public async Task<Result> RemoveProfileImage()
     {
         string userId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.RemoveProfileImage(userId);
+    }
+
+    [HttpGet]
+    [Route("GetCollegeList")]
+    public async Task<Result<string>> GetCollegeList([FromQuery] string searchValue)
+    {
+        List<string> collegeList = [];
+        collegeList = await _employeeService.GetCollegeNameSuggestions(searchValue);
+        return new Result<string>()
+        {
+            Success = true,
+            MethodResults = collegeList,
+            TotalRecords = collegeList.Count,
+        };
     }
 }

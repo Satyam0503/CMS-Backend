@@ -66,7 +66,7 @@ public class LeaveManagementService : ILeaveManagementService
         bool isValidLeaveType = Enum.IsDefined(typeof(EnumsHelper.LeaveTypes), leaveTypeRequestDto.LeaveType);
         if (!isValidLeaveType)
         {
-            result.Message = "Leave type doesn't exists";
+            result.StatusCode = CustomStatusCode.LeaveTypeNotExist;
             return result;
         }
         Expression<Func<LeaveTypes, bool>> leaveTypeCondition = l => l.LeaveType == leaveTypeRequestDto.LeaveType;
@@ -98,7 +98,7 @@ public class LeaveManagementService : ILeaveManagementService
                 await _leaveTypeRepo.Update(leaveTypeCondition, existingLeaveType);
                 result.Success = true;
             }
-            result.Message = "Leave Type Already Exists";
+            result.StatusCode = CustomStatusCode.LeaveTypeAlreadyExist;
             return result;
         }
         else
@@ -131,7 +131,7 @@ public class LeaveManagementService : ILeaveManagementService
                     return result;
                 }
                 result.Success = false;
-                result.Message = "Leave Type Already Exists";
+                result.StatusCode = CustomStatusCode.LeaveTypeAlreadyExist;
                 return result;
             }
             existingLeaveType.LeaveType = leaveTypeRequestDto.LeaveType;
@@ -140,7 +140,6 @@ public class LeaveManagementService : ILeaveManagementService
             existingLeaveType.IsActive = leaveTypeRequestDto.IsActive;
             existingLeaveType.MinAdvanceNoticeDate = leaveTypeRequestDto.MinAdvanceNoticeDate;
             result = await _leaveTypeRepo.Update(whereCondition, existingLeaveType);
-
         }
         return result;
     }
