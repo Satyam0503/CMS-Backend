@@ -127,7 +127,6 @@ namespace Codeji.CMS.Services.Employees
                 DateOfBirth = user.DateOfBirth,
                 Department = user.Department,
                 ReportingManager = user.ReportingManager,
-                TeamLead = user.TeamLead,
                 PhoneNumber = user.PhoneNumber,
                 BloodGroup = user.BloodGroup,
                 PersonalEmail = user.PersonalEmail,
@@ -213,12 +212,10 @@ namespace Codeji.CMS.Services.Employees
         {
             string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
             EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
-            EmpUser? teamLead = await _employeeRepository.FirstOrDefault(x => x.UserId == user.TeamLead);
             EmpUser? reportingManager = await _employeeRepository.FirstOrDefault(x => x.UserId == user.ReportingManager);
             Department? department = await _departmentRepository.FirstOrDefault(x => x.DepartmentId == user.Department);
             UserModel userModel = _mapper.Map<UserModel>(user);
             userModel.DepartmentName = department?.Titles?.FirstOrDefault(x => x.Language == acceptLanguage)?.Label;
-            userModel.TeamLeadName = teamLead != null ? $"{teamLead.FirstName} {teamLead.LastName}" : null;
             userModel.ReportingManagerName = reportingManager != null ? $"{reportingManager?.FirstName} {reportingManager?.LastName}" : null;
             userModel.FullProfileUrl = string.IsNullOrEmpty(user.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(user.ProfileUrl);
             return userModel;
@@ -711,7 +708,7 @@ namespace Codeji.CMS.Services.Employees
         public async Task<List<string>> GetCollegeNameSuggestions(string searchValue)
         {
             Expression<Func<EmpEducationDetails, bool>> expression = e => e.CollegeName.ToLower().Contains(searchValue.ToLower());
-            List<string> collegeList = (await _educationDetailsRepo.GetAll(expression, true, false)).Select(e => e.CollegeName).ToList();
+            List<string> collegeList = (await _educationDetailsRepo.GetAll(expression, true, false)).Select(e => e.CollegeName).Distinct().ToList();
             return collegeList;
         }
     }
