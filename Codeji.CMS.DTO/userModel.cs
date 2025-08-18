@@ -14,7 +14,7 @@ public class UserModel
     public string? JobRole { get; set; }
     public string? DateOfBirth { get; set; }
     public string? Department { get; set; }
-    public string? DepartmentName { get; set; }
+    public List<MultilingualModel> DepartmentName { get; set; } = [];
     public string? ReportingManager { get; set; }
     public string? ReportingManagerName { get; set; }
     public string? PhoneNumber { get; set; }

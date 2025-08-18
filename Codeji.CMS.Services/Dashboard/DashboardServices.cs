@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Expressions;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Linq.Expressions;
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Dashboard;
@@ -45,25 +40,20 @@ namespace Codeji.CMS.Services.Dashboard
             _holidayRepository = holidayRepository;
         }
 
-        public async Task<List<AllDepartmentDetailsResponseModel>> GetAllDepartmentsDetails(string companyId)
+        public async Task<List<DepartmentEmpResponseDto>> GetAllDepartmentsDetails(string companyId)
         {
-
-            string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
-
             var allDepartments = await _departmentRepository.GetAll(x => x.CompanyId == companyId && x.IsDeleted == false);
             var allEmpUser = await _empUserRepository.GetAll(x => x.CompanyId == companyId);
 
             var result = from ad in allDepartments
                          join aeu in allEmpUser on ad.DepartmentId equals aeu.Department into empGroup
-                         select new AllDepartmentDetailsResponseModel
+                         select new DepartmentEmpResponseDto
                          {
-                             Label = ad.Titles.FirstOrDefault(x => x.Language == acceptLanguage)?.Label,
+                             Label = ad.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label),
                              DepartmentId = ad.DepartmentId,
                              EmployeeCount = empGroup.Count(),
                          };
-
             return result.ToList();
-
         }
 
         public async Task<List<GenderDetailsResponseModel>> GetAllGenderDetails(string companyId)

@@ -10,7 +10,7 @@ public class GetAllEmployeeResponseModel
     public string Email { get; set; }
     public string? EmployeeId { get; set; }
     public string? JobRole { get; set; }
-    public string? Department { get; set; }
+    public Dictionary<string, string>? Department { get; set; }
     public string? PhoneNumber { get; set; }
     public string? DateOfBirth { get; set; }
     public string? FullProfileUrl { get; set; }

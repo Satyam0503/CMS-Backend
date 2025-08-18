@@ -215,7 +215,7 @@ namespace Codeji.CMS.Services.Employees
             EmpUser? reportingManager = await _employeeRepository.FirstOrDefault(x => x.UserId == user.ReportingManager);
             Department? department = await _departmentRepository.FirstOrDefault(x => x.DepartmentId == user.Department);
             UserModel userModel = _mapper.Map<UserModel>(user);
-            userModel.DepartmentName = department?.Titles?.FirstOrDefault(x => x.Language == acceptLanguage)?.Label;
+            userModel.DepartmentName = department?.Titles;
             userModel.ReportingManagerName = reportingManager != null ? $"{reportingManager?.FirstName} {reportingManager?.LastName}" : null;
             userModel.FullProfileUrl = string.IsNullOrEmpty(user.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(user.ProfileUrl);
             return userModel;
@@ -263,7 +263,6 @@ namespace Codeji.CMS.Services.Employees
                     TotalRecords = totalRecords,
                 };
             }
-            string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
             string[] depId = employeeList.Select(x => x.Department).Distinct().ToArray();
             var deptList = await _departmentRepository.GetAll(x => depId.Contains(x.DepartmentId));
 
@@ -279,7 +278,7 @@ namespace Codeji.CMS.Services.Employees
                             Gender = emp.Gender,
                             EmployeeId = emp.EmployeeId,
                             JobRole = emp.JobRole,
-                            Department = department?.Titles?.FirstOrDefault(x => x.Language == acceptLanguage)?.Label,
+                            Department = department?.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label),
                             PhoneNumber = emp.PhoneNumber,
                             DateOfBirth = emp.DateOfBirth,
                             FullProfileUrl = string.IsNullOrEmpty(emp.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(emp.ProfileUrl),

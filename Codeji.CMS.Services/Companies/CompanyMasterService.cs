@@ -2,6 +2,7 @@
 
 using System.Collections;
 using System.Linq.Expressions;
+using AngleSharp.Common;
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
@@ -66,7 +67,7 @@ public class CompanyMasterService : ICompanyMasterService
         return result;
     }
 
-    public async Task<Result<DepartmentDTO>> GetDepartmentList(bool? isActive)
+    public async Task<Result<DepartmentResponseDto>> GetDepartmentList(bool? isActive)
     {
         IEnumerable<Department> departments = await _departmentRepository.GetAll(x => x.IsDeleted == false);
         if (isActive.HasValue)
@@ -76,21 +77,24 @@ public class CompanyMasterService : ICompanyMasterService
 
         if (departments == null || !departments.Any())
         {
-            return new Result<DepartmentDTO>()
+            return new Result<DepartmentResponseDto>()
             {
                 StatusCode = StatusCodes.Status404NotFound,
                 Success = false,
-                Message = "No Department Found"
             };
         }
 
-        List<DepartmentDTO> data = _mapper.Map<List<DepartmentDTO>>(departments);
-        return new Result<DepartmentDTO>()
+        var data = departments.Select(d => new DepartmentResponseDto()
+        {
+            DepartmentId = d.DepartmentId,
+            IsActive = d.IsActive,
+            Titles = d.Titles.ToDictionary(keySelector: dt => dt.Language, elementSelector: dt => dt.Label),
+        });
+        return new Result<DepartmentResponseDto>()
         {
             MethodResults = data.ToList(),
-            TotalRecords = data.Count,
+            TotalRecords = data.Count(),
             Success = true,
-            StatusCode = 200,
         };
     }
 
