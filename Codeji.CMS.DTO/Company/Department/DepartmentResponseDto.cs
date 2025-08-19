@@ -1,4 +1,4 @@
-namespace Codeji.CMS.DTO.RequestModels.Company
+namespace Codeji.CMS.DTO.Company.Department
 {
     public class DepartmentResponseDto
     {

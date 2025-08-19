@@ -1,5 +1,7 @@
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
+using Codeji.CMS.DTO.Company.Department;
+using Codeji.CMS.DTO.Company.JobTitle;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.Repository.Entities.Company;
@@ -23,12 +25,14 @@ public class CompanyMasterController : BaseApiController
         _httpContextAccessor = httpContextAccessor;
     }
 
+    // company department actions
+
     [HttpPost]
     [Route("UpdateDepartment")]
-    public async Task<Result> AddEditDepartment(List<DepartmentDTO> model)
+    public async Task<Result> AddEditDepartment(List<DepartmentRequestDto> data)
     {
         string userId = CurrentContext.UserId(_httpContextAccessor);
-        Result result = await _companyMasterService.UpdateDepartments(model, userId);
+        Result result = await _companyMasterService.UpdateDepartments(data, userId);
         return result;
     }
 
@@ -44,20 +48,14 @@ public class CompanyMasterController : BaseApiController
     [Route("DeleteDepartment/{departmentId}")]
     public async Task<Result> DeleteDepartment(string departmentId)
     {
+        Result result = new();
         var success = await _companyMasterService.DeleteDepartment(departmentId);
         if (!success)
         {
-            return new Result()
-            {
-                Success = false,
-                StatusCode = 200,
-            };
+            return result;
         }
-        return new Result()
-        {
-            StatusCode = 200,
-            Success = true,
-        };
+        result.Success = true;
+        return result;
     }
 
     [HttpPatch]
@@ -77,7 +75,6 @@ public class CompanyMasterController : BaseApiController
 
     [HttpGet]
     [Route("GetAllModuleDetails")]
-    [Authorize]
     public async Task<Result<AllModuleDetailsResponseModel>> GetAllModuleDetails()
     {
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -89,4 +86,21 @@ public class CompanyMasterController : BaseApiController
         };
     }
 
+    // company job title actions
+    [HttpPost]
+    [Route("AddUpdateJobTitle")]
+    public async Task<Result> AddUpdateJobTitle(List<JobTitleRequestDto> data)
+    {
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        var result = await _companyMasterService.AddUpdateJobTitle(data, userId);
+        return result;
+    }
+
+    [HttpGet]
+    [Route("GetJobTitles")]
+    public async Task<Result<JobTitleResponseDto>> GetAllJobTitles([FromQuery] bool? isActive)
+    {
+        var result = await _companyMasterService.GetJobTitles(isActive);
+        return result;
+    }
 }

@@ -1,6 +1,8 @@
 ﻿using AutoMapper;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Company;
+using Codeji.CMS.DTO.Company.Department;
+using Codeji.CMS.DTO.Company.JobTitle;
 using Codeji.CMS.DTO.Holiday;
 using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
 using Codeji.CMS.DTO.NoticeBoard;
@@ -37,12 +39,13 @@ namespace Codeji.CMS.Services.Registration
             CreateMap<EmpCertificationDetails, EmployeeCertificationRequestModel>().ReverseMap();
             CreateMap<Roles, RoleModel>().ReverseMap();
             CreateMap<JobVacancy, JobVacancyModel>().ReverseMap();
-            CreateMap<Department, DepartmentDTO>().ReverseMap();
+            CreateMap<Department, DepartmentRequestDto>().ReverseMap();
             CreateMap<Skills, SkillsDTO>().ReverseMap();
             CreateMap<Notice, MyNoticeDTO>().ReverseMap();
             CreateMap<LeaveBalance, LeaveBalanceRequestDto>().ReverseMap();
             CreateMap<HolidayResponseDto, Holidays>().ReverseMap();
             CreateMap<Applicant, ApplicantViewModel>().ForMember(dest => dest.ApplyDate, opt => opt.MapFrom(src => src.CreatedDate)).ReverseMap();
+            CreateMap<JobTitles, JobTitleRequestDto>().ReverseMap();
         }
     }
 
