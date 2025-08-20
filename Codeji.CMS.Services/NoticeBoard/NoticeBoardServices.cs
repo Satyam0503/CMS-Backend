@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using AngleSharp.Common;
 using AngleSharp.Text;
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
@@ -6,6 +7,7 @@ using Codeji.CMS.DTO.NoticeBoard;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
+using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.NoticeBoard;
 using Codeji.CMS.Utility;
@@ -23,7 +25,16 @@ public class NoticeBoardServices : INoticeBoardService
     private readonly IMongoDbRepository<Notifications> _notificationRepository;
     private readonly IMongoDbRepository<UserNotifications> _userNotificationsRepository;
     private readonly INotificationService _notificationService;
-    public NoticeBoardServices(IMapper mapper, IMongoDbRepository<Notice> noticeRepository, IMongoDbRepository<EmpUser> empUserRepository, IMongoDbRepository<Notifications> notificationRepository, IMongoDbRepository<UserNotifications> userNotificationsRepository, INotificationService notificationService)
+    private readonly IMongoDbRepository<JobTitles> _jobTitlesRepository;
+    public NoticeBoardServices(
+        IMapper mapper,
+        IMongoDbRepository<Notice> noticeRepository,
+        IMongoDbRepository<EmpUser> empUserRepository,
+        IMongoDbRepository<Notifications> notificationRepository,
+        IMongoDbRepository<UserNotifications> userNotificationsRepository,
+        INotificationService notificationService,
+        IMongoDbRepository<JobTitles> jobTitlesRepository
+        )
     {
         _mapper = mapper;
         _noticeRepository = noticeRepository;
@@ -31,6 +42,7 @@ public class NoticeBoardServices : INoticeBoardService
         _notificationRepository = notificationRepository;
         _userNotificationsRepository = userNotificationsRepository;
         _notificationService = notificationService;
+        _jobTitlesRepository = jobTitlesRepository;
     }
 
     public async Task<Result> PostNotice(AddNoticeRequestModel model, string userId)
@@ -120,22 +132,27 @@ public class NoticeBoardServices : INoticeBoardService
             empIdsList = (await _empUserRepository.GetAll(x => (x.FirstName + " " + x.LastName).Contains(filter.PostedBy.Trim(), StringComparison.CurrentCultureIgnoreCase))).Select(x => x.UserId).ToList();
         }
         EmpUser? employee = await _empUserRepository.FirstOrDefault(x => x.UserId == userId);
+
         Expression<Func<Notice, bool>> whereCondition = x => (x.Departments.Equals("all") || x.Departments.Equals(employee.Department))
         && (x.Target.Equals("all") || x.Target.Equals(employee.RoleId))
         && (filter.NoticeType.Length == 0 || filter.NoticeType.Contains(x.NoticeType))
         && ((!filter.FilterFrom.HasValue || filter.FilterFrom.Value <= x.CreatedDate) && (!filter.FilterTo.HasValue || filter.FilterTo >= x.CreatedDate))
         && (filter.PostedBy.Trim().Length == 0 || empIdsList.Contains(x.CreatedBy));
+
         int totalRecords = await _noticeRepository.Count(whereCondition);
         List<Notice> noticeList = (await _noticeRepository.GetAggregateDataAsync<Notice>(whereCondition, isAscending: false, orderedKey: "CreatedDate", pageNo: filter.PageNo, pageSize: filter.Records)).ToList();
         List<string> empIdList = noticeList.Select(x => x.CreatedBy).Distinct().ToList();
         IEnumerable<EmpUser> empUsers = await _empUserRepository.GetAll(x => empIdList.Contains(x.UserId));
+        IEnumerable<JobTitles> jobTitles = await _jobTitlesRepository.GetAll();
         var data = (from notice in noticeList
                     join emp in empUsers on notice.CreatedBy equals emp.UserId
+                    join job in jobTitles on emp.JobRole equals job.JobTitleId into jobGroup
+                    from jobTitle in jobGroup.DefaultIfEmpty()
                     select new NoticeViewModel
                     {
                         NoticeId = notice.NoticeId,
                         UserName = $"{emp.FirstName} {emp.LastName}",
-                        UserDesignation = emp.JobRole,
+                        UserDesignation = jobTitle != null ? jobTitle.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label) : null,
                         NoticeMessage = notice.Message,
                         NoticeTitle = notice.Title,
                         CreatedDateTime = notice.CreatedDate,
@@ -157,13 +174,13 @@ public class NoticeBoardServices : INoticeBoardService
         if (notice is null) return null;
         EmpUser? user = await _empUserRepository.FirstOrDefault(x => x.UserId == notice.CreatedBy);
         if (user is null) return null;
-
+        JobTitles? jobTitle = await _jobTitlesRepository.FirstOrDefault(jt => jt.JobTitleId == user.JobRole);
         var data = new NoticeViewModel()
         {
             NoticeId = notice.NoticeId,
             UserName = $"{user.FirstName} {user.LastName}",
             UserProfile = Common.GetEmployeeImageUrl(user.ProfileUrl),
-            UserDesignation = user.JobRole,
+            UserDesignation = jobTitle?.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label),
             NoticeMessage = notice.Message,
             NoticeTitle = notice.Title,
             CreatedDateTime = notice.CreatedDate,

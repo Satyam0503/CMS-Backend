@@ -12,11 +12,12 @@ public class UserModel
     public string Gender { get; set; }
     public string? EmployeeId { get; set; }
     public string? JobRole { get; set; }
+    public Dictionary<string, string>? JobRoleTitle { get; set; } = null;
     public string? DateOfBirth { get; set; }
     public string? Department { get; set; }
-    public List<MultilingualModel> DepartmentName { get; set; } = [];
+    public Dictionary<string, string>? DepartmentTitle { get; set; }
     public string? ReportingManager { get; set; }
-    public string? ReportingManagerName { get; set; }
+    public string? ReportingManagerName { get; set; } = null;
     public string? PhoneNumber { get; set; }
     public string? BloodGroup { get; set; }
     public string? PersonalEmail { get; set; }

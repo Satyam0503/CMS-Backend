@@ -9,6 +9,7 @@ using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
+using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Holidays;
 using Codeji.CMS.Repository.Entities.Leave;
@@ -34,6 +35,7 @@ public class LeaveManagementService : ILeaveManagementService
     private readonly INotificationService _notificationService;
     private readonly IMongoDbRepository<Notifications> _notificationsRepo;
     private readonly IMongoDbRepository<UserNotifications> _userNotificationsRepo;
+    private readonly IMongoDbRepository<JobTitles> _jobTitleRepo;
     private readonly IMapper _mapper;
     private readonly IEmployeeService _employeeService;
     public LeaveManagementService(IMongoDbRepository<LeaveTypes> leaveTypeRepo,
@@ -45,6 +47,7 @@ public class LeaveManagementService : ILeaveManagementService
     IMongoDbRepository<Notifications> notificationsRepo,
     IMongoDbRepository<UserNotifications> userNotificationsRepo,
     IMongoDbRepository<Roles> roleRepository,
+    IMongoDbRepository<JobTitles> jobTitleRepo,
     IEmployeeService employeeService)
     {
         _leaveTypeRepo = leaveTypeRepo;
@@ -58,6 +61,7 @@ public class LeaveManagementService : ILeaveManagementService
         _userNotificationsRepo = userNotificationsRepo;
         _roleRepository = roleRepository;
         _employeeService = employeeService;
+        _jobTitleRepo = jobTitleRepo;
     }
 
     public async Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto)
@@ -417,18 +421,21 @@ public class LeaveManagementService : ILeaveManagementService
             leaveRequestList = (await _leave.GetAggregateDataAsync<LeaveRequest>(whereCondition, pageNo: leaveFilter.PageNo, pageSize: leaveFilter.PageSize, isAscending: false, orderedKey: "CreatedDate")).ToList();
         }
         var users = await _empUser.GetAll();
+        var jobTitles = await _jobTitleRepo.GetAll();
 
         List<LeaveResponseDto> FinalLeaveRequestList = (from leave in leaveRequestList
                                                         join user in users on leave.EmployeeId equals user.UserId
                                                         join reviewerGroup in users on leave.ReviewedBy equals reviewerGroup.UserId into approvedUsers
                                                         from approvedUser in approvedUsers.DefaultIfEmpty()
+                                                        join job in jobTitles on user.JobRole equals job.JobTitleId into jobRolesTitles
+                                                        from jobTitle in jobRolesTitles.DefaultIfEmpty()
                                                         select new LeaveResponseDto
                                                         {
                                                             LeaveRequestId = leave.LeaveRequestId,
                                                             EmployeeId = leave.EmployeeId,
                                                             EmployeeName = user.FirstName + " " + user.LastName,
                                                             ProfileUrl = Common.GetEmployeeImageUrl(user.ProfileUrl),
-                                                            JobRole = user.JobRole,
+                                                            JobRole = jobTitle != null ? jobTitle.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label) : null,
                                                             IsHalfDay = leave.IsHalfDay,
                                                             LeaveType = leave.LeaveType,
                                                             StartDate = leave.StartDate,

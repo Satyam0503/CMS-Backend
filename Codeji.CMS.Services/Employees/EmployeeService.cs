@@ -54,6 +54,7 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<UserNotifications> _userNotificationRepository;
         readonly IMongoDbRepository<Notifications> _notificationsRepository;
         readonly IMongoDbRepository<RefreshToken> _refreshTokenRepository;
+        readonly IMongoDbRepository<JobTitles> _jobTitlesRepository;
         readonly IHttpContextAccessor _httpContextAccessor;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
@@ -76,7 +77,8 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<EmpWorkHistory> empWorkHistoryRepository,
             IMongoDbRepository<UserNotifications> userNotificationRepository,
             IMongoDbRepository<Notifications> notificationsRepository,
-            IMongoDbRepository<RefreshToken> refreshTokenRepository
+            IMongoDbRepository<RefreshToken> refreshTokenRepository,
+            IMongoDbRepository<JobTitles> jobTitlesRepository
             )
         {
             _employeeRepository = employeeRepository;
@@ -101,6 +103,7 @@ namespace Codeji.CMS.Services.Employees
             _userNotificationRepository = userNotificationRepository;
             _notificationsRepository = notificationsRepository;
             _refreshTokenRepository = refreshTokenRepository;
+            _jobTitlesRepository = jobTitlesRepository;
         }
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
@@ -210,13 +213,20 @@ namespace Codeji.CMS.Services.Employees
         }
         public async Task<UserModel> GetEmployeeById(string userId)
         {
-            string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
             EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
-            EmpUser? reportingManager = await _employeeRepository.FirstOrDefault(x => x.UserId == user.ReportingManager);
             Department? department = await _departmentRepository.FirstOrDefault(x => x.DepartmentId == user.Department);
             UserModel userModel = _mapper.Map<UserModel>(user);
-            userModel.DepartmentName = department?.Titles;
-            userModel.ReportingManagerName = reportingManager != null ? $"{reportingManager?.FirstName} {reportingManager?.LastName}" : null;
+            if (userModel.JobRole != null)
+            {
+                JobTitles? jobTitles = await _jobTitlesRepository.FirstOrDefault(jt => jt.JobTitleId == userModel.JobRole);
+                userModel.JobRoleTitle = jobTitles != null ? jobTitles.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label) : null;
+            }
+            if (userModel.ReportingManager != null)
+            {
+                EmpUser? reportingManager = await _employeeRepository.FirstOrDefault(x => x.UserId == user.ReportingManager);
+                userModel.ReportingManagerName = reportingManager != null ? $"{reportingManager?.FirstName} {reportingManager?.LastName}" : null;
+            }
+            userModel.DepartmentTitle = department == null ? null : department.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label);
             userModel.FullProfileUrl = string.IsNullOrEmpty(user.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(user.ProfileUrl);
             return userModel;
         }
@@ -266,10 +276,16 @@ namespace Codeji.CMS.Services.Employees
             string[] depId = employeeList.Select(x => x.Department).Distinct().ToArray();
             var deptList = await _departmentRepository.GetAll(x => depId.Contains(x.DepartmentId));
 
+            string[] jobRoleId = employeeList.Select(e => e.JobRole).Distinct().ToArray();
+            var jobRoleList = await _jobTitlesRepository.GetAll(jt => jobRoleId.Contains(jt.JobTitleId));
+
             var data = (from emp in employeeList
                         join dept in deptList
                         on emp.Department equals dept.DepartmentId into empDepartmentGrp
                         from department in empDepartmentGrp.DefaultIfEmpty()
+                        join jt in jobRoleList
+                        on emp.JobRole equals jt.JobTitleId into empJobTitleGrp
+                        from jobTitle in empJobTitleGrp.DefaultIfEmpty()
                         select new GetAllEmployeeResponseModel
                         {
                             UserId = emp.UserId,
@@ -277,7 +293,7 @@ namespace Codeji.CMS.Services.Employees
                             Email = emp.Email,
                             Gender = emp.Gender,
                             EmployeeId = emp.EmployeeId,
-                            JobRole = emp.JobRole,
+                            JobRole = jobTitle != null ? jobTitle.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label) : null,
                             Department = department?.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label),
                             PhoneNumber = emp.PhoneNumber,
                             DateOfBirth = emp.DateOfBirth,
