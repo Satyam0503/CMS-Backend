@@ -256,23 +256,26 @@ public class LeaveManagementService : ILeaveManagementService
         List<string> empId = !string.IsNullOrEmpty(leaveBalanceFilter.EmployeeName) ? (await _empUser.GetAll(e => e.FirstName.ToLower().Contains(leaveBalanceFilter.EmployeeName) || e.LastName.ToLower().Contains(leaveBalanceFilter.EmployeeName))).Select(e => e.UserId).ToList() : null;
         Expression<Func<LeaveBalance, bool>> whereCondition = l =>
         (string.IsNullOrEmpty(leaveBalanceFilter.EmployeeName) || empId.Contains(l.EmployeeId))
-        && (leaveBalanceFilter.Year == null || (l.Year.Year == leaveBalanceFilter.Year));
+        && ((leaveBalanceFilter.Year == null && l.Year.Year == DateTime.UtcNow.Year) || (l.Year.Year == leaveBalanceFilter.Year));
         int count = await _leaveBalance.Count(whereCondition);
 
         leaveBalances = (await _leaveBalance.GetAggregateDataAsync<LeaveBalance>(whereCondition, pageNo: leaveBalanceFilter.PageNo, pageSize: leaveBalanceFilter.PageSize, isAscending: false, orderedKey: "CreatedDate")).ToList();
-        List<EmpUser> users = (await _empUser.GetAll(e => CompanyId.Contains(e.CompanyId))).ToList();
+        List<string> userIds = leaveBalances.Select(lb => lb.EmployeeId).ToList();
+        List<EmpUser> users = (await _empUser.GetAll(e => userIds.Contains(e.UserId))).ToList();
         List<LeaveTypes> leaveTypes = (await _leaveTypeRepo.GetAll()).ToList();
+        IEnumerable<JobTitles> jobTitles = await _jobTitleRepo.GetAll();
+
         List<LeaveBalanceResponseDto> LeaveBalanceList = (from leaveBalance in leaveBalances
                                                           join user in users on leaveBalance.EmployeeId equals user.UserId
-                                                          join createdByUser in users on leaveBalance.CreatedBy equals createdByUser.UserId
+                                                          join jobTitle in jobTitles on user.JobRole equals jobTitle.JobTitleId into jobTitlesGroup
+                                                          from jobTitleItem in jobTitlesGroup.DefaultIfEmpty()
                                                           select new LeaveBalanceResponseDto
                                                           {
                                                               Id = leaveBalance.Id,
                                                               EmployeeId = leaveBalance.EmployeeId,
                                                               EmployeeName = user.FirstName + " " + user.LastName,
                                                               ProfileUrl = Common.GetEmployeeImageUrl(user.ProfileUrl),
-                                                              JobRole = user.JobRole,
-                                                              CreatedBy = createdByUser.FirstName + " " + createdByUser.LastName,
+                                                              JobRole = jobTitleItem?.Titles.ToDictionary(jt => jt.Language, jt => jt.Label),
                                                               Year = leaveBalance.Year,
                                                               SickLeave = leaveBalance.LeaveTypeBalances.Find(x => x.LeaveType == EnumsHelper.LeaveTypes.Sick) ?? null,
                                                               EarnedLeave = leaveBalance.LeaveTypeBalances.Find(x => x.LeaveType == EnumsHelper.LeaveTypes.Earned) ?? null,
@@ -435,7 +438,7 @@ public class LeaveManagementService : ILeaveManagementService
                                                             EmployeeId = leave.EmployeeId,
                                                             EmployeeName = user.FirstName + " " + user.LastName,
                                                             ProfileUrl = Common.GetEmployeeImageUrl(user.ProfileUrl),
-                                                            JobRole = jobTitle != null ? jobTitle.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label) : null,
+                                                            JobRole = jobTitle?.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label),
                                                             IsHalfDay = leave.IsHalfDay,
                                                             LeaveType = leave.LeaveType,
                                                             StartDate = leave.StartDate,
