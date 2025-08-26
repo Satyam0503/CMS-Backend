@@ -19,4 +19,5 @@ public interface ICompanyMasterService
     // Company Job Titles 
     Task<Result> AddUpdateJobTitle(List<JobTitleRequestDto> data, string userId);
     Task<Result<JobTitleResponseDto>> GetJobTitles(bool? isActive);
+    Task<bool> DeleteJobTitle(string jobTitleId);
 }

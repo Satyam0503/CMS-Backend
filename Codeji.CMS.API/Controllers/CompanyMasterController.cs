@@ -103,4 +103,13 @@ public class CompanyMasterController : BaseApiController
         var result = await _companyMasterService.GetJobTitles(isActive);
         return result;
     }
+
+    [HttpDelete]
+    [Route("DeleteJobTitle/{jobTitleId}")]
+    public async Task<Result> DeleteJobTitle(string jobTitleId)
+    {
+        Result result = new();
+        result.Success = await _companyMasterService.DeleteJobTitle(jobTitleId);
+        return result;
+    }
 }

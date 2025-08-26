@@ -205,5 +205,18 @@ public class CompanyMasterService : ICompanyMasterService
         }
         return result;
     }
+
+    public async Task<bool> DeleteJobTitle(string jobTitleId)
+    {
+        Expression<Func<JobTitles, bool>> whereCondition = jt => jt.JobTitleId == jobTitleId;
+        JobTitles? jobTitle = await _jobTitleRepository.FirstOrDefault(whereCondition);
+        if (jobTitle is null)
+        {
+            return false;
+        }
+        jobTitle.IsDeleted = true;
+        var result = await _jobTitleRepository.Update(whereCondition, jobTitle);
+        return result.Success;
+    }
 }
 
