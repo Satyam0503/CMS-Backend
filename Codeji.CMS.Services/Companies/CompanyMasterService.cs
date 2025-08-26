@@ -6,6 +6,7 @@ using AngleSharp.Common;
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
+using Codeji.CMS.DTO.Company.CustomAttribute;
 using Codeji.CMS.DTO.Company.Department;
 using Codeji.CMS.DTO.Company.JobTitle;
 using Codeji.CMS.DTO.RequestModels.Company;
@@ -35,8 +36,9 @@ public class CompanyMasterService : ICompanyMasterService
     readonly IHttpContextAccessor _httpContextAccessor;
     readonly IRoleService _roleService;
     readonly IMongoDbRepository<JobTitles> _jobTitleRepository;
+    readonly IMongoDbRepository<CustomAttribute> _customAttributeRepository;
 
-    public CompanyMasterService(IRoleService roleService, IMongoDbRepository<Department> departmentRepository, IMapper mapper, IMongoDbRepository<Module> moduleRepository, IMongoDbRepository<ModulePermission> modulePermissionRepository, IMongoDbRepository<Permission> permissionRepository, IMongoDbRepository<RolePermission> rolePermissionRepository, IMongoDbRepository<JobTitles> jobTitleRepository, IHttpContextAccessor httpContextAccessor)
+    public CompanyMasterService(IRoleService roleService, IMongoDbRepository<CustomAttribute> customAttributeRepository, IMongoDbRepository<Department> departmentRepository, IMapper mapper, IMongoDbRepository<Module> moduleRepository, IMongoDbRepository<ModulePermission> modulePermissionRepository, IMongoDbRepository<Permission> permissionRepository, IMongoDbRepository<RolePermission> rolePermissionRepository, IMongoDbRepository<JobTitles> jobTitleRepository, IHttpContextAccessor httpContextAccessor)
     {
         _departmentRepository = departmentRepository;
         _mapper = mapper;
@@ -47,8 +49,7 @@ public class CompanyMasterService : ICompanyMasterService
         _httpContextAccessor = httpContextAccessor;
         _roleService = roleService;
         _jobTitleRepository = jobTitleRepository;
-
-
+        _customAttributeRepository = customAttributeRepository;
     }
 
     public async Task<Result> UpdateDepartments(List<DepartmentRequestDto> departmentList, string userId)
@@ -217,6 +218,29 @@ public class CompanyMasterService : ICompanyMasterService
         jobTitle.IsDeleted = true;
         var result = await _jobTitleRepository.Update(whereCondition, jobTitle);
         return result.Success;
+    }
+
+    // Custom Attributes Services
+    public async Task<CustomAttributeResponseDto> CreateCustomAttribute(string userId)
+    {
+        CustomAttribute customAttribute = new()
+        {
+            CustomAttributeId = Guid.NewGuid().ToString(),
+            CustomAttributeName = null,
+            CreatedBy = userId,
+            CreatedDate = DateTime.UtcNow,
+        };
+        var result = await _customAttributeRepository.AddOne(customAttribute);
+        // if (!result.Success)
+        // {
+        //     return null;
+        // }
+        CustomAttributeResponseDto responseDto = new()
+        {
+            CustomAttributeId = customAttribute.CustomAttributeId,
+            CustomAttributeName = customAttribute.CustomAttributeName
+        };
+        return responseDto;
     }
 }
 

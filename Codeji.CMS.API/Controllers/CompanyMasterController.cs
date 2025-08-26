@@ -1,5 +1,6 @@
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
+using Codeji.CMS.DTO.Company.CustomAttribute;
 using Codeji.CMS.DTO.Company.Department;
 using Codeji.CMS.DTO.Company.JobTitle;
 using Codeji.CMS.DTO.RequestModels.Company;
@@ -110,6 +111,18 @@ public class CompanyMasterController : BaseApiController
     {
         Result result = new();
         result.Success = await _companyMasterService.DeleteJobTitle(jobTitleId);
+        return result;
+    }
+
+    // custom attributes actions
+    [HttpPost]
+    [Route("CreateCustomAttribute")]
+    public async Task<Result<CustomAttributeResponseDto>> CreateCustomAttribute()
+    {
+        Result<CustomAttributeResponseDto> result = new();
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        var data = await _companyMasterService.CreateCustomAttribute(userId);
+        result.MethodResult = data;
         return result;
     }
 }

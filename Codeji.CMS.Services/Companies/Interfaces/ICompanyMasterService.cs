@@ -1,5 +1,6 @@
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
+using Codeji.CMS.DTO.Company.CustomAttribute;
 using Codeji.CMS.DTO.Company.Department;
 using Codeji.CMS.DTO.Company.JobTitle;
 using Codeji.CMS.DTO.RequestModels.Company;
@@ -20,4 +21,7 @@ public interface ICompanyMasterService
     Task<Result> AddUpdateJobTitle(List<JobTitleRequestDto> data, string userId);
     Task<Result<JobTitleResponseDto>> GetJobTitles(bool? isActive);
     Task<bool> DeleteJobTitle(string jobTitleId);
+
+    // custom attributes
+    Task<CustomAttributeResponseDto> CreateCustomAttribute(string userId);
 }
