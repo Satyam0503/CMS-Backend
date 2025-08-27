@@ -15,7 +15,6 @@ namespace Codeji.CMS.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
 public class CompanyMasterController : BaseApiController
 {
     readonly ICompanyMasterService _companyMasterService;
@@ -119,10 +118,38 @@ public class CompanyMasterController : BaseApiController
     [Route("CreateCustomAttribute")]
     public async Task<Result<CustomAttributeResponseDto>> CreateCustomAttribute()
     {
+        Result<CustomAttributeResponseDto> result = new()
+        {
+            Success = false
+        };
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        var data = await _companyMasterService.CreateCustomAttribute(companyId);
+        if (data != null)
+        {
+            result.Success = true;
+            result.MethodResult = data;
+        }
+        return result;
+    }
+
+    [HttpGet]
+    [Route("GetAllCustomAttribute")]
+    public async Task<Result<CustomAttributeResponseDto>> GetAllCustomAttributes()
+    {
         Result<CustomAttributeResponseDto> result = new();
-        string userId = CurrentContext.UserId(_httpContextAccessor);
-        var data = await _companyMasterService.CreateCustomAttribute(userId);
-        result.MethodResult = data;
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        var dataList = await _companyMasterService.GetAllCustomAttribute(companyId);
+        result.TotalRecords = dataList.Count;
+        result.MethodResults = dataList;
+        return result;
+    }
+
+    [HttpGet]
+    [Route("GetCustomAttributeById/{customAttributeId}")]
+    public async Task<Result<CustomAttributeByIdResponseDto>> GetCustomAttributeById(string customAttributeId)
+    {
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        var result = await _companyMasterService.GetCustomAttributeById(customAttributeId, companyId);
         return result;
     }
 }

@@ -37,8 +37,9 @@ public class CompanyMasterService : ICompanyMasterService
     readonly IRoleService _roleService;
     readonly IMongoDbRepository<JobTitles> _jobTitleRepository;
     readonly IMongoDbRepository<CustomAttribute> _customAttributeRepository;
+    readonly IMongoDbRepository<CustomAttributeValue> _customAttributeValueRepository;
 
-    public CompanyMasterService(IRoleService roleService, IMongoDbRepository<CustomAttribute> customAttributeRepository, IMongoDbRepository<Department> departmentRepository, IMapper mapper, IMongoDbRepository<Module> moduleRepository, IMongoDbRepository<ModulePermission> modulePermissionRepository, IMongoDbRepository<Permission> permissionRepository, IMongoDbRepository<RolePermission> rolePermissionRepository, IMongoDbRepository<JobTitles> jobTitleRepository, IHttpContextAccessor httpContextAccessor)
+    public CompanyMasterService(IRoleService roleService, IMongoDbRepository<CustomAttribute> customAttributeRepository, IMongoDbRepository<CustomAttributeValue> customAttributeValueRepository, IMongoDbRepository<Department> departmentRepository, IMapper mapper, IMongoDbRepository<Module> moduleRepository, IMongoDbRepository<ModulePermission> modulePermissionRepository, IMongoDbRepository<Permission> permissionRepository, IMongoDbRepository<RolePermission> rolePermissionRepository, IMongoDbRepository<JobTitles> jobTitleRepository, IHttpContextAccessor httpContextAccessor)
     {
         _departmentRepository = departmentRepository;
         _mapper = mapper;
@@ -50,6 +51,7 @@ public class CompanyMasterService : ICompanyMasterService
         _roleService = roleService;
         _jobTitleRepository = jobTitleRepository;
         _customAttributeRepository = customAttributeRepository;
+        _customAttributeValueRepository = customAttributeValueRepository;
     }
 
     public async Task<Result> UpdateDepartments(List<DepartmentRequestDto> departmentList, string userId)
@@ -221,26 +223,63 @@ public class CompanyMasterService : ICompanyMasterService
     }
 
     // Custom Attributes Services
-    public async Task<CustomAttributeResponseDto> CreateCustomAttribute(string userId)
+    public async Task<CustomAttributeResponseDto?> CreateCustomAttribute(string companyId)
     {
+        // get count of custom attribute 
+        const int MaxAllowedAttribute = 3;
+        int totalAttribute = await _customAttributeRepository.Count(ca => ca.CompanyId == companyId);
+        if (totalAttribute >= MaxAllowedAttribute)
+        {
+            return null;
+        }
+
         CustomAttribute customAttribute = new()
         {
             CustomAttributeId = Guid.NewGuid().ToString(),
-            CustomAttributeName = null,
-            CreatedBy = userId,
-            CreatedDate = DateTime.UtcNow,
+            CustomAttributeTitle = [],
         };
         var result = await _customAttributeRepository.AddOne(customAttribute);
-        // if (!result.Success)
-        // {
-        //     return null;
-        // }
+        if (!result.Success) return null;
         CustomAttributeResponseDto responseDto = new()
         {
             CustomAttributeId = customAttribute.CustomAttributeId,
-            CustomAttributeName = customAttribute.CustomAttributeName
+            CustomAttributeTitle = customAttribute.CustomAttributeTitle.ToDictionary(keySelector: ca => ca.Language, elementSelector: ca => ca.Label),
         };
         return responseDto;
+    }
+
+    public async Task<List<CustomAttributeResponseDto>> GetAllCustomAttribute(string companyId)
+    {
+        IEnumerable<CustomAttribute> customAttributes = await _customAttributeRepository.GetAll(ca => ca.CompanyId == companyId);
+        if (!customAttributes.Any()) return [];
+        List<CustomAttributeResponseDto> dataList = [.. customAttributes.Select(ca => new CustomAttributeResponseDto()
+        {
+            CustomAttributeId = ca.CustomAttributeId,
+            CustomAttributeTitle = ca.CustomAttributeTitle.ToDictionary(a => a.Language,a => a.Label),
+        })];
+        return dataList;
+    }
+
+    public async Task<Result<CustomAttributeByIdResponseDto>> GetCustomAttributeById(string customAttributeId, string companyId)
+    {
+        Result<CustomAttributeByIdResponseDto> result = new() { Success = false };
+        CustomAttribute? customAttribute = await _customAttributeRepository.FirstOrDefault(ca => ca.CompanyId == companyId && ca.CustomAttributeId == customAttributeId);
+        if (customAttribute == null) return result;
+        IEnumerable<CustomAttributeValue> customAttributeValuesList = await _customAttributeValueRepository.GetAll(v => v.CompanyId == companyId && v.CustomAttributeId == customAttributeId);
+        CustomAttributeByIdResponseDto data = new()
+        {
+            CustomAttributeId = customAttribute.CustomAttributeId,
+            CustomAttributeTitle = customAttribute.CustomAttributeTitle.Count != 0 ? customAttribute.CustomAttributeTitle.ToDictionary(t => t.Language, t => t.Label) : null,
+            CustomAttributeValues = customAttributeValuesList.Select(v => new CustomAttributeValueResponseDto()
+            {
+                CustomAttributeValueId = v.CustomAttributeValueId,
+                IsActive = v.IsActive,
+                Titles = v.Titles.ToDictionary(t => t.Language, t => t.Label)
+            }).ToList()
+        };
+        result.MethodResult = data;
+        result.Success = true;
+        return result;
     }
 }
 

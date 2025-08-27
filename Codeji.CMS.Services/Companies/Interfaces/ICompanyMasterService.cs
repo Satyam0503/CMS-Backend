@@ -23,5 +23,7 @@ public interface ICompanyMasterService
     Task<bool> DeleteJobTitle(string jobTitleId);
 
     // custom attributes
-    Task<CustomAttributeResponseDto> CreateCustomAttribute(string userId);
+    Task<CustomAttributeResponseDto?> CreateCustomAttribute(string companyId);
+    Task<List<CustomAttributeResponseDto>> GetAllCustomAttribute(string companyId);
+    Task<Result<CustomAttributeByIdResponseDto>> GetCustomAttributeById(string customAttributeId, string companyId);
 }
