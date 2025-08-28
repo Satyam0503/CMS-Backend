@@ -281,5 +281,46 @@ public class CompanyMasterService : ICompanyMasterService
         result.Success = true;
         return result;
     }
+    public async Task<Result> UpdateCustomAttribute(CustomAttributeRequestDto model, string companyId, string userId)
+    {
+        // check custom attribute exist or not
+        Result result = new();
+        Expression<Func<CustomAttribute, bool>> whereCondition = ca => ca.CustomAttributeId == model.CustomAttributeId && ca.CompanyId == companyId;
+        bool isExist = await _customAttributeRepository.Exist(whereCondition);
+        if (!isExist) return result;
+        result = await _customAttributeRepository.UpdateMany(whereCondition, Builders<CustomAttribute>.Update.Set(ca => ca.CustomAttributeTitle, model.CustomAttributeTitle).Set(ca => ca.UpdatedDate, DateTime.UtcNow).Set(ca => ca.UpdatedBy, userId));
+        if (model.CustomAttributeValues.Count != 0)
+        {
+            List<CustomAttributeValue> customAttributeValues = [];
+            _mapper.Map(model.CustomAttributeValues, customAttributeValues);
+            foreach (CustomAttributeValue data in customAttributeValues)
+            {
+                // update if custAttributeValueId is present else add new attribute item
+                if (string.IsNullOrEmpty(data.CustomAttributeValueId))
+                {
+                    data.CustomAttributeId = model.CustomAttributeId;
+                    data.CreatedDate = DateTime.UtcNow;
+                    await _customAttributeValueRepository.AddOne(data);
+                }
+                else
+                {
+
+                    Expression<Func<CustomAttributeValue, bool>> filter = cav => cav.CustomAttributeValueId == data.CustomAttributeValueId && cav.CustomAttributeId == model.CustomAttributeId && cav.CompanyId == companyId;
+                    await _customAttributeValueRepository.UpdateMany(filter, Builders<CustomAttributeValue>.Update.Set(v => v.UpdatedDate, DateTime.UtcNow).Set(v => v.UpdatedBy, userId).Set(v => v.Titles, data.Titles).Set(v => v.IsActive, data.IsActive));
+                }
+            }
+        }
+        return result;
+    }
+
+    public async Task<Result> DeleteCustomAttributeValue(string customAttributeValueId, string companyId)
+    {
+        Result result = new();
+        Expression<Func<CustomAttributeValue, bool>> expression = v => v.CustomAttributeValueId == customAttributeValueId && v.CompanyId == companyId;
+        CustomAttributeValue? customAttributeValue = await _customAttributeValueRepository.FirstOrDefault(expression);
+        if (customAttributeValue == null) return result;
+        customAttributeValue.IsDeleted = true;
+        return await _customAttributeValueRepository.Update(expression, customAttributeValue);
+    }
 }
 

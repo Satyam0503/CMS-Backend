@@ -152,4 +152,24 @@ public class CompanyMasterController : BaseApiController
         var result = await _companyMasterService.GetCustomAttributeById(customAttributeId, companyId);
         return result;
     }
+
+    [HttpPut]
+    [Route("UpdateCustomAttribute")]
+    public async Task<Result> UpdateCustomAttribute([FromBody] CustomAttributeRequestDto data)
+    {
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        string userId = CurrentContext.CompanyId(_httpContextAccessor);
+        return await _companyMasterService.UpdateCustomAttribute(data, companyId, userId);
+    }
+
+    [HttpDelete]
+    [Route("DeleteCustomAttributeValue/{customAttributeValueId}")]
+    public async Task<Result> DeleteCustomAttributeValue(string customAttributeValueId)
+    {
+        Result result = new();
+        if (string.IsNullOrEmpty(customAttributeValueId)) return result;
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        result = await _companyMasterService.DeleteCustomAttributeValue(customAttributeValueId, companyId);
+        return result;
+    }
 }

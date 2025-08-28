@@ -26,4 +26,6 @@ public interface ICompanyMasterService
     Task<CustomAttributeResponseDto?> CreateCustomAttribute(string companyId);
     Task<List<CustomAttributeResponseDto>> GetAllCustomAttribute(string companyId);
     Task<Result<CustomAttributeByIdResponseDto>> GetCustomAttributeById(string customAttributeId, string companyId);
+    Task<Result> UpdateCustomAttribute(CustomAttributeRequestDto data, string companyId, string userId);
+    Task<Result> DeleteCustomAttributeValue(string customAttributeValueId, string companyId);
 }

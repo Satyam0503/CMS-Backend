@@ -1,6 +1,7 @@
 ﻿using AutoMapper;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Company;
+using Codeji.CMS.DTO.Company.CustomAttribute;
 using Codeji.CMS.DTO.Company.Department;
 using Codeji.CMS.DTO.Company.JobTitle;
 using Codeji.CMS.DTO.Holiday;
@@ -46,6 +47,7 @@ namespace Codeji.CMS.Services.Registration
             CreateMap<HolidayResponseDto, Holidays>().ReverseMap();
             CreateMap<Applicant, ApplicantViewModel>().ForMember(dest => dest.ApplyDate, opt => opt.MapFrom(src => src.CreatedDate)).ReverseMap();
             CreateMap<JobTitles, JobTitleRequestDto>().ReverseMap();
+            CreateMap<CustomAttributeValue, CustomAttributeValueRequestDto>().ReverseMap();
         }
     }
 
