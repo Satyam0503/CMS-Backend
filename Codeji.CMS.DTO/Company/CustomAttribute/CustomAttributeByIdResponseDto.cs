@@ -4,6 +4,7 @@ public class CustomAttributeByIdResponseDto
 {
     public string CustomAttributeId { get; set; }
     public Dictionary<string, string>? CustomAttributeTitle { get; set; }
+    public int CustomAttributeNumber { get; set; }
     public List<CustomAttributeValueResponseDto> CustomAttributeValues { get; set; } = [];
 }
 

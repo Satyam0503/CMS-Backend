@@ -8,4 +8,5 @@ public class CustomAttribute : BaseClass
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
     public string CustomAttributeId { get; set; }
     public List<MultilingualModel> CustomAttributeTitle { get; set; } = [];
+    public int CustomAttributeNumber { get; set; }
 }

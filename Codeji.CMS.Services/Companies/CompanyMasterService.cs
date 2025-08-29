@@ -226,7 +226,7 @@ public class CompanyMasterService : ICompanyMasterService
     public async Task<CustomAttributeResponseDto?> CreateCustomAttribute(string companyId)
     {
         // get count of custom attribute 
-        const int MaxAllowedAttribute = 3;
+        const int MaxAllowedAttribute = 5;
         int totalAttribute = await _customAttributeRepository.Count(ca => ca.CompanyId == companyId);
         if (totalAttribute >= MaxAllowedAttribute)
         {
@@ -237,6 +237,7 @@ public class CompanyMasterService : ICompanyMasterService
         {
             CustomAttributeId = Guid.NewGuid().ToString(),
             CustomAttributeTitle = [],
+            CustomAttributeNumber = totalAttribute + 1
         };
         var result = await _customAttributeRepository.AddOne(customAttribute);
         if (!result.Success) return null;
@@ -244,6 +245,7 @@ public class CompanyMasterService : ICompanyMasterService
         {
             CustomAttributeId = customAttribute.CustomAttributeId,
             CustomAttributeTitle = customAttribute.CustomAttributeTitle.ToDictionary(keySelector: ca => ca.Language, elementSelector: ca => ca.Label),
+            CustomAttributeNumber = customAttribute.CustomAttributeNumber,
         };
         return responseDto;
     }
@@ -256,6 +258,7 @@ public class CompanyMasterService : ICompanyMasterService
         {
             CustomAttributeId = ca.CustomAttributeId,
             CustomAttributeTitle = ca.CustomAttributeTitle.ToDictionary(a => a.Language,a => a.Label),
+            CustomAttributeNumber = ca.CustomAttributeNumber,
         })];
         return dataList;
     }
@@ -270,6 +273,7 @@ public class CompanyMasterService : ICompanyMasterService
         {
             CustomAttributeId = customAttribute.CustomAttributeId,
             CustomAttributeTitle = customAttribute.CustomAttributeTitle.Count != 0 ? customAttribute.CustomAttributeTitle.ToDictionary(t => t.Language, t => t.Label) : null,
+            CustomAttributeNumber = customAttribute.CustomAttributeNumber,
             CustomAttributeValues = customAttributeValuesList.Select(v => new CustomAttributeValueResponseDto()
             {
                 CustomAttributeValueId = v.CustomAttributeValueId,
