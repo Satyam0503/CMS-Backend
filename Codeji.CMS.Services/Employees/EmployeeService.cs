@@ -57,6 +57,9 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<JobTitles> _jobTitlesRepository;
         readonly IHttpContextAccessor _httpContextAccessor;
 
+        readonly IMongoDbRepository<CustomAttribute> _customAttributeRepository;
+        readonly IMongoDbRepository<CustomAttributeValue> _customAttributeValueRepository;
+
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
             IMongoDbRepository<EmpSummary> userSummary,
@@ -78,7 +81,9 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<UserNotifications> userNotificationRepository,
             IMongoDbRepository<Notifications> notificationsRepository,
             IMongoDbRepository<RefreshToken> refreshTokenRepository,
-            IMongoDbRepository<JobTitles> jobTitlesRepository
+            IMongoDbRepository<JobTitles> jobTitlesRepository,
+            IMongoDbRepository<CustomAttribute> customAttributeRepository,
+            IMongoDbRepository<CustomAttributeValue> customAttributeValueRepository
             )
         {
             _employeeRepository = employeeRepository;
@@ -104,6 +109,8 @@ namespace Codeji.CMS.Services.Employees
             _notificationsRepository = notificationsRepository;
             _refreshTokenRepository = refreshTokenRepository;
             _jobTitlesRepository = jobTitlesRepository;
+            _customAttributeRepository = customAttributeRepository;
+            _customAttributeValueRepository = customAttributeValueRepository;
         }
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
@@ -228,6 +235,26 @@ namespace Codeji.CMS.Services.Employees
             }
             userModel.DepartmentTitle = department == null ? null : department.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label);
             userModel.FullProfileUrl = string.IsNullOrEmpty(user.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(user.ProfileUrl);
+            if (user.CustomAttributeList.Count != 0)
+            {
+                List<UserCustomAttribute> customAttributeList = [];
+                foreach (EmpUserCustomAttribute attribute in user.CustomAttributeList)
+                {
+                    var customAttribute = await _customAttributeRepository.FirstOrDefault(ca => ca.CustomAttributeId == attribute.CustomAttributeId);
+                    var customAttributeValue = await _customAttributeValueRepository.FirstOrDefault(cav => cav.CustomAttributeValueId == attribute.CustomAttributeValueId && cav.CustomAttributeId == attribute.CustomAttributeId);
+                    if (customAttribute != null && customAttributeValue != null)
+                    {
+                        customAttributeList.Add(new UserCustomAttribute()
+                        {
+                            CustomAttributeId = customAttribute.CustomAttributeId,
+                            CustomAttributeTitle = customAttribute.CustomAttributeTitle.ToDictionary(t => t.Language, t => t.Label),
+                            CustomAttributeValueId = customAttributeValue.CustomAttributeValueId,
+                            CustomAttributeVlaueTitle = customAttributeValue.Titles.ToDictionary(t => t.Language, t => t.Label)
+                        });
+                    }
+                }
+                userModel.CustomAttributes = customAttributeList;
+            }
             return userModel;
         }
 

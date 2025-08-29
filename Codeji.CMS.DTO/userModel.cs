@@ -1,3 +1,5 @@
+using Codeji.CMS.DTO.Employee;
+
 namespace Codeji.CMS.DTO;
 
 public class UserModel
@@ -28,4 +30,14 @@ public class UserModel
     public string? Address { get; set; }
     public string? ProfileUrl { get; set; }
     public string? FullProfileUrl { get; set; }
+    public List<UserCustomAttribute> CustomAttributes { get; set; } = [];
+}
+
+
+public class UserCustomAttribute
+{
+    public required string CustomAttributeId { get; set; }
+    public required string CustomAttributeValueId { get; set; }
+    public Dictionary<string, string> CustomAttributeTitle { get; set; }
+    public Dictionary<string, string> CustomAttributeVlaueTitle { get; set; }
 }

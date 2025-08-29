@@ -1,4 +1,6 @@
-﻿namespace Codeji.CMS.DTO.RequestModels.EmployeeData
+﻿using Codeji.CMS.DTO.Employee;
+
+namespace Codeji.CMS.DTO.RequestModels.EmployeeData
 {
     public class EmployeePersonalInfo
     {
@@ -14,5 +16,7 @@
         public string? EmergencyContact { get; set; }
         public string? Address { get; set; }
         public string? ReportingManager { get; set; }
+        public List<EmpUserCustomAttribute> CustomAttributeList { get; set; } = [];
+
     }
 }

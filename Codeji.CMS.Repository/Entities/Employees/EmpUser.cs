@@ -1,3 +1,4 @@
+using Codeji.CMS.DTO.Employee;
 using MongoDB.Bson.Serialization.Attributes;
 
 namespace Codeji.CMS.Repository.Entities.Employees;
@@ -26,4 +27,7 @@ public class EmpUser : BaseClass
     public bool IsEmailVerified { get; set; }
     public string Address { get; set; }
     public string ProfileUrl { get; set; }
+    public List<EmpUserCustomAttribute> CustomAttributeList { get; set; } = [];
 }
+
+
