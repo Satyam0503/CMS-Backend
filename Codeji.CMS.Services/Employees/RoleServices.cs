@@ -10,6 +10,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Utility.Enums;
 using MongoDB.Driver;
 using MongoDB.Driver.Linq;
 using Module = Codeji.CMS.Repository.Entities.RolePermissions.Module;
@@ -458,4 +459,19 @@ public class RoleServices : IRoleService
             Success = true
         };
     }
+
+    // Check roleId is admin roleId 
+
+    public async Task<bool> IsRoleTypeMatch(string roleId, EnumsHelper.Roles roleType, string companyId)
+    {
+        if (string.IsNullOrEmpty(roleId))
+        {
+            return false;
+        }
+        Expression<Func<Roles, bool>> expression = r => r.RolesId == roleId && r.CompanyId == companyId && r.RoleType == (int)roleType;
+        Roles? roles = await _RolesRepository.FirstOrDefault(expression);
+        if (roles == null) return false;
+        return true;
+    }
+
 }

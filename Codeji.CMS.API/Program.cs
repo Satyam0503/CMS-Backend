@@ -9,8 +9,10 @@ using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Holiday;
 using Codeji.CMS.Services.Holiday.Interface;
 using Codeji.CMS.Services.Registration;
+using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.SignalR;
@@ -97,6 +99,8 @@ builder.Services.AddRepositoryServices();
 ConfigurationHelper.Initialize(configuration);
 //automapper
 
+// register authorization handler to service collection
+builder.Services.AddSingleton<IAuthorizationHandler, RoleHandler>();
 builder.Services.AddAutoMapper(typeof(AutoMapperObjects));
 // Authentication and Authorization
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -129,7 +133,15 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization();
+// register policy with authorization service
+builder.Services.AddAuthorization(option =>
+{
+    option.AddPolicy("AdminOnly", policy =>
+    {
+        policy.Requirements.Add(new RoleRequirement(EnumsHelper.Roles.Administrator));
+    });
+});
+
 // Antiforgery
 builder.Services.AddAntiforgery(options =>
 {

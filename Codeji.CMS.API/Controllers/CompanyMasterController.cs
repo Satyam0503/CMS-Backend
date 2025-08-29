@@ -15,6 +15,7 @@ namespace Codeji.CMS.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize(Policy = "AdminOnly")]
 public class CompanyMasterController : BaseApiController
 {
     readonly ICompanyMasterService _companyMasterService;

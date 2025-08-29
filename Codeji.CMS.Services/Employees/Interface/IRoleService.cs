@@ -4,6 +4,8 @@ namespace Codeji.CMS.Services.Employees.Interface;
 using System.Collections.Generic;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.Repository.Entities.RolePermissions;
+using Codeji.CMS.Utility.Enums;
+
 public interface
     IRoleService
 {
@@ -21,4 +23,5 @@ public interface
     Task<bool> VerifyUserAccess(string module, string[] Role, string userId, string companyId, UserCheckModel userForEdit = null);
     Task<List<ModuleWithPermissionsModel>> GetAllRolesWithPermission(string companyId);
     Task<Result> UpdateAppAccessForRole(string roleId, bool hasAppAccess);
+    Task<bool> IsRoleTypeMatch(string roleId, EnumsHelper.Roles roleType, string companyId);
 }
