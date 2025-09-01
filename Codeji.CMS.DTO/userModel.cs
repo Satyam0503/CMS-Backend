@@ -4,7 +4,6 @@ namespace Codeji.CMS.DTO;
 
 public class UserModel
 {
-
     public string UserId { get; set; }
     public string FirstName { get; set; }
     public string LastName { get; set; }
@@ -39,5 +38,5 @@ public class UserCustomAttribute
     public required string CustomAttributeId { get; set; }
     public required string CustomAttributeValueId { get; set; }
     public Dictionary<string, string> CustomAttributeTitle { get; set; }
-    public Dictionary<string, string> CustomAttributeVlaueTitle { get; set; }
+    public Dictionary<string, string> CustomAttributeValueTitle { get; set; }
 }

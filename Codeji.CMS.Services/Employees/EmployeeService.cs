@@ -221,19 +221,22 @@ namespace Codeji.CMS.Services.Employees
         public async Task<UserModel> GetEmployeeById(string userId)
         {
             EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
-            Department? department = await _departmentRepository.FirstOrDefault(x => x.DepartmentId == user.Department);
             UserModel userModel = _mapper.Map<UserModel>(user);
             if (userModel.JobRole != null)
             {
                 JobTitles? jobTitles = await _jobTitlesRepository.FirstOrDefault(jt => jt.JobTitleId == userModel.JobRole);
-                userModel.JobRoleTitle = jobTitles != null ? jobTitles.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label) : null;
+                userModel.JobRoleTitle = jobTitles?.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label);
             }
             if (userModel.ReportingManager != null)
             {
                 EmpUser? reportingManager = await _employeeRepository.FirstOrDefault(x => x.UserId == user.ReportingManager);
                 userModel.ReportingManagerName = reportingManager != null ? $"{reportingManager?.FirstName} {reportingManager?.LastName}" : null;
             }
-            userModel.DepartmentTitle = department == null ? null : department.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label);
+            if (userModel.Department != null)
+            {
+                Department? department = await _departmentRepository.FirstOrDefault(x => x.DepartmentId == user.Department);
+                userModel.DepartmentTitle = department?.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label);
+            }
             userModel.FullProfileUrl = string.IsNullOrEmpty(user.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(user.ProfileUrl);
             if (user.CustomAttributeList.Count != 0)
             {
@@ -249,7 +252,7 @@ namespace Codeji.CMS.Services.Employees
                             CustomAttributeId = customAttribute.CustomAttributeId,
                             CustomAttributeTitle = customAttribute.CustomAttributeTitle.ToDictionary(t => t.Language, t => t.Label),
                             CustomAttributeValueId = customAttributeValue.CustomAttributeValueId,
-                            CustomAttributeVlaueTitle = customAttributeValue.Titles.ToDictionary(t => t.Language, t => t.Label)
+                            CustomAttributeValueTitle = customAttributeValue.Titles.ToDictionary(t => t.Language, t => t.Label)
                         });
                     }
                 }
@@ -267,8 +270,24 @@ namespace Codeji.CMS.Services.Employees
         public async Task<List<EmployeeSearchResponseDTO>> SearchEmployeeByName(string name)
         {
             Expression<Func<EmpUser, bool>> whereCondition = x => (x.FirstName + " " + x.LastName).Contains(name, StringComparison.CurrentCultureIgnoreCase);
-            var data = await _employeeRepository.GetAll(whereCondition);
-            return _mapper.Map<List<EmployeeSearchResponseDTO>>(data);
+            var empUsers = await _employeeRepository.GetAll(whereCondition);
+            List<string> jobTitleIds = empUsers.Select(emp => emp.JobRole).Distinct().ToList();
+            var jobTitleList = await _jobTitlesRepository.GetAll(jt => jobTitleIds.Contains(jt.JobTitleId));
+
+            var result = (from emp in empUsers
+                          join jobRole in jobTitleList
+                          on emp.JobRole equals jobRole.JobTitleId into empJobTitleGroup
+                          from jobTitle in empJobTitleGroup.DefaultIfEmpty()
+                          select new EmployeeSearchResponseDTO()
+                          {
+                              UserId = emp.UserId,
+                              FirstName = emp.FirstName,
+                              LastName = emp.LastName,
+                              EmpId = emp.EmployeeId,
+                              JobRole = jobTitle?.Titles.ToDictionary(jt => jt.Language, jt => jt.Label),
+                              FullProfileUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl)
+                          }).ToList();
+            return result;
         }
 
         public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters)

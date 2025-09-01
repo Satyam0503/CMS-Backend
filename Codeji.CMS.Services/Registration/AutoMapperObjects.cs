@@ -32,7 +32,6 @@ namespace Codeji.CMS.Services.Registration
             // CreateMap<EmpUser, UserModel>().ForMember(dest => dest.Password, opt => opt.Ignore()).ReverseMap();
             CreateMap<EmpUser, UserModel>().ReverseMap();
             CreateMap<EmpUser, GetAllEmployeeResponseModel>().ReverseMap();
-            CreateMap<EmpUser, EmployeeSearchResponseDTO>().ReverseMap();
             CreateMap<EmpWorkHistory, EmployeeWorkHistoryModel>().ReverseMap();
             CreateMap<Company, CompanyRequestModel>().ReverseMap();
             CreateMap<EmpUser, CompanyRequestModel>().ReverseMap();

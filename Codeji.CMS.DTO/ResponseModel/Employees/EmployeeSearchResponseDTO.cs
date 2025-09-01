@@ -8,13 +8,6 @@ public class EmployeeSearchResponseDTO
     public string FirstName { get; set; }
     public string LastName { get; set; }
     public string EmpId { get; set; }
-    public string? JobRole { get; set; }
-    public string? ProfileUrl { get; set; }
-    public string? FullProfileUrl
-    {
-        get
-        {
-            return Common.GetEmployeeImageUrl(ProfileUrl);
-        }
-    }
+    public Dictionary<string, string>? JobRole { get; set; }
+    public string? FullProfileUrl { get; set; }
 }
