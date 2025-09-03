@@ -1,9 +1,6 @@
-using Codeji.CMS.API.Notification;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.NoticeBoard;
 using Codeji.CMS.Services.NoticeBoard;
-using Codeji.CMS.Utility.Enums;
-using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

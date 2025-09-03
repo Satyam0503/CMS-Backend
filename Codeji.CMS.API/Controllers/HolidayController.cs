@@ -29,14 +29,15 @@ public class HolidayController : ControllerBase
 
     [HttpPost]
     [Route("CreateHoliday")]
-    // [ModulePermission("Holidays", "Create")]
+    [ModulePermission("Holidays", "Create")]
     public async Task<Result> CreateUpdateHoliday([FromForm] HolidayRequestDto model)
     {
         return await holidayService.CreateEditHoliday(model);
     }
 
-    [Route("DeleteHoliday/{holidayId}")]
     [HttpDelete]
+    [Route("DeleteHoliday/{holidayId}")]
+    [ModulePermission("Holidays", "Delete")]
     public async Task<Result> DeleteHoliday(string holidayId)
     {
         return await holidayService.DeleteHoliday(holidayId);

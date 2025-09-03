@@ -29,7 +29,7 @@ public class JobVacancyController : BaseApiController
 
     [Route("AddJobVacancy")]
     [HttpPost]
-
+    [ModulePermission("Jobs", "Create")]
     public async Task<Result<JobVacancyModel>> AddJobVacancy(JobVacancyModel jobVacancy)
     {
         return await _jobVacancyService.AddJobVacancy(jobVacancy);
@@ -37,6 +37,7 @@ public class JobVacancyController : BaseApiController
 
     [Route("EditJobVacancy")]
     [HttpPost]
+    [ModulePermission("Jobs", "Edit")]
     public async Task<Result<JobVacancyModel>> EditJobVacancy(JobVacancyModel jobVacancy, string jobId)
     {
         return await _jobVacancyService.EditJobVacancy(jobVacancy, jobId);

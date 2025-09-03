@@ -1,5 +1,6 @@
 
 using System.Text.RegularExpressions;
+using Codeji.CMS.API.App_Start;
 using Codeji.CMS.API.Notification;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
@@ -35,6 +36,7 @@ public class UserController : BaseApiController
 
     [Route("AddEmployees")]
     [HttpPost]
+    [ModulePermission("Employees", "Create")]
     public async Task<Result<UserModel>> AddEmployees(UserModel user)
     {
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
@@ -294,14 +296,12 @@ public class UserController : BaseApiController
             return new Result()
             {
                 Success = false,
-                Message = "Employee Not Deleted ",
                 StatusCode = 400
             };
         }
         return new Result()
         {
             Success = true,
-            Message = "Employee Deleted Successfully",
             StatusCode = 200
         };
     }
