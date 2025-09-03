@@ -11,6 +11,7 @@
             company_id,
             admin_id,
             admin_company_id,
+            role_type
         }
         public enum ActivityType
         {

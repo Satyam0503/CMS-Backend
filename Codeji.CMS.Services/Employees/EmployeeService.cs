@@ -375,6 +375,7 @@ namespace Codeji.CMS.Services.Employees
             }
             string[] allowedModulePermission = await _roleService.GetRolePermissionOfuser(role.RolesId);
             returnModel.UserId = user.UserId;
+            returnModel.RoleType = role.RoleType;
             returnModel.FirstName = user.FirstName;
             returnModel.LastName = user.LastName;
             returnModel.CompanyId = companyDetails.CompanyId;

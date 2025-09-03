@@ -102,7 +102,7 @@ public class AccountServices : IAccountServices
             result.StatusCode = CustomStatusCode.InvalidCredential;
             return result;
         }
-        List<string> roles = ["admin", "employee"];
+        List<string> roles = [role.Titles];
         string token = AuthenticationHandler.GenerateJwtToken(user.UserId, user.CompanyId, user.RoleId, roles);
         string refreshToken = TokenHelper.GenerateToken();
         string hashedRefreshToken = TokenHelper.ComputeSha256Hash(refreshToken);
@@ -247,9 +247,10 @@ public class AccountServices : IAccountServices
             result.StatusCode = CustomStatusCode.InvalidRefreshToken;
             return result;
         }
+        Roles? role = await _rolesRepository.FirstOrDefault(r => r.CompanyId == empUser.CompanyId && r.RolesId == empUser.RoleId);
         string newRefreshToken = TokenHelper.GenerateToken();
         string newRefreshTokenHashed = TokenHelper.ComputeSha256Hash(newRefreshToken);
-        List<string> roles = ["admin", "employee"];
+        List<string> roles = [role.Titles];
         string newJwtToken = AuthenticationHandler.GenerateJwtToken(empUser.UserId, empUser.CompanyId, empUser.RoleId, roles);
         RefreshToken refreshToken = new()
         {

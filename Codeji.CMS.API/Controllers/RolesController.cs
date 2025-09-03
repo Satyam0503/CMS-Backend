@@ -51,6 +51,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("AddEditRole")]
+        [Authorize(Policy = "AdminOnly")]
         public async Task<Result> AddRole(RoleWithModuleAndPermissions model)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -59,6 +60,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetAllRolesWithPermission")]
+        [Authorize(Policy = "AdminOnly")]
         public async Task<Result<ModuleWithPermissionsModel>> GetModulePermission()
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -73,6 +75,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetRoleWithPermissionById")]
+        [Authorize(Policy = "AdminOnly")]
         public async Task<Result<ModuleWithPermissionsModel>> GetModulePermissionyId([FromQuery] string roleId)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -88,6 +91,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetRoleById/{roleId}")]
+        [Authorize(Policy = "AdminOnly")]
         public async Task<Result<RoleModel>> GetRoleById(string roleId)
         {
             var data = await _roleService.GetRoleById(roleId);
@@ -101,6 +105,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPatch]
         [Route("UpdateAppAccessForRole/{roleId}")]
+        [Authorize(Policy = "AdminOnly")]
         public async Task<Result> UpdateAppAccessForRole(string roleId, [FromBody] bool hasAppAccess)
         {
             var result = await _roleService.UpdateAppAccessForRole(roleId, hasAppAccess);

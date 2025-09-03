@@ -215,7 +215,6 @@ public class RoleServices : IRoleService
     }
     public async Task<string[]> GetRolePermissionOfuser(string roleId)
     {
-        List<ModuleWithPermissionsModel> moduleWithPermissionsModel = new();
         Expression<Func<Roles, bool>> whereCondition = x => x.RolesId == roleId;
         IEnumerable<Permission> permissions = await _permissionRepository.GetAll();
         IEnumerable<Module> modules = await _moduleRepository.GetAll();

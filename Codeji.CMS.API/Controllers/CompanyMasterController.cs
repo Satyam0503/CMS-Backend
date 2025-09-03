@@ -15,7 +15,7 @@ namespace Codeji.CMS.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Policy = "AdminOnly")]
+[Authorize]
 public class CompanyMasterController : BaseApiController
 {
     readonly ICompanyMasterService _companyMasterService;
@@ -30,6 +30,7 @@ public class CompanyMasterController : BaseApiController
 
     [HttpPost]
     [Route("UpdateDepartment")]
+    [Authorize(Policy = "AdminOnly")]
     public async Task<Result> AddEditDepartment(List<DepartmentRequestDto> data)
     {
         string userId = CurrentContext.UserId(_httpContextAccessor);
@@ -47,6 +48,7 @@ public class CompanyMasterController : BaseApiController
 
     [HttpDelete]
     [Route("DeleteDepartment/{departmentId}")]
+    [Authorize(Policy = "AdminOnly")]
     public async Task<Result> DeleteDepartment(string departmentId)
     {
         Result result = new();
@@ -61,6 +63,7 @@ public class CompanyMasterController : BaseApiController
 
     [HttpPatch]
     [Route("UpdateModuleAccess/{moduleId}")]
+    [Authorize(Policy = "AdminOnly")]
     public async Task<Result<string[]>> UpdateModuleAccess(string moduleId)
     {
         if (string.IsNullOrEmpty(moduleId))
@@ -76,6 +79,7 @@ public class CompanyMasterController : BaseApiController
 
     [HttpGet]
     [Route("GetAllModuleDetails")]
+    [Authorize(Policy = "AdminOnly")]
     public async Task<Result<AllModuleDetailsResponseModel>> GetAllModuleDetails()
     {
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -90,6 +94,7 @@ public class CompanyMasterController : BaseApiController
     // company job title actions
     [HttpPost]
     [Route("AddUpdateJobTitle")]
+    [Authorize(Policy = "AdminOnly")]
     public async Task<Result> AddUpdateJobTitle(List<JobTitleRequestDto> data)
     {
         string userId = CurrentContext.UserId(_httpContextAccessor);
@@ -107,6 +112,7 @@ public class CompanyMasterController : BaseApiController
 
     [HttpDelete]
     [Route("DeleteJobTitle/{jobTitleId}")]
+    [Authorize(Policy = "AdminOnly")]
     public async Task<Result> DeleteJobTitle(string jobTitleId)
     {
         Result result = new();
@@ -117,6 +123,7 @@ public class CompanyMasterController : BaseApiController
     // custom attributes actions
     [HttpPost]
     [Route("CreateCustomAttribute")]
+    [Authorize(Policy = "AdminOnly")]
     public async Task<Result<CustomAttributeResponseDto>> CreateCustomAttribute()
     {
         Result<CustomAttributeResponseDto> result = new()
@@ -147,15 +154,16 @@ public class CompanyMasterController : BaseApiController
 
     [HttpGet]
     [Route("GetCustomAttributeById/{customAttributeId}")]
-    public async Task<Result<CustomAttributeByIdResponseDto>> GetCustomAttributeById(string customAttributeId)
+    public async Task<Result<CustomAttributeByIdResponseDto>> GetCustomAttributeById(string customAttributeId, [FromQuery] bool? active)
     {
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-        var result = await _companyMasterService.GetCustomAttributeById(customAttributeId, companyId);
+        var result = await _companyMasterService.GetCustomAttributeById(customAttributeId, companyId, active);
         return result;
     }
 
     [HttpPut]
     [Route("UpdateCustomAttribute")]
+    [Authorize(Policy = "AdminOnly")]
     public async Task<Result> UpdateCustomAttribute([FromBody] CustomAttributeRequestDto data)
     {
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -165,6 +173,7 @@ public class CompanyMasterController : BaseApiController
 
     [HttpDelete]
     [Route("DeleteCustomAttributeValue/{customAttributeValueId}")]
+    [Authorize(Policy = "AdminOnly")]
     public async Task<Result> DeleteCustomAttributeValue(string customAttributeValueId)
     {
         Result result = new();

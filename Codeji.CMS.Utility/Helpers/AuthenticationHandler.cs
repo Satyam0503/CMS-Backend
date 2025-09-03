@@ -1,8 +1,10 @@
 ﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Codeji.CMS.Utility.Enums;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
+using static Codeji.CMS.Utility.Enums.EnumsHelper;
 namespace Codeji.CMS.Utility.Helpers
 {
     public static class AuthenticationHandler
@@ -23,7 +25,7 @@ namespace Codeji.CMS.Utility.Helpers
             new Claim("user_id", userId),
             new Claim("company_id", companyId),
             // Add multiple roles as separate claims
-        
+
             new Claim("role_id",roleId),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()) // Unique Token ID
             };

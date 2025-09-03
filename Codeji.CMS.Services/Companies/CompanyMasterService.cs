@@ -143,8 +143,7 @@ public class CompanyMasterService : ICompanyMasterService
     }
     public async Task<List<AllModuleDetailsResponseModel>> GetAllModulesDetails(string companyId)
     {
-        int[] excludedModuleIds = [11];
-        var allModules = await _moduleRepository.GetAll(x => !excludedModuleIds.Contains(x.ModuleId));
+        var allModules = await _moduleRepository.GetAll();
         var allModulePermissions = await _modulePermissionRepository.GetAll();
         var allRolePermission = await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId);
 
@@ -263,12 +262,16 @@ public class CompanyMasterService : ICompanyMasterService
         return dataList;
     }
 
-    public async Task<Result<CustomAttributeByIdResponseDto>> GetCustomAttributeById(string customAttributeId, string companyId)
+    public async Task<Result<CustomAttributeByIdResponseDto>> GetCustomAttributeById(string customAttributeId, string companyId, bool? active)
     {
         Result<CustomAttributeByIdResponseDto> result = new() { Success = false };
         CustomAttribute? customAttribute = await _customAttributeRepository.FirstOrDefault(ca => ca.CompanyId == companyId && ca.CustomAttributeId == customAttributeId);
         if (customAttribute == null) return result;
         IEnumerable<CustomAttributeValue> customAttributeValuesList = await _customAttributeValueRepository.GetAll(v => v.CompanyId == companyId && v.CustomAttributeId == customAttributeId);
+        if (active.HasValue && active.Value)
+        {
+            customAttributeValuesList = customAttributeValuesList.Where(v => v.IsActive);
+        }
         CustomAttributeByIdResponseDto data = new()
         {
             CustomAttributeId = customAttribute.CustomAttributeId,
