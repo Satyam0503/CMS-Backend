@@ -15,7 +15,7 @@
         public string DefaultLanguage { get; set; }
         public List<string> ApplicationLanguage { get; set; }
         public string[] modulePermission { get; set; }
-        public string CompanyLogo { get; set; }
+        public string? CompanyLogo { get; set; }
         public int RoleType { get; set; }
     }
 }

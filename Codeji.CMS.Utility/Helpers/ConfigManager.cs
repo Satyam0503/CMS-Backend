@@ -42,8 +42,6 @@ public class FileSettings
     public string Employee_ImageUrl { get; set; }
     public string ViewResumeUrl { get; set; }
     public string CompanyLogoUrl { get; set; }
-    public string Default_User_Image { get; set; }
-    public string Default_Company_logo { get; set; }
     public string HolidayCoverImage { get; set; }
 
 }

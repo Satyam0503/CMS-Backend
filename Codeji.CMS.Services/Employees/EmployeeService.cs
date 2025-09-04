@@ -237,7 +237,7 @@ namespace Codeji.CMS.Services.Employees
                 Department? department = await _departmentRepository.FirstOrDefault(x => x.DepartmentId == user.Department);
                 userModel.DepartmentTitle = department?.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label);
             }
-            userModel.FullProfileUrl = string.IsNullOrEmpty(user.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(user.ProfileUrl);
+            userModel.ProfileUrl = Common.GetEmployeeImageUrl(user.ProfileUrl);
             if (user.CustomAttributeList.Count != 0)
             {
                 List<UserCustomAttribute> customAttributeList = [];
@@ -343,7 +343,7 @@ namespace Codeji.CMS.Services.Employees
                             Department = department?.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label),
                             PhoneNumber = emp.PhoneNumber,
                             DateOfBirth = emp.DateOfBirth,
-                            FullProfileUrl = string.IsNullOrEmpty(emp.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(emp.ProfileUrl),
+                            FullProfileUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl),
                         }).ToList();
             return new Result<GetAllEmployeeResponseModel>()
             {
@@ -383,8 +383,8 @@ namespace Codeji.CMS.Services.Employees
             returnModel.CompanyName = companyDetails.CompanyName;
             returnModel.DefaultLanguage = companyDetails.DefaultLanguage;
             returnModel.ApplicationLanguage = companyDetails.ApplicationLanguage;
-            returnModel.ProfileImage = user.FullProfileUrl;
-            returnModel.CompanyLogo = string.IsNullOrEmpty(companyDetails.CompanyLogo) ? Common.GetCompanyLogoUrl(null) : Common.GetCompanyLogoUrl(companyDetails.CompanyLogo);
+            returnModel.ProfileImage = user.ProfileUrl;
+            returnModel.CompanyLogo = Common.GetCompanyLogoUrl(companyDetails.CompanyLogo);
             return returnModel;
         }
         public async Task<Result> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId)
@@ -557,7 +557,7 @@ namespace Codeji.CMS.Services.Employees
             profile.ProfileUrl = fileName;
 
             Result res = await _employeeRepository.Update(whereCondition, profile);
-            string fullProfileUrl = Common.GetEmployeeImageUrl(fileName);
+            string fullProfileUrl = Common.GetEmployeeImageUrl(fileName) ?? "";
             return fullProfileUrl;
         }
 

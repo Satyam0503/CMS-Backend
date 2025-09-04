@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Linq.Expressions;
 using AngleSharp.Common;
 using AngleSharp.Text;
@@ -79,7 +80,7 @@ public class NoticeBoardServices : INoticeBoardService
             if (empUsers.Any())
             {
                 List<UserNotifications> userNotifications = [];
-
+                var notificationsTasks = new List<Task>();
                 foreach (EmpUser user in empUsers)
                 {
                     UserNotifications userNotification = new()
@@ -91,8 +92,12 @@ public class NoticeBoardServices : INoticeBoardService
                         CreatedDateTime = DateTime.UtcNow,
                         IsDeleted = false,
                     };
+
+                    // add user notification entry
                     userNotifications.Add(userNotification);
-                    await _notificationService.SendNotificationToUser(user.UserId, new NotificationViewModel()
+
+                    // queue notification task 
+                    notificationsTasks.Add(_notificationService.SendNotificationToUser(user.UserId, new NotificationViewModel()
                     {
                         Title = notification.Title,
                         Body = notification.Body,
@@ -102,8 +107,10 @@ public class NoticeBoardServices : INoticeBoardService
                         TargetId = notification.TargetId,
                         NotificationTypes = EnumsHelper.NotificationTypes.Notice,
                         UserNotificationId = userNotification.UserNotificationId,
-                    });
+                    }));
                 }
+                // run all the notification task parallel
+                await Task.WhenAll(notificationsTasks);
                 await _userNotificationsRepository.AddMany(userNotifications);
             }
         }
@@ -157,7 +164,7 @@ public class NoticeBoardServices : INoticeBoardService
                         NoticeTitle = notice.Title,
                         CreatedDateTime = notice.CreatedDate,
                         NoticeType = notice.NoticeType,
-                        UserProfile = string.IsNullOrEmpty(emp.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(emp.ProfileUrl),
+                        UserProfile = Common.GetEmployeeImageUrl(emp.ProfileUrl),
                     }).OrderByDescending(x => x.CreatedDateTime).ToList();
 
         return new Result<NoticeViewModel>()

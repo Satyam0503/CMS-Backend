@@ -108,7 +108,7 @@ namespace Codeji.CMS.Services
             }
             else
             {
-                company.CompanyLogo = string.IsNullOrEmpty(company.CompanyLogo) ? Common.GetCompanyLogoUrl(null) : Common.GetCompanyLogoUrl(company.CompanyLogo);
+                company.CompanyLogo = Common.GetCompanyLogoUrl(company.CompanyLogo);
                 result.MethodResult = company;
             }
             return result;
@@ -147,7 +147,7 @@ namespace Codeji.CMS.Services
                 result.Message = "Failed To Update Company";
                 return result;
             }
-            company.CompanyLogo = Common.GetCompanyLogoUrl(company.CompanyLogo ?? string.Empty);
+            company.CompanyLogo = Common.GetCompanyLogoUrl(company.CompanyLogo);
             result.MethodResult = company;
             result.Success = true;
             return result;

@@ -658,6 +658,7 @@ public class LeaveManagementService : ILeaveManagementService
         Result result1 = await _notificationsRepo.AddOne(notification);
         if (!result1.Success) return;
         List<UserNotifications> userNotifications = [];
+        var notificationTasks = new List<Task>();
         foreach (var user in targetUserIds)
         {
             UserNotifications userNotification = new()
@@ -670,7 +671,7 @@ public class LeaveManagementService : ILeaveManagementService
                 IsDeleted = false
             };
             userNotifications.Add(userNotification);
-            await _notificationService.SendNotificationToUser(user, new NotificationViewModel()
+            notificationTasks.Add(_notificationService.SendNotificationToUser(user, new NotificationViewModel()
             {
                 Title = notification.Title,
                 Body = notification.Body,
@@ -679,9 +680,11 @@ public class LeaveManagementService : ILeaveManagementService
                 TargetId = notification.TargetId,
                 NotificationTypes = notification.NotificationType,
                 UserNotificationId = userNotification.UserNotificationId
-            });
+            }));
         }
         await _userNotificationsRepo.AddMany(userNotifications);
+        // process all notificatios task
+        await Task.WhenAll(notificationTasks);
     }
 }
 

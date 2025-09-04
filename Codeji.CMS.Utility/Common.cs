@@ -11,16 +11,16 @@ namespace Codeji.CMS.Utility
             return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.ViewResumeUrl + resumeUrl;
         }
 
-        public static string GetEmployeeImageUrl(string? profileUrl)
+        public static string? GetEmployeeImageUrl(string? profileUrl)
         {
             if (string.IsNullOrEmpty(profileUrl))
-                return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.Default_User_Image;
+                return null;
             return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.Employee_ImageUrl + profileUrl;
         }
-        public static string GetCompanyLogoUrl(string? logoUrl)
+        public static string? GetCompanyLogoUrl(string? logoUrl)
         {
             if (string.IsNullOrEmpty(logoUrl))
-                return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.Default_Company_logo;
+                return null;
             return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.CompanyLogoUrl + logoUrl;
         }
         public static string GetHolidayCoverImagePath(string imageUrl)

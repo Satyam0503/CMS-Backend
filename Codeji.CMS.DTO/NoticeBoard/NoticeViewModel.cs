@@ -6,7 +6,7 @@ public class NoticeViewModel
 {
     public string NoticeId { get; set; }
     public string UserName { get; set; }
-    public string UserProfile { get; set; }
+    public string? UserProfile { get; set; }
     public Dictionary<string, string>? UserDesignation { get; set; } = null;
     public string NoticeMessage { get; set; }
     public string NoticeTitle { get; set; }
