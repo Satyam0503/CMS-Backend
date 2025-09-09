@@ -773,5 +773,12 @@ namespace Codeji.CMS.Services.Employees
             List<string> collegeList = (await _educationDetailsRepo.GetAll(expression, true, false)).Select(e => e.CollegeName).Distinct().ToList();
             return collegeList;
         }
+
+        // generate salary slip
+
+        public async Task<byte[]> GenerateEmpSalarySlip(string month, string userId)
+        {
+            // logice to generate pdfs
+        }
     }
 }

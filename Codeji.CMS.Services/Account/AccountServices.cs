@@ -18,6 +18,7 @@ using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
+using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Account;
 
@@ -285,12 +286,15 @@ public class AccountServices : IAccountServices
         }
         if (storedRefreshToken.IsRevoked)
         {
+            // detected the use of revoked refresh token.Remove all the active refresh token 
             result.StatusCode = CustomStatusCode.RefreshTokenRevoked;
-            return result;
+            Expression<Func<RefreshToken, bool>> expression = rt => !rt.IsRevoked && rt.UserId == userid;
+            return await _refreshTokenRepository.UpdateMany(expression, Builders<RefreshToken>.Update.Set(rt => rt.IsRevoked, true).Set(rt => rt.RevokedAt, DateTime.UtcNow));
         }
         storedRefreshToken.IsRevoked = true;
         storedRefreshToken.RevokedAt = DateTime.UtcNow;
-        return await _refreshTokenRepository.Update(whereCondition, storedRefreshToken);
+        result = await _refreshTokenRepository.Update(whereCondition, storedRefreshToken);
+        return result;
     }
 
 }

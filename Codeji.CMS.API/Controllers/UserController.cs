@@ -437,4 +437,14 @@ public class UserController : BaseApiController
             TotalRecords = collegeList.Count,
         };
     }
+
+    // route to generate salary slip of employee
+    [HttpGet]
+    [Route("GetSalarySlip/{month}")]
+    public async Task<FileContentResult> GetSalarySlip(string month)
+    {
+        var userId = CurrentContext.UserId(_httpContextAccessor);
+        byte[] pdfByte = await _employeeService.GenerateEmpSalarySlip(month, userId);
+        return File(pdfByte, "application/pdf", "salarySlip.pdf");
+    }
 }

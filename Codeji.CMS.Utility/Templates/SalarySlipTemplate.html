@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Monthly Salary Slip</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 40px;
+        color: #000;
+      }
+
+      .salary-slip {
+        max-width: 800px;
+        margin: auto;
+        padding: 20px;
+      }
+
+      .header {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+
+      .header h1 {
+        font-size: 22px;
+        text-decoration: underline;
+      }
+
+      .company-info {
+        font-size: 14px;
+        margin-bottom: 2rem;
+        display: flex;
+
+        & > * {
+          flex-grow: 1;
+        }
+
+        & img {
+          max-width: 180px;
+          object-fit: contain;
+          max-height: 70px;
+        }
+      }
+
+      .company-info h3 {
+        line-height: 0;
+      }
+
+      .row {
+        display: flex;
+        font-size: 14px;
+        margin-bottom: 0.5rem;
+        gap: 1rem;
+
+        & > strong {
+          width: 150px;
+        }
+
+        & > span {
+          text-align: start;
+        }
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 15px;
+      }
+
+      table,
+      th,
+      td {
+        border: 1px solid #000;
+      }
+
+      th,
+      td {
+        padding: 8px;
+        font-size: 14px;
+        text-align: left;
+      }
+
+      th {
+        background-color: #d9e2f3;
+        text-align: center;
+      }
+
+      .net-salary {
+        font-size: 16px;
+        font-weight: bold;
+        margin-top: 20px;
+        text-align: right;
+      }
+
+      .amount-in-words {
+        font-size: 14px;
+        margin-top: 5px;
+      }
+
+      .details {
+        display: flex;
+        flex-direction: row;
+        gap: 1rem;
+
+        & > * {
+          flex-grow: 1;
+        }
+
+        &.details-group {
+          flex-basis: 50%;
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+      }
+
+      .fw-bold {
+        font-weight: bold;
+      }
+
+      .text-center {
+        text-align: center;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="salary-slip">
+      <div class="header">
+        <h1>Monthly Salary Slip</h1>
+      </div>
+
+      <div class="company-info">
+        <div>
+          <img alt="company-logo" src="[CompanyLogo]" /><br />
+          <h3 style="font-size: 16px; line-height: 0">[CompanyName]</h3>
+          <span style="margin-top: x">[CompanyAddress]</span>
+        </div>
+        <div style="align-self: end; text-align: end">
+          <h4 style="line-height: 0">Payslip For Month:</h4>
+          <span>[PaySlipMonth]</span>
+        </div>
+      </div>
+
+      <div class="details">
+        <div class="details-group">
+          <div class="row">
+            <strong>Employee Name :</strong>
+            <span> [EmployeeName]</span>
+          </div>
+          <div class="row">
+            <strong>Designation :</strong>
+            <span> [Designation]</span>
+          </div>
+          <div class="row">
+            <strong>Pan :</strong>
+            <span> [PanNumber]</span>
+          </div>
+          <div class="row">
+            <strong>Back Ac No :</strong>
+            <span> [BankAccountNo]</span>
+          </div>
+          <div class="row">
+            <strong>Employee Type :</strong>
+            <span> [EmployeeType]</span>
+          </div>
+        </div>
+        <div class="details-group">
+          <div class="row">
+            <strong>Employee Id :</strong>
+            <span> [EmployeeId]</span>
+          </div>
+          <div class="row">
+            <strong>Paid Date :</strong>
+            <span> [PaidDate]</span>
+          </div>
+          <div class="row">
+            <strong>Paid Days :</strong>
+            <span> [PaidDays]</span>
+          </div>
+
+          <div class="row">
+            <strong>Loss of Pay Days :</strong>
+            <span> [LossofPayDays]</span>
+          </div>
+        </div>
+      </div>
+
+      <table>
+        <tr>
+          <th class="text-center" colspan="2">Income</th>
+          <th colspan="2">Deductions(-)</th>
+        </tr>
+        <tr>
+          <td class="fw-bold">Basic Salary</td>
+          <td>₹ [BasicSalary]</td>
+          <td class="fw-bold">Loss Of Pays</td>
+          <td>₹ [LossOfPays]</td>
+        </tr>
+        <tr className>
+          <td class="fw-bold">HRA</td>
+          <td>₹ [HRA]</td>
+          <td class="fw-bold">Income Tax</td>
+          <td>₹ [IncomeTax]</td>
+        </tr>
+        <tr>
+          <td class="fw-bold">LTA Allowance</td>
+          <td>₹ [LtaAllowance]</td>
+          <td class="fw-bold">Health Insurance</td>
+          <td>₹ [HealthInsurance]</td>
+        </tr>
+        <tr>
+          <td class="fw-bold">Other Allowance</td>
+          <td>₹ [OtherAllowance]</td>
+          <td class="fw-bold"></td>
+          <td></td>
+        </tr>
+        <tr>
+          <td class="fw-bold">Bonus</td>
+          <td>₹ [Bonus]</td>
+          <td class="fw-bold"></td>
+          <td></td>
+        </tr>
+        <tr style="height: 50px">
+          <td colspan="2"></td>
+        </tr>
+        <tr>
+          <td>Gross Pay</td>
+          <td>₹ [GrossPay]</td>
+          <td>Total Deduction</td>
+          <td>₹ [TotalDeduction]</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td></td>
+          <td class="fw-bold">Net Salary</td>
+          <td>₹ [NetSalary]</td>
+        </tr>
+      </table>
+      <p style="margin-block: 20px; text-align: end">[NetSalaryInWords]</p>
+    </div>
+  </body>
+</html>
