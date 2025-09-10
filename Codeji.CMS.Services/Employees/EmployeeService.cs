@@ -1,16 +1,12 @@
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Security.Cryptography;
-using System.Text;
 using AutoMapper;
-using BCrypt.Net;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.DTO.ResponseModel;
-using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
@@ -25,7 +21,6 @@ using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
-using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Employees
@@ -36,29 +31,26 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<EmpCertificationDetails> _certificationDetailsRepo;
         readonly IMongoDbRepository<EmpSummary> _employeeSummaryRepo;
         readonly IMapper _mapper;
-        private readonly IPriorityTaskQueue _priorityTaskQueue;
+        readonly IPriorityTaskQueue _priorityTaskQueue;
         readonly IMongoDbRepository<EmpUser> _employeeRepository;
         readonly IMongoDbRepository<Roles> _rolesRepository;
         readonly IRoleService _roleService;
-        readonly IMongoDbRepository<RolePermission> _rolePermissionRepository;
         readonly IMongoDbRepository<EmpSkills> _employeeSkillsRepository;
         readonly IMongoDbRepository<Company> _companyRepository;
         readonly IMongoDbRepository<MailTemplate> _mailTemplateRepository;
-        readonly IMongoDbRepository<JobVacancy> _jobVacancy;
-        private readonly IMiddlewareService _middlewareService;
+        readonly IMiddlewareService _middlewareService;
         readonly IMongoDbRepository<Department> _departmentRepository;
-
         readonly IMongoDbRepository<Skills> _skillsRepository;
         readonly IMongoDbRepository<PasswordResetTokens> _passwordResetTokens;
         readonly IMongoDbRepository<EmpWorkHistory> _empWorkHistoryRepository;
         readonly IMongoDbRepository<UserNotifications> _userNotificationRepository;
         readonly IMongoDbRepository<Notifications> _notificationsRepository;
-        readonly IMongoDbRepository<RefreshToken> _refreshTokenRepository;
         readonly IMongoDbRepository<JobTitles> _jobTitlesRepository;
         readonly IHttpContextAccessor _httpContextAccessor;
-
         readonly IMongoDbRepository<CustomAttribute> _customAttributeRepository;
         readonly IMongoDbRepository<CustomAttributeValue> _customAttributeValueRepository;
+        readonly IMongoDbRepository<PayRoll> _payRollRepository;
+        readonly PdfService _pdfService;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
@@ -66,11 +58,9 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<EmpUser> employeeRepository,
             IMongoDbRepository<Roles> rolesRepository,
             IRoleService roleService,
-            IMongoDbRepository<RolePermission> rolePermissionRepository,
             IMongoDbRepository<EmpSkills> employeeSkillsRepository,
             IMongoDbRepository<Company> companyRepository,
             IMongoDbRepository<MailTemplate> mailTemplateRepository,
-            IMongoDbRepository<JobVacancy> jobVacancy,
             IPriorityTaskQueue priorityTaskQueue,
             IMiddlewareService middlewareService,
             IHttpContextAccessor httpContextAccessor,
@@ -80,10 +70,11 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<EmpWorkHistory> empWorkHistoryRepository,
             IMongoDbRepository<UserNotifications> userNotificationRepository,
             IMongoDbRepository<Notifications> notificationsRepository,
-            IMongoDbRepository<RefreshToken> refreshTokenRepository,
             IMongoDbRepository<JobTitles> jobTitlesRepository,
             IMongoDbRepository<CustomAttribute> customAttributeRepository,
-            IMongoDbRepository<CustomAttributeValue> customAttributeValueRepository
+            IMongoDbRepository<CustomAttributeValue> customAttributeValueRepository,
+            IMongoDbRepository<PayRoll> payRollRepository,
+            PdfService pdfService
             )
         {
             _employeeRepository = employeeRepository;
@@ -93,11 +84,9 @@ namespace Codeji.CMS.Services.Employees
             _mapper = mapper;
             _certificationDetailsRepo = certificationDetailsRepo;
             _employeeSummaryRepo = userSummary;
-            _rolePermissionRepository = rolePermissionRepository;
             _employeeSkillsRepository = employeeSkillsRepository;
             _companyRepository = companyRepository;
             _mailTemplateRepository = mailTemplateRepository;
-            _jobVacancy = jobVacancy;
             _priorityTaskQueue = priorityTaskQueue;
             _middlewareService = middlewareService;
             _departmentRepository = departmentRepository;
@@ -107,10 +96,11 @@ namespace Codeji.CMS.Services.Employees
             _empWorkHistoryRepository = empWorkHistoryRepository;
             _userNotificationRepository = userNotificationRepository;
             _notificationsRepository = notificationsRepository;
-            _refreshTokenRepository = refreshTokenRepository;
             _jobTitlesRepository = jobTitlesRepository;
             _customAttributeRepository = customAttributeRepository;
             _customAttributeValueRepository = customAttributeValueRepository;
+            _pdfService = pdfService;
+            _payRollRepository = payRollRepository;
         }
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
@@ -776,9 +766,74 @@ namespace Codeji.CMS.Services.Employees
 
         // generate salary slip
 
-        public async Task<byte[]> GenerateEmpSalarySlip(string month, string userId)
+        public async Task<(byte[] pdfBytes, string pdfName)> GenerateEmpSalarySlip(PayslipRequestDto model, string userId)
         {
-            // logice to generate pdfs
+            try
+            {
+                // get month and year 
+                var month = model.Month;
+                var year = model.Year;
+                SalarySlipTemplateModel salarySlipModel = new();
+                EmpUser? empUser = await _employeeRepository.FirstOrDefault(emp => emp.UserId == userId);
+                Company? company = await _companyRepository.FirstOrDefault(c => c.CompanyId == empUser.CompanyId);
+                if (company == null || empUser == null) throw new Exception();
+
+                // get pay details based on month and year
+                Expression<Func<PayRoll, bool>> expression = p => p.EmployeeId == empUser.EmployeeId && p.UserId == empUser.UserId && p.CompanyId == empUser.CompanyId && p.PayMonth.Month == model.Month && p.PayMonth.Year == model.Year;
+                PayRoll? payRoll = await _payRollRepository.FirstOrDefault(expression) ?? throw new Exception(CustomStatusCode.PayRollNotExist.ToString());
+
+                // assign payroll data
+                if (empUser.JobRole != null)
+                {
+                    JobTitles? jobTitles = await _jobTitlesRepository.FirstOrDefault(jt => jt.JobTitleId == empUser.JobRole && jt.CompanyId == company.CompanyId);
+                    salarySlipModel.Designation = jobTitles.Titles.Find(t => t.Language == company.DefaultLanguage)?.Label ?? string.Empty;
+                }
+                salarySlipModel.EmployeeName = $"{empUser.FirstName} {empUser.LastName}";
+                salarySlipModel.CompanyName = company.CompanyName;
+                salarySlipModel.CompanyAddress = company.Address;
+                salarySlipModel.PaySlipMonth = payRoll.PayMonth.ToString("MMM yyyy");
+                salarySlipModel.EmployeeId = empUser.EmployeeId;
+                salarySlipModel.PaidDate = payRoll.PayMonth.ToString("ddd, dd MMM yyyy");
+                salarySlipModel.LossofPayDays = payRoll.Deduction.LossOfPayDays;
+
+                salarySlipModel.BasicSalary = payRoll.BasicPay;
+                salarySlipModel.HRA = payRoll.Allowance.HRA;
+                salarySlipModel.LtaAllowance = payRoll.Allowance.LTA;
+                salarySlipModel.OtherAllowance = payRoll.Allowance.Other;
+                salarySlipModel.Bonus = payRoll.Bonus;
+
+                salarySlipModel.LossOfPays = payRoll.Deduction.LossOfPay;
+                salarySlipModel.IncomeTax = payRoll.Deduction.IncomeTax;
+                salarySlipModel.HealthInsurance = payRoll.Deduction.HealthInsurance;
+                salarySlipModel.GrossPay = payRoll.BasicPay + payRoll.Allowance.HRA + payRoll.Allowance.LTA + payRoll.Bonus + payRoll.Allowance.Other;
+                salarySlipModel.TotalDeduction = payRoll.Deduction.IncomeTax + payRoll.Deduction.HealthInsurance + payRoll.Deduction.LossOfPay;
+                salarySlipModel.NetSalary = salarySlipModel.GrossPay - salarySlipModel.TotalDeduction;
+
+                string templateFilePath = Path.Combine(Directory.GetCurrentDirectory(), "Templates", "SalarySlipTemplate.html");
+                string fileContent = File.ReadAllText(templateFilePath);
+
+                if (company.CompanyLogo != null)
+                {
+                    string logoPath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "CompanyLogo", company.CompanyLogo);
+                    if (File.Exists(logoPath))
+                    {
+                        byte[] logoByteArray = File.ReadAllBytes(logoPath);
+                        string logoBase64Format = Convert.ToBase64String(logoByteArray);
+                        string logoExtension = company.CompanyLogo.Split(".").Last();
+                        salarySlipModel.CompanyLogo = $"data:image/{logoExtension};base64,{logoBase64Format}";
+                    }
+                }
+
+                string templateContent = HtmlTemplate.Render(fileContent, salarySlipModel);
+                // logic to generate pdfs
+                byte[] pdfBytes = await _pdfService.GeneratePdfFormHtml(templateContent);
+                string pdfName = $"{empUser.FirstName} {empUser.LastName}_{payRoll.PayMonth.ToString("MMM yyyy")}_Salary_slip.pdf";
+                return (pdfBytes, pdfName);
+            }
+            catch (Exception)
+            {
+                throw;
+            }
         }
     }
 }

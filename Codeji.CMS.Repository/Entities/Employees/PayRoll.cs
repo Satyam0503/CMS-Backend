@@ -8,11 +8,12 @@ public class PayRoll
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
     public string Id { get; set; }
     public required string CompanyId { get; set; }
+    public required string UserId { get; set; }
     public required string EmployeeId { get; set; }
     public required DateTime PayMonth { get; set; }
     public required decimal BasicPay { get; set; }
-    public decimal Bonus { get; set; } = 0;
-    public required decimal PayDays { get; set; }
+    public decimal Bonus { get; set; }
+    public required float PayDays { get; set; }
     public Allowance Allowance { get; set; } = new Allowance();
     public Deduction Deduction { get; set; } = new Deduction();
     public DateTime CreatedAt { get; set; }
@@ -20,15 +21,15 @@ public class PayRoll
 
 public class Allowance
 {
-    public decimal HRA { get; set; } = 0;
-    public decimal LTA { get; set; } = 0;
-    public decimal Other { get; set; } = 0;
+    public decimal HRA { get; set; }
+    public decimal LTA { get; set; }
+    public decimal Other { get; set; }
 }
 
 public class Deduction
 {
-    public decimal LossOfPayDays { get; set; }
-    public decimal LossOfPay { get; set; } = 0;
-    public decimal IncomeTax { get; set; } = 0;
-    public decimal HealthInsurance { get; set; } = 0;
+    public float LossOfPayDays { get; set; }
+    public decimal LossOfPay { get; set; }
+    public decimal IncomeTax { get; set; }
+    public decimal HealthInsurance { get; set; }
 }

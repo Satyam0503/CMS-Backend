@@ -439,12 +439,23 @@ public class UserController : BaseApiController
     }
 
     // route to generate salary slip of employee
-    [HttpGet]
-    [Route("GetSalarySlip/{month}")]
-    public async Task<FileContentResult> GetSalarySlip(string month)
+    [HttpPost]
+    [Route("GeneratePaySlip")]
+    public async Task<ActionResult> GetSalarySlip(PayslipRequestDto model)
     {
-        var userId = CurrentContext.UserId(_httpContextAccessor);
-        byte[] pdfByte = await _employeeService.GenerateEmpSalarySlip(month, userId);
-        return File(pdfByte, "application/pdf", "salarySlip.pdf");
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+        try
+        {
+            var userId = CurrentContext.UserId(_httpContextAccessor);
+            var (pdfByte, pdfName) = await _employeeService.GenerateEmpSalarySlip(model, userId);
+            return File(pdfByte, "application/pdf", pdfName);
+        }
+        catch (Exception exp)
+        {
+            return StatusCode(500, new { message = "Error generating payslip", details = exp.Message });
+        }
     }
 }

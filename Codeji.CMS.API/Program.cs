@@ -7,13 +7,9 @@ using Codeji.CMS.GenericRepository.Registration;
 using Codeji.CMS.GenericRepository.Settings;
 using Codeji.CMS.Services;
 using Codeji.CMS.Services.BackgroundTasks;
-using Codeji.CMS.Services.Holiday;
-using Codeji.CMS.Services.Holiday.Interface;
 using Codeji.CMS.Services.Registration;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
-using DinkToPdf;
-using DinkToPdf.Contracts;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Connections;
@@ -100,15 +96,15 @@ builder.Services.AddRepositoryServices();
 
 // Initialize configuration helper
 ConfigurationHelper.Initialize(configuration);
-//automapper
-
-// register Convertor 
-
-builder.Services.AddSingleton(typeof(IConverter), new SynchronizedConverter(new PdfTools()));
-
 // register authorization handler to service collection
 builder.Services.AddSingleton<IAuthorizationHandler, RoleHandler>();
+//automapper
 builder.Services.AddAutoMapper(typeof(AutoMapperObjects));
+
+// register pdf services
+
+builder.Services.AddTransient<PdfService>();
+
 // Authentication and Authorization
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>

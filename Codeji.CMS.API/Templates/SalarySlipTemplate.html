@@ -12,7 +12,7 @@
       }
 
       .salary-slip {
-        max-width: 800px;
+        max-width: 900px;
         margin: auto;
         padding: 20px;
       }
@@ -54,10 +54,11 @@
         gap: 1rem;
 
         & > strong {
-          width: 150px;
+          width: 130px;
         }
 
         & > span {
+          width: 150px;
           text-align: start;
         }
       }
@@ -122,6 +123,9 @@
       .text-center {
         text-align: center;
       }
+      .w-150 {
+        width: 150px;
+      }
     </style>
   </head>
 
@@ -138,7 +142,7 @@
           <span style="margin-top: x">[CompanyAddress]</span>
         </div>
         <div style="align-self: end; text-align: end">
-          <h4 style="line-height: 0">Payslip For Month:</h4>
+          <strong style="line-height: 0">Payslip For Month:</strong><br />
           <span>[PaySlipMonth]</span>
         </div>
       </div>
@@ -194,9 +198,9 @@
         </tr>
         <tr>
           <td class="fw-bold">Basic Salary</td>
-          <td>₹ [BasicSalary]</td>
+          <td class="w-150">₹ [BasicSalary]</td>
           <td class="fw-bold">Loss Of Pays</td>
-          <td>₹ [LossOfPays]</td>
+          <td class="w-150">₹ [LossOfPays]</td>
         </tr>
         <tr className>
           <td class="fw-bold">HRA</td>
