@@ -11,7 +11,6 @@
                 string replacement = val?.ToString() ?? string.Empty;
                 output = output.Replace("[" + p.Name + "]", replacement);
             }
-            // output = output.Replace("[" + p.Name + "]", (p.GetValue(values, null) as string) ?? string.Empty);
             return output;
         }
     }

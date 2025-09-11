@@ -13,6 +13,7 @@ public class UserModel
     public string Gender { get; set; }
     public string? EmployeeId { get; set; }
     public string? JobRole { get; set; }
+    public int? EmploymentType { get; set; }
     public Dictionary<string, string>? JobRoleTitle { get; set; } = null;
     public string? DateOfBirth { get; set; }
     public string? Department { get; set; }

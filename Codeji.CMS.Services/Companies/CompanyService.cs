@@ -138,6 +138,7 @@ namespace Codeji.CMS.Services
                 company.ApplicationLanguage = [model.DefaultLanguage];
             }
             company.CompanyName = model.CompanyName ?? company.CompanyName;
+            company.Address = model.Address ?? company.Address;
             company.DefaultLanguage = model.DefaultLanguage ?? company.DefaultLanguage;
             company.CompanyLogo = model.CompanyLogo == null ? company.CompanyLogo : await UpdateCompanyLogo(model.CompanyLogo, companyId);
 

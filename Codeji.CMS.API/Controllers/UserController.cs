@@ -443,14 +443,15 @@ public class UserController : BaseApiController
     [Route("GeneratePaySlip")]
     public async Task<ActionResult> GetSalarySlip(PayslipRequestDto model)
     {
-        if (!ModelState.IsValid)
-        {
-            return BadRequest(ModelState);
-        }
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        // prevent user form generating future salary slip  
+        DateTime currentDate = DateTime.UtcNow;
+        if (model.Month >= currentDate.Month || model.Year > currentDate.Year) return BadRequest(ModelState);
         try
         {
             var userId = CurrentContext.UserId(_httpContextAccessor);
             var (pdfByte, pdfName) = await _employeeService.GenerateEmpSalarySlip(model, userId);
+            Response.Headers.Append("Access-Control-Expose-Headers", "Content-Disposition");
             return File(pdfByte, "application/pdf", pdfName);
         }
         catch (Exception exp)

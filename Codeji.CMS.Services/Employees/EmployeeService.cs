@@ -124,6 +124,7 @@ namespace Codeji.CMS.Services.Employees
                 Gender = user.Gender,
                 EmployeeId = user.EmployeeId,
                 JobRole = user.JobRole,
+                EmploymentType = user.EmploymentType,
                 DateOfBirth = user.DateOfBirth,
                 Department = user.Department,
                 ReportingManager = user.ReportingManager,
@@ -794,6 +795,7 @@ namespace Codeji.CMS.Services.Employees
                 salarySlipModel.PaySlipMonth = payRoll.PayMonth.ToString("MMM yyyy");
                 salarySlipModel.EmployeeId = empUser.EmployeeId;
                 salarySlipModel.PaidDate = payRoll.PayMonth.ToString("ddd, dd MMM yyyy");
+                salarySlipModel.EmployeeType = MapperHelper.GetEmploymentTypeLabel(empUser.EmploymentType);
                 salarySlipModel.LossofPayDays = payRoll.Deduction.LossOfPayDays;
 
                 salarySlipModel.BasicSalary = payRoll.BasicPay;

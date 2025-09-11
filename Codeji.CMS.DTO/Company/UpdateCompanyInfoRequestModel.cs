@@ -11,5 +11,6 @@ namespace Codeji.CMS.DTO.Company
         public required string DefaultLanguage { get; set; }
         public List<string>? ApplicationLanguage { get; set; }
         public IFormFile? CompanyLogo { get; set; }
+        public string Address { get; set; }
     }
 }
