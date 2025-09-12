@@ -189,7 +189,7 @@ public class AccountServices : IAccountServices
     {
         Result result = new();
         var tokenHash = TokenHelper.ComputeSha256Hash(model.Token);
-        PasswordResetTokens? token = await _passwordResetTokens.FirstOrDefault(x => x.UserId == model.Uid && x.TokenHash == tokenHash && !x.IsUsed);
+        PasswordResetTokens? token = await _passwordResetTokens.FirstOrDefault(x => x.TokenHash == tokenHash && !x.IsUsed);
         if (token is null)
         {
             result.StatusCode = CustomStatusCode.InvalidExpiredToken;
@@ -201,22 +201,25 @@ public class AccountServices : IAccountServices
             return result;
         }
 
-        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == model.Uid);
-        if (user is null)
-        {
-            return result;
-        }
+        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == token.UserId);
+        if (user is null) return result;
         user.Password = AuthenticationHandler.HashedPassword(model.NewPassword);
         user.IsEmailVerified = true;
         Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == user.UserId;
         await _employeeRepository.Update(whereCondition, user);
-        Expression<Func<PasswordResetTokens, bool>> whereCondition2 = x => x.Id == token.Id;
-        var result2 = await _passwordResetTokens.Delete(whereCondition2);
+
+        // mark current token used
+        Expression<Func<PasswordResetTokens, bool>> exp = rt => rt.Id == token.Id;
+        token.IsUsed = true;
+        await _passwordResetTokens.Update(exp, token);
+
+        // delete all the used and expired tokens of current user
+        Expression<Func<PasswordResetTokens, bool>> expression = x => x.UserId == user.UserId && (x.IsUsed || x.Expiry < DateTime.UtcNow);
+        await _passwordResetTokens.DeleteAll(expression);
         result.Success = true;
         result.StatusCode = CustomStatusCode.PasswordResetSuccess;
         return result;
     }
-    // Logic for Login User and Employee by Email and Password
 
     public async Task<Result<TokenResponseDto>> RefreshToken(RefreshTokenRequestDto model)
     {
