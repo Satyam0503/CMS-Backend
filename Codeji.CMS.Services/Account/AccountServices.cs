@@ -55,23 +55,27 @@ public class AccountServices : IAccountServices
         _priorityTaskQueue = priorityTaskQueue;
         _middlewareService = middlewareService;
     }
-    public async Task<bool> ResetPassword(string userId, string password, string oldPassword)
+    public async Task<Result> ResetPassword(string userId, ChangePasswordRequest password)
     {
+        Result result = new();
         EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
-        if (user is null)
-            return false;
-        if (!string.IsNullOrEmpty(oldPassword))
+        if (user == null) return result;
+        else if (user.Password == null) return result;
+        else if (!AuthenticationHandler.VerifyPassword(password.OldPassword, user.Password))
         {
-            if (!AuthenticationHandler.VerifyPassword(oldPassword, user.Password))
-                return false;
+            result.StatusCode = CustomStatusCode.InvalidCredential;
+            return result;
         }
-
-        user.Password = AuthenticationHandler.HashedPassword(password);
-        user.UpdatedDate = DateTime.Now;
-        Expression<Func<EmpUser, bool>> whereCondition = x => user.UserId == x.UserId;
-        await _employeeRepository.Update(whereCondition, user);
-        return true;
+        else
+        {
+            user.Password = AuthenticationHandler.HashedPassword(password.NewPassword);
+            user.UpdatedDate = DateTime.UtcNow;
+            Expression<Func<EmpUser, bool>> whereCondition = x => user.UserId == x.UserId;
+            result = await _employeeRepository.Update(whereCondition, user);
+            return result;
+        }
     }
+
     public async Task<Result<TokenResponseDto>> VerifyAndGenerateToken(LoginModel model)
     {
         Result<TokenResponseDto> result = new();
@@ -158,7 +162,7 @@ public class AccountServices : IAccountServices
         string replacedBody = HtmlTemplate.Render(emailContent?.body, new
         {
             EmployeeName = emp.FirstName + " " + emp.LastName,
-            PasswordResetLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={emp.UserId}",
+            PasswordResetLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}",
             CompanyName = company != null ? company.CompanyName : "",
             LinkExpiryTime = $"{tokenExpiryMinutes} Minutes"
         });

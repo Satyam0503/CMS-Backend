@@ -81,10 +81,10 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result> ChangePassword(ChangePasswordRequest passwordModel)
     {
-        Result result = new Result();
+        Result result = new();
+        if (!ModelState.IsValid) return result;
         string userId = CurrentContext.UserId(_httpContextAccessor);
-        result.Success = await _accountServices.ResetPassword(userId, passwordModel.Password, passwordModel.OldPassword);
-        return result;
+        return await _accountServices.ResetPassword(userId, passwordModel);
     }
 
 

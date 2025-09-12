@@ -8,7 +8,7 @@ namespace Codeji.CMS.Services.Account.Interface;
 
 public interface IAccountServices
 {
-    Task<bool> ResetPassword(string userId, string password, string oldPassword = "");
+    Task<Result> ResetPassword(string userId, ChangePasswordRequest model);
     Task<Result<TokenResponseDto>> VerifyAndGenerateToken(LoginModel model);
     Task<Result<TokenResponseDto>> RefreshToken(RefreshTokenRequestDto model);
     Task<Result> LogOut(string refreshToken, string userId);
