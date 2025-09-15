@@ -13,7 +13,7 @@ public class PayRoll
     public required DateTime PayMonth { get; set; }
     public required decimal BasicPay { get; set; }
     public decimal Bonus { get; set; }
-    public required float PayDays { get; set; }
+    public required float PaidDays { get; set; }
     public Allowance Allowance { get; set; } = new Allowance();
     public Deduction Deduction { get; set; } = new Deduction();
     public DateTime CreatedAt { get; set; }
@@ -23,7 +23,7 @@ public class Allowance
 {
     public decimal HRA { get; set; }
     public decimal LTA { get; set; }
-    public decimal Other { get; set; }
+    public decimal OtherAllowance { get; set; }
 }
 
 public class Deduction

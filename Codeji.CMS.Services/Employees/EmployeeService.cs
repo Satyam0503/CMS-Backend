@@ -795,19 +795,20 @@ namespace Codeji.CMS.Services.Employees
                 salarySlipModel.PaySlipMonth = payRoll.PayMonth.ToString("MMM yyyy");
                 salarySlipModel.EmployeeId = empUser.EmployeeId;
                 salarySlipModel.PaidDate = payRoll.PayMonth.ToString("ddd, dd MMM yyyy");
+                salarySlipModel.PaidDays = payRoll.PaidDays;
                 salarySlipModel.EmployeeType = MapperHelper.GetEmploymentTypeLabel(empUser.EmploymentType);
                 salarySlipModel.LossofPayDays = payRoll.Deduction.LossOfPayDays;
 
                 salarySlipModel.BasicSalary = payRoll.BasicPay;
                 salarySlipModel.HRA = payRoll.Allowance.HRA;
                 salarySlipModel.LtaAllowance = payRoll.Allowance.LTA;
-                salarySlipModel.OtherAllowance = payRoll.Allowance.Other;
+                salarySlipModel.OtherAllowance = payRoll.Allowance.OtherAllowance;
                 salarySlipModel.Bonus = payRoll.Bonus;
 
                 salarySlipModel.LossOfPays = payRoll.Deduction.LossOfPay;
                 salarySlipModel.IncomeTax = payRoll.Deduction.IncomeTax;
                 salarySlipModel.HealthInsurance = payRoll.Deduction.HealthInsurance;
-                salarySlipModel.GrossPay = payRoll.BasicPay + payRoll.Allowance.HRA + payRoll.Allowance.LTA + payRoll.Bonus + payRoll.Allowance.Other;
+                salarySlipModel.GrossPay = payRoll.BasicPay + payRoll.Allowance.HRA + payRoll.Allowance.LTA + payRoll.Bonus + payRoll.Allowance.OtherAllowance;
                 salarySlipModel.TotalDeduction = payRoll.Deduction.IncomeTax + payRoll.Deduction.HealthInsurance + payRoll.Deduction.LossOfPay;
                 salarySlipModel.NetSalary = salarySlipModel.GrossPay - salarySlipModel.TotalDeduction;
 
@@ -836,6 +837,48 @@ namespace Codeji.CMS.Services.Employees
             {
                 throw;
             }
+        }
+
+        public async Task<Result> UploadPayrollData(List<EmplyeePayRollRequestDto> payList, string companyId)
+        {
+            Result result = new();
+            // check employee existance
+            foreach (var item in payList)
+            {
+                bool exist = await _employeeRepository.Exist(e => e.EmployeeId == item.EmployeeId && e.CompanyId == companyId);
+                if (!exist)
+                {
+                    payList.Remove(item);
+                }
+            }
+            List<string> employeeIds = payList.Select(m => m.EmployeeId).ToList();
+            IEnumerable<EmpUser> empUsers = await _employeeRepository.GetAll(e => employeeIds.Contains(e.EmployeeId));
+            var dataList = from emp in empUsers
+                           join payItem in payList on emp.EmployeeId equals payItem.EmployeeId
+                           select new PayRoll()
+                           {
+                               CompanyId = companyId,
+                               UserId = emp.UserId,
+                               EmployeeId = emp.EmployeeId,
+                               PayMonth = DateTime.UtcNow,
+                               BasicPay = payItem.BasicPay,
+                               Bonus = payItem.Bonus,
+                               PaidDays = payItem.PaidDays,
+                               Allowance = new Allowance()
+                               {
+                                   HRA = payItem.HRA,
+                                   LTA = payItem.LTA,
+                                   OtherAllowance = payItem.OtherAllowance
+                               },
+                               Deduction = new Deduction()
+                               {
+                                   LossOfPay = payItem.LossOfPay,
+                                   LossOfPayDays = payItem.LossOfPayDays,
+                                   IncomeTax = payItem.IncomeTax,
+                                   HealthInsurance = payItem.HealthInsurance
+                               }
+                           };
+            return await _payRollRepository.AddMany(dataList);
         }
     }
 }

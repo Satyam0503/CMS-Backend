@@ -446,7 +446,7 @@ public class UserController : BaseApiController
         if (!ModelState.IsValid) return BadRequest(ModelState);
         // prevent user form generating future salary slip  
         DateTime currentDate = DateTime.UtcNow;
-        if (model.Month >= currentDate.Month || model.Year > currentDate.Year) return BadRequest(ModelState);
+        if (model.Month > currentDate.Month || model.Year > currentDate.Year) return BadRequest(ModelState);
         try
         {
             var userId = CurrentContext.UserId(_httpContextAccessor);
@@ -458,5 +458,19 @@ public class UserController : BaseApiController
         {
             return StatusCode(500, new { message = "Error generating payslip", details = exp.Message });
         }
+    }
+
+    [HttpPost]
+    [Route("UploadPayloadData")]
+    public async Task<ActionResult> UploadPayloadData([FromBody] List<EmplyeePayRollRequestDto> model)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        var result = await _employeeService.UploadPayrollData(model, companyId);
+        if (result.Success)
+        {
+            return Ok();
+        }
+        return BadRequest();
     }
 }

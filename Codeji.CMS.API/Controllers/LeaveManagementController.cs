@@ -96,5 +96,4 @@ public class LeaveManagementController : ControllerBase
         var result = await _leaveManagementService.GetEmployeeLeaveBalance(employeeId);
         return result;
     }
-
 }
