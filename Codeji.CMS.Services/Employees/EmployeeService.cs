@@ -843,14 +843,15 @@ namespace Codeji.CMS.Services.Employees
         {
             Result result = new();
             // check employee existance
-            foreach (var item in payList)
+            for (int i = payList.Count - 1; i >= 0; i--)
             {
-                bool exist = await _employeeRepository.Exist(e => e.EmployeeId == item.EmployeeId && e.CompanyId == companyId);
+                bool exist = await _employeeRepository.Exist(e => e.EmployeeId == payList[i].EmployeeId && e.CompanyId == companyId);
                 if (!exist)
                 {
-                    payList.Remove(item);
+                    payList.RemoveAt(i);
                 }
             }
+
             List<string> employeeIds = payList.Select(m => m.EmployeeId).ToList();
             IEnumerable<EmpUser> empUsers = await _employeeRepository.GetAll(e => employeeIds.Contains(e.EmployeeId));
             var dataList = from emp in empUsers
@@ -860,10 +861,11 @@ namespace Codeji.CMS.Services.Employees
                                CompanyId = companyId,
                                UserId = emp.UserId,
                                EmployeeId = emp.EmployeeId,
-                               PayMonth = DateTime.UtcNow,
+                               PayMonth = DateTime.UtcNow.Date,
                                BasicPay = payItem.BasicPay,
                                Bonus = payItem.Bonus,
                                PaidDays = payItem.PaidDays,
+                               CreatedAt = DateTime.UtcNow,
                                Allowance = new Allowance()
                                {
                                    HRA = payItem.HRA,
@@ -878,7 +880,26 @@ namespace Codeji.CMS.Services.Employees
                                    HealthInsurance = payItem.HealthInsurance
                                }
                            };
-            return await _payRollRepository.AddMany(dataList);
+
+            var tasks = new List<Task>();
+            foreach (var item in dataList)
+            {
+                var payRoll = await _payRollRepository.FirstOrDefault(p => p.EmployeeId == item.EmployeeId && item.PayMonth.Month == DateTime.UtcNow.Month && item.PayMonth.Year == DateTime.UtcNow.Year);
+                if (payRoll == null)
+                {
+                    tasks.Add(_payRollRepository.AddOne(item));
+                }
+                else
+                {
+                    Expression<Func<PayRoll, bool>> expression = p => p.Id == payRoll.Id;
+                    item.Id = payRoll.Id;
+                    tasks.Add(_payRollRepository.Update(expression, item));
+                }
+            }
+            await Task.WhenAll(tasks);
+            result.Success = true;
+            return result;
+            // return await _payRollRepository.AddMany(dataList);
         }
     }
 }

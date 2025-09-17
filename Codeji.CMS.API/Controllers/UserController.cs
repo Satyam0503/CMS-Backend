@@ -469,7 +469,7 @@ public class UserController : BaseApiController
         var result = await _employeeService.UploadPayrollData(model, companyId);
         if (result.Success)
         {
-            return Ok();
+            return Ok(result);
         }
         return BadRequest();
     }
