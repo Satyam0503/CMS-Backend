@@ -839,29 +839,30 @@ namespace Codeji.CMS.Services.Employees
             }
         }
 
-        public async Task<Result> UploadPayrollData(List<EmplyeePayRollRequestDto> payList, string companyId)
+        public async Task<Result> UploadPayrollData(EmplyeePayRollRequestDto payLoad, string companyId)
         {
             Result result = new();
             // check employee existance
-            for (int i = payList.Count - 1; i >= 0; i--)
+            List<EmployeePayRollModel> payData = payLoad.PayData;
+            for (int i = payData.Count - 1; i >= 0; i--)
             {
-                bool exist = await _employeeRepository.Exist(e => e.EmployeeId == payList[i].EmployeeId && e.CompanyId == companyId);
+                bool exist = await _employeeRepository.Exist(e => e.EmployeeId == payData[i].EmployeeId && e.CompanyId == companyId);
                 if (!exist)
                 {
-                    payList.RemoveAt(i);
+                    payData.RemoveAt(i);
                 }
             }
 
-            List<string> employeeIds = payList.Select(m => m.EmployeeId).ToList();
+            List<string> employeeIds = payData.Select(m => m.EmployeeId).ToList();
             IEnumerable<EmpUser> empUsers = await _employeeRepository.GetAll(e => employeeIds.Contains(e.EmployeeId));
             var dataList = from emp in empUsers
-                           join payItem in payList on emp.EmployeeId equals payItem.EmployeeId
+                           join payItem in payData on emp.EmployeeId equals payItem.EmployeeId
                            select new PayRoll()
                            {
                                CompanyId = companyId,
                                UserId = emp.UserId,
                                EmployeeId = emp.EmployeeId,
-                               PayMonth = DateTime.UtcNow.Date,
+                               PayMonth = payLoad.PayMonth,
                                BasicPay = payItem.BasicPay,
                                Bonus = payItem.Bonus,
                                PaidDays = payItem.PaidDays,
@@ -899,7 +900,6 @@ namespace Codeji.CMS.Services.Employees
             await Task.WhenAll(tasks);
             result.Success = true;
             return result;
-            // return await _payRollRepository.AddMany(dataList);
         }
     }
 }

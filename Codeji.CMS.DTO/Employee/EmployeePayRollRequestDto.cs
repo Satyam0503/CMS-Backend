@@ -1,6 +1,6 @@
 namespace Codeji.CMS.DTO.Employee;
 
-public class EmplyeePayRollRequestDto
+public class EmployeePayRollModel
 {
     public required string EmployeeId { get; set; }
     public required decimal BasicPay { get; set; }
@@ -13,4 +13,9 @@ public class EmplyeePayRollRequestDto
     public decimal LossOfPay { get; set; }
     public decimal IncomeTax { get; set; }
     public decimal HealthInsurance { get; set; }
+}
+public class EmplyeePayRollRequestDto
+{
+    public DateTime PayMonth { get; set; }
+    public List<EmployeePayRollModel> PayData { get; set; } = [];
 }

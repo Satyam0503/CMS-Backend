@@ -49,6 +49,6 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<List<string>> GetCollegeNameSuggestions(string searchValue);
                 Task<(byte[] pdfBytes, string pdfName)> GenerateEmpSalarySlip(PayslipRequestDto model, string userId);
 
-                Task<Result> UploadPayrollData(List<EmplyeePayRollRequestDto> model, string companyId);
+                Task<Result> UploadPayrollData(EmplyeePayRollRequestDto model, string companyId);
         }
 }
