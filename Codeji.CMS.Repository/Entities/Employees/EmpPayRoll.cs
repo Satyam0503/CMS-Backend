@@ -1,9 +1,8 @@
-using System.ComponentModel.DataAnnotations;
 using MongoDB.Bson.Serialization.Attributes;
 
 namespace Codeji.CMS.Repository.Entities.Employees;
 
-public class PayRoll
+public class EmpPayRoll
 {
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
     public string Id { get; set; }

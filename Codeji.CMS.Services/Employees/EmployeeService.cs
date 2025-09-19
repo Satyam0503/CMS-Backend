@@ -49,8 +49,6 @@ namespace Codeji.CMS.Services.Employees
         readonly IHttpContextAccessor _httpContextAccessor;
         readonly IMongoDbRepository<CustomAttribute> _customAttributeRepository;
         readonly IMongoDbRepository<CustomAttributeValue> _customAttributeValueRepository;
-        readonly IMongoDbRepository<PayRoll> _payRollRepository;
-        readonly PdfService _pdfService;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
@@ -72,9 +70,7 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<Notifications> notificationsRepository,
             IMongoDbRepository<JobTitles> jobTitlesRepository,
             IMongoDbRepository<CustomAttribute> customAttributeRepository,
-            IMongoDbRepository<CustomAttributeValue> customAttributeValueRepository,
-            IMongoDbRepository<PayRoll> payRollRepository,
-            PdfService pdfService
+            IMongoDbRepository<CustomAttributeValue> customAttributeValueRepository
             )
         {
             _employeeRepository = employeeRepository;
@@ -99,8 +95,6 @@ namespace Codeji.CMS.Services.Employees
             _jobTitlesRepository = jobTitlesRepository;
             _customAttributeRepository = customAttributeRepository;
             _customAttributeValueRepository = customAttributeValueRepository;
-            _pdfService = pdfService;
-            _payRollRepository = payRollRepository;
         }
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
@@ -763,143 +757,6 @@ namespace Codeji.CMS.Services.Employees
             Expression<Func<EmpEducationDetails, bool>> expression = e => e.CollegeName.ToLower().Contains(searchValue.ToLower());
             List<string> collegeList = (await _educationDetailsRepo.GetAll(expression, true, false)).Select(e => e.CollegeName).Distinct().ToList();
             return collegeList;
-        }
-
-        // generate salary slip
-
-        public async Task<(byte[] pdfBytes, string pdfName)> GenerateEmpSalarySlip(PayslipRequestDto model, string userId)
-        {
-            try
-            {
-                // get month and year 
-                var month = model.Month;
-                var year = model.Year;
-                SalarySlipTemplateModel salarySlipModel = new();
-                EmpUser? empUser = await _employeeRepository.FirstOrDefault(emp => emp.UserId == userId);
-                Company? company = await _companyRepository.FirstOrDefault(c => c.CompanyId == empUser.CompanyId);
-                if (company == null || empUser == null) throw new Exception();
-
-                // get pay details based on month and year
-                Expression<Func<PayRoll, bool>> expression = p => p.EmployeeId == empUser.EmployeeId && p.UserId == empUser.UserId && p.CompanyId == empUser.CompanyId && p.PayMonth.Month == model.Month && p.PayMonth.Year == model.Year;
-                PayRoll? payRoll = await _payRollRepository.FirstOrDefault(expression) ?? throw new Exception(CustomStatusCode.PayRollNotExist.ToString());
-
-                // assign payroll data
-                if (empUser.JobRole != null)
-                {
-                    JobTitles? jobTitles = await _jobTitlesRepository.FirstOrDefault(jt => jt.JobTitleId == empUser.JobRole && jt.CompanyId == company.CompanyId);
-                    salarySlipModel.Designation = jobTitles.Titles.Find(t => t.Language == company.DefaultLanguage)?.Label ?? string.Empty;
-                }
-                salarySlipModel.EmployeeName = $"{empUser.FirstName} {empUser.LastName}";
-                salarySlipModel.CompanyName = company.CompanyName;
-                salarySlipModel.CompanyAddress = company.Address;
-                salarySlipModel.PaySlipMonth = payRoll.PayMonth.ToString("MMM yyyy");
-                salarySlipModel.EmployeeId = empUser.EmployeeId;
-                salarySlipModel.PaidDate = payRoll.PayMonth.ToString("ddd, dd MMM yyyy");
-                salarySlipModel.PaidDays = payRoll.PaidDays;
-                salarySlipModel.EmployeeType = MapperHelper.GetEmploymentTypeLabel(empUser.EmploymentType);
-                salarySlipModel.LossofPayDays = payRoll.Deduction.LossOfPayDays;
-
-                salarySlipModel.BasicSalary = payRoll.BasicPay;
-                salarySlipModel.HRA = payRoll.Allowance.HRA;
-                salarySlipModel.LtaAllowance = payRoll.Allowance.LTA;
-                salarySlipModel.OtherAllowance = payRoll.Allowance.OtherAllowance;
-                salarySlipModel.Bonus = payRoll.Bonus;
-
-                salarySlipModel.LossOfPays = payRoll.Deduction.LossOfPay;
-                salarySlipModel.IncomeTax = payRoll.Deduction.IncomeTax;
-                salarySlipModel.HealthInsurance = payRoll.Deduction.HealthInsurance;
-                salarySlipModel.GrossPay = payRoll.BasicPay + payRoll.Allowance.HRA + payRoll.Allowance.LTA + payRoll.Bonus + payRoll.Allowance.OtherAllowance;
-                salarySlipModel.TotalDeduction = payRoll.Deduction.IncomeTax + payRoll.Deduction.HealthInsurance + payRoll.Deduction.LossOfPay;
-                salarySlipModel.NetSalary = salarySlipModel.GrossPay - salarySlipModel.TotalDeduction;
-
-                string templateFilePath = Path.Combine(Directory.GetCurrentDirectory(), "Templates", "SalarySlipTemplate.html");
-                string fileContent = File.ReadAllText(templateFilePath);
-
-                if (company.CompanyLogo != null)
-                {
-                    string logoPath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "CompanyLogo", company.CompanyLogo);
-                    if (File.Exists(logoPath))
-                    {
-                        byte[] logoByteArray = File.ReadAllBytes(logoPath);
-                        string logoBase64Format = Convert.ToBase64String(logoByteArray);
-                        string logoExtension = company.CompanyLogo.Split(".").Last();
-                        salarySlipModel.CompanyLogo = $"data:image/{logoExtension};base64,{logoBase64Format}";
-                    }
-                }
-
-                string templateContent = HtmlTemplate.Render(fileContent, salarySlipModel);
-                // logic to generate pdfs
-                byte[] pdfBytes = await _pdfService.GeneratePdfFormHtml(templateContent);
-                string pdfName = $"{empUser.FirstName} {empUser.LastName}_{payRoll.PayMonth.ToString("MMM yyyy")}_Salary_slip.pdf";
-                return (pdfBytes, pdfName);
-            }
-            catch (Exception)
-            {
-                throw;
-            }
-        }
-
-        public async Task<Result> UploadPayrollData(EmplyeePayRollRequestDto payLoad, string companyId)
-        {
-            Result result = new();
-            // check employee existance
-            List<EmployeePayRollModel> payData = payLoad.PayData;
-            for (int i = payData.Count - 1; i >= 0; i--)
-            {
-                bool exist = await _employeeRepository.Exist(e => e.EmployeeId == payData[i].EmployeeId && e.CompanyId == companyId);
-                if (!exist)
-                {
-                    payData.RemoveAt(i);
-                }
-            }
-
-            List<string> employeeIds = payData.Select(m => m.EmployeeId).ToList();
-            IEnumerable<EmpUser> empUsers = await _employeeRepository.GetAll(e => employeeIds.Contains(e.EmployeeId));
-            var dataList = from emp in empUsers
-                           join payItem in payData on emp.EmployeeId equals payItem.EmployeeId
-                           select new PayRoll()
-                           {
-                               CompanyId = companyId,
-                               UserId = emp.UserId,
-                               EmployeeId = emp.EmployeeId,
-                               PayMonth = payLoad.PayMonth,
-                               BasicPay = payItem.BasicPay,
-                               Bonus = payItem.Bonus,
-                               PaidDays = payItem.PaidDays,
-                               CreatedAt = DateTime.UtcNow,
-                               Allowance = new Allowance()
-                               {
-                                   HRA = payItem.HRA,
-                                   LTA = payItem.LTA,
-                                   OtherAllowance = payItem.OtherAllowance
-                               },
-                               Deduction = new Deduction()
-                               {
-                                   LossOfPay = payItem.LossOfPay,
-                                   LossOfPayDays = payItem.LossOfPayDays,
-                                   IncomeTax = payItem.IncomeTax,
-                                   HealthInsurance = payItem.HealthInsurance
-                               }
-                           };
-
-            var tasks = new List<Task>();
-            foreach (var item in dataList)
-            {
-                var payRoll = await _payRollRepository.FirstOrDefault(p => p.EmployeeId == item.EmployeeId && item.PayMonth.Month == DateTime.UtcNow.Month && item.PayMonth.Year == DateTime.UtcNow.Year);
-                if (payRoll == null)
-                {
-                    tasks.Add(_payRollRepository.AddOne(item));
-                }
-                else
-                {
-                    Expression<Func<PayRoll, bool>> expression = p => p.Id == payRoll.Id;
-                    item.Id = payRoll.Id;
-                    tasks.Add(_payRollRepository.Update(expression, item));
-                }
-            }
-            await Task.WhenAll(tasks);
-            result.Success = true;
-            return result;
         }
     }
 }

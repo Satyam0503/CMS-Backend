@@ -1,4 +1,4 @@
-namespace Codeji.CMS.DTO.Employee;
+namespace Codeji.CMS.DTO.PayRoll;
 
 public class SalarySlipTemplateModel
 {

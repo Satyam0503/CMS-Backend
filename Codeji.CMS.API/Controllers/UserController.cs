@@ -438,41 +438,5 @@ public class UserController : BaseApiController
         };
     }
 
-    // route to generate salary slip of employee
-    [HttpPost]
-    [Route("GeneratePaySlip")]
-    public async Task<ActionResult> GetSalarySlip(PayslipRequestDto model)
-    {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        // prevent user form generating future salary slip  
-        DateTime currentDate = DateTime.UtcNow;
-        if (model.Month >= currentDate.Month && model.Year >= currentDate.Year) return BadRequest(ModelState);
-        try
-        {
-            var userId = CurrentContext.UserId(_httpContextAccessor);
-            var (pdfByte, pdfName) = await _employeeService.GenerateEmpSalarySlip(model, userId);
-            Response.Headers.Append("Access-Control-Expose-Headers", "Content-Disposition");
-            return File(pdfByte, "application/pdf", pdfName);
-        }
-        catch (Exception exp)
-        {
-            return StatusCode(500, new { message = "Error generating payslip", details = exp.Message });
-        }
-    }
-
-    [HttpPost]
-    [Route("UploadPayloadData")]
-    public async Task<ActionResult> UploadPayloadData([FromBody] EmplyeePayRollRequestDto model)
-    {
-        var currentDate = DateTime.UtcNow;
-        if (model.PayMonth.Month >= currentDate.Month && model.PayMonth.Year >= currentDate.Year) return BadRequest();
-        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-        var result = await _employeeService.UploadPayrollData(model, companyId);
-        if (result.Success)
-        {
-            return Ok(result);
-        }
-        return BadRequest();
-    }
 }
 

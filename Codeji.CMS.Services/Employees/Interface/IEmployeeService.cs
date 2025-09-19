@@ -47,8 +47,5 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<Result> MarkAllNotificationAsRead(string userId);
                 Task<Result> RemoveProfileImage(string userId);
                 Task<List<string>> GetCollegeNameSuggestions(string searchValue);
-                Task<(byte[] pdfBytes, string pdfName)> GenerateEmpSalarySlip(PayslipRequestDto model, string userId);
-
-                Task<Result> UploadPayrollData(EmplyeePayRollRequestDto model, string companyId);
         }
 }
