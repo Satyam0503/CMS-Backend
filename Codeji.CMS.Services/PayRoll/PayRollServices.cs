@@ -172,15 +172,22 @@ public class PayRollServices : IPayRollServices
     public async Task<Result<GetEmpPayRollResponseDto>> GetEmployeePayRoll(GetEmpPayRollRequestDto payload, string companyId)
     {
         Result<GetEmpPayRollResponseDto> result = new();
+        List<string> matchingEmployeeIds = [];
+        if (!string.IsNullOrEmpty(payload.EmployeeName))
+        {
+            matchingEmployeeIds = (await _employeeRepository.GetAll(e => (e.FirstName.Contains(payload.EmployeeName, StringComparison.CurrentCultureIgnoreCase) || e.LastName.Contains(payload.EmployeeName, StringComparison.CurrentCultureIgnoreCase)) && e.CompanyId == companyId)).Select(e => e.UserId).ToList();
+        }
         Expression<Func<EmpPayRoll, bool>> expression = p => p.CompanyId == companyId
-                                        && payload.PayMonth.Month == p.PayMonth.Month && payload.PayMonth.Year == p.PayMonth.Year;
+                                        && payload.PayMonth.Month == p.PayMonth.Month && payload.PayMonth.Year == p.PayMonth.Year
+                                        && (matchingEmployeeIds.Count == 0 || matchingEmployeeIds.Contains(p.UserId));
 
         List<EmpPayRoll> empPayRolls = _empPayRollRepository.Get(expression).ToList();
         if (empPayRolls.Count == 0)
         {
             return result;
         }
-        IEnumerable<EmpUser> empUsers = await _employeeRepository.GetAll(e => e.CompanyId == companyId);
+        Expression<Func<EmpUser, bool>> empExpression = e => e.CompanyId == companyId && (matchingEmployeeIds.Count == 0 || matchingEmployeeIds.Contains(e.UserId));
+        IEnumerable<EmpUser> empUsers = await _employeeRepository.GetAll(empExpression);
         List<string> jobIds = empUsers.Select(emp => emp.JobRole).Distinct().Where(jt => jt != null).ToList();
         IEnumerable<JobTitles> jobTitles = await _jobTitlesRepository.GetAll(jt => jobIds.Contains(jt.JobTitleId));
 
