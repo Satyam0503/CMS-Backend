@@ -71,4 +71,20 @@ public class PayRollController : BaseApiController
         }
         return BadRequest();
     }
+
+    [HttpPost]
+    [Route("AddUpdatePayRoll")]
+    public async Task<Result> AddUpdatePayRoll([FromBody] AddUpdatePayRollRequestDto model)
+    {
+        Result result = new Result();
+        var currentDate = DateTime.UtcNow;
+        if (model.PayMonth.Month >= currentDate.Month && model.PayMonth.Year >= currentDate.Year) return result;
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        result = await _payRollServices.AddUpdatePayRoll(model, companyId);
+        if (result.Success)
+        {
+            return result;
+        }
+        return result;
+    }
 }

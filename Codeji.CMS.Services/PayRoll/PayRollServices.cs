@@ -6,6 +6,7 @@ using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.Utility.Helpers;
+using LinqKit;
 
 namespace Codeji.CMS.Services.PayRoll;
 
@@ -152,7 +153,7 @@ public class PayRollServices : IPayRollServices
         var tasks = new List<Task>();
         foreach (var item in dataList)
         {
-            var payRoll = await _empPayRollRepository.FirstOrDefault(p => p.EmployeeId == item.EmployeeId && item.PayMonth.Month == DateTime.UtcNow.Month && item.PayMonth.Year == DateTime.UtcNow.Year);
+            var payRoll = await _empPayRollRepository.FirstOrDefault(p => p.EmployeeId == item.EmployeeId && item.PayMonth.Month == p.PayMonth.Month && item.PayMonth.Year == p.PayMonth.Year);
             if (payRoll == null)
             {
                 tasks.Add(_empPayRollRepository.AddOne(item));
@@ -173,21 +174,31 @@ public class PayRollServices : IPayRollServices
     {
         Result<GetEmpPayRollResponseDto> result = new();
         List<string> matchingEmployeeIds = [];
+        List<EmpPayRoll> empPayRolls = [];
+        IEnumerable<EmpUser> empUsers = [];
         if (!string.IsNullOrEmpty(payload.EmployeeName))
         {
             matchingEmployeeIds = (await _employeeRepository.GetAll(e => (e.FirstName.Contains(payload.EmployeeName, StringComparison.CurrentCultureIgnoreCase) || e.LastName.Contains(payload.EmployeeName, StringComparison.CurrentCultureIgnoreCase)) && e.CompanyId == companyId)).Select(e => e.UserId).ToList();
-        }
-        Expression<Func<EmpPayRoll, bool>> expression = p => p.CompanyId == companyId
+            Expression<Func<EmpPayRoll, bool>> expression = p => p.CompanyId == companyId
                                         && payload.PayMonth.Month == p.PayMonth.Month && payload.PayMonth.Year == p.PayMonth.Year
-                                        && (matchingEmployeeIds.Count == 0 || matchingEmployeeIds.Contains(p.UserId));
+                                        && matchingEmployeeIds.Contains(p.UserId);
+            empPayRolls = _empPayRollRepository.Get(expression).ToList();
+            Expression<Func<EmpUser, bool>> empExpression = e => e.CompanyId == companyId && matchingEmployeeIds.Contains(e.UserId);
+            empUsers = await _employeeRepository.GetAll(empExpression);
+        }
+        else
+        {
+            Expression<Func<EmpPayRoll, bool>> expression = p => p.CompanyId == companyId
+                                        && payload.PayMonth.Month == p.PayMonth.Month && payload.PayMonth.Year == p.PayMonth.Year;
+            empPayRolls = _empPayRollRepository.Get(expression).ToList();
+            Expression<Func<EmpUser, bool>> empExpression = e => e.CompanyId == companyId;
+            empUsers = await _employeeRepository.GetAll(empExpression);
+        }
 
-        List<EmpPayRoll> empPayRolls = _empPayRollRepository.Get(expression).ToList();
         if (empPayRolls.Count == 0)
         {
             return result;
         }
-        Expression<Func<EmpUser, bool>> empExpression = e => e.CompanyId == companyId && (matchingEmployeeIds.Count == 0 || matchingEmployeeIds.Contains(e.UserId));
-        IEnumerable<EmpUser> empUsers = await _employeeRepository.GetAll(empExpression);
         List<string> jobIds = empUsers.Select(emp => emp.JobRole).Distinct().Where(jt => jt != null).ToList();
         IEnumerable<JobTitles> jobTitles = await _jobTitlesRepository.GetAll(jt => jobIds.Contains(jt.JobTitleId));
 
@@ -203,6 +214,7 @@ public class PayRollServices : IPayRollServices
                         JobTitle = empJobTitle?.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label) ?? null,
                         PayData = new EmployeePayRollModel
                         {
+                            PayRollId = payRoll?.Id ?? "",
                             EmployeeId = emp.EmployeeId,
                             BasicPay = payRoll?.BasicPay ?? null,
                             PaidDays = payRoll?.PaidDays ?? null,
@@ -220,4 +232,70 @@ public class PayRollServices : IPayRollServices
         return result;
     }
 
+    public async Task<Result> AddUpdatePayRoll(AddUpdatePayRollRequestDto model, string companyId)
+    {
+        Result result = new();
+        EmpUser? empUser = await _employeeRepository.FirstOrDefault(e => e.EmployeeId == model.EmployeeId && e.CompanyId == companyId);
+        if (empUser == null) return result;
+        EmpPayRoll? payRoll = null;
+        if (!string.IsNullOrEmpty(model.PayRollId))
+        {
+            payRoll = await _empPayRollRepository.FirstOrDefault(p => p.Id == model.PayRollId && p.CompanyId == companyId);
+        }
+        if (payRoll == null)
+        {
+            // check if payroll for the month already exist
+            Expression<Func<EmpPayRoll, bool>> expression = p => p.EmployeeId == model.EmployeeId && p.UserId == empUser.UserId && p.CompanyId == companyId && p.PayMonth.Month == model.PayMonth.Month && p.PayMonth.Year == model.PayMonth.Year;
+            bool exist = await _empPayRollRepository.Exist(expression);
+            if (exist)
+            {
+                result.Message = "Payroll for the month already exist";
+                return result;
+            }
+            // add new entry
+            EmpPayRoll newPayRoll = new()
+            {
+                CompanyId = companyId,
+                UserId = empUser.UserId,
+                EmployeeId = empUser.EmployeeId,
+                PayMonth = model.PayMonth,
+                BasicPay = model.BasicPay,
+                Bonus = model.Bonus ?? 0,
+                PaidDays = model.PaidDays,
+                CreatedAt = DateTime.UtcNow,
+                Allowance = new Allowance()
+                {
+                    HRA = model.HRA ?? 0,
+                    LTA = model.LTA ?? 0,
+                    OtherAllowance = model.OtherAllowance ?? 0
+                },
+                Deduction = new Deduction()
+                {
+                    LossOfPayDays = model.LossOfPayDays ?? 0,
+                    LossOfPay = model.LossOfPay ?? 0,
+                    IncomeTax = model.IncomeTax ?? 0,
+                    HealthInsurance = model.HealthInsurance ?? 0
+                }
+            };
+            result = await _empPayRollRepository.AddOne(newPayRoll);
+        }
+        else
+        {
+            // update existing
+            Expression<Func<EmpPayRoll, bool>> expression = p => p.Id == payRoll.Id;
+            payRoll.BasicPay = model.BasicPay;
+            payRoll.Bonus = model.Bonus ?? 0;
+            payRoll.PaidDays = model.PaidDays;
+            payRoll.PayMonth = model.PayMonth;
+            payRoll.Allowance.HRA = model.HRA ?? 0;
+            payRoll.Allowance.LTA = model.LTA ?? 0;
+            payRoll.Allowance.OtherAllowance = model.OtherAllowance ?? 0;
+            payRoll.Deduction.LossOfPayDays = model.LossOfPayDays ?? 0;
+            payRoll.Deduction.LossOfPay = model.LossOfPay ?? 0;
+            payRoll.Deduction.IncomeTax = model.IncomeTax ?? 0;
+            payRoll.Deduction.HealthInsurance = model.HealthInsurance ?? 0;
+            result = await _empPayRollRepository.Update(expression, payRoll);
+        }
+        return result;
+    }
 }
