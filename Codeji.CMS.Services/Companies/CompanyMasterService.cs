@@ -122,7 +122,8 @@ public class CompanyMasterService : ICompanyMasterService
         }
         List<ModulePermission> modulesPermission = (await _modulePermissionRepository.GetAll(x => x.ModuleId == module.ModuleId)).ToList();
         int[] modulePermissionId = modulesPermission.Select(x => x.ModulePermissionId).ToArray();
-        IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId && modulePermissionId.Contains(x.ModulePermissionId));
+        Expression<Func<RolePermission, bool>> whereCondition = x => x.CompanyId == companyId && modulePermissionId.Contains(x.ModulePermissionId);
+        IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(whereCondition);
         if (!rolePermissions.Any())
         {
             return new Result<string[]>()
@@ -132,7 +133,6 @@ public class CompanyMasterService : ICompanyMasterService
         }
         string roleId = CurrentContext.UserRoleId(_httpContextAccessor);
         bool hasAccess = rolePermissions.Take(1).ToList()[0].IsAccessible;
-        Expression<Func<RolePermission, bool>> whereCondition = x => x.CompanyId.Equals(companyId) && modulePermissionId.Contains(x.ModulePermissionId);
         Result result = await _rolePermissionRepository.UpdateMany(whereCondition, Builders<RolePermission>.Update.Set(x => x.IsAccessible, !hasAccess));
         string[] updatedPermissions = await _roleService.GetRolePermissionOfuser(roleId);
         return new Result<string[]>()

@@ -2,6 +2,7 @@ using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Holiday;
 using Codeji.CMS.Services.Holiday.Interface;
+using Codeji.CMS.Utility.Constraints;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -21,7 +22,7 @@ public class HolidayController : ControllerBase
 
     [Route("GetAllHoliday")]
     [HttpPost]
-    // [ModulePermission("Holidays","View")]
+    [ModulePermission(AppModule.Holidays, Permission.View)]
     public async Task<Result<HolidayResponseDto>> GetAllHoliday([FromBody] HolidayFilter? filter)
     {
         return await holidayService.GetAllHoliday(filter);
@@ -29,7 +30,7 @@ public class HolidayController : ControllerBase
 
     [HttpPost]
     [Route("CreateHoliday")]
-    [ModulePermission("Holidays", "Create")]
+    [ModulePermission(AppModule.Holidays, Permission.Create)]
     public async Task<Result> CreateUpdateHoliday([FromForm] HolidayRequestDto model)
     {
         return await holidayService.CreateEditHoliday(model);
@@ -37,7 +38,7 @@ public class HolidayController : ControllerBase
 
     [HttpDelete]
     [Route("DeleteHoliday/{holidayId}")]
-    [ModulePermission("Holidays", "Delete")]
+    [ModulePermission(AppModule.Holidays, Permission.Delete)]
     public async Task<Result> DeleteHoliday(string holidayId)
     {
         return await holidayService.DeleteHoliday(holidayId);

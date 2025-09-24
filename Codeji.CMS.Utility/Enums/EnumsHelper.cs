@@ -34,7 +34,6 @@
             HR = 2,
             Employee = 3
         }
-
         public enum MailType
         {
             CreateNewPasswordMail = 0,
@@ -55,7 +54,6 @@
             Important = 2,
             Urgent = 3
         }
-
         public enum NotificationTypes
         {
             Notice = 1,
@@ -63,7 +61,6 @@
             LeaveRequestApproved = 3,
             LeaveRequestReject = 4
         }
-
         public enum HolidayTypes
         {
             Cultural = 1,
@@ -71,14 +68,12 @@
             Religious = 3,
             National = 4,
         }
-
         public enum LeaveRequestStatus
         {
             Pending = 1,
             Accepted = 2,
             Rejected = 3
         }
-
         public enum LeaveTypes
         {
             Sick = 1,

@@ -261,30 +261,6 @@ namespace Codeji.CMS.API.Controllers
             }
             return false;
         }
-        [HttpGet]
-        [AllowAnonymous]
-        [Route("SendEmail")]
-        public async Task<bool> SendEmail()
-        {
-            string a = AppModule.Applicants;
-            _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
-            {
-                _middlewareService.EmailSendAndSave(new Repository.Entities.EmpEmailLogs()
-                {
-                    UserTo = "",
-                    Subject = "Test",
-                    Body = "Test",
-                    EmailLogType = Utility.Enums.EnumsHelper.MailType.ApplyNowMailToHR,
-                    Email = "jay@codeji.in",
-                    UserFrom = "    ",
-
-
-                });
-            }, priority: 1);
-
-
-            return false;
-        }
         public class reCaptchaResponse
         {
             public bool Success { get; set; }

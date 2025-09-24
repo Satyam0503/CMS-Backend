@@ -52,19 +52,19 @@ public class RoleServices : IRoleService
     public async Task<Result> AddEditRoles(RoleWithModuleAndPermissions roles, string companyId)
     {
         Result result = new();
-        List<Roles> roleData = (await _RolesRepository.GetAll(x => x.CompanyId == companyId)).ToList();
+        int totalRoles = await _RolesRepository.Count(x => x.CompanyId == companyId);
         List<RolePermission> roleWithModulePermission = (await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId)).ToList();
         if (string.IsNullOrEmpty(roles.RoleId))
         {
             Roles newRole = new Roles()
             {
-                RoleType = roleData.Count + 1,
+                RoleType = totalRoles + 1,
                 CompanyId = companyId,
                 Titles = roles.RoleTitle,
                 Description = roles.Description,
                 HasAppAccess = roles.HasAppAccess,
                 IsNotEditable = false,
-                CreatedDate = DateTime.Now
+                CreatedDate = DateTime.UtcNow
             };
             await _RolesRepository.AddOne(newRole);
             List<RolePermission> rolePermissions = [];
@@ -105,14 +105,14 @@ public class RoleServices : IRoleService
                     }
                     else
                     {
+                        bool isAccessible = (await _rolePermissionRepository.FirstOrDefault(rp => rp.CompanyId == companyId && rp.ModulePermissionId == currentRolePermission.ModulePermissionId))?.IsAccessible ?? false;
                         RolePermission newPermission = new RolePermission()
                         {
                             RoleId = roles.RoleId,
                             ModulePermissionId = currentRolePermission.ModulePermissionId,
                             HasAccess = currentRolePermission.HasAccess,
-                            IsAccessible = false,
+                            IsAccessible = isAccessible,
                             CompanyId = companyId
-
                         };
                         await _rolePermissionRepository.AddOne(newPermission);
                     }
@@ -393,11 +393,11 @@ public class RoleServices : IRoleService
 
         {
             UserModel user = _middleware.GetUserById(userId);
-            string[] modulePremissions = await GetRolePermissionOfuser(user.RoleId);
+            string[] modulePermissions = await GetRolePermissionOfuser(user.RoleId);
             string[] permission = Role.Select(_ => $"{module}.{_}").ToArray();
             if (!string.IsNullOrEmpty(module))
                 modules = new string[] { module };
-            hasPermission = permission.Any(x => modulePremissions.Contains(x));
+            hasPermission = permission.Any(x => modulePermissions.Contains(x));
 
         }
 

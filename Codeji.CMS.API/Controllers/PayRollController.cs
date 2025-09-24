@@ -1,6 +1,8 @@
+using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.PayRoll;
 using Codeji.CMS.Services.PayRoll.Interface;
+using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -22,6 +24,7 @@ public class PayRollController : BaseApiController
 
     [HttpPost]
     [Route("GetEmpPayRollData")]
+    [ModulePermission(AppModule.PayRoll, Permission.View)]
     public async Task<ActionResult<Result<GetEmpPayRollResponseDto>>> GetEmpPayRollData([FromBody] GetEmpPayRollRequestDto payload)
     {
         var requestPeriod = new DateTime(payload.PayMonth.Year, payload.PayMonth.Month, 1);
@@ -35,7 +38,6 @@ public class PayRollController : BaseApiController
         return Ok(result);
     }
 
-    // route to generate salary slip of employee
     [HttpPost]
     [Route("GeneratePaySlip")]
     public async Task<ActionResult> GetSalarySlip(PayslipRequestDto model)
@@ -59,6 +61,7 @@ public class PayRollController : BaseApiController
 
     [HttpPost]
     [Route("UploadPayloadData")]
+    [ModulePermission(AppModule.PayRoll, [Permission.Create, Permission.Edit])]
     public async Task<ActionResult> UploadPayloadData([FromBody] EmplyeePayRollRequestDto model)
     {
         var currentDate = DateTime.UtcNow;
@@ -74,6 +77,7 @@ public class PayRollController : BaseApiController
 
     [HttpPost]
     [Route("AddUpdatePayRoll")]
+    [ModulePermission(AppModule.PayRoll, [Permission.Create, Permission.Edit])]
     public async Task<Result> AddUpdatePayRoll([FromBody] AddUpdatePayRollRequestDto model)
     {
         Result result = new Result();

@@ -249,6 +249,7 @@ public class PayRollServices : IPayRollServices
             bool exist = await _empPayRollRepository.Exist(expression);
             if (exist)
             {
+                result.StatusCode = CustomStatusCode.PayRollAlreadyForMonth;
                 result.Message = "Payroll for the month already exist";
                 return result;
             }

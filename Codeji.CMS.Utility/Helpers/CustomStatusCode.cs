@@ -26,6 +26,6 @@ public static class CustomStatusCode
     public const int LeaveTypeNotExist = 22;
     public const int LeaveTypeAlreadyExist = 23;
     public const int PayRollNotExist = 24;
-
+    public const int PayRollAlreadyForMonth = 25;
 
 }

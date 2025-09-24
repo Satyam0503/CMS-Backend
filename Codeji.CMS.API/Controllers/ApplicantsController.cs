@@ -13,7 +13,6 @@ namespace Codeji.CMS.API.Controllers
 {
     [Route("api/[controller]")]
     [Authorize]
-    [ModulePermission("Applications", "View")]
     public class ApplicantsController : BaseApiController
     {
         readonly IApplicantsService _applicantsService;
