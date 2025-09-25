@@ -1,9 +1,11 @@
+using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Leave.LeaveRequest;
 using Codeji.CMS.DTO.LeaveManagement;
 using Codeji.CMS.DTO.LeaveManagement.Leave;
 using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
 using Codeji.CMS.Services.LeaveManagement;
+using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -25,6 +27,7 @@ public class LeaveManagementController : ControllerBase
 
     [Route("CreateUpdateLeaveType")]
     [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, [Permission.Create, Permission.Edit])]
     public async Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto)
     {
         return await _leaveManagementService.CreateUpdateLeaveType(leaveTypeRequestDto);
@@ -39,6 +42,7 @@ public class LeaveManagementController : ControllerBase
 
     [Route("DeleteLeaveType/{leaveTypeId}")]
     [HttpDelete]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Delete)]
     public async Task<Result> DeleteLeaveType(string leaveTypeId)
     {
         return await _leaveManagementService.DeleteLeaveType(leaveTypeId);
@@ -48,10 +52,12 @@ public class LeaveManagementController : ControllerBase
     // leave Balance
     [Route("CreateUpdateLeaveBalance")]
     [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, [Permission.Create, Permission.Edit])]
     public async Task<Result> CreateUpdateLeaveBalance(LeaveBalanceRequestDto LeaveBalanceRequestDto)
     {
         return await _leaveManagementService.CreateUpdateLeaveBalance(LeaveBalanceRequestDto);
     }
+
     [Route("GetLeaveBalance")]
     [HttpPost]
     public async Task<Result<LeaveBalanceResponseDto>> GetLeaveBalance(LeaveBalanceFilter? leaveBalanceFilter)

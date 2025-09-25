@@ -4,6 +4,7 @@ using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.ApplyNow;
 using Codeji.CMS.GenericRepository.Settings;
 using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -29,7 +30,7 @@ public class JobVacancyController : BaseApiController
 
     [Route("AddJobVacancy")]
     [HttpPost]
-    [ModulePermission("Jobs", "Create")]
+    [ModulePermission(AppModule.Jobs, Permission.Create)]
     public async Task<Result<JobVacancyModel>> AddJobVacancy(JobVacancyModel jobVacancy)
     {
         return await _jobVacancyService.AddJobVacancy(jobVacancy);
@@ -37,7 +38,7 @@ public class JobVacancyController : BaseApiController
 
     [Route("EditJobVacancy")]
     [HttpPost]
-    [ModulePermission("Jobs", "Edit")]
+    [ModulePermission(AppModule.Jobs, Permission.Edit)]
     public async Task<Result<JobVacancyModel>> EditJobVacancy(JobVacancyModel jobVacancy, string jobId)
     {
         return await _jobVacancyService.EditJobVacancy(jobVacancy, jobId);
@@ -63,7 +64,7 @@ public class JobVacancyController : BaseApiController
 
     [Route("DeleteJobVacancy")]
     [HttpDelete]
-
+    [ModulePermission(AppModule.Jobs, Permission.Delete)]
     public async Task<Result> DeleteJobVacancy([FromQuery] string vacancyId)
     {
         Result data = await _jobVacancyService.DeleteJobVacancy(vacancyId);

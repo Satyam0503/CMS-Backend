@@ -4,6 +4,7 @@ using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -24,7 +25,7 @@ namespace Codeji.CMS.API.Controllers
         }
         [HttpPost]
         [Route("GetApplicantList")]
-        //[CustomAuthorize(Module = "Applicant", Role = ["View"])]
+        [ModulePermission(AppModule.Applications, Permission.View)]
         public async Task<Result<ApplicantViewModel>> GetApplicantList(ApplicantResultFilters? filters)
         {
             Result<ApplicantViewModel> data = await _applicantsService.GetApplicantsList(filters);
@@ -32,7 +33,7 @@ namespace Codeji.CMS.API.Controllers
         }
         [HttpGet]
         [Route("ApplicantById")]
-        //[CustomAuthorize(Module = "Applicant", Role = ["View"])]
+        [ModulePermission(AppModule.Applications, Permission.View)]
         public async Task<Result<ApplicantViewModel>> ApplicantById(string id)
         {
             Result<ApplicantViewModel> result = await _applicantsService.ApplicantById(id);
@@ -40,7 +41,7 @@ namespace Codeji.CMS.API.Controllers
         }
         [HttpPost]
         [Route("AddApplicant")]
-        //[CustomAuthorize(Module = "Applicant", Role = ["Create"])]
+        [ModulePermission(AppModule.Applications, Permission.Create)]
         public async Task<Result> AddApplicant([FromBody] ApplicantAddEditModel applicantRegisterModel)
         {
             Result result = new Result();
@@ -54,7 +55,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("EditApplicant")]
-        //[CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
+        [ModulePermission(AppModule.Applications, Permission.Edit)]
         public async Task<Result> EditApplicants([FromBody] ApplicantAddEditModel model)
         {
             var result = await _applicantsService.UpdateApplicants(model);
@@ -123,6 +124,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("GetProcessLogData")]
+        [ModulePermission(AppModule.ProcessLog, Permission.View)]
         public async Task<Result<ApplicantLogResponseModel>> GetProcessLogData(ApplicantLogFilterModel model)
         {
             var data = await _applicantsService.GetProcessLogData(model);
