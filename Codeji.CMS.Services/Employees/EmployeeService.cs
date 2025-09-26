@@ -49,6 +49,7 @@ namespace Codeji.CMS.Services.Employees
         readonly IHttpContextAccessor _httpContextAccessor;
         readonly IMongoDbRepository<CustomAttribute> _customAttributeRepository;
         readonly IMongoDbRepository<CustomAttributeValue> _customAttributeValueRepository;
+        readonly INotificationService _notificationService;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
@@ -70,7 +71,8 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<Notifications> notificationsRepository,
             IMongoDbRepository<JobTitles> jobTitlesRepository,
             IMongoDbRepository<CustomAttribute> customAttributeRepository,
-            IMongoDbRepository<CustomAttributeValue> customAttributeValueRepository
+            IMongoDbRepository<CustomAttributeValue> customAttributeValueRepository,
+            INotificationService notificationService
             )
         {
             _employeeRepository = employeeRepository;
@@ -95,6 +97,7 @@ namespace Codeji.CMS.Services.Employees
             _jobTitlesRepository = jobTitlesRepository;
             _customAttributeRepository = customAttributeRepository;
             _customAttributeValueRepository = customAttributeValueRepository;
+            _notificationService = notificationService;
         }
 
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
@@ -757,6 +760,59 @@ namespace Codeji.CMS.Services.Employees
             Expression<Func<EmpEducationDetails, bool>> expression = e => e.CollegeName.ToLower().Contains(searchValue.ToLower());
             List<string> collegeList = (await _educationDetailsRepo.GetAll(expression, true, false)).Select(e => e.CollegeName).Distinct().ToList();
             return collegeList;
+        }
+
+        // Get a list of employee
+        public async Task SendBirthDayNotificationToEmployees()
+        {
+            var currentDate = DateTime.UtcNow.Date;
+            Expression<Func<EmpUser, bool>> expression = emp => emp.DateOfBirth.HasValue && emp.DateOfBirth.Value.Month == currentDate.Month && emp.DateOfBirth.Value.Day == currentDate.Day;
+            IEnumerable<EmpUser> employeeList = await _employeeRepository.GetAll(expression, withDefaultFilter: false);
+            if (employeeList.Any())
+            {
+                var notificationTasks = new List<Task>();
+                List<UserNotifications> userNotifications = [];
+                foreach (EmpUser employee in employeeList)
+                {
+                    Expression<Func<EmpUser, bool>> exp = emp => emp.CompanyId == employee.CompanyId && emp.UserId != employee.UserId && emp.Status;
+                    List<EmpUser> targetEmployeeList = _employeeRepository.Get(exp).ToList();
+                    Notifications notification = new()
+                    {
+                        NotificationId = Guid.NewGuid().ToString(),
+                        CreatedDateTime = DateTime.UtcNow,
+                        NotificationType = EnumsHelper.NotificationTypes.BirthDay,
+                        Body = $"{employee.FirstName} {employee.LastName}"
+                    };
+                    await _notificationsRepository.AddOne(notification);
+                    foreach (var emp in targetEmployeeList)
+                    {
+                        UserNotifications userNotification = new()
+                        {
+                            UserNotificationId = Guid.NewGuid().ToString(),
+                            UserId = emp.UserId,
+                            NotificationId = notification.NotificationId,
+                            IsRead = false,
+                            CreatedDateTime = DateTime.UtcNow,
+                            IsDeleted = false
+                        };
+                        userNotifications.Add(userNotification);
+                        notificationTasks.Add(_notificationService.SendNotificationToUser(emp.UserId, new NotificationViewModel()
+                        {
+                            Title = notification.Title,
+                            Body = notification.Body,
+                            IsRead = false,
+                            SentDateTime = DateTime.UtcNow,
+                            TargetId = notification.TargetId,
+                            NotificationTypes = notification.NotificationType,
+                            UserNotificationId = userNotification.UserNotificationId
+                        }));
+                    }
+                }
+                // insert all user notification into db
+                await _userNotificationRepository.AddMany(userNotifications);
+                // process all notificatios task
+                await Task.WhenAll(notificationTasks);
+            }
         }
     }
 }

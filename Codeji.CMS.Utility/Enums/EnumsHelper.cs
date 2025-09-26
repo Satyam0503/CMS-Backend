@@ -59,7 +59,8 @@
             Notice = 1,
             LeaveRequest = 2,
             LeaveRequestApproved = 3,
-            LeaveRequestReject = 4
+            LeaveRequestReject = 4,
+            BirthDay = 5
         }
         public enum HolidayTypes
         {

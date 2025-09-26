@@ -638,20 +638,19 @@ public class LeaveManagementService : ILeaveManagementService
             {
                 targetUserIds.Remove(leaveDomain.EmployeeId);
             }
-            notification.Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.LeaveRequest);
             notification.Body = await _employeeService.GetEmployeeNameById(leaveDomain.EmployeeId);
             notification.NotificationType = EnumsHelper.NotificationTypes.LeaveRequest;
         }
         else if (status == EnumsHelper.LeaveRequestStatus.Accepted)
         {
             targetUserIds.Add(leaveDomain.EmployeeId);
-            notification.Body = await _employeeService.GetEmployeeNameById(currentUserId);
+            notification.Body = await _employeeService.GetEmployeeNameById(leaveDomain.ReviewedBy);
             notification.NotificationType = EnumsHelper.NotificationTypes.LeaveRequestApproved;
         }
         else
         {
             targetUserIds.Add(leaveDomain.EmployeeId);
-            notification.Body = await _employeeService.GetEmployeeNameById(currentUserId);
+            notification.Body = await _employeeService.GetEmployeeNameById(leaveDomain.ReviewedBy);
             notification.NotificationType = EnumsHelper.NotificationTypes.LeaveRequestReject;
         }
         if (targetUserIds.Count == 0) return;
