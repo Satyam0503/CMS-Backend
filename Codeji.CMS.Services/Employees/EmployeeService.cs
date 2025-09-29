@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Reflection;
 using AutoMapper;
@@ -99,7 +100,6 @@ namespace Codeji.CMS.Services.Employees
             _customAttributeValueRepository = customAttributeValueRepository;
             _notificationService = notificationService;
         }
-
         public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
         {
             Result<UserModel> result = new();
@@ -134,6 +134,7 @@ namespace Codeji.CMS.Services.Employees
                 IsEmailVerified = false,
                 Address = user.Address
             };
+
 
             Result result1 = await _employeeRepository.AddOne(employee);
             if (!result1.Success)
@@ -766,7 +767,11 @@ namespace Codeji.CMS.Services.Employees
         public async Task SendBirthDayNotificationToEmployees()
         {
             var currentDate = DateTime.UtcNow.Date;
-            Expression<Func<EmpUser, bool>> expression = emp => emp.DateOfBirth.HasValue && emp.DateOfBirth.Value.Month == currentDate.Month && emp.DateOfBirth.Value.Day == currentDate.Day;
+            var currentMonthDay = currentDate.ToString("MM-dd");
+
+            Expression<Func<EmpUser, bool>> expression = emp =>
+                !string.IsNullOrEmpty(emp.DateOfBirth)
+                && emp.DateOfBirth.Substring(5, 5) == currentMonthDay;
             IEnumerable<EmpUser> employeeList = await _employeeRepository.GetAll(expression, withDefaultFilter: false);
             if (employeeList.Any())
             {

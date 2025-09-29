@@ -21,13 +21,11 @@ public class BirthDayNotificationHostedServices : BackgroundService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var now = DateTime.Now;
-            var nextRun = DateTime.Today.AddHours(1); // today at 1 AM
-
+            var now = DateTime.Now;  // get current time
+            var nextRun = DateTime.Today.AddHours(1); // set date to today 1 am
             if (now > nextRun)
             {
-                // If it's already past 1 AM today, schedule for tomorrow 1 AM
-                nextRun = nextRun.AddDays(1);
+                nextRun = nextRun.AddDays(1); // set next run to tommarrow 1 am 
             }
 
             var delay = nextRun - now;
@@ -35,15 +33,13 @@ public class BirthDayNotificationHostedServices : BackgroundService
 
             try
             {
-                await Task.Delay(delay, stoppingToken); // wait until 1 AM
+                await Task.Delay(delay, stoppingToken);
             }
             catch (TaskCanceledException)
             {
-                // stoppingToken was triggered, exit cleanly
                 break;
             }
 
-            // Run the actual work
             try
             {
                 using var scope = _serviceProvider.CreateScope();
