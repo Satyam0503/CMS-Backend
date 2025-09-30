@@ -23,11 +23,13 @@ public class EmpUser : BaseClass
     public string PersonalEmail { get; set; }
     public string EmergencyContact { get; set; }
     public string DateOfJoining { get; set; }
-    public int? EmploymentType { get; set; }
+    public int? EmploymentType { get; set; } = null;
     public bool Status { get; set; }
     public bool IsEmailVerified { get; set; }
     public string Address { get; set; }
     public string ProfileUrl { get; set; }
+    public string? PanNumber { get; set; }
+    public ulong? BankAccountNumber { get; set; } = null;
     public List<EmpUserCustomAttribute> CustomAttributeList { get; set; } = [];
 }
 

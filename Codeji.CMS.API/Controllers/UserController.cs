@@ -12,6 +12,7 @@ using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Account.Interface;
 using Codeji.CMS.Services.Employees.Interface;
+using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
@@ -36,21 +37,19 @@ public class UserController : BaseApiController
 
     [Route("AddEmployees")]
     [HttpPost]
-    [ModulePermission("Employees", "Create")]
-    public async Task<Result<UserModel>> AddEmployees(UserModel user)
+    [ModulePermission(AppModule.Employees, Permission.Create)]
+    public async Task<Result> AddEmployees(UserModel user)
     {
+        Result result = new();
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
         bool isEmailExist = await _employeeService.IsEmailExist(user.Email);
-
         if (isEmailExist)
         {
-            return new Result<UserModel>
-            {
-                StatusCode = CustomStatusCode.EmployeeAlreadyExist,
-                Success = false
-            };
+            result.StatusCode = CustomStatusCode.EmployeeAlreadyExist;
+            return result;
         }
-        return await _employeeService.AddEmployee(user, currentUserId);
+        result = await _employeeService.AddEmployee(user, currentUserId);
+        return result;
     }
 
     [Route("EditEmployees")]

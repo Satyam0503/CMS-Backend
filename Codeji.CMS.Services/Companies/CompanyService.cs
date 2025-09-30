@@ -65,7 +65,9 @@ namespace Codeji.CMS.Services
                 CompanyId = companyId,
                 Password = AuthenticationHandler.HashedPassword(companyModel.Password),
                 RoleId = adminRole.FirstOrDefault(x => x.RoleType == 1)?.RolesId ?? "",
-                Status = true
+                Status = true,
+                //  change verification logic later
+                IsEmailVerified = true
             };
             //Company Creation and Addition in DB
             Company company = new Company()

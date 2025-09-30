@@ -55,7 +55,7 @@ public class PayRollServices : IPayRollServices
             if (empUser.JobRole != null)
             {
                 JobTitles? jobTitles = await _jobTitlesRepository.FirstOrDefault(jt => jt.JobTitleId == empUser.JobRole && jt.CompanyId == company.CompanyId);
-                salarySlipModel.Designation = jobTitles.Titles.Find(t => t.Language == company.DefaultLanguage)?.Label ?? string.Empty;
+                salarySlipModel.Designation = jobTitles?.Titles?.Find(t => t.Language == company.DefaultLanguage)?.Label ?? string.Empty;
             }
             salarySlipModel.EmployeeName = $"{empUser.FirstName} {empUser.LastName}";
             salarySlipModel.CompanyName = company.CompanyName;
@@ -66,6 +66,9 @@ public class PayRollServices : IPayRollServices
             salarySlipModel.PaidDays = payRoll.PaidDays;
             salarySlipModel.EmployeeType = MapperHelper.GetEmploymentTypeLabel(empUser.EmploymentType);
             salarySlipModel.LossofPayDays = payRoll.Deduction.LossOfPayDays;
+            salarySlipModel.BankAccountNo = empUser.BankAccountNumber?.ToString() ?? "NA";
+            salarySlipModel.PanNumber = empUser.PanNumber ?? "NA";
+
 
             salarySlipModel.BasicSalary = payRoll.BasicPay;
             salarySlipModel.HRA = payRoll.Allowance.HRA;

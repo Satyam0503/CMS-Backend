@@ -100,9 +100,9 @@ namespace Codeji.CMS.Services.Employees
             _customAttributeValueRepository = customAttributeValueRepository;
             _notificationService = notificationService;
         }
-        public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
+        public async Task<Result> AddEmployee(UserModel user, string currentUserId)
         {
-            Result<UserModel> result = new();
+            Result result = new();
             bool IsEmpIdExist = await _employeeRepository.Exist(e => e.EmployeeId.Equals(user.EmployeeId, StringComparison.OrdinalIgnoreCase));
             if (IsEmpIdExist)
             {
@@ -132,7 +132,9 @@ namespace Codeji.CMS.Services.Employees
                 DateOfJoining = user.DateOfJoining,
                 Status = true,
                 IsEmailVerified = false,
-                Address = user.Address
+                Address = user.Address,
+                BankAccountNumber = user.BankAccountNumber,
+                PanNumber = user.PanNumber,
             };
 
 
@@ -168,19 +170,17 @@ namespace Codeji.CMS.Services.Employees
             });
 
             _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
-          {
-              _middlewareService.EmailSendAndSave(new EmpEmailLogs()
-              {
-                  UserTo = employee.UserId,
-                  Subject = emailContent.subject,
-                  Body = replacedBody,
-                  EmailLogType = EnumsHelper.MailType.CreateNewPasswordMail,
-                  Email = employee.Email,
-                  UserFrom = currentUser.UserId,
-              });
-          }, priority: 1);
-
-            result.MethodResult = user;
+            {
+                _middlewareService.EmailSendAndSave(new EmpEmailLogs()
+                {
+                    UserTo = employee.UserId,
+                    Subject = emailContent.subject,
+                    Body = replacedBody,
+                    EmailLogType = EnumsHelper.MailType.CreateNewPasswordMail,
+                    Email = employee.Email,
+                    UserFrom = currentUser.UserId,
+                });
+            }, priority: 1);
             return result;
         }
         public async Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId)

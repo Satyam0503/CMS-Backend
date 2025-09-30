@@ -8,7 +8,7 @@ public class SalarySlipTemplateModel
     public string EmployeeName { get; set; }
     public string Designation { get; set; }
     public string PanNumber { get; set; }
-    public long BankAccountNo { get; set; }
+    public string BankAccountNo { get; set; }
     public string EmployeeType { get; set; }
     public string PaySlipMonth { get; set; }
     public string EmployeeId { get; set; }
