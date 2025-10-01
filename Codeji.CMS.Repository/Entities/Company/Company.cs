@@ -15,6 +15,7 @@ namespace Codeji.CMS.Repository.Entities.Company
         public List<string> ApplicationLanguage { get; set; }
         public string Country { get; set; }
         public string State { get; set; }
+        public string Address { get; set; }
         public DateTime? CreatedDate { get; set; } = DateTime.UtcNow;
         public string UpdatedBy { get; set; }
         public DateTime? UpdatedDate { get; set; }

@@ -6,11 +6,11 @@ public class LeaveBalanceRequestDto
 {
     public string? Id { get; set; }
     public string EmployeeId { get; set; }
-    public DateTime Year { get; set; }
+    public DateTime? Year { get; set; } = DateTime.UtcNow;
     public List<LeaveTypeBalance> LeaveTypeBalances { get; set; }
-
 }
-public class LeaveTypeBalance {
+public class LeaveTypeBalance
+{
     // public string LeaveTypeId { get; set; }
     public EnumsHelper.LeaveTypes LeaveType { get; set; }
     public decimal MaximumLeave { get; set; }

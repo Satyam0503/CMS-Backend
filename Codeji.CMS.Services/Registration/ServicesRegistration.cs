@@ -1,4 +1,6 @@
 
+using Codeji.CMS.Services.Account;
+using Codeji.CMS.Services.Account.Interface;
 using Codeji.CMS.Services.Companies;
 using Codeji.CMS.Services.Dashboard;
 using Codeji.CMS.Services.Employees;
@@ -6,8 +8,10 @@ using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Holiday;
 using Codeji.CMS.Services.Holiday.Interface;
 using Codeji.CMS.Services.Interface;
-using Codeji.CMS.Services.LeaveManagement.LeaveTypes;
+using Codeji.CMS.Services.LeaveManagement;
 using Codeji.CMS.Services.NoticeBoard;
+using Codeji.CMS.Services.PayRoll;
+using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.Services.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,6 +33,8 @@ public static class ServicesRegistration
         services.AddScoped<INoticeBoardService, NoticeBoardServices>();
         services.AddScoped<IHolidayService, HolidayService>();
         services.AddScoped<ILeaveManagementService, LeaveManagementService>();
+        services.AddScoped<IAccountServices, AccountServices>();
+        services.AddScoped<IPayRollServices, PayRollServices>();
         return services;
     }
 }

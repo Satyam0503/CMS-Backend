@@ -5,12 +5,13 @@ using Codeji.CMS.API.Notification;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.GenericRepository.Registration;
 using Codeji.CMS.GenericRepository.Settings;
+using Codeji.CMS.Services;
 using Codeji.CMS.Services.BackgroundTasks;
-using Codeji.CMS.Services.Holiday;
-using Codeji.CMS.Services.Holiday.Interface;
 using Codeji.CMS.Services.Registration;
+using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.SignalR;
@@ -74,6 +75,7 @@ builder.Services.AddTransient<INotificationService, NotificationService>();
 builder.Services.AddSingleton<AntiforgeryMiddleware>();
 builder.Services.AddSingleton<IPriorityTaskQueue, PriorityTaskQueue>();
 builder.Services.AddHostedService<PriorityQueuedHostedService>();
+builder.Services.AddHostedService<BirthDayNotificationHostedServices>();
 builder.Services.AddHttpContextAccessor();
 
 // MongoDB Configuration
@@ -95,9 +97,15 @@ builder.Services.AddRepositoryServices();
 
 // Initialize configuration helper
 ConfigurationHelper.Initialize(configuration);
+// register authorization handler to service collection
+builder.Services.AddSingleton<IAuthorizationHandler, RoleHandler>();
 //automapper
-
 builder.Services.AddAutoMapper(typeof(AutoMapperObjects));
+
+// register pdf services
+
+builder.Services.AddTransient<PdfService>();
+
 // Authentication and Authorization
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -129,7 +137,15 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization();
+// register policy with authorization service
+builder.Services.AddAuthorization(option =>
+{
+    option.AddPolicy("AdminOnly", policy =>
+    {
+        policy.Requirements.Add(new RoleRequirement(EnumsHelper.Roles.Administrator));
+    });
+});
+
 // Antiforgery
 builder.Services.AddAntiforgery(options =>
 {

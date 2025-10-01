@@ -9,7 +9,7 @@ namespace Codeji.CMS.API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize]
+    [Authorize(Policy = "AdminOnly")]
     public class CompanyController : ControllerBase
     {
         private readonly ICompanyService _companyService;

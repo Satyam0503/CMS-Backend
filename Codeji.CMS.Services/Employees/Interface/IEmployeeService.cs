@@ -12,22 +12,20 @@ namespace Codeji.CMS.Services.Employees.Interface
 {
         public interface IEmployeeService
         {
-                Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId);
+                Task<Result> AddEmployee(UserModel user, string currentUserId);
                 Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId);
                 Task<bool> IsUserActive(string userId);
                 Task<UserModel> GetEmployeeById(string userId);
+                Task<string> GetEmployeeNameById(string employeeId);
                 Task<List<EmployeeSearchResponseDTO>> SearchEmployeeByName(string name);
                 Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters);
                 Task<bool> IsEmailExist(string email);
                 Task<bool> IsEmpExistAndActive(string email);
-                Task<Result> GenerateTokenAndSendEmail(string email);
-                Task<bool> ResetPassword(string userId, string password, string oldPassword = "");
-                Task<string> GetVerificationToken(string email, string password);
                 Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId, string companyId);
-                Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId);
-                Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);
+                Task<Result> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId);
+                Task<Result> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);
                 Task<Result> EditEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);
-                Task<Result<EmployeeCertificationRequestModel>> AddEmployeeCertification(EmployeeCertificationRequestModel cerificationDetails, string userId);
+                Task<Result> AddEmployeeCertification(EmployeeCertificationRequestModel cerificationDetails, string userId);
                 Task<Result> EditEmployeeCertification(EmployeeCertificationRequestModel certificationDetails, string userId);
                 Task<List<EmpEducationDetails>> GetEmployeeEducationDetails(string id);
                 Task<EmployeeSummaryRequestModel> GetEmployeeSummary(string userId);
@@ -36,7 +34,6 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<string> AddUserProfileImage(string fileName, string userId, string filePath);
                 Task<Result> AddEditEmployeeSkills(SkillsRequestModel skillsModel, string userId);
                 Task<EmployeeSkillsDTO> GetEmployeeSkills(string userId);
-                Task<Result> CreateNewPassword(CreateNewPasswordRequest model);
                 Task<Result> DeleteEducationDetails(string educationId, string userId);
                 Task<Result> DeleteCertificationDetails(string certificationId, string userId);
                 Task<Result> DeleteEmployee(string employeeId);
@@ -48,6 +45,8 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<NotificationResponseModel> GetAllNotifications(NotificationRequestDTO model, string userId);
                 Task<Result> MarkNotificationAsRead(string userId, string userNotificationId);
                 Task<Result> MarkAllNotificationAsRead(string userId);
-                Task<Result<string>> GetCollegeList();
+                Task<Result> RemoveProfileImage(string userId);
+                Task<List<string>> GetCollegeNameSuggestions(string searchValue);
+                Task SendBirthDayNotificationToEmployees();
         }
 }

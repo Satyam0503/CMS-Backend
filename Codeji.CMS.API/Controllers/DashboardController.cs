@@ -53,20 +53,34 @@ namespace Codeji.CMS.API.Controllers
         }
 
         [HttpGet]
-        [Route("GetAllDepartmentDetails")]
-        public async Task<Result<AllDepartmentDetailsResponseModel>> GetAllDepartmentDetails()
+        [Route("GetApplicationStatusData")]
+        public async Task<Result<ApplicationDataResponseDto>> GetApplicationStatusData([FromQuery] string? vacancyId)
         {
+            var result = await _dashboardService.GetApplicationStatusData(vacancyId);
+            return result;
+        }
 
+        [HttpGet]
+        [Route("GetAllDepartmentDetails")]
+        public async Task<Result<DepartmentEmpResponseDto>> GetAllDepartmentDetails()
+        {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-
             var data = await _dashboardService.GetAllDepartmentsDetails(companyId);
-
-            return new Result<AllDepartmentDetailsResponseModel>()
+            return new Result<DepartmentEmpResponseDto>()
             {
-                Message = "Department details fetched successfully",
-                MethodResults = data
+                MethodResults = data,
+                TotalRecords = data.Count,
             };
 
         }
+
+        [HttpGet]
+        [Route("GetUpComingHolidays")]
+        public async Task<Result<UpComingHolidayResponseDto>> GetUpComingHolidays()
+        {
+            var result = await _dashboardService.GetUpComingHolidays();
+            return result;
+        }
+
     }
 }

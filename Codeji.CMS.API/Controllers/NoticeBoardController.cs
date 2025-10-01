@@ -1,9 +1,6 @@
-using Codeji.CMS.API.Notification;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.NoticeBoard;
 using Codeji.CMS.Services.NoticeBoard;
-using Codeji.CMS.Utility.Enums;
-using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -35,12 +32,6 @@ public class NoticeBoardController : BaseApiController
         {
             string userId = CurrentContext.UserId(_httpContextAccessor);
             Result result = await _noticeBoardServices.PostNotice(notice, userId);
-
-            if (result.Success)
-            {
-                result.Message = "Notice posted successfully";
-                result.StatusCode = StatusCodes.Status201Created;
-            }
             return result;
         }
     }
@@ -58,7 +49,8 @@ public class NoticeBoardController : BaseApiController
     public async Task<Result<NoticeViewModel>> GetNoticeById(string noticeId)
     {
         Result<NoticeViewModel> result = new();
-        var data = await _noticeBoardServices.GetNoticeById(noticeId);
+        var userId = CurrentContext.UserId(_httpContextAccessor);
+        var data = await _noticeBoardServices.GetNoticeById(noticeId, userId);
         if (data is null)
         {
             result.Success = false;
@@ -81,7 +73,7 @@ public class NoticeBoardController : BaseApiController
 
     [HttpPut]
     [Route("UpdateMyNotice")]
-    public async Task<Result> UpdateMyNotice([FromBody] MyNoticeDTO notice)
+    public async Task<Result> UpdateMyNotice([FromBody] UpdateNoticeDto notice)
     {
         if (!ModelState.IsValid)
         {

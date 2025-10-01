@@ -10,6 +10,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Utility.Enums;
 using MongoDB.Driver;
 using MongoDB.Driver.Linq;
 using Module = Codeji.CMS.Repository.Entities.RolePermissions.Module;
@@ -48,27 +49,28 @@ public class RoleServices : IRoleService
     }
 
     //Add New Roles
-    public async Task<string> AddEditRoles(RoleWithModuleAndPermissions roles, string companyId)
+    public async Task<Result> AddEditRoles(RoleWithModuleAndPermissions roles, string companyId)
     {
-        List<Roles> roleData = (await _RolesRepository.GetAll(x => x.CompanyId == companyId)).ToList();
+        Result result = new();
+        int totalRoles = await _RolesRepository.Count(x => x.CompanyId == companyId);
         List<RolePermission> roleWithModulePermission = (await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId)).ToList();
         if (string.IsNullOrEmpty(roles.RoleId))
         {
             Roles newRole = new Roles()
             {
-                RoleType = roleData.Count + 1,
+                RoleType = totalRoles + 1,
                 CompanyId = companyId,
                 Titles = roles.RoleTitle,
                 Description = roles.Description,
                 HasAppAccess = roles.HasAppAccess,
                 IsNotEditable = false,
-                CreatedDate = DateTime.Now
-
+                CreatedDate = DateTime.UtcNow
             };
             await _RolesRepository.AddOne(newRole);
+            List<RolePermission> rolePermissions = [];
             foreach (ModuleRolePermissionsModel permission in roles.RolePermissions)
             {
-                await _rolePermissionRepository.AddOne(new RolePermission
+                rolePermissions.Add(new RolePermission
                 {
                     RolePermissionId = permission.RolePermissionId,
                     CompanyId = companyId,
@@ -77,7 +79,8 @@ public class RoleServices : IRoleService
                     HasAccess = permission.HasAccess
                 });
             }
-            return "ROLE.ADD.SUCCESS";
+            result = await _rolePermissionRepository.AddMany(rolePermissions);
+            return result;
         }
         else
         {
@@ -102,20 +105,21 @@ public class RoleServices : IRoleService
                     }
                     else
                     {
+                        bool isAccessible = (await _rolePermissionRepository.FirstOrDefault(rp => rp.CompanyId == companyId && rp.ModulePermissionId == currentRolePermission.ModulePermissionId))?.IsAccessible ?? false;
                         RolePermission newPermission = new RolePermission()
                         {
                             RoleId = roles.RoleId,
                             ModulePermissionId = currentRolePermission.ModulePermissionId,
                             HasAccess = currentRolePermission.HasAccess,
-                            IsAccessible = false,
+                            IsAccessible = isAccessible,
                             CompanyId = companyId
-
                         };
                         await _rolePermissionRepository.AddOne(newPermission);
                     }
                 }
             }
-            return "ROLE.UPDATE.SUCCESS";
+            result.Success = true;
+            return result;
         }
     }
     //Get company's all roles
@@ -211,7 +215,6 @@ public class RoleServices : IRoleService
     }
     public async Task<string[]> GetRolePermissionOfuser(string roleId)
     {
-        List<ModuleWithPermissionsModel> moduleWithPermissionsModel = new();
         Expression<Func<Roles, bool>> whereCondition = x => x.RolesId == roleId;
         IEnumerable<Permission> permissions = await _permissionRepository.GetAll();
         IEnumerable<Module> modules = await _moduleRepository.GetAll();
@@ -390,11 +393,11 @@ public class RoleServices : IRoleService
 
         {
             UserModel user = _middleware.GetUserById(userId);
-            string[] modulePremissions = await GetRolePermissionOfuser(user.RoleId);
+            string[] modulePermissions = await GetRolePermissionOfuser(user.RoleId);
             string[] permission = Role.Select(_ => $"{module}.{_}").ToArray();
             if (!string.IsNullOrEmpty(module))
                 modules = new string[] { module };
-            hasPermission = permission.Any(x => modulePremissions.Contains(x));
+            hasPermission = permission.Any(x => modulePermissions.Contains(x));
 
         }
 
@@ -442,8 +445,6 @@ public class RoleServices : IRoleService
         {
             return new Result()
             {
-                StatusCode = 200,
-                Message = "ROLE.NOT_EXIST",
                 Success = false
             };
         }
@@ -454,9 +455,22 @@ public class RoleServices : IRoleService
 
         return new Result()
         {
-            StatusCode = 200,
-            Message = "ROLE.APP_ACCESS.UPDATED",
             Success = true
         };
     }
+
+    // Check roleId is admin roleId 
+
+    public async Task<bool> IsRoleTypeMatch(string roleId, EnumsHelper.Roles roleType, string companyId)
+    {
+        if (string.IsNullOrEmpty(roleId))
+        {
+            return false;
+        }
+        Expression<Func<Roles, bool>> expression = r => r.RolesId == roleId && r.CompanyId == companyId && r.RoleType == (int)roleType;
+        Roles? roles = await _RolesRepository.FirstOrDefault(expression);
+        if (roles == null) return false;
+        return true;
+    }
+
 }

@@ -2,17 +2,16 @@
 {
     public class HtmlTemplate
     {
-        public HtmlTemplate()
-        {
-
-        }
-        public string Render(string htmlTemplate, object values)
+        public static string Render(string htmlTemplate, object values)
         {
             string output = htmlTemplate;
             foreach (System.Reflection.PropertyInfo p in values.GetType().GetProperties())
-                output = output.Replace("[" + p.Name + "]", (p.GetValue(values, null) as string) ?? string.Empty);
+            {
+                object? val = p.GetValue(values, null);
+                string replacement = val?.ToString() ?? string.Empty;
+                output = output.Replace("[" + p.Name + "]", replacement);
+            }
             return output;
         }
     }
-
 }

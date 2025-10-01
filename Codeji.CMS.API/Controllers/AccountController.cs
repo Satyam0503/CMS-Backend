@@ -9,12 +9,15 @@ using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.ApplyNow;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
+using Codeji.CMS.DTO.ResponseModel;
+using Codeji.CMS.Services.Account.Interface;
 using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.Constraints;
+using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Antiforgery;
@@ -29,6 +32,7 @@ namespace Codeji.CMS.API.Controllers
     [Route("api")]
     public class AccountController : BaseApiController
     {
+        private readonly IAccountServices _accountService;
         private readonly IAntiforgery _antiforgery;
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly ICompanyService _companyService;
@@ -47,7 +51,9 @@ namespace Codeji.CMS.API.Controllers
             IMapper mapper,
             HttpClient httpClient,
             IPriorityTaskQueue priorityTaskQueue,
-            IMiddlewareService middlewareService)
+            IMiddlewareService middlewareService,
+            IAccountServices accountServices
+            )
         {
             _antiforgery = antiforgery;
             _httpContextAccessor = httpContextAccessor;
@@ -57,6 +63,7 @@ namespace Codeji.CMS.API.Controllers
             _companyService = companyService;
             _priorityTaskQueue = priorityTaskQueue;
             _middlewareService = middlewareService;
+            _accountService = accountServices;
         }
         /// This block contains pure anonymous API
         [HttpGet]
@@ -107,9 +114,8 @@ namespace Codeji.CMS.API.Controllers
             {
                 return new Result()
                 {
-                    Message = "Company Already Exist",
                     Success = false,
-                    StatusCode = StatusCodes.Status406NotAcceptable
+                    StatusCode = CustomStatusCode.CompanyAlreadyExist,
                 };
             }
             return await _companyService.Register(companyModel);
@@ -119,52 +125,48 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("account/login")]
         [AllowAnonymous]
-        public async Task<Result> Login([FromBody] LoginModel model)
+        public async Task<Result<TokenResponseDto>> Login([FromBody] LoginModel model)
         {
-            Result result = new Result();
-            bool isEmailExist = await _employeeService.IsEmailExist(model.Email);
-            if (!isEmailExist)
-            {
-                result.Message = "Incorrect Credentials";
-                result.Success = false;
-                result.StatusCode = 400;
-                return result;
-
-            }
+            Result<TokenResponseDto> result = new();
             if (!ModelState.IsValid)
+            {
+                result.Success = false;
                 return result;
+            }
+            result = await _accountService.VerifyAndGenerateToken(model);
+            return result;
+        }
 
-            string token = await _employeeService.GetVerificationToken(model.Email, model.Password);
-            if (string.IsNullOrEmpty(token))
+        [AllowAnonymous]
+        [HttpPost]
+        [Route("account/refresh-token")]
+        public async Task<Result<TokenResponseDto>> RefreshToken([FromBody] RefreshTokenRequestDto model)
+        {
+            Result<TokenResponseDto> result = new();
+            if (!ModelState.IsValid)
             {
-                result.Message = "Email or Password not matched.";
                 result.Success = false;
-                result.StatusCode = 404;
                 return result;
             }
-            if (token == "false")
-            {
-                result.Message = "Please Verify Email First";
-                result.Success = false;
-                result.StatusCode = 404;
-                return result;
-            }
-            if (token == "No Access")
-            {
-                result.Message = "MESSAGE.APPLICATION.ACCESS_DENIED";
-                result.Success = false;
-                result.StatusCode = 401;
-                return result;
+            return await _accountService.RefreshToken(model);
+        }
 
+        [HttpPost]
+        [Route("account/logout")]
+        [Authorize]
+        public async Task<Result> LogOut([FromBody] RefreshTokenRequestDto model)
+        {
+            if (string.IsNullOrEmpty(model.RefreshToken))
+            {
+                return new Result();
             }
-            result.Message = token;
-            result.Success = true;
+            string currentUser = CurrentContext.UserId(_httpContextAccessor);
+            var result = await _accountService.LogOut(model.RefreshToken, currentUser);
             return result;
         }
 
         [HttpPost]
         [Route("account/getSignedUserDetails")]
-        // [ModulePermission("Dashboard", "View")]
         public async Task<Result<LoginUserViewModel>> GetUserByToken()
         {
             Result<LoginUserViewModel> result = new();
@@ -187,7 +189,7 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         public async Task<Result> CreateNewPassword(CreateNewPasswordRequest model)
         {
-            Result result = await _employeeService.CreateNewPassword(model);
+            Result result = await _accountService.CreateNewPassword(model);
             return result;
         }
 
@@ -200,29 +202,34 @@ namespace Codeji.CMS.API.Controllers
             bool exist = await _employeeService.IsEmpExistAndActive(email);
             if (!exist)
             {
+                result.StatusCode = CustomStatusCode.InvalidCredential;
                 return result;
             }
-            return await _employeeService.GenerateTokenAndSendEmail(email);
+            return await _accountService.GenerateTokenAndSendEmail(email);
         }
 
+        [AllowAnonymous]
         [HttpPost]
         [Route("applicant/applyJob")]
-        [AllowAnonymous]
         public async Task<Result> RegisterApplicants([FromBody] ApplicantAddEditModel applicantRegisterModel)
         {
-
             Result result = new Result();
-            if (string.IsNullOrEmpty(applicantRegisterModel.Email))
-                return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
+            if (!ModelState.IsValid)
+            {
+                return result;
+            }
             Result ApplicantId = await _applicantsServices.GetApplicantsExistingId(applicantRegisterModel.Email);
             if (ApplicantId.Success)
             {
                 applicantRegisterModel.ActivityType = string.IsNullOrEmpty(ApplicantId.Message)
-                ? Utility.Enums.EnumsHelper.ActivityType.New :
-                Utility.Enums.EnumsHelper.ActivityType.ReApply;
+                ? EnumsHelper.ActivityType.New :
+                EnumsHelper.ActivityType.ReApply;
+                applicantRegisterModel.Status = EnumsHelper.ActivityStatus.Active;
                 result = await _applicantsServices.RegisterApplicants(applicantRegisterModel);
-                result.Success = true;
-                result.Message = "Your application has been submitted successfully";
+                if (result.Success)
+                {
+                    result.Message = "Your application has been submitted successfully";
+                }
             }
             else
             {
@@ -252,30 +259,6 @@ namespace Codeji.CMS.API.Controllers
                     return result.Success;
                 }
             }
-            return false;
-        }
-        [HttpGet]
-        [AllowAnonymous]
-        [Route("SendEmail")]
-        public async Task<bool> SendEmail()
-        {
-            string a = AppModule.Applicants;
-            _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
-            {
-                _middlewareService.EmailSendAndSave(new Repository.Entities.EmpEmailLogs()
-                {
-                    UserTo = "",
-                    Subject = "Test",
-                    Body = "Test",
-                    EmailLogType = Utility.Enums.EnumsHelper.MailType.ApplyNowMailToHR,
-                    Email = "jay@codeji.in",
-                    UserFrom = "    ",
-
-
-                });
-            }, priority: 1);
-
-
             return false;
         }
         public class reCaptchaResponse

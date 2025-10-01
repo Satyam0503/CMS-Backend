@@ -65,7 +65,9 @@ namespace Codeji.CMS.Services
                 CompanyId = companyId,
                 Password = AuthenticationHandler.HashedPassword(companyModel.Password),
                 RoleId = adminRole.FirstOrDefault(x => x.RoleType == 1)?.RolesId ?? "",
-                Status = true
+                Status = true,
+                //  change verification logic later
+                IsEmailVerified = true
             };
             //Company Creation and Addition in DB
             Company company = new Company()
@@ -104,12 +106,11 @@ namespace Codeji.CMS.Services
             Company? company = await _companyRepo.FirstOrDefault(x => x.CompanyId == companyId);
             if (company is null)
             {
-                result.Message = "Company Not Exist";
                 result.Success = false;
             }
             else
             {
-                company.CompanyLogo = string.IsNullOrEmpty(company.CompanyLogo) ? Common.GetCompanyLogoUrl(null) : Common.GetCompanyLogoUrl(company.CompanyLogo);
+                company.CompanyLogo = Common.GetCompanyLogoUrl(company.CompanyLogo);
                 result.MethodResult = company;
             }
             return result;
@@ -139,6 +140,7 @@ namespace Codeji.CMS.Services
                 company.ApplicationLanguage = [model.DefaultLanguage];
             }
             company.CompanyName = model.CompanyName ?? company.CompanyName;
+            company.Address = model.Address ?? company.Address;
             company.DefaultLanguage = model.DefaultLanguage ?? company.DefaultLanguage;
             company.CompanyLogo = model.CompanyLogo == null ? company.CompanyLogo : await UpdateCompanyLogo(model.CompanyLogo, companyId);
 
@@ -148,7 +150,7 @@ namespace Codeji.CMS.Services
                 result.Message = "Failed To Update Company";
                 return result;
             }
-            company.CompanyLogo = Common.GetCompanyLogoUrl(company.CompanyLogo ?? string.Empty);
+            company.CompanyLogo = Common.GetCompanyLogoUrl(company.CompanyLogo);
             result.MethodResult = company;
             result.Success = true;
             return result;

@@ -23,17 +23,18 @@ namespace Codeji.CMS.API.App_Start
             }
             // check if user id is present in request and path is not in pathForNOCompanyIdRequired then return unauthorized
 
-            string[] pathForNOCompanyIdRequired = new string[] {
+            string[] pathForNOCompanyIdRequired = [
                  "/api/account/antiforgerytoken/" ,
                  "/api/app/checkAppVersion",
                  "/api/account/register",
                  "/api/account/login",
+                 "/api/account/refresh-token",
                  "/api/CreateNewPassword",
                  "api/account/ResetPassword",
                  "/api/VerificationCaptch",
                  "/api/SendEmail",
                  "/fs/",
-                };
+                ];
             IEmployeeService? _employeeService = context.RequestServices.GetService(typeof(IEmployeeService)) as IEmployeeService;
             ICompanyService? _companyService = context.RequestServices.GetService(typeof(ICompanyService)) as ICompanyService;
 

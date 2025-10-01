@@ -12,4 +12,11 @@ public class Notice : BaseClass
     public string Target { get; set; }
     public string Departments { get; set; }
     public EnumsHelper.NoticeType NoticeType { get; set; }
+    public List<NoticeView> Views { get; set; } = [];
+}
+
+public class NoticeView
+{
+    public string EmployeeId { get; set; }
+    public DateTime ViewedAt { get; set; }
 }

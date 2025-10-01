@@ -4,6 +4,7 @@ using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.ApplyNow;
 using Codeji.CMS.GenericRepository.Settings;
 using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -29,7 +30,7 @@ public class JobVacancyController : BaseApiController
 
     [Route("AddJobVacancy")]
     [HttpPost]
-
+    [ModulePermission(AppModule.Jobs, Permission.Create)]
     public async Task<Result<JobVacancyModel>> AddJobVacancy(JobVacancyModel jobVacancy)
     {
         return await _jobVacancyService.AddJobVacancy(jobVacancy);
@@ -37,6 +38,7 @@ public class JobVacancyController : BaseApiController
 
     [Route("EditJobVacancy")]
     [HttpPost]
+    [ModulePermission(AppModule.Jobs, Permission.Edit)]
     public async Task<Result<JobVacancyModel>> EditJobVacancy(JobVacancyModel jobVacancy, string jobId)
     {
         return await _jobVacancyService.EditJobVacancy(jobVacancy, jobId);
@@ -45,9 +47,9 @@ public class JobVacancyController : BaseApiController
     [Route("GetAllVacancy")]
     [HttpPost]
     [AllowAnonymous]
-    public async Task<Result<JobVacancyModel>> GetAllVacancy(JobRequestModel? model, [FromQuery] bool? active)
+    public async Task<Result<JobVacancyModel>> GetAllVacancy(JobRequestModel model)
     {
-        Result<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy(model, active);
+        Result<JobVacancyModel> data = await _jobVacancyService.GetAllVacancy(model);
         return data;
     }
 
@@ -62,7 +64,7 @@ public class JobVacancyController : BaseApiController
 
     [Route("DeleteJobVacancy")]
     [HttpDelete]
-
+    [ModulePermission(AppModule.Jobs, Permission.Delete)]
     public async Task<Result> DeleteJobVacancy([FromQuery] string vacancyId)
     {
         Result data = await _jobVacancyService.DeleteJobVacancy(vacancyId);
@@ -77,7 +79,6 @@ public class JobVacancyController : BaseApiController
         return new Result()
         {
             Success = true,
-            Message = "Job Deleted Successfully",
             StatusCode = 200
         };
     }

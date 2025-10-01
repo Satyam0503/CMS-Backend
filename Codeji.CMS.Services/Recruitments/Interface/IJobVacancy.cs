@@ -7,7 +7,7 @@ namespace Codeji.CMS.Services.Recruitments.Interface
     {
         Task<Result<JobVacancyModel>> AddJobVacancy(JobVacancyModel jobVacancy);
         Task<Result<JobVacancyModel>> EditJobVacancy(JobVacancyModel jobVacancy, string jobId);
-        Task<Result<JobVacancyModel>> GetAllVacancy(JobRequestModel? model, bool? active);
+        Task<Result<JobVacancyModel>> GetAllVacancy(JobRequestModel model);
         Task<JobVacancyModel?> GetVacancyById(string vacancyId);
         Task<Result> DeleteJobVacancy(string vacancyId);
     }

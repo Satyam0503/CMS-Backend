@@ -1,8 +1,10 @@
 ﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Codeji.CMS.Utility.Enums;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
+using static Codeji.CMS.Utility.Enums.EnumsHelper;
 namespace Codeji.CMS.Utility.Helpers
 {
     public static class AuthenticationHandler
@@ -14,7 +16,7 @@ namespace Codeji.CMS.Utility.Helpers
             // Retrieve JWT settings from configuration
             IConfigurationSection jwtSettings = ConfigurationHelper.config.GetSection("jwt");
             byte[] key = Encoding.UTF8.GetBytes(jwtSettings["SecretKey"]);
-            int expiryDays = int.Parse(jwtSettings["Expiry"]);
+            int expiryMinutes = int.Parse(jwtSettings["Expiry"]);
 
             // Define claims
             List<Claim> claims = new List<Claim>
@@ -23,7 +25,7 @@ namespace Codeji.CMS.Utility.Helpers
             new Claim("user_id", userId),
             new Claim("company_id", companyId),
             // Add multiple roles as separate claims
-        
+
             new Claim("role_id",roleId),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()) // Unique Token ID
             };
@@ -39,7 +41,8 @@ namespace Codeji.CMS.Utility.Helpers
                 issuer: ConfigManager.AppSettings.APIUrl,
                 audience: ConfigManager.AppSettings.AppUrl,
                 claims: claims,
-                expires: DateTime.UtcNow.AddDays(expiryDays),
+                // expires: DateTime.UtcNow.AddDays(expiryDays),
+                expires: DateTime.UtcNow.AddMinutes(expiryMinutes),
                 signingCredentials: credentials
             );
 

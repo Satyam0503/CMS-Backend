@@ -4,6 +4,7 @@ using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,7 +14,6 @@ namespace Codeji.CMS.API.Controllers
 {
     [Route("api/[controller]")]
     [Authorize]
-    [ModulePermission("Applications", "View")]
     public class ApplicantsController : BaseApiController
     {
         readonly IApplicantsService _applicantsService;
@@ -25,7 +25,7 @@ namespace Codeji.CMS.API.Controllers
         }
         [HttpPost]
         [Route("GetApplicantList")]
-        //[CustomAuthorize(Module = "Applicant", Role = ["View"])]
+        [ModulePermission(AppModule.Applications, Permission.View)]
         public async Task<Result<ApplicantViewModel>> GetApplicantList(ApplicantResultFilters? filters)
         {
             Result<ApplicantViewModel> data = await _applicantsService.GetApplicantsList(filters);
@@ -33,7 +33,7 @@ namespace Codeji.CMS.API.Controllers
         }
         [HttpGet]
         [Route("ApplicantById")]
-        //[CustomAuthorize(Module = "Applicant", Role = ["View"])]
+        [ModulePermission(AppModule.Applications, Permission.View)]
         public async Task<Result<ApplicantViewModel>> ApplicantById(string id)
         {
             Result<ApplicantViewModel> result = await _applicantsService.ApplicantById(id);
@@ -41,37 +41,24 @@ namespace Codeji.CMS.API.Controllers
         }
         [HttpPost]
         [Route("AddApplicant")]
-        //[CustomAuthorize(Module = "Applicant", Role = ["Create"])]
+        [ModulePermission(AppModule.Applications, Permission.Create)]
         public async Task<Result> AddApplicant([FromBody] ApplicantAddEditModel applicantRegisterModel)
         {
-
             Result result = new Result();
-            if (string.IsNullOrEmpty(applicantRegisterModel.Email))
-                return new Result() { Success = false, StatusCode = StatusCodes.Status500InternalServerError };
-            var isExist = await _applicantsService.IsEmailExist(applicantRegisterModel.Email);
-            if (isExist == false)
-
+            if (!ModelState.IsValid)
             {
-                result = await _applicantsService.RegisterApplicants(applicantRegisterModel);
-                result.Success = true;
-                result.Message = "MESSAGE.APPLICANT.ADD_SUCCESS";
+                return result;
             }
-
-            else
-            {
-                result.Success = false;
-                result.Message = "MESSAGE.APPLICANT.ALREADY_APPLIED";
-            }
+            result = await _applicantsService.RegisterApplicants(applicantRegisterModel);
             return result;
         }
 
         [HttpPost]
         [Route("EditApplicant")]
-        //[CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
+        [ModulePermission(AppModule.Applications, Permission.Edit)]
         public async Task<Result> EditApplicants([FromBody] ApplicantAddEditModel model)
         {
             var result = await _applicantsService.UpdateApplicants(model);
-            result.Message = "MESSAGE.APPLICANT.UPDATED";
             return result;
         }
 
@@ -122,7 +109,6 @@ namespace Codeji.CMS.API.Controllers
             Result result = new Result()
             {
                 Success = true,
-                Message = "MESSAGE.COMMENT.ADD_SUCCESS",
                 StatusCode = StatusCodes.Status200OK,
             };
             return result;
@@ -138,6 +124,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("GetProcessLogData")]
+        [ModulePermission(AppModule.ProcessLog, Permission.View)]
         public async Task<Result<ApplicantLogResponseModel>> GetProcessLogData(ApplicantLogFilterModel model)
         {
             var data = await _applicantsService.GetProcessLogData(model);

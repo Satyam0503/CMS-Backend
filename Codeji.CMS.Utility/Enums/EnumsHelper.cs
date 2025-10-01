@@ -11,6 +11,7 @@
             company_id,
             admin_id,
             admin_company_id,
+            role_type
         }
         public enum ActivityType
         {
@@ -33,7 +34,6 @@
             HR = 2,
             Employee = 3
         }
-
         public enum MailType
         {
             CreateNewPasswordMail = 0,
@@ -54,12 +54,14 @@
             Important = 2,
             Urgent = 3
         }
-
         public enum NotificationTypes
         {
             Notice = 1,
+            LeaveRequest = 2,
+            LeaveRequestApproved = 3,
+            LeaveRequestReject = 4,
+            BirthDay = 5
         }
-
         public enum HolidayTypes
         {
             Cultural = 1,
@@ -67,21 +69,19 @@
             Religious = 3,
             National = 4,
         }
-
         public enum LeaveRequestStatus
         {
             Pending = 1,
             Accepted = 2,
             Rejected = 3
         }
-
         public enum LeaveTypes
         {
             Sick = 1,
             Casual = 2,
             Earned = 3,
             Maternity = 4,
-            Patrenity = 5,
+            Paternity = 5,
 
         }
     }

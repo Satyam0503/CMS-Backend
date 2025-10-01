@@ -1,16 +1,13 @@
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Security.Cryptography;
-using System.Text;
 using AutoMapper;
-using BCrypt.Net;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.DTO.ResponseModel;
-using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
@@ -25,7 +22,6 @@ using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
-using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Employees
@@ -36,24 +32,25 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<EmpCertificationDetails> _certificationDetailsRepo;
         readonly IMongoDbRepository<EmpSummary> _employeeSummaryRepo;
         readonly IMapper _mapper;
-        private readonly IPriorityTaskQueue _priorityTaskQueue;
+        readonly IPriorityTaskQueue _priorityTaskQueue;
         readonly IMongoDbRepository<EmpUser> _employeeRepository;
         readonly IMongoDbRepository<Roles> _rolesRepository;
         readonly IRoleService _roleService;
-        readonly IMongoDbRepository<RolePermission> _rolePermissionRepository;
         readonly IMongoDbRepository<EmpSkills> _employeeSkillsRepository;
         readonly IMongoDbRepository<Company> _companyRepository;
         readonly IMongoDbRepository<MailTemplate> _mailTemplateRepository;
-        readonly IMongoDbRepository<JobVacancy> _jobVacancy;
-        private readonly IMiddlewareService _middlewareService;
+        readonly IMiddlewareService _middlewareService;
         readonly IMongoDbRepository<Department> _departmentRepository;
-
         readonly IMongoDbRepository<Skills> _skillsRepository;
         readonly IMongoDbRepository<PasswordResetTokens> _passwordResetTokens;
         readonly IMongoDbRepository<EmpWorkHistory> _empWorkHistoryRepository;
         readonly IMongoDbRepository<UserNotifications> _userNotificationRepository;
         readonly IMongoDbRepository<Notifications> _notificationsRepository;
+        readonly IMongoDbRepository<JobTitles> _jobTitlesRepository;
         readonly IHttpContextAccessor _httpContextAccessor;
+        readonly IMongoDbRepository<CustomAttribute> _customAttributeRepository;
+        readonly IMongoDbRepository<CustomAttributeValue> _customAttributeValueRepository;
+        readonly INotificationService _notificationService;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
@@ -61,11 +58,9 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<EmpUser> employeeRepository,
             IMongoDbRepository<Roles> rolesRepository,
             IRoleService roleService,
-            IMongoDbRepository<RolePermission> rolePermissionRepository,
             IMongoDbRepository<EmpSkills> employeeSkillsRepository,
             IMongoDbRepository<Company> companyRepository,
             IMongoDbRepository<MailTemplate> mailTemplateRepository,
-            IMongoDbRepository<JobVacancy> jobVacancy,
             IPriorityTaskQueue priorityTaskQueue,
             IMiddlewareService middlewareService,
             IHttpContextAccessor httpContextAccessor,
@@ -74,7 +69,11 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<PasswordResetTokens> passwordResetTokens,
             IMongoDbRepository<EmpWorkHistory> empWorkHistoryRepository,
             IMongoDbRepository<UserNotifications> userNotificationRepository,
-            IMongoDbRepository<Notifications> notificationsRepository
+            IMongoDbRepository<Notifications> notificationsRepository,
+            IMongoDbRepository<JobTitles> jobTitlesRepository,
+            IMongoDbRepository<CustomAttribute> customAttributeRepository,
+            IMongoDbRepository<CustomAttributeValue> customAttributeValueRepository,
+            INotificationService notificationService
             )
         {
             _employeeRepository = employeeRepository;
@@ -84,11 +83,9 @@ namespace Codeji.CMS.Services.Employees
             _mapper = mapper;
             _certificationDetailsRepo = certificationDetailsRepo;
             _employeeSummaryRepo = userSummary;
-            _rolePermissionRepository = rolePermissionRepository;
             _employeeSkillsRepository = employeeSkillsRepository;
             _companyRepository = companyRepository;
             _mailTemplateRepository = mailTemplateRepository;
-            _jobVacancy = jobVacancy;
             _priorityTaskQueue = priorityTaskQueue;
             _middlewareService = middlewareService;
             _departmentRepository = departmentRepository;
@@ -98,11 +95,21 @@ namespace Codeji.CMS.Services.Employees
             _empWorkHistoryRepository = empWorkHistoryRepository;
             _userNotificationRepository = userNotificationRepository;
             _notificationsRepository = notificationsRepository;
+            _jobTitlesRepository = jobTitlesRepository;
+            _customAttributeRepository = customAttributeRepository;
+            _customAttributeValueRepository = customAttributeValueRepository;
+            _notificationService = notificationService;
         }
-
-        public async Task<Result<UserModel>> AddEmployee(UserModel user, string currentUserId)
+        public async Task<Result> AddEmployee(UserModel user, string currentUserId)
         {
-            Result<UserModel> result = new();
+            Result result = new();
+            bool IsEmpIdExist = await _employeeRepository.Exist(e => e.EmployeeId.Equals(user.EmployeeId, StringComparison.OrdinalIgnoreCase));
+            if (IsEmpIdExist)
+            {
+                result.Success = false;
+                result.StatusCode = CustomStatusCode.EmployeeIdAlreadyExist;
+                return result;
+            }
             var userId = Guid.NewGuid().ToString();
             EmpUser employee = new EmpUser()
             {
@@ -114,10 +121,10 @@ namespace Codeji.CMS.Services.Employees
                 Gender = user.Gender,
                 EmployeeId = user.EmployeeId,
                 JobRole = user.JobRole,
+                EmploymentType = user.EmploymentType,
                 DateOfBirth = user.DateOfBirth,
                 Department = user.Department,
                 ReportingManager = user.ReportingManager,
-                TeamLead = user.TeamLead,
                 PhoneNumber = user.PhoneNumber,
                 BloodGroup = user.BloodGroup,
                 PersonalEmail = user.PersonalEmail,
@@ -125,11 +132,13 @@ namespace Codeji.CMS.Services.Employees
                 DateOfJoining = user.DateOfJoining,
                 Status = true,
                 IsEmailVerified = false,
-                Address = user.Address
+                Address = user.Address,
+                BankAccountNumber = user.BankAccountNumber,
+                PanNumber = user.PanNumber,
             };
 
-            Result result1 = await _employeeRepository.AddOne(employee);
-            if (!result1.Success)
+            result = await _employeeRepository.AddOne(employee);
+            if (!result.Success)
             {
                 result.Success = false;
                 return result;
@@ -140,19 +149,19 @@ namespace Codeji.CMS.Services.Employees
             // generate password creation token for newly added employee
             string token = TokenHelper.GenerateToken();
             string tokenHash = TokenHelper.ComputeSha256Hash(token);
+            int tokenExpiryTime = 24;
             PasswordResetTokens passwordResetTokens = new()
             {
                 UserId = userId,
                 TokenHash = tokenHash,
                 IsUsed = false,
-                Expiry = DateTime.UtcNow.AddMinutes(15),
+                Expiry = DateTime.UtcNow.AddHours(tokenExpiryTime),
             };
             var result2 = await _passwordResetTokens.AddOne(passwordResetTokens);
 
             //Acknowledgement Email Logic 
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.CreateNewPasswordMail);
-            HtmlTemplate htmlTemplate = new HtmlTemplate();
-            string replacedBody = htmlTemplate.Render(emailContent.body, new
+            string replacedBody = HtmlTemplate.Render(emailContent.body, new
             {
                 RecipientName = employee.FirstName + " " + employee.LastName,
                 PasswordCreationLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={userId}",
@@ -160,20 +169,17 @@ namespace Codeji.CMS.Services.Employees
             });
 
             _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
-          {
-              _middlewareService.EmailSendAndSave(new EmpEmailLogs()
-              {
-                  UserTo = employee.Email,
-                  Subject = emailContent.subject,
-                  Body = replacedBody,
-                  EmailLogType = EnumsHelper.MailType.CreateNewPasswordMail,
-                  Email = employee.Email,
-                  UserFrom = currentUser.Email,
-              });
-          }, priority: 1);
-
-            result.MethodResult = user;
-            result.Message = "User added";
+            {
+                _middlewareService.EmailSendAndSave(new EmpEmailLogs()
+                {
+                    UserTo = employee.UserId,
+                    Subject = emailContent.subject,
+                    Body = replacedBody,
+                    EmailLogType = EnumsHelper.MailType.CreateNewPasswordMail,
+                    Email = employee.Email,
+                    UserFrom = currentUser.UserId,
+                });
+            }, priority: 1);
             return result;
         }
         public async Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId)
@@ -198,29 +204,78 @@ namespace Codeji.CMS.Services.Employees
             {
                 Success = true,
                 MethodResult = updatedUser,
-                Message = "Updated Successfully",
             };
         }
         public async Task<UserModel> GetEmployeeById(string userId)
         {
-            string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
             EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
-            EmpUser? teamLead = await _employeeRepository.FirstOrDefault(x => x.UserId == user.TeamLead);
-            EmpUser? reportingManager = await _employeeRepository.FirstOrDefault(x => x.UserId == user.ReportingManager);
-            Department? department = await _departmentRepository.FirstOrDefault(x => x.DepartmentId == user.Department);
             UserModel userModel = _mapper.Map<UserModel>(user);
-            userModel.DepartmentName = department?.Titles?.FirstOrDefault(x => x.Language == acceptLanguage)?.Label;
-            userModel.TeamLeadName = teamLead != null ? $"{teamLead.FirstName} {teamLead.LastName}" : null;
-            userModel.ReportingManagerName = reportingManager != null ? $"{reportingManager?.FirstName} {reportingManager?.LastName}" : null;
-            userModel.FullProfileUrl = string.IsNullOrEmpty(user.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(user.ProfileUrl);
+            if (userModel.JobRole != null)
+            {
+                JobTitles? jobTitles = await _jobTitlesRepository.FirstOrDefault(jt => jt.JobTitleId == userModel.JobRole);
+                userModel.JobRoleTitle = jobTitles?.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label);
+            }
+            if (userModel.ReportingManager != null)
+            {
+                EmpUser? reportingManager = await _employeeRepository.FirstOrDefault(x => x.UserId == user.ReportingManager);
+                userModel.ReportingManagerName = reportingManager != null ? $"{reportingManager?.FirstName} {reportingManager?.LastName}" : null;
+            }
+            if (userModel.Department != null)
+            {
+                Department? department = await _departmentRepository.FirstOrDefault(x => x.DepartmentId == user.Department);
+                userModel.DepartmentTitle = department?.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label);
+            }
+            userModel.ProfileUrl = Common.GetEmployeeImageUrl(user.ProfileUrl);
+            if (user.CustomAttributeList.Count != 0)
+            {
+                List<UserCustomAttribute> customAttributeList = [];
+                foreach (EmpUserCustomAttribute attribute in user.CustomAttributeList)
+                {
+                    var customAttribute = await _customAttributeRepository.FirstOrDefault(ca => ca.CustomAttributeId == attribute.CustomAttributeId);
+                    var customAttributeValue = await _customAttributeValueRepository.FirstOrDefault(cav => cav.CustomAttributeValueId == attribute.CustomAttributeValueId && cav.CustomAttributeId == attribute.CustomAttributeId);
+                    if (customAttribute != null && customAttributeValue != null)
+                    {
+                        customAttributeList.Add(new UserCustomAttribute()
+                        {
+                            CustomAttributeId = customAttribute.CustomAttributeId,
+                            CustomAttributeTitle = customAttribute.CustomAttributeTitle.ToDictionary(t => t.Language, t => t.Label),
+                            CustomAttributeValueId = customAttributeValue.CustomAttributeValueId,
+                            CustomAttributeValueTitle = customAttributeValue.Titles.ToDictionary(t => t.Language, t => t.Label)
+                        });
+                    }
+                }
+                userModel.CustomAttributes = customAttributeList;
+            }
             return userModel;
         }
 
+        public async Task<string> GetEmployeeNameById(string employeeId)
+        {
+            EmpUser? empUser = await _employeeRepository.FirstOrDefault(emp => emp.UserId == employeeId);
+            if (empUser == null) return string.Empty;
+            return $"{empUser.FirstName} {empUser.LastName}";
+        }
         public async Task<List<EmployeeSearchResponseDTO>> SearchEmployeeByName(string name)
         {
             Expression<Func<EmpUser, bool>> whereCondition = x => (x.FirstName + " " + x.LastName).Contains(name, StringComparison.CurrentCultureIgnoreCase);
-            var data = await _employeeRepository.GetAll(whereCondition);
-            return _mapper.Map<List<EmployeeSearchResponseDTO>>(data);
+            var empUsers = await _employeeRepository.GetAll(whereCondition);
+            List<string> jobTitleIds = empUsers.Select(emp => emp.JobRole).Distinct().ToList();
+            var jobTitleList = await _jobTitlesRepository.GetAll(jt => jobTitleIds.Contains(jt.JobTitleId));
+
+            var result = (from emp in empUsers
+                          join jobRole in jobTitleList
+                          on emp.JobRole equals jobRole.JobTitleId into empJobTitleGroup
+                          from jobTitle in empJobTitleGroup.DefaultIfEmpty()
+                          select new EmployeeSearchResponseDTO()
+                          {
+                              UserId = emp.UserId,
+                              FirstName = emp.FirstName,
+                              LastName = emp.LastName,
+                              EmpId = emp.EmployeeId,
+                              JobRole = jobTitle?.Titles.ToDictionary(jt => jt.Language, jt => jt.Label),
+                              FullProfileUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl)
+                          }).ToList();
+            return result;
         }
 
         public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters)
@@ -252,25 +307,31 @@ namespace Codeji.CMS.Services.Employees
                     TotalRecords = totalRecords,
                 };
             }
-            string acceptLanguage = CurrentContext.GetLanguage(_httpContextAccessor);
             string[] depId = employeeList.Select(x => x.Department).Distinct().ToArray();
             var deptList = await _departmentRepository.GetAll(x => depId.Contains(x.DepartmentId));
+
+            string[] jobRoleId = employeeList.Select(e => e.JobRole).Distinct().ToArray();
+            var jobRoleList = await _jobTitlesRepository.GetAll(jt => jobRoleId.Contains(jt.JobTitleId));
 
             var data = (from emp in employeeList
                         join dept in deptList
                         on emp.Department equals dept.DepartmentId into empDepartmentGrp
                         from department in empDepartmentGrp.DefaultIfEmpty()
+                        join jt in jobRoleList
+                        on emp.JobRole equals jt.JobTitleId into empJobTitleGrp
+                        from jobTitle in empJobTitleGrp.DefaultIfEmpty()
                         select new GetAllEmployeeResponseModel
                         {
                             UserId = emp.UserId,
                             FullName = $"{emp?.FirstName} {emp?.LastName ?? ""}",
                             Email = emp.Email,
+                            Gender = emp.Gender,
                             EmployeeId = emp.EmployeeId,
-                            JobRole = emp.JobRole,
-                            Department = department?.Titles?.FirstOrDefault(x => x.Language == acceptLanguage)?.Label,
+                            JobRole = jobTitle != null ? jobTitle.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label) : null,
+                            Department = department?.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label),
                             PhoneNumber = emp.PhoneNumber,
                             DateOfBirth = emp.DateOfBirth,
-                            FullProfileUrl = string.IsNullOrEmpty(emp.ProfileUrl) ? Common.GetEmployeeImageUrl(null) : Common.GetEmployeeImageUrl(emp.ProfileUrl),
+                            FullProfileUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl),
                         }).ToList();
             return new Result<GetAllEmployeeResponseModel>()
             {
@@ -289,127 +350,6 @@ namespace Codeji.CMS.Services.Employees
         {
             return await _employeeRepository.Exist(x => x.Email == email && x.Status && x.Password != null);
         }
-        public async Task<Result> GenerateTokenAndSendEmail(string email)
-        {
-            Result result = new();
-            var emp = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(email));
-            if (emp is null) return result;
-            var token = TokenHelper.GenerateToken();
-            var hashedToken = TokenHelper.ComputeSha256Hash(token);
-
-            PasswordResetTokens passwordResetTokens = new()
-            {
-                UserId = emp.UserId,
-                TokenHash = hashedToken,
-                IsUsed = false,
-                Expiry = DateTime.UtcNow.AddMinutes(10),
-            };
-            var result2 = await _passwordResetTokens.AddOne(passwordResetTokens);
-            if (!result2.Success)
-            {
-                return result;
-            }
-            Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == emp.CompanyId);
-            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ResetPassword);
-            HtmlTemplate htmlTemplate = new HtmlTemplate();
-            string replacedBody = htmlTemplate.Render(emailContent?.body, new
-            {
-                EmployeeName = emp.FirstName + " " + emp.LastName,
-                PasswordResetLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={emp.UserId}",
-                CompanyName = company != null ? company.CompanyName : "",
-            });
-            string replacedSubject = htmlTemplate.Render(emailContent.subject, new
-            {
-                CompanyName = company != null ? company.CompanyName : ""
-            });
-
-            _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
-            {
-                _middlewareService.EmailSendAndSave(new EmpEmailLogs()
-                {
-                    UserTo = emp.Email,
-                    Subject = replacedSubject,
-                    Body = replacedBody,
-                    EmailLogType = EnumsHelper.MailType.ResetPassword,
-                    Email = emp.Email,
-                    UserFrom = "",
-                });
-            }, priority: 1);
-
-            result.Success = true;
-            result.Message = "Password reset link has been sent. Please check your mail";
-            return result;
-        }
-
-        public async Task<bool> ResetPassword(string userId, string password, string oldPassword)
-        {
-            EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
-            if (user is null)
-                return false;
-            if (!string.IsNullOrEmpty(oldPassword))
-            {
-                if (!AuthenticationHandler.VerifyPassword(oldPassword, user.Password))
-                    return false;
-            }
-
-            user.Password = AuthenticationHandler.HashedPassword(password);
-            user.UpdatedDate = DateTime.Now;
-            Expression<Func<EmpUser, bool>> whereCondition = x => user.UserId == x.UserId;
-            await _employeeRepository.Update(whereCondition, user);
-            return true;
-        }
-
-        public async Task<Result> CreateNewPassword(CreateNewPasswordRequest model)
-        {
-            Result result = new();
-            var tokenHash = TokenHelper.ComputeSha256Hash(model.Token);
-            PasswordResetTokens? token = await _passwordResetTokens.FirstOrDefault(x => x.UserId == model.Uid && x.TokenHash == tokenHash && !x.IsUsed);
-            if (token is null)
-            {
-                result.Message = "Invalid or expired token";
-                return result;
-            }
-            if (token?.Expiry < DateTime.UtcNow)
-            {
-                result.Message = "This password reset link has expired. Please request a new one.";
-                return result;
-            }
-
-            EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == model.Uid);
-            if (user is null)
-            {
-                return result;
-            }
-            user.Password = AuthenticationHandler.HashedPassword(model.NewPassword);
-            user.IsEmailVerified = true;
-            Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == user.UserId;
-            await _employeeRepository.Update(whereCondition, user);
-            Expression<Func<PasswordResetTokens, bool>> whereCondition2 = x => x.Id == token.Id;
-            var result2 = await _passwordResetTokens.Delete(whereCondition2);
-            result.Success = true;
-            result.Message = "Password has been reset";
-            return result;
-        }
-        // Logic for Login User and Employee by Email and Password
-        public async Task<string> GetVerificationToken(string email, string password)
-        {
-            EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
-            Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == user.RoleId);
-            if (role.HasAppAccess)
-            {
-                if (string.IsNullOrEmpty(user.Password))
-                {
-                    return "false";
-                }
-                if (user != null && AuthenticationHandler.VerifyPassword(password, user.Password))
-                {
-                    List<string> roles = new List<string>() { "admin", "employee" };
-                    return AuthenticationHandler.GenerateJwtToken(user.UserId, user.CompanyId, user.RoleId, roles);
-                }
-                return string.Empty;
-            }
-            return "No Access";
-        }
 
         public async Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId, string companyId)
         {
@@ -423,6 +363,7 @@ namespace Codeji.CMS.Services.Employees
             }
             string[] allowedModulePermission = await _roleService.GetRolePermissionOfuser(role.RolesId);
             returnModel.UserId = user.UserId;
+            returnModel.RoleType = role.RoleType;
             returnModel.FirstName = user.FirstName;
             returnModel.LastName = user.LastName;
             returnModel.CompanyId = companyDetails.CompanyId;
@@ -430,11 +371,11 @@ namespace Codeji.CMS.Services.Employees
             returnModel.CompanyName = companyDetails.CompanyName;
             returnModel.DefaultLanguage = companyDetails.DefaultLanguage;
             returnModel.ApplicationLanguage = companyDetails.ApplicationLanguage;
-            returnModel.ProfileImage = user.FullProfileUrl;
-            returnModel.CompanyLogo = string.IsNullOrEmpty(companyDetails.CompanyLogo) ? Common.GetCompanyLogoUrl(null) : Common.GetCompanyLogoUrl(companyDetails.CompanyLogo);
+            returnModel.ProfileImage = user.ProfileUrl;
+            returnModel.CompanyLogo = Common.GetCompanyLogoUrl(companyDetails.CompanyLogo);
             return returnModel;
         }
-        public async Task<Result<EmployeeSummaryRequestModel>> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId)
+        public async Task<Result> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId)
         {
             Expression<Func<EmpSummary, bool>> whereCondition = x => userId == x.UserId && x.Id == userSummary.SummaryId;
             EmpSummary? employeesummary = await _employeeSummaryRepo.FirstOrDefault(whereCondition);
@@ -446,22 +387,12 @@ namespace Codeji.CMS.Services.Employees
                     UserId = userId,
                     Summary = userSummary.Summary
                 };
-                Result result = await _employeeSummaryRepo.AddOne(summary);
-                return new Result<EmployeeSummaryRequestModel>
-                {
-                    Success = true,
-                    Message = "Summary Added Successfully"
-                };
+                return await _employeeSummaryRepo.AddOne(summary);
             }
             else
             {
                 employeesummary.Summary = userSummary.Summary;
-                Result result = await _employeeSummaryRepo.Update(whereCondition, employeesummary);
-                return new Result<EmployeeSummaryRequestModel>
-                {
-                    Success = true,
-                    Message = "Summary Updated Successfully"
-                };
+                return await _employeeSummaryRepo.Update(whereCondition, employeesummary);
             }
         }
         public async Task<Result> AddEditEmployeeSkills(SkillsRequestModel skillsModel, string userId)
@@ -475,25 +406,15 @@ namespace Codeji.CMS.Services.Employees
                     newSkill.UserId = userId;
                     newSkill.Skills = skillsModel.Skills;
                 }
-                Result result = await _employeeSkillsRepository.AddOne(newSkill);
-                return new Result
-                {
-                    Success = true,
-                    Message = "Skills Addded Successfully"
-                };
+                return await _employeeSkillsRepository.AddOne(newSkill);
             }
             else
             {
                 employeSkills.Skills = skillsModel.Skills;
-                Result result = await _employeeSkillsRepository.Update(whereCondition, employeSkills);
-                return new Result
-                {
-                    Success = true,
-                    Message = "Skills Updated Successfully"
-                };
+                return await _employeeSkillsRepository.Update(whereCondition, employeSkills);
             }
         }
-        public async Task<Result<EmployeeEducationRequestModel>> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId)
+        public async Task<Result> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId)
         {
             EmpEducationDetails educationDetail = new EmpEducationDetails()
             {
@@ -504,30 +425,15 @@ namespace Codeji.CMS.Services.Employees
                 EndDate = educationDetails.EndDate,
                 Type = educationDetails.Type,
             };
-            await _educationDetailsRepo.AddOne(educationDetail);
-            return new Result<EmployeeEducationRequestModel>
-            {
-                MethodResult = educationDetails,
-                Message = "Education Details Added",
-                Success = true
-
-            };
+            return await _educationDetailsRepo.AddOne(educationDetail);
         }
 
         public async Task<Result> EditEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId)
         {
+            Result result = new();
             Expression<Func<EmpEducationDetails, bool>> whereCondition = x => x.UserId == userId && x.EducationId == educationDetails.EducationId;
             EmpEducationDetails? check = await _educationDetailsRepo.FirstOrDefault(whereCondition);
-            if (check == null)
-            {
-                return new Result()
-                {
-                    Message = "Education Details Not Updated",
-                    Success = false,
-                    StatusCode = 400
-
-                };
-            }
+            if (check == null) return result;
             EmpEducationDetails data = new EmpEducationDetails()
             {
                 EducationId = educationDetails.EducationId,
@@ -538,17 +444,11 @@ namespace Codeji.CMS.Services.Employees
                 StartDate = educationDetails.StartDate,
                 Type = educationDetails.Type
             };
-            await _educationDetailsRepo.Update(whereCondition, data);
-            return new Result()
-            {
-                Message = "Education Details Updated Sucessfully",
-                Success = true,
-                StatusCode = 200
-
-            };
+            result = await _educationDetailsRepo.Update(whereCondition, data);
+            return result;
         }
 
-        public async Task<Result<EmployeeCertificationRequestModel>> AddEmployeeCertification(EmployeeCertificationRequestModel cerificationDetails, string userId)
+        public async Task<Result> AddEmployeeCertification(EmployeeCertificationRequestModel cerificationDetails, string userId)
         {
             EmpCertificationDetails certificatinDetail = new EmpCertificationDetails()
             {
@@ -559,29 +459,15 @@ namespace Codeji.CMS.Services.Employees
                 EndDate = cerificationDetails.EndDate,
                 Mode = cerificationDetails.Mode,
             };
-            await _certificationDetailsRepo.AddOne(certificatinDetail);
-            return new Result<EmployeeCertificationRequestModel>
-            {
-                MethodResult = cerificationDetails,
-                Message = "Certification Details Added",
-                Success = true
-            };
+            return await _certificationDetailsRepo.AddOne(certificatinDetail);
         }
 
         public async Task<Result> EditEmployeeCertification(EmployeeCertificationRequestModel certificationDetails, string userId)
         {
+            Result result = new();
             Expression<Func<EmpCertificationDetails, bool>> whereCondition = x => x.UserId == userId && x.CertificationId == certificationDetails.CertificationId;
             EmpCertificationDetails? check = await _certificationDetailsRepo.FirstOrDefault(whereCondition);
-            if (check == null)
-            {
-                return new Result()
-                {
-                    Message = "Certification Details Not Updated",
-                    Success = false,
-                    StatusCode = 400
-
-                };
-            }
+            if (check == null) return result;
             EmpCertificationDetails data = new EmpCertificationDetails()
             {
                 CertificationId = certificationDetails.CertificationId,
@@ -592,13 +478,8 @@ namespace Codeji.CMS.Services.Employees
                 StartDate = certificationDetails.StartDate,
                 Mode = certificationDetails.Mode
             };
-            await _certificationDetailsRepo.Update(whereCondition, data);
-            return new Result()
-            {
-                Message = "Certification Details Updated Sucessfully",
-                Success = true,
-                StatusCode = 200
-            };
+            result = await _certificationDetailsRepo.Update(whereCondition, data);
+            return result;
         }
 
         public async Task<List<EmpEducationDetails>> GetEmployeeEducationDetails(string userId)
@@ -664,7 +545,7 @@ namespace Codeji.CMS.Services.Employees
             profile.ProfileUrl = fileName;
 
             Result res = await _employeeRepository.Update(whereCondition, profile);
-            string fullProfileUrl = Common.GetEmployeeImageUrl(fileName);
+            string fullProfileUrl = Common.GetEmployeeImageUrl(fileName) ?? "";
             return fullProfileUrl;
         }
 
@@ -729,9 +610,8 @@ namespace Codeji.CMS.Services.Employees
             {
                 return new Result()
                 {
-                    StatusCode = 200,
+                    StatusCode = CustomStatusCode.SkillsAlreadyExist,
                     Success = false,
-                    Message = "Skill already exist"
                 };
             }
             Skills skills = new()
@@ -855,16 +735,88 @@ namespace Codeji.CMS.Services.Employees
             return await _userNotificationRepository.UpdateMany(whereCondition, Builders<UserNotifications>.Update.Set(x => x.IsRead, true));
         }
 
-
-        public async Task<Result<string>> GetCollegeList()
+        public async Task<Result> RemoveProfileImage(string userId)
         {
-            var educationDetails = _educationDetailsRepo.Get();
-            List<string> collegeList = educationDetails.Select(x => x.CollegeName).ToList();
-            return new Result<string>
+            Result result = new();
+            EmpUser? empUser = await _employeeRepository.FirstOrDefault(e => e.UserId == userId);
+            if (empUser is null) return result;
+            if (empUser.ProfileUrl != null)
             {
-                Success = true,
-                MethodResults = collegeList
-            };
+                string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\ProfileImage\\");
+                string oldPath = Path.Combine(uploadFolder, empUser.ProfileUrl);
+                FileInfo fileInfo = new(oldPath);
+                fileInfo.Delete();
+                Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == userId;
+                return await _employeeRepository.UpdateMany(whereCondition, Builders<EmpUser>.Update.Set(x => x.ProfileUrl, null));
+            }
+            else
+            {
+                return result;
+            }
+        }
+
+        public async Task<List<string>> GetCollegeNameSuggestions(string searchValue)
+        {
+            Expression<Func<EmpEducationDetails, bool>> expression = e => e.CollegeName.ToLower().Contains(searchValue.ToLower());
+            List<string> collegeList = (await _educationDetailsRepo.GetAll(expression, true, false)).Select(e => e.CollegeName).Distinct().ToList();
+            return collegeList;
+        }
+
+        // Get a list of employee
+        public async Task SendBirthDayNotificationToEmployees()
+        {
+            var currentDate = DateTime.UtcNow.Date;
+            var currentMonthDay = currentDate.ToString("MM-dd");
+
+            Expression<Func<EmpUser, bool>> expression = emp =>
+                !string.IsNullOrEmpty(emp.DateOfBirth)
+                && emp.DateOfBirth.Substring(5, 5) == currentMonthDay;
+            IEnumerable<EmpUser> employeeList = await _employeeRepository.GetAll(expression, withDefaultFilter: false);
+            if (employeeList.Any())
+            {
+                var notificationTasks = new List<Task>();
+                List<UserNotifications> userNotifications = [];
+                foreach (EmpUser employee in employeeList)
+                {
+                    Expression<Func<EmpUser, bool>> exp = emp => emp.CompanyId == employee.CompanyId && emp.UserId != employee.UserId && emp.Status;
+                    List<EmpUser> targetEmployeeList = _employeeRepository.Get(exp).ToList();
+                    Notifications notification = new()
+                    {
+                        NotificationId = Guid.NewGuid().ToString(),
+                        CreatedDateTime = DateTime.UtcNow,
+                        NotificationType = EnumsHelper.NotificationTypes.BirthDay,
+                        Body = $"{employee.FirstName} {employee.LastName}"
+                    };
+                    await _notificationsRepository.AddOne(notification);
+                    foreach (var emp in targetEmployeeList)
+                    {
+                        UserNotifications userNotification = new()
+                        {
+                            UserNotificationId = Guid.NewGuid().ToString(),
+                            UserId = emp.UserId,
+                            NotificationId = notification.NotificationId,
+                            IsRead = false,
+                            CreatedDateTime = DateTime.UtcNow,
+                            IsDeleted = false
+                        };
+                        userNotifications.Add(userNotification);
+                        notificationTasks.Add(_notificationService.SendNotificationToUser(emp.UserId, new NotificationViewModel()
+                        {
+                            Title = notification.Title,
+                            Body = notification.Body,
+                            IsRead = false,
+                            SentDateTime = DateTime.UtcNow,
+                            TargetId = notification.TargetId,
+                            NotificationTypes = notification.NotificationType,
+                            UserNotificationId = userNotification.UserNotificationId
+                        }));
+                    }
+                }
+                // insert all user notification into db
+                await _userNotificationRepository.AddMany(userNotifications);
+                // process all notificatios task
+                await Task.WhenAll(notificationTasks);
+            }
         }
     }
 }
