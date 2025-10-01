@@ -12,4 +12,5 @@ public class NoticeViewModel
     public string NoticeTitle { get; set; }
     public DateTime? CreatedDateTime { get; set; }
     public EnumsHelper.NoticeType NoticeType { get; set; }
+    public bool ViewedStatus { get; set; }
 }

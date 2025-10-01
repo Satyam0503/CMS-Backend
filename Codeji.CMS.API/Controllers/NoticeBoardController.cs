@@ -49,7 +49,8 @@ public class NoticeBoardController : BaseApiController
     public async Task<Result<NoticeViewModel>> GetNoticeById(string noticeId)
     {
         Result<NoticeViewModel> result = new();
-        var data = await _noticeBoardServices.GetNoticeById(noticeId);
+        var userId = CurrentContext.UserId(_httpContextAccessor);
+        var data = await _noticeBoardServices.GetNoticeById(noticeId, userId);
         if (data is null)
         {
             result.Success = false;
@@ -72,7 +73,7 @@ public class NoticeBoardController : BaseApiController
 
     [HttpPut]
     [Route("UpdateMyNotice")]
-    public async Task<Result> UpdateMyNotice([FromBody] MyNoticeDTO notice)
+    public async Task<Result> UpdateMyNotice([FromBody] UpdateNoticeDto notice)
     {
         if (!ModelState.IsValid)
         {

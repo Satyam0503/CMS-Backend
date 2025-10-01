@@ -181,7 +181,7 @@ public class PayRollServices : IPayRollServices
         IEnumerable<EmpUser> empUsers = [];
         if (!string.IsNullOrEmpty(payload.EmployeeName))
         {
-            matchingEmployeeIds = (await _employeeRepository.GetAll(e => (e.FirstName.Contains(payload.EmployeeName, StringComparison.CurrentCultureIgnoreCase) || e.LastName.Contains(payload.EmployeeName, StringComparison.CurrentCultureIgnoreCase)) && e.CompanyId == companyId)).Select(e => e.UserId).ToList();
+            matchingEmployeeIds = (await _employeeRepository.GetAll(e => (e.FirstName + " " + e.LastName).Contains(payload.EmployeeName, StringComparison.CurrentCultureIgnoreCase) && e.CompanyId == companyId)).Select(e => e.UserId).ToList();
             Expression<Func<EmpPayRoll, bool>> expression = p => p.CompanyId == companyId
                                         && payload.PayMonth.Month == p.PayMonth.Month && payload.PayMonth.Year == p.PayMonth.Year
                                         && matchingEmployeeIds.Contains(p.UserId);

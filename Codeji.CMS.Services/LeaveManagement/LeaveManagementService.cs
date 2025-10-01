@@ -90,7 +90,6 @@ public class LeaveManagementService : ILeaveManagementService
                     CreatedDate = DateTime.UtcNow
                 };
                 result = await _leaveTypeRepo.AddOne(leaveTypeDomain);
-
             }
             else if (existingLeaveType != null && existingLeaveType.IsDeleted == true)
             {
@@ -196,8 +195,6 @@ public class LeaveManagementService : ILeaveManagementService
         result = await _leaveTypeRepo.Update(whereCondition, deletedLeaveType);
         return result;
     }
-
-
 
     // leave balance 
 

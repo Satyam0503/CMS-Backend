@@ -137,9 +137,8 @@ namespace Codeji.CMS.Services.Employees
                 PanNumber = user.PanNumber,
             };
 
-
-            Result result1 = await _employeeRepository.AddOne(employee);
-            if (!result1.Success)
+            result = await _employeeRepository.AddOne(employee);
+            if (!result.Success)
             {
                 result.Success = false;
                 return result;
