@@ -87,7 +87,7 @@ namespace Codeji.CMS.Services.Dashboard
             {
                 ActivityType = apg.Key,
                 Count = apg.Count()
-            }).ToList();
+            }).OrderBy(ap => ap.ActivityType).ToList();
             result.MethodResult = new ApplicationDataResponseDto()
             {
                 TotalApplications = applicantList.Count,

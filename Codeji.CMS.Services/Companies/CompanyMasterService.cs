@@ -225,12 +225,12 @@ public class CompanyMasterService : ICompanyMasterService
     public async Task<CustomAttributeResponseDto?> CreateCustomAttribute(string companyId)
     {
         // get count of custom attribute 
-        const int MaxAllowedAttribute = 5;
+        // const int MaxAllowedAttribute = 5;
         int totalAttribute = await _customAttributeRepository.Count(ca => ca.CompanyId == companyId);
-        if (totalAttribute >= MaxAllowedAttribute)
-        {
-            return null;
-        }
+        // if (totalAttribute >= MaxAllowedAttribute)
+        // {
+        //     return null;
+        // }
 
         CustomAttribute customAttribute = new()
         {
