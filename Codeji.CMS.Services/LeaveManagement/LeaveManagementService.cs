@@ -28,7 +28,7 @@ public class LeaveManagementService : ILeaveManagementService
 {
     private readonly IMongoDbRepository<LeaveTypes> _leaveTypeRepo;
     private readonly IMongoDbRepository<Roles> _roleRepository;
-    private readonly IMongoDbRepository<EmpUser> _empUser;
+    private readonly IMongoDbRepository<EmpUser> _employeeRepository;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IMongoDbRepository<LeaveBalance> _leaveBalance;
     private readonly IMongoDbRepository<LeaveRequest> _leave;
@@ -39,7 +39,7 @@ public class LeaveManagementService : ILeaveManagementService
     private readonly IMapper _mapper;
     private readonly IEmployeeService _employeeService;
     public LeaveManagementService(IMongoDbRepository<LeaveTypes> leaveTypeRepo,
-    IMongoDbRepository<EmpUser> empUser,
+    IMongoDbRepository<EmpUser> employeeRepository,
     IMongoDbRepository<LeaveBalance> leaveBalance,
     IMongoDbRepository<LeaveRequest> leave,
     IHttpContextAccessor httpContextAccessor, IMapper mapper,
@@ -52,7 +52,7 @@ public class LeaveManagementService : ILeaveManagementService
     {
         _leaveTypeRepo = leaveTypeRepo;
         _httpContextAccessor = httpContextAccessor;
-        _empUser = empUser;
+        _employeeRepository = employeeRepository;
         _leaveBalance = leaveBalance;
         _leave = leave;
         _mapper = mapper;
@@ -67,6 +67,7 @@ public class LeaveManagementService : ILeaveManagementService
     public async Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto)
     {
         Result result = new();
+        // validate leave type enum value
         bool isValidLeaveType = Enum.IsDefined(typeof(EnumsHelper.LeaveTypes), leaveTypeRequestDto.LeaveType);
         if (!isValidLeaveType)
         {
@@ -75,12 +76,13 @@ public class LeaveManagementService : ILeaveManagementService
         }
         Expression<Func<LeaveTypes, bool>> leaveTypeCondition = l => l.LeaveType == leaveTypeRequestDto.LeaveType;
 
+        // create new leave type
         if (string.IsNullOrEmpty(leaveTypeRequestDto.LeaveTypeId))
         {
             var existingLeaveType = await _leaveTypeRepo.FirstOrDefault(leaveTypeCondition, true);
             if (existingLeaveType == null)
             {
-                var leaveTypeDomain = new LeaveTypes
+                var leaveType = new LeaveTypes
                 {
                     MinAdvanceNoticeDate = leaveTypeRequestDto.MinAdvanceNoticeDate,
                     IsHalfDay = leaveTypeRequestDto.IsHalfDay,
@@ -89,7 +91,7 @@ public class LeaveManagementService : ILeaveManagementService
                     MaxLeaveDays = leaveTypeRequestDto.MaxLeaveDays,
                     CreatedDate = DateTime.UtcNow
                 };
-                result = await _leaveTypeRepo.AddOne(leaveTypeDomain);
+                result = await _leaveTypeRepo.AddOne(leaveType);
             }
             else if (existingLeaveType != null && existingLeaveType.IsDeleted == true)
             {
@@ -98,41 +100,40 @@ public class LeaveManagementService : ILeaveManagementService
                 existingLeaveType.LeaveType = leaveTypeRequestDto.LeaveType;
                 existingLeaveType.IsActive = leaveTypeRequestDto.IsActive;
                 existingLeaveType.MaxLeaveDays = leaveTypeRequestDto.MaxLeaveDays;
-                await _leaveTypeRepo.Update(leaveTypeCondition, existingLeaveType);
-                result.Success = true;
+                result = await _leaveTypeRepo.Update(leaveTypeCondition, existingLeaveType);
             }
             result.StatusCode = CustomStatusCode.LeaveTypeAlreadyExist;
             return result;
         }
         else
         {
-
             var existingLeaveTypeName = await _leaveTypeRepo.FirstOrDefault(leaveTypeCondition, true);
             Expression<Func<LeaveTypes, bool>> whereCondition = l => l.LeaveTypeId == leaveTypeRequestDto.LeaveTypeId;
             var existingLeaveType = await _leaveTypeRepo.FirstOrDefault(whereCondition);
             if (existingLeaveType == null)
             {
                 result.Success = false;
+                result.StatusCode = CustomStatusCode.LeaveTypeNotExist;
                 return result;
             }
             if (existingLeaveTypeName != null && existingLeaveTypeName.LeaveType == leaveTypeRequestDto.LeaveType && existingLeaveTypeName.LeaveTypeId != leaveTypeRequestDto.LeaveTypeId)
             {
-                if (existingLeaveTypeName.IsDeleted == true)
-                {
-                    // state change of already exist leave type
-                    existingLeaveTypeName.IsDeleted = false;
-                    existingLeaveTypeName.LeaveType = leaveTypeRequestDto.LeaveType;
-                    existingLeaveTypeName.MaxLeaveDays = leaveTypeRequestDto.MaxLeaveDays;
-                    existingLeaveType.MinAdvanceNoticeDate = leaveTypeRequestDto.MinAdvanceNoticeDate;
-                    existingLeaveType.IsHalfDay = leaveTypeRequestDto.IsHalfDay;
-                    existingLeaveType.IsActive = leaveTypeRequestDto.IsActive;
-                    await _leaveTypeRepo.Update(leaveTypeCondition, existingLeaveTypeName);
-                    //state change of selected leave type
-                    existingLeaveType.IsDeleted = true;
-                    result.Success = true;
-                    await _leaveTypeRepo.Update(whereCondition, existingLeaveType);
-                    return result;
-                }
+                // if (existingLeaveTypeName.IsDeleted == true)
+                // {
+                //     // state change of already exist leave type
+                //     existingLeaveTypeName.IsDeleted = false;
+                //     existingLeaveTypeName.LeaveType = leaveTypeRequestDto.LeaveType;
+                //     existingLeaveTypeName.MaxLeaveDays = leaveTypeRequestDto.MaxLeaveDays;
+                //     existingLeaveType.MinAdvanceNoticeDate = leaveTypeRequestDto.MinAdvanceNoticeDate;
+                //     existingLeaveType.IsHalfDay = leaveTypeRequestDto.IsHalfDay;
+                //     existingLeaveType.IsActive = leaveTypeRequestDto.IsActive;
+                //     await _leaveTypeRepo.Update(leaveTypeCondition, existingLeaveTypeName);
+                //     //state change of selected leave type
+                //     existingLeaveType.IsDeleted = true;
+                //     result.Success = true;
+                //     await _leaveTypeRepo.Update(whereCondition, existingLeaveType);
+                //     return result;
+                // }
                 result.Success = false;
                 result.StatusCode = CustomStatusCode.LeaveTypeAlreadyExist;
                 return result;
@@ -160,25 +161,8 @@ public class LeaveManagementService : ILeaveManagementService
             Expression<Func<LeaveTypes, bool>> isActiveCondition = l => !l.IsDeleted && l.IsActive;
             leaveTypeList = await _leaveTypeRepo.GetAll(isActiveCondition);
         }
-
-
-        List<string> usersId = leaveTypeList.Select(l => l.CreatedBy).ToList();
-        List<EmpUser> users = (await _empUser.GetAll(u => usersId.Contains(u.UserId))).ToList();
-
-        List<LeaveTypeResponseDto> leaveTypeData = (from leaveType in leaveTypeList
-                                                    join user in users on leaveType.CreatedBy equals user.UserId
-                                                    select new LeaveTypeResponseDto
-                                                    {
-                                                        LeaveTypeId = leaveType.LeaveTypeId,
-                                                        LeaveType = leaveType.LeaveType,
-                                                        MaxLeaveDays = leaveType.MaxLeaveDays,
-                                                        MinAdvanceNoticeDate = leaveType.MinAdvanceNoticeDate,
-                                                        IsHalfDay = leaveType.IsHalfDay,
-                                                        IsActive = leaveType.IsActive,
-                                                        CreatedBy = user.FirstName + " " + user.LastName,
-                                                        CreatedOn = leaveType.CreatedDate
-                                                    }
-                                                    ).OrderByDescending(d => d.CreatedOn).ToList();
+       ;
+        List<LeaveTypeResponseDto> leaveTypeData = _mapper.Map<List<LeaveTypeResponseDto>>(leaveTypeList);
         return new Result<LeaveTypeResponseDto>
         {
             Success = true,
@@ -196,27 +180,21 @@ public class LeaveManagementService : ILeaveManagementService
         return result;
     }
 
-    // leave balance 
+
+    // leave balance services
 
     public async Task<Result> CreateUpdateLeaveBalance(LeaveBalanceRequestDto leaveBalanceRequestDto)
     {
         Result result = new();
-        var employeeExist = await _empUser.FirstOrDefault(e => e.UserId == leaveBalanceRequestDto.EmployeeId);
+        var employeeExist = await _employeeRepository.FirstOrDefault(e => e.UserId == leaveBalanceRequestDto.EmployeeId);
         if (employeeExist == null)
         {
             result.StatusCode = CustomStatusCode.EmployeeNotExist;
             return result;
         }
         IEnumerable<LeaveTypes> leaveTypes = await _leaveTypeRepo.GetAll();
-        if (ValidateLeaveBalance(leaveBalanceRequestDto, result, leaveTypes) == false)
-        {
-            return result;
-        }
-        if (await InitializeLeaveBalance(leaveBalanceRequestDto, result) == false)
-        {
-            result.Message = "Remaining Leave Should Be Less Than Maximum Leave";
-            return result;
-        }
+        if (ValidateLeaveBalance(leaveBalanceRequestDto, result, leaveTypes) == false) return result;
+        if (await InitializeLeaveBalance(leaveBalanceRequestDto, result) == false) return result;
         if (string.IsNullOrEmpty(leaveBalanceRequestDto.Id))
         {
             Expression<Func<LeaveBalance, bool>> whereCondition = l => l.EmployeeId == leaveBalanceRequestDto.EmployeeId && l.Year.Year == DateTime.UtcNow.Year;
@@ -230,7 +208,8 @@ public class LeaveManagementService : ILeaveManagementService
             }
             else
             {
-                result.Message = "Leave Balance For Current Employee Already Exists";
+                result.Success = false;
+                result.StatusCode = CustomStatusCode.LeaveBalanceAlreadyExists;
                 return result;
             }
         }
@@ -244,13 +223,12 @@ public class LeaveManagementService : ILeaveManagementService
         return result;
     }
 
-
     public async Task<Result<LeaveBalanceResponseDto>> GetLeaveBalance(LeaveBalanceFilter? leaveBalanceFilter)
     {
         IEnumerable<LeaveBalance> leaveBalances = [];
         var CompanyId = CurrentContext.CompanyId(_httpContextAccessor);
 
-        List<string> empId = !string.IsNullOrEmpty(leaveBalanceFilter.EmployeeName) ? (await _empUser.GetAll(e => e.FirstName.ToLower().Contains(leaveBalanceFilter.EmployeeName) || e.LastName.ToLower().Contains(leaveBalanceFilter.EmployeeName))).Select(e => e.UserId).ToList() : null;
+        List<string> empId = !string.IsNullOrEmpty(leaveBalanceFilter.EmployeeName) ? (await _employeeRepository.GetAll(e => e.FirstName.ToLower().Contains(leaveBalanceFilter.EmployeeName) || e.LastName.ToLower().Contains(leaveBalanceFilter.EmployeeName))).Select(e => e.UserId).ToList() : null;
         Expression<Func<LeaveBalance, bool>> whereCondition = l =>
         (string.IsNullOrEmpty(leaveBalanceFilter.EmployeeName) || empId.Contains(l.EmployeeId))
         && ((leaveBalanceFilter.Year == null && l.Year.Year == DateTime.UtcNow.Year) || (l.Year.Year == leaveBalanceFilter.Year));
@@ -258,7 +236,7 @@ public class LeaveManagementService : ILeaveManagementService
 
         leaveBalances = (await _leaveBalance.GetAggregateDataAsync<LeaveBalance>(whereCondition, pageNo: leaveBalanceFilter.PageNo, pageSize: leaveBalanceFilter.PageSize, isAscending: false, orderedKey: "CreatedDate")).ToList();
         List<string> userIds = leaveBalances.Select(lb => lb.EmployeeId).ToList();
-        List<EmpUser> users = (await _empUser.GetAll(e => userIds.Contains(e.UserId))).ToList();
+        List<EmpUser> users = (await _employeeRepository.GetAll(e => userIds.Contains(e.UserId))).ToList();
         List<LeaveTypes> leaveTypes = (await _leaveTypeRepo.GetAll()).ToList();
         IEnumerable<JobTitles> jobTitles = await _jobTitleRepo.GetAll();
 
@@ -292,7 +270,7 @@ public class LeaveManagementService : ILeaveManagementService
     public async Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string employeeId)
     {
         Result<EmployeeLeaveBalanceResponseDto> result = new();
-        bool isEmpExist = await _empUser.Exist(x => x.UserId == employeeId);
+        bool isEmpExist = await _employeeRepository.Exist(x => x.UserId == employeeId);
         if (!isEmpExist)
         {
             result.Success = false;
@@ -314,7 +292,7 @@ public class LeaveManagementService : ILeaveManagementService
                 LeaveType = empLeaveTypeBalance.LeaveType,
                 MaximumLeave = empLeaveTypeBalance.MaximumLeave,
                 RemainingLeave = empLeaveTypeBalance.RemainingLeave ?? 0,
-                MinAdvanceNoticeDate = leaveType.MinAdvanceNoticeDate ?? 0,
+                MinAdvanceNoticeDate = leaveType.MinAdvanceNoticeDate,
                 IsHalfDay = leaveType.IsHalfDay,
             }
         ).ToList();
@@ -325,24 +303,32 @@ public class LeaveManagementService : ILeaveManagementService
         return result;
     }
 
-    // Leave 
     public async Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto)
     {
         Result result = new();
+
         var selectedLeaveType = await _leaveTypeRepo.FirstOrDefault(lt => lt.LeaveType == leaveRequestDto.LeaveType);
         if (selectedLeaveType == null)
         {
-            result.Success = false;
-            result.Message = "Invalid Leave Type";
+            result.StatusCode = CustomStatusCode.LeaveTypeNotExist;
             return result;
         }
+
         Expression<Func<LeaveBalance, bool>> leaveBalanceCondition = lb => lb.EmployeeId == leaveRequestDto.EmployeeId && lb.Year.Year == DateTime.UtcNow.Year;
         var selectedEmpLeaveBal = await _leaveBalance.FirstOrDefault(leaveBalanceCondition);
         if (selectedEmpLeaveBal == null)
         {
-            result.Success = false;
+            result.StatusCode = CustomStatusCode.LeaveBalanceNotExist;
             return result;
         }
+        bool leaveTypeExist = selectedEmpLeaveBal.LeaveTypeBalances.Any(lb => lb.LeaveType == leaveRequestDto.LeaveType);
+        if (!leaveTypeExist)
+        {
+            result.StatusCode = CustomStatusCode.LeaveTypeBalanceNotExists;
+            return result;
+        }
+
+        // if user has pending leave request
         if (leaveRequestDto.LeaveRequestId == null)
         {
             int pendingLeaves = await _leave.Count(l => l.EmployeeId == leaveRequestDto.EmployeeId && l.Status == EnumsHelper.LeaveRequestStatus.Pending);
@@ -420,7 +406,7 @@ public class LeaveManagementService : ILeaveManagementService
             count = await _leave.Count(whereCondition);
             leaveRequestList = (await _leave.GetAggregateDataAsync<LeaveRequest>(whereCondition, pageNo: leaveFilter.PageNo, pageSize: leaveFilter.PageSize, isAscending: false, orderedKey: "CreatedDate")).ToList();
         }
-        var users = await _empUser.GetAll();
+        var users = await _employeeRepository.GetAll();
         var jobTitles = await _jobTitleRepo.GetAll();
 
         List<LeaveResponseDto> FinalLeaveRequestList = (from leave in leaveRequestList
@@ -524,7 +510,7 @@ public class LeaveManagementService : ILeaveManagementService
             // add logic
             foreach (var leaveTypeBalance in leaveBalanceRequestDto.LeaveTypeBalances)
             {
-                if (leaveTypeBalance.RemainingLeave is null) leaveTypeBalance.RemainingLeave = leaveTypeBalance.MaximumLeave;
+                leaveTypeBalance.RemainingLeave ??= leaveTypeBalance.MaximumLeave;
             }
         }
         else
@@ -550,14 +536,20 @@ public class LeaveManagementService : ILeaveManagementService
                 }
                 else if (leaveTypeBalance.MaximumLeave > existingLeaveBalance.MaximumLeave)
                 {
-                    leaveTypeBalance.RemainingLeave = existingLeaveBalance.RemainingLeave + leaveTypeBalance.MaximumLeave - existingLeaveBalance.MaximumLeave;
+                    leaveTypeBalance.RemainingLeave = (existingLeaveBalance.RemainingLeave ?? 0) + leaveTypeBalance.MaximumLeave - existingLeaveBalance.MaximumLeave;
                 }
                 else
                 {
-                    decimal leaveTaken = (decimal)(existingLeaveBalance.MaximumLeave - existingLeaveBalance.RemainingLeave);
+                    decimal leaveTaken = existingLeaveBalance.MaximumLeave - (existingLeaveBalance.RemainingLeave ?? 0);
                     leaveTaken = Math.Max(leaveTaken, 0);
                     leaveTypeBalance.RemainingLeave = leaveTaken > 0 ? Math.Max(leaveTypeBalance.MaximumLeave - leaveTaken, 0) : leaveTypeBalance.MaximumLeave;
                 }
+
+                // Clamp RemainingLeave between 0 and MaximumLeave
+                if (leaveTypeBalance.RemainingLeave < 0)
+                    leaveTypeBalance.RemainingLeave = 0;
+                if (leaveTypeBalance.RemainingLeave > leaveTypeBalance.MaximumLeave)
+                    leaveTypeBalance.RemainingLeave = leaveTypeBalance.MaximumLeave;
             }
         }
         return true;
@@ -570,11 +562,19 @@ public class LeaveManagementService : ILeaveManagementService
             LeaveTypes? leaveType = leaveTypes.FirstOrDefault(lt => lt.LeaveType == leaveTypeBalance.LeaveType && lt.IsActive);
             if (leaveType is null)
             {
+                result.StatusCode = CustomStatusCode.LeaveTypeNotExist;
                 result.Success = false;
+                return false;
+            }
+            else if (leaveTypeBalance.MaximumLeave < 0)
+            {
+                result.Success = false;
+                result.StatusCode = CustomStatusCode.NegativeValueNotAllowed;
                 return false;
             }
             else if (leaveType.MaxLeaveDays < leaveTypeBalance.MaximumLeave)
             {
+                result.StatusCode = CustomStatusCode.MaxAllowedLeaveDaysExceed;
                 result.Success = false;
                 return false;
             }
@@ -615,7 +615,6 @@ public class LeaveManagementService : ILeaveManagementService
         return true;
     }
 
-
     private async void LeaveNotification(LeaveRequest leaveDomain, EnumsHelper.LeaveRequestStatus status)
     {
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
@@ -630,7 +629,7 @@ public class LeaveManagementService : ILeaveManagementService
         {
             string company_id = CurrentContext.CompanyId(_httpContextAccessor);
             List<string> roleIds = (await _roleRepository.GetAll(x => x.CompanyId == company_id && x.RoleType == Convert.ToInt32(EnumsHelper.Roles.Administrator) || x.RoleType == Convert.ToInt32(EnumsHelper.Roles.HR))).Select(x => x.RolesId).ToList();
-            targetUserIds = (await _empUser.GetAll(x => roleIds.Contains(x.RoleId))).Select(x => x.UserId).ToList();
+            targetUserIds = (await _employeeRepository.GetAll(x => roleIds.Contains(x.RoleId))).Select(x => x.UserId).ToList();
             if (targetUserIds.Contains(leaveDomain.EmployeeId))
             {
                 targetUserIds.Remove(leaveDomain.EmployeeId);

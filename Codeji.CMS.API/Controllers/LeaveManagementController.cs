@@ -30,6 +30,7 @@ public class LeaveManagementController : ControllerBase
     [ModulePermission(AppModule.LeaveManagement, [Permission.Create, Permission.Edit])]
     public async Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto)
     {
+        Result result = new();
         return await _leaveManagementService.CreateUpdateLeaveType(leaveTypeRequestDto);
     }
 

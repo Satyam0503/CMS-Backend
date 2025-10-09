@@ -27,5 +27,8 @@ public static class CustomStatusCode
     public const int LeaveTypeAlreadyExist = 23;
     public const int PayRollNotExist = 24;
     public const int PayRollAlreadyForMonth = 25;
-
+    public const int MaxAllowedLeaveDaysExceed = 26;
+    public const int NegativeValueNotAllowed = 27;
+    public const int LeaveBalanceAlreadyExists = 28;
+    public const int LeaveTypeBalanceNotExists = 29;
 }
