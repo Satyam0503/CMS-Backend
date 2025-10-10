@@ -19,8 +19,9 @@ public interface ILeaveManagementService
     Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string employeeId);
 
     // leave
-    Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto);
-    Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveFilter filter);
+    Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto, string userId);
+    Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveRequestFilter filter);
+    Task<Result<MyLeaveRequestResponse>> GetMyLeaveRequests(LeaveRequestFilter filter, string userId);
     Task<Result> DeleteLeaveRequest(string leaveRequestId);
     Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, EnumsHelper.LeaveRequestStatus status);
 }

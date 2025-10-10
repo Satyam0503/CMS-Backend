@@ -303,7 +303,7 @@ public class LeaveManagementService : ILeaveManagementService
         return result;
     }
 
-    public async Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto)
+    public async Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto, string userId)
     {
         Result result = new();
 
@@ -314,7 +314,7 @@ public class LeaveManagementService : ILeaveManagementService
             return result;
         }
 
-        Expression<Func<LeaveBalance, bool>> leaveBalanceCondition = lb => lb.EmployeeId == leaveRequestDto.EmployeeId && lb.Year.Year == DateTime.UtcNow.Year;
+        Expression<Func<LeaveBalance, bool>> leaveBalanceCondition = lb => lb.EmployeeId == userId && lb.Year.Year == DateTime.UtcNow.Year;
         var selectedEmpLeaveBal = await _leaveBalance.FirstOrDefault(leaveBalanceCondition);
         if (selectedEmpLeaveBal == null)
         {
@@ -331,7 +331,7 @@ public class LeaveManagementService : ILeaveManagementService
         // if user has pending leave request
         if (leaveRequestDto.LeaveRequestId == null)
         {
-            int pendingLeaves = await _leave.Count(l => l.EmployeeId == leaveRequestDto.EmployeeId && l.Status == EnumsHelper.LeaveRequestStatus.Pending);
+            int pendingLeaves = await _leave.Count(l => l.EmployeeId == userId && l.Status == EnumsHelper.LeaveRequestStatus.Pending);
             if (pendingLeaves > 0)
             {
                 result.Success = false;
@@ -350,7 +350,7 @@ public class LeaveManagementService : ILeaveManagementService
         {
             var leaveDomain = new LeaveRequest
             {
-                EmployeeId = leaveRequestDto.EmployeeId,
+                EmployeeId = userId,
                 LeaveType = leaveRequestDto.LeaveType,
                 StartDate = leaveRequestDto.StartDate,
                 EndDate = leaveRequestDto.IsHalfDay ? leaveRequestDto.StartDate : leaveRequestDto.EndDate,
@@ -386,7 +386,7 @@ public class LeaveManagementService : ILeaveManagementService
         }
     }
 
-    public async Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveFilter? leaveFilter)
+    public async Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveRequestFilter? leaveFilter)
     {
         int count;
         IEnumerable<LeaveRequest> leaveRequestList = [];
@@ -397,12 +397,11 @@ public class LeaveManagementService : ILeaveManagementService
         }
         else
         {
-            Expression<Func<LeaveRequest, bool>> whereCondition = l =>
-            (leaveFilter.EmployeeId == null || l.EmployeeId == leaveFilter.EmployeeId)
-            && (leaveFilter.LeaveType == null || !leaveFilter.LeaveType.Any() || leaveFilter.LeaveType.Contains(l.LeaveType))
-            && (leaveFilter.StartDate == null || !leaveFilter.StartDate.HasValue || (l.StartDate >= leaveFilter.StartDate))
-            && (leaveFilter.EndDate == null || !leaveFilter.EndDate.HasValue || (l.EndDate <= leaveFilter.EndDate))
-            && (leaveFilter.Status == null || !leaveFilter.Status.Any() || leaveFilter.Status.Contains(l.Status));
+            Expression<Func<LeaveRequest, bool>> whereCondition = lr =>
+               (leaveFilter.LeaveType == null || (lr.LeaveType == leaveFilter.LeaveType))
+            && (leaveFilter.Status == null || (lr.Status == leaveFilter.Status))
+            && ((leaveFilter.StartDate == null || (lr.StartDate >= leaveFilter.StartDate)) && (leaveFilter.EndDate == null || (lr.StartDate <= leaveFilter.EndDate)));
+
             count = await _leave.Count(whereCondition);
             leaveRequestList = (await _leave.GetAggregateDataAsync<LeaveRequest>(whereCondition, pageNo: leaveFilter.PageNo, pageSize: leaveFilter.PageSize, isAscending: false, orderedKey: "CreatedDate")).ToList();
         }
@@ -418,7 +417,6 @@ public class LeaveManagementService : ILeaveManagementService
                                                         select new LeaveResponseDto
                                                         {
                                                             LeaveRequestId = leave.LeaveRequestId,
-                                                            EmployeeId = leave.EmployeeId,
                                                             EmployeeName = user.FirstName + " " + user.LastName,
                                                             ProfileUrl = Common.GetEmployeeImageUrl(user.ProfileUrl),
                                                             JobRole = jobTitle?.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label),
@@ -440,6 +438,48 @@ public class LeaveManagementService : ILeaveManagementService
             TotalRecords = count,
             MethodResults = FinalLeaveRequestList
         };
+    }
+
+    public async Task<Result<MyLeaveRequestResponse>> GetMyLeaveRequests(LeaveRequestFilter filter, string userId)
+    {
+        Result<MyLeaveRequestResponse> result = new();
+        Expression<Func<LeaveRequest, bool>> whereCondition = lr =>
+                lr.EmployeeId == userId
+            && (filter.LeaveType == null || (lr.LeaveType == filter.LeaveType))
+            && (filter.Status == null || (lr.Status == filter.Status))
+            && ((filter.StartDate == null || (lr.StartDate >= filter.StartDate)) && (filter.EndDate == null || (lr.StartDate <= filter.EndDate)));
+
+        int count = await _leave.Count(whereCondition);
+        List<LeaveRequest> myLeaveRequestList = (await _leave.GetAggregateDataAsync<LeaveRequest>(whereCondition, pageNo: filter.PageNo, pageSize: filter.PageSize, isAscending: false, orderedKey: "CreatedDate")).ToList();
+
+        // get reviewer details
+        var userIds = myLeaveRequestList.Select(lr => lr.ReviewedBy).Where(id => !string.IsNullOrEmpty(id)).Distinct().ToList();
+        var users = await _employeeRepository.GetAll(u => userIds.Contains(u.UserId));
+
+        var userDict = users.ToDictionary(u => u.UserId, u => u);
+
+        var responseList = myLeaveRequestList.Select(lr =>
+        {
+            var reviewer = !string.IsNullOrEmpty(lr.ReviewedBy) && userDict.ContainsKey(lr.ReviewedBy)
+                ? userDict[lr.ReviewedBy]
+                : null;
+            return new MyLeaveRequestResponse
+            {
+                LeaveRequestId = lr.LeaveRequestId,
+                IsHalfDay = lr.IsHalfDay,
+                LeaveType = lr.LeaveType,
+                StartDate = lr.StartDate,
+                EndDate = lr.EndDate,
+                TotalDays = lr.TotalDays,
+                Reason = lr.Reason,
+                Status = lr.Status,
+                ReviewedBy = reviewer != null ? $"{reviewer.FirstName} {reviewer.LastName}" : "-",
+            };
+        }).ToList();
+
+        result.MethodResults = responseList;
+        result.TotalRecords = count;
+        return result;
     }
 
     public async Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, EnumsHelper.LeaveRequestStatus status)

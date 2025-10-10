@@ -50,6 +50,7 @@ namespace Codeji.CMS.Services.Registration
             CreateMap<JobTitles, JobTitleRequestDto>().ReverseMap();
             CreateMap<CustomAttributeValue, CustomAttributeValueRequestDto>().ReverseMap();
             CreateMap<LeaveTypes, LeaveTypeResponseDto>().ReverseMap();
+            CreateMap<LeaveRequest, MyLeaveRequestResponse>().ReverseMap();
         }
     }
 

@@ -2,12 +2,9 @@ using Codeji.CMS.Utility.Enums;
 
 namespace Codeji.CMS.DTO.LeaveManagement.Leave;
 
-public class LeaveResponseDto
+public class MyLeaveRequestResponse
 {
     public string LeaveRequestId { get; set; }
-    public string EmployeeName { get; set; }
-    public string? ProfileUrl { get; set; }
-    public Dictionary<string, string>? JobRole { get; set; } = null;
     public bool IsHalfDay { get; set; }
     public EnumsHelper.LeaveTypes LeaveType { get; set; }
     public DateTime StartDate { get; set; }

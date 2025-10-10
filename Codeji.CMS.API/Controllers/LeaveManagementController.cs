@@ -7,6 +7,7 @@ using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
 using Codeji.CMS.Services.LeaveManagement;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Enums;
+using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -19,10 +20,12 @@ public class LeaveManagementController : ControllerBase
 {
 
     private readonly ILeaveManagementService _leaveManagementService;
+    private readonly IHttpContextAccessor _httpContextAccessor;
 
-    public LeaveManagementController(ILeaveManagementService leaveManagementService)
+    public LeaveManagementController(ILeaveManagementService leaveManagementService, IHttpContextAccessor httpContextAccessor)
     {
         _leaveManagementService = leaveManagementService;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     [Route("CreateUpdateLeaveType")]
@@ -72,14 +75,23 @@ public class LeaveManagementController : ControllerBase
     [HttpPost]
     public async Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto)
     {
-        return await _leaveManagementService.CreateUpdateLeave(leaveRequestDto);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _leaveManagementService.CreateUpdateLeave(leaveRequestDto, userId);
     }
 
     [Route("GetLeaveRequest")]
     [HttpPost]
-    public async Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveFilter? leaveFilter)
+    public async Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveRequestFilter? leaveFilter)
     {
         return await _leaveManagementService.GetLeaveRequest(leaveFilter);
+    }
+
+    [Route("GetMyLeaveRequests")]
+    [HttpPost]
+    public async Task<Result<MyLeaveRequestResponse>> GetMyLeaveRequests(LeaveRequestFilter leaveFilter)
+    {
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _leaveManagementService.GetMyLeaveRequests(leaveFilter, userId);
     }
 
     [Route("DeleteLeaveRequest/{leaveRequestId}")]
