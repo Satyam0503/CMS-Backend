@@ -306,6 +306,11 @@ public class LeaveManagementService : ILeaveManagementService
     public async Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto, string userId)
     {
         Result result = new();
+        // if (leaveRequestDto.StartDate < DateTime.UtcNow.Date || leaveRequestDto.EndDate < DateTime.UtcNow.Date)
+        // {
+        //     result.StatusCode = CustomStatusCode.CannotRequestPastDate;
+        //     return result;
+        // }
 
         var selectedLeaveType = await _leaveTypeRepo.FirstOrDefault(lt => lt.LeaveType == leaveRequestDto.LeaveType);
         if (selectedLeaveType == null)
@@ -339,13 +344,22 @@ public class LeaveManagementService : ILeaveManagementService
                 return result;
             }
         }
-        var totalRequestedLeaveDays = leaveRequestDto.EndDate.Day - leaveRequestDto.StartDate.Day + 1;
+        // check if emp already has apporoved leave on request date
+        var upcomingApprovedLeaves = await _leave.GetAll(lr => lr.EmployeeId == userId && lr.Status == EnumsHelper.LeaveRequestStatus.Accepted && lr.EndDate >= DateTime.UtcNow.Date);
+        bool isOverlapping = upcomingApprovedLeaves.Any(lr => leaveRequestDto.StartDate <= lr.EndDate && leaveRequestDto.EndDate >= lr.StartDate);
+        if (isOverlapping)
+        {
+            result.Success = false;
+            result.StatusCode = CustomStatusCode.LeaveDateOverlaps;
+            return result;
+        }
+
+        var totalRequestedLeaveDays = (int)(leaveRequestDto.EndDate - leaveRequestDto.StartDate).TotalDays + 1;
         bool IsValid = await LeaveRequestValidation(selectedLeaveType, selectedEmpLeaveBal, leaveRequestDto, totalRequestedLeaveDays, result);
         if (IsValid == false)
         {
             return result;
         }
-
         if (string.IsNullOrEmpty(leaveRequestDto.LeaveRequestId))
         {
             var leaveDomain = new LeaveRequest
@@ -474,6 +488,7 @@ public class LeaveManagementService : ILeaveManagementService
                 Reason = lr.Reason,
                 Status = lr.Status,
                 ReviewedBy = reviewer != null ? $"{reviewer.FirstName} {reviewer.LastName}" : "-",
+                Comment = lr.Comment ?? ""
             };
         }).ToList();
 
@@ -482,12 +497,12 @@ public class LeaveManagementService : ILeaveManagementService
         return result;
     }
 
-    public async Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, EnumsHelper.LeaveRequestStatus status)
+    public async Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, LeaveRequestUpdateDto model)
     {
         Result result = new();
         Expression<Func<LeaveRequest, bool>> leaveRequestCond = lr => lr.LeaveRequestId == leaveRequestId;
         var existingLeaveRequest = await _leave.FirstOrDefault(leaveRequestCond);
-        if (existingLeaveRequest == null || status == EnumsHelper.LeaveRequestStatus.Pending || status == existingLeaveRequest.Status) return result;
+        if (existingLeaveRequest == null || model.Status == EnumsHelper.LeaveRequestStatus.Pending || model.Status == existingLeaveRequest.Status) return result;
 
         Expression<Func<LeaveBalance, bool>> leaveBalanceCond = lb => lb.EmployeeId == existingLeaveRequest.EmployeeId;
         var selectedEmpLeaveBal = await _leaveBalance.FirstOrDefault(leaveBalanceCond);
@@ -498,7 +513,7 @@ public class LeaveManagementService : ILeaveManagementService
         var balance = selectedEmpLeaveBal.LeaveTypeBalances.FirstOrDefault(lt => lt.LeaveType == existingLeaveRequest.LeaveType);
 
         var reviewedBy = CurrentContext.UserId(_httpContextAccessor);
-        if (status == EnumsHelper.LeaveRequestStatus.Rejected)
+        if (model.Status == EnumsHelper.LeaveRequestStatus.Rejected)
         {
             if (existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted && existingLeaveRequest.IsHalfDay == true)
             {
@@ -509,9 +524,10 @@ public class LeaveManagementService : ILeaveManagementService
                 balance.RemainingLeave += existingLeaveRequest.TotalDays;
             }
             existingLeaveRequest.ReviewedBy = reviewedBy;
+            existingLeaveRequest.Comment = model.Comment;
             existingLeaveRequest.Status = EnumsHelper.LeaveRequestStatus.Rejected;
         }
-        if (status == EnumsHelper.LeaveRequestStatus.Accepted)
+        if (model.Status == EnumsHelper.LeaveRequestStatus.Accepted)
         {
             if (existingLeaveRequest.IsHalfDay == true && existingLeaveRequest.Status != EnumsHelper.LeaveRequestStatus.Accepted)
             {
@@ -523,12 +539,13 @@ public class LeaveManagementService : ILeaveManagementService
             }
             existingLeaveRequest.Status = EnumsHelper.LeaveRequestStatus.Accepted;
             existingLeaveRequest.ReviewedBy = reviewedBy;
+            existingLeaveRequest.Comment = model.Comment;
         }
         await _leave.Update(leaveRequestCond, existingLeaveRequest);
         result = await _leaveBalance.Update(leaveBalanceCond, selectedEmpLeaveBal);
         if (result.Success)
         {
-            LeaveNotification(existingLeaveRequest, status);
+            LeaveNotification(existingLeaveRequest, model.Status);
         }
         return result;
     }

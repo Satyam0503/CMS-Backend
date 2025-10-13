@@ -13,3 +13,9 @@ public class LeaveRequestDto
     public string? ReviewedBy { get; set; }
     public EnumsHelper.LeaveRequestStatus? Status { get; set; }
 }
+
+public class LeaveRequestUpdateDto
+{
+    public string Comment { get; set; }
+    public EnumsHelper.LeaveRequestStatus Status { get; set; }
+}

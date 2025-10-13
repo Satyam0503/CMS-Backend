@@ -103,9 +103,9 @@ public class LeaveManagementController : ControllerBase
 
     [Route("LeaveRequest/{leaveRequestId}/Status")]
     [HttpPatch]
-    public async Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, [FromBody] EnumsHelper.LeaveRequestStatus status)
+    public async Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, [FromBody] LeaveRequestUpdateDto model)
     {
-        return await _leaveManagementService.UpdateLeaveRequestStatus(leaveRequestId, status);
+        return await _leaveManagementService.UpdateLeaveRequestStatus(leaveRequestId, model);
     }
 
     [Route("GetEmployeeLeaveBalance/{employeeId}")]

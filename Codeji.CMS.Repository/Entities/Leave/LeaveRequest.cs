@@ -15,6 +15,7 @@ public class LeaveRequest : BaseClass
     public decimal TotalDays { get; set; }
     public string Reason { get; set; }
     public string? ReviewedBy { get; set; }
+    public string Comment { get; set; } = "";
     public EnumsHelper.LeaveRequestStatus Status { get; set; }
-    
+
 }

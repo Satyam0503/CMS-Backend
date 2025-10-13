@@ -31,4 +31,5 @@ public static class CustomStatusCode
     public const int NegativeValueNotAllowed = 27;
     public const int LeaveBalanceAlreadyExists = 28;
     public const int LeaveTypeBalanceNotExists = 29;
+    public const int LeaveDateOverlaps = 30;
 }

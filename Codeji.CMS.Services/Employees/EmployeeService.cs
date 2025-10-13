@@ -129,7 +129,7 @@ namespace Codeji.CMS.Services.Employees
                 BloodGroup = user.BloodGroup,
                 PersonalEmail = user.PersonalEmail,
                 EmergencyContact = user.EmergencyContact,
-                DateOfJoining = user.DateOfJoining,
+                DateOfJoining = user.DateOfJoining ?? DateTime.Now.ToString("yyyy-MM-dd"),
                 Status = true,
                 IsEmailVerified = false,
                 Address = user.Address,
