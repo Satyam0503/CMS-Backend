@@ -52,7 +52,6 @@ public class LeaveManagementController : ControllerBase
         return await _leaveManagementService.DeleteLeaveType(leaveTypeId);
     }
 
-
     // leave Balance
     [Route("CreateUpdateLeaveBalance")]
     [HttpPost]
@@ -68,7 +67,6 @@ public class LeaveManagementController : ControllerBase
     {
         return await _leaveManagementService.GetLeaveBalance(leaveBalanceFilter);
     }
-
 
     // leave request
     [Route("CreateUpdateLeave")]
@@ -114,5 +112,12 @@ public class LeaveManagementController : ControllerBase
     {
         var result = await _leaveManagementService.GetEmployeeLeaveBalance(employeeId);
         return result;
+    }
+
+    [Route("GetLeaveRequestSummary")]
+    [HttpGet]
+    public async Task<Result<LeaveRequestSummaryResponseDto>> GetLeaveRequestSummary()
+    {
+        return await _leaveManagementService.GetLeaveRequestSummary();
     }
 }

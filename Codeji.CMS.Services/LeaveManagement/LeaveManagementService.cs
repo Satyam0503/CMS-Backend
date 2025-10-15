@@ -20,6 +20,7 @@ using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using EllipticCurve.Utils;
+using LinqKit;
 using Microsoft.AspNetCore.Http;
 
 namespace Codeji.CMS.Services.LeaveManagement;
@@ -179,7 +180,6 @@ public class LeaveManagementService : ILeaveManagementService
         result = await _leaveTypeRepo.Update(whereCondition, deletedLeaveType);
         return result;
     }
-
 
     // leave balance services
 
@@ -738,5 +738,33 @@ public class LeaveManagementService : ILeaveManagementService
         // process all notificatios task
         await Task.WhenAll(notificationTasks);
     }
+
+    public async Task<Result<LeaveRequestSummaryResponseDto>> GetLeaveRequestSummary()
+    {
+        Result<LeaveRequestSummaryResponseDto> result = new();
+        var currentMonth = DateTime.UtcNow.Month;
+        var currentYear = DateTime.UtcNow.Year;
+        Expression<Func<LeaveRequest, bool>> expression = lr => lr.CreatedDate.HasValue && lr.CreatedDate.Value.Month == currentMonth && lr.CreatedDate.HasValue && lr.CreatedDate.Value.Year == currentYear;
+        var currentMonthLeaveRequest = await _leave.GetAll(expression);
+        Dictionary<int, int> leaveStatusSummary = new();
+        currentMonthLeaveRequest.GroupBy(lr => lr.Status).ForEach(lr =>
+        {
+            leaveStatusSummary.Add((int)lr.Key, lr.Count());
+        });
+
+        var leaveTypeSummary = currentMonthLeaveRequest.GroupBy(lr => lr.LeaveType).Select(group => new LeaveTypeSummary()
+        {
+            LeaveType = group.Key,
+            StatusValues = group.GroupBy(lr => lr.Status).ToDictionary(ls => (int)ls.Key, ls => ls.Count())
+        });
+        result.MethodResult = new()
+        {
+            TotalRequests = currentMonthLeaveRequest.Count(),
+            LeaveStatusSummary = leaveStatusSummary,
+            LeaveTypeSummary = leaveTypeSummary.ToList(),
+        };
+        return result;
+    }
+
 }
 

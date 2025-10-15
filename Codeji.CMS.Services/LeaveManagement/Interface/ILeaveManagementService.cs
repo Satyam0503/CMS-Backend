@@ -24,4 +24,5 @@ public interface ILeaveManagementService
     Task<Result<MyLeaveRequestResponse>> GetMyLeaveRequests(LeaveRequestFilter filter, string userId);
     Task<Result> DeleteLeaveRequest(string leaveRequestId);
     Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, LeaveRequestUpdateDto model);
+    Task<Result<LeaveRequestSummaryResponseDto>> GetLeaveRequestSummary();
 }

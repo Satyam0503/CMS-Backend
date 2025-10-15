@@ -62,12 +62,10 @@
             LeaveRequestReject = 4,
             BirthDay = 5
         }
-        public enum HolidayTypes
+        public enum Occasions
         {
-            Cultural = 1,
-            Health = 2,
-            Religious = 3,
-            National = 4,
+            Holiday = 1,
+            Event = 2,
         }
         public enum LeaveRequestStatus
         {
