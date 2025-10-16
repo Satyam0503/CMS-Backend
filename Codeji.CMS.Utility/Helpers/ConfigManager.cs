@@ -42,7 +42,7 @@ public class FileSettings
     public string Employee_ImageUrl { get; set; }
     public string ViewResumeUrl { get; set; }
     public string CompanyLogoUrl { get; set; }
-    public string HolidayCoverImage { get; set; }
+    public string CalendarItemCoverImage { get; set; }
 
 }
 

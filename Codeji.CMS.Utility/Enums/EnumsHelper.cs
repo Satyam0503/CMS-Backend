@@ -62,7 +62,7 @@
             LeaveRequestReject = 4,
             BirthDay = 5
         }
-        public enum Occasions
+        public enum CalendarItem
         {
             Holiday = 1,
             Event = 2,

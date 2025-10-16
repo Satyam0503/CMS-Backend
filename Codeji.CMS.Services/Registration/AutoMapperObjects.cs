@@ -4,7 +4,7 @@ using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.Company.CustomAttribute;
 using Codeji.CMS.DTO.Company.Department;
 using Codeji.CMS.DTO.Company.JobTitle;
-using Codeji.CMS.DTO.Holiday;
+using Codeji.CMS.DTO.Dashboard;
 using Codeji.CMS.DTO.LeaveManagement;
 using Codeji.CMS.DTO.LeaveManagement.Leave;
 using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
@@ -16,6 +16,7 @@ using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.Repository.Entities;
+using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Holidays;
@@ -45,12 +46,12 @@ namespace Codeji.CMS.Services.Registration
             CreateMap<Skills, SkillsDTO>().ReverseMap();
             CreateMap<Notice, MyNoticeDTO>().ReverseMap();
             CreateMap<LeaveBalance, LeaveBalanceRequestDto>().ReverseMap();
-            CreateMap<HolidayResponseDto, Holidays>().ReverseMap();
             CreateMap<Applicant, ApplicantViewModel>().ForMember(dest => dest.ApplyDate, opt => opt.MapFrom(src => src.CreatedDate)).ReverseMap();
             CreateMap<JobTitles, JobTitleRequestDto>().ReverseMap();
             CreateMap<CustomAttributeValue, CustomAttributeValueRequestDto>().ReverseMap();
             CreateMap<LeaveTypes, LeaveTypeResponseDto>().ReverseMap();
             CreateMap<LeaveRequest, MyLeaveRequestResponse>().ReverseMap();
+            CreateMap<CalendarEntity, UpComingHolidayEventResponseDto>().ReverseMap();
         }
     }
 

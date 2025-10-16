@@ -1,15 +1,19 @@
-﻿using System.Linq.Expressions;
+﻿using System.Globalization;
+using System.Linq.Expressions;
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Dashboard;
 using Codeji.CMS.GenericRepository.Interfaces;
+using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Holidays;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
+using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.middlewares;
+using LinqKit;
 using Microsoft.AspNetCore.Http;
 
 namespace Codeji.CMS.Services.Dashboard
@@ -22,13 +26,15 @@ namespace Codeji.CMS.Services.Dashboard
         private readonly IMapper _mapper;
         private readonly IHttpContextAccessor _httpContextAccessor;
         readonly IMongoDbRepository<Applicant> _applicantRepository;
-        readonly IMongoDbRepository<Holidays> _holidayRepository;
+        readonly IMongoDbRepository<CalendarEntity> _calendarRepository;
+        readonly IMongoDbRepository<JobTitles> _jobTitleRepository;
         public DashboardServices(
             IMongoDbRepository<Department> departmentRepository,
             IMongoDbRepository<EmpUser> empUserRepository,
             IHttpContextAccessor httpContextAccessor,
             IMongoDbRepository<Applicant> applicantRepository,
-            IMongoDbRepository<Holidays> holidayRepository,
+            IMongoDbRepository<CalendarEntity> calendarRepository,
+            IMongoDbRepository<JobTitles> jobRepository,
         IMapper mapper)
 
         {
@@ -37,14 +43,14 @@ namespace Codeji.CMS.Services.Dashboard
             _mapper = mapper;
             _httpContextAccessor = httpContextAccessor;
             _applicantRepository = applicantRepository;
-            _holidayRepository = holidayRepository;
+            _calendarRepository = calendarRepository;
+            _jobTitleRepository = jobRepository;
         }
 
         public async Task<List<DepartmentEmpResponseDto>> GetAllDepartmentsDetails(string companyId)
         {
             var allDepartments = await _departmentRepository.GetAll(x => x.CompanyId == companyId && x.IsDeleted == false);
             var allEmpUser = await _empUserRepository.GetAll(x => x.CompanyId == companyId);
-
             var result = from ad in allDepartments
                          join aeu in allEmpUser on ad.DepartmentId equals aeu.Department into empGroup
                          select new DepartmentEmpResponseDto
@@ -96,23 +102,134 @@ namespace Codeji.CMS.Services.Dashboard
             return result;
         }
 
-        public async Task<Result<UpComingHolidayResponseDto>> GetUpComingHolidays()
+        public async Task<Result<UpComingHolidayEventResponseDto>> GetUpComingHolidayAndEvents()
         {
-            Result<UpComingHolidayResponseDto> result = new();
-            Expression<Func<Holidays, bool>> whereCondition = h => h.Date.Date >= DateTime.UtcNow.Date;
-            var data = (await _holidayRepository.GetAggregateDataAsync<Holidays>(whereCondition, isAscending: true, orderedKey: "Date", pageSize: 10)).ToList();
-            if (!data.Any()) return result;
-            result.MethodResults = data.Select(x =>
-                new UpComingHolidayResponseDto()
+            Result<UpComingHolidayEventResponseDto> result = new();
+            Expression<Func<CalendarEntity, bool>> whereCondition = ci => ci.Date.Date >= DateTime.UtcNow.Date;
+
+            var recurringItems = await _calendarRepository.GetAll(ci => ci.Recurring);
+
+            var upcomingEventOrHolidays = recurringItems.Select(ci =>
+            {
+                var date = ci.Date;
+                var adjustedDate = new DateTime(DateTime.UtcNow.Year, date.Month, date.Day, date.Hour, date.Minute, date.Second, date.Kind);
+                if (adjustedDate < DateTime.UtcNow.Date)
                 {
-                    HolidayId = x.HolidayId,
-                    HolidayName = x.HolidayName,
+                    adjustedDate = adjustedDate.AddYears(1);
+                }
+                return new CalendarEntity()
+                {
+                    Id = ci.Id,
+                    Name = ci.Name,
+                    Date = adjustedDate,
+                    Recurring = ci.Recurring,
+                    Description = ci.Description,
+                    Type = ci.Type,
+                    ImageUrl = ci.ImageUrl
+                };
+            }).Where(ci => ci.Date > DateTime.UtcNow).OrderBy(ci => ci.Date);
+
+            var data = (await _calendarRepository.GetAggregateDataAsync<CalendarEntity>(whereCondition, isAscending: true, orderedKey: "Date", pageSize: 10)).ToList();
+
+            var combinedItems = data.Concat(upcomingEventOrHolidays).OrderBy(ci => ci.Date).Select(x =>
+                new CalendarItemDto()
+                {
+                    Id = x.Id,
+                    Name = x.Name,
                     Date = x.Date,
-                    HolidayCoverImageUrl = string.IsNullOrEmpty(x.HolidayImageUrl) ? null : Common.GetHolidayCoverImagePath(x.HolidayImageUrl)
+                    Type = x.Type,
+                    Description = x.Description,
+                    ImageUrl = string.IsNullOrEmpty(x.ImageUrl) ? null : Common.GetCalendarItemCoverImagePath(x.ImageUrl)
                 }
             ).ToList();
+            result.MethodResult = new UpComingHolidayEventResponseDto
+            {
+                Holiday = combinedItems.Where(x => x.Type == EnumsHelper.CalendarItem.Holiday).ToList(),
+                Event = combinedItems.Where(x => x.Type == EnumsHelper.CalendarItem.Event).ToList()
+            };
             return result;
         }
+
+        public async Task<Result<UpcomingCelebrations>> GetUpComingCelebrations()
+        {
+            Result<UpcomingCelebrations> result = new();
+            IEnumerable<EmpUser> employeeList = await _empUserRepository.GetAll();
+            List<string> empJobIds = employeeList.Select(e => e.JobRole).ToList();
+            IEnumerable<JobTitles> jobTitles = await _jobTitleRepository.GetAll(jt => empJobIds.Contains(jt.JobTitleId));
+
+            var today = DateTime.Today;
+            string dateFormat = "yyyy-MM-dd";
+
+            var empJobTitleJoin = (from emp in employeeList
+                                   join jobTitle in jobTitles
+                                   on emp.JobRole equals jobTitle.JobTitleId into empJobTitleGroup
+                                   from jobRole in empJobTitleGroup.DefaultIfEmpty()
+                                   select new
+                                   {
+                                       emp.EmployeeId,
+                                       EmployeeName = $"{emp.FirstName} {emp.LastName}",
+                                       JobRole = jobRole?.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label),
+                                       emp.DateOfBirth,
+                                       emp.DateOfJoining,
+                                       ProfileUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl)
+                                   }).ToList();
+
+            var upcomingBirthdays = empJobTitleJoin
+                .Select(emp =>
+                {
+                    if (!DateTime.TryParseExact(emp.DateOfBirth, dateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dob))
+                        return null; // Skip if invalid format
+
+                    var thisYearBirthday = new DateTime(today.Year, dob.Month, dob.Day);
+                    var nextBirthday = thisYearBirthday < today ? thisYearBirthday.AddYears(1) : thisYearBirthday;
+
+                    return new CalebrationItemDto
+                    {
+                        EmployeeId = emp.EmployeeId,
+                        EmployeeName = emp.EmployeeName,
+                        ProfileUrl = emp.ProfileUrl,
+                        JobRole = emp.JobRole,
+                        Date = nextBirthday
+                    };
+                })
+                .Where(x => x != null)
+                .OrderBy(x => x.Date)
+                .Take(5)
+                .ToList();
+
+            var upcomingAnniversaries = empJobTitleJoin
+                .Select(emp =>
+                {
+                    if (!DateTime.TryParseExact(emp.DateOfJoining, dateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime doj))
+                        return null; // Skip if invalid format
+
+                    var thisYearAnniv = new DateTime(today.Year, doj.Month, doj.Day);
+                    var nextAnniv = thisYearAnniv < today ? thisYearAnniv.AddYears(1) : thisYearAnniv;
+
+                    return new CalebrationItemDto
+                    {
+                        EmployeeId = emp.EmployeeId,
+                        EmployeeName = emp.EmployeeName,
+                        ProfileUrl = emp.ProfileUrl,
+                        JobRole = emp.JobRole,
+                        Date = nextAnniv
+                    };
+                })
+                .Where(x => x != null)
+                .OrderBy(x => x.Date)
+                .Take(5)
+                .ToList();
+
+            result.MethodResult = new UpcomingCelebrations
+            {
+                Birthday = upcomingBirthdays,
+                WorkAnniversary = upcomingAnniversaries
+            };
+            result.Success = true;
+            return result;
+        }
+
     }
+
 }
 

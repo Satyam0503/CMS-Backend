@@ -8,6 +8,7 @@ namespace Codeji.CMS.Services.Interface
         Task<List<DepartmentEmpResponseDto>> GetAllDepartmentsDetails(string companyId);
         Task<List<GenderDetailsResponseModel>> GetAllGenderDetails(string companyId);
         Task<Result<ApplicationDataResponseDto>> GetApplicationStatusData(string? vacancyId);
-        Task<Result<UpComingHolidayResponseDto>> GetUpComingHolidays();
+        Task<Result<UpComingHolidayEventResponseDto>> GetUpComingHolidayAndEvents();
+        Task<Result<UpcomingCelebrations>> GetUpComingCelebrations();
     }
 }

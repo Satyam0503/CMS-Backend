@@ -23,9 +23,9 @@ namespace Codeji.CMS.Utility
                 return null;
             return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.CompanyLogoUrl + logoUrl;
         }
-        public static string GetHolidayCoverImagePath(string imageUrl)
+        public static string GetCalendarItemCoverImagePath(string imageUrl)
         {
-            return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.HolidayCoverImage + imageUrl;
+            return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.CalendarItemCoverImage + imageUrl;
         }
     }
 }
