@@ -75,7 +75,7 @@ builder.Services.AddTransient<INotificationService, NotificationService>();
 builder.Services.AddSingleton<AntiforgeryMiddleware>();
 builder.Services.AddSingleton<IPriorityTaskQueue, PriorityTaskQueue>();
 builder.Services.AddHostedService<PriorityQueuedHostedService>();
-builder.Services.AddHostedService<BirthDayNotificationHostedServices>();
+builder.Services.AddHostedService<BirthDayAndAnniversaryNotificationHostedServices>();
 builder.Services.AddHttpContextAccessor();
 
 // MongoDB Configuration

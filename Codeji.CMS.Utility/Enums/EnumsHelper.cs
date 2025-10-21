@@ -60,7 +60,8 @@
             LeaveRequest = 2,
             LeaveRequestApproved = 3,
             LeaveRequestReject = 4,
-            BirthDay = 5
+            BirthDay = 5,
+            WorkAnniversary = 6
         }
         public enum CalendarItem
         {

@@ -6,12 +6,12 @@ using Microsoft.Extensions.Logging;
 
 namespace Codeji.CMS.Services.BackgroundTasks;
 
-public class BirthDayNotificationHostedServices : BackgroundService
+public class BirthDayAndAnniversaryNotificationHostedServices : BackgroundService
 {
-    private readonly ILogger<BirthDayNotificationHostedServices> _logger;
+    private readonly ILogger<BirthDayAndAnniversaryNotificationHostedServices> _logger;
     private readonly IServiceProvider _serviceProvider;
 
-    public BirthDayNotificationHostedServices(ILogger<BirthDayNotificationHostedServices> logger, IServiceProvider serviceProvider)
+    public BirthDayAndAnniversaryNotificationHostedServices(ILogger<BirthDayAndAnniversaryNotificationHostedServices> logger, IServiceProvider serviceProvider)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
@@ -22,14 +22,15 @@ public class BirthDayNotificationHostedServices : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             var now = DateTime.Now;  // get current time
-            var nextRun = DateTime.Today.AddHours(1); // set date to today 1 am
+            // var nextRun = DateTime.Today.AddHours(1); // set date to today 1 am
+            var nextRun = now.AddMinutes(2); // set date to today 1 am
             if (now > nextRun)
             {
-                nextRun = nextRun.AddDays(1); // set next run to tommarrow 1 am 
+                nextRun = nextRun.AddMinutes(2); // set next run to tommarrow 1 am 
             }
 
             var delay = nextRun - now;
-            _logger.LogInformation("Birthday notification service will run at {NextRun}", nextRun);
+            _logger.LogInformation("notification service will run at {NextRun}", nextRun);
 
             try
             {
@@ -44,12 +45,12 @@ public class BirthDayNotificationHostedServices : BackgroundService
             {
                 using var scope = _serviceProvider.CreateScope();
                 var empServices = scope.ServiceProvider.GetRequiredService<IEmployeeService>();
-                await empServices.SendBirthDayNotificationToEmployees();
-                _logger.LogInformation("Birthday notifications sent at {Time}", DateTime.Now);
+                await empServices.SendBirthDayAndAnniversaryNotificationToEmployees();
+                _logger.LogInformation("Birthday/Anniversary notifications sent at {Time}", DateTime.Now);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error occurred while sending birthday notifications");
+                _logger.LogError(ex, "Error occurred while sending birthday/anniversary notifications");
             }
         }
     }

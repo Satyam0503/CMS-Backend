@@ -13,5 +13,6 @@ namespace Codeji.CMS.DTO.Dashboard
         public string? ProfileUrl { get; set; }
         public Dictionary<string, string>? JobRole { get; set; } = null;
         public DateTime Date { get; set; }
+        public int Ordinal { get; set; }
     }
 }

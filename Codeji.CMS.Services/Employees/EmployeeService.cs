@@ -763,7 +763,7 @@ namespace Codeji.CMS.Services.Employees
         }
 
         // Get a list of employee
-        public async Task SendBirthDayNotificationToEmployees()
+        public async Task SendBirthDayAndAnniversaryNotificationToEmployees()
         {
             var currentDate = DateTime.UtcNow.Date;
             var currentMonthDay = currentDate.ToString("MM-dd");
@@ -771,12 +771,16 @@ namespace Codeji.CMS.Services.Employees
             Expression<Func<EmpUser, bool>> expression = emp =>
                 !string.IsNullOrEmpty(emp.DateOfBirth)
                 && emp.DateOfBirth.Substring(5, 5) == currentMonthDay;
-            IEnumerable<EmpUser> employeeList = await _employeeRepository.GetAll(expression, withDefaultFilter: false);
-            if (employeeList.Any())
+
+            IEnumerable<EmpUser> birthDayEmployeeList = await _employeeRepository.GetAll(expression);
+            IEnumerable<EmpUser> EmployeeAnniversaryList = await _employeeRepository.GetAll(emp => !string.IsNullOrEmpty(emp.DateOfJoining) && emp.DateOfJoining.Substring(5, 5) == currentMonthDay);
+
+            var notificationTasks = new List<Task>();
+            List<UserNotifications> userNotifications = [];
+
+            if (birthDayEmployeeList.Any())
             {
-                var notificationTasks = new List<Task>();
-                List<UserNotifications> userNotifications = [];
-                foreach (EmpUser employee in employeeList)
+                foreach (EmpUser employee in birthDayEmployeeList)
                 {
                     Expression<Func<EmpUser, bool>> exp = emp => emp.CompanyId == employee.CompanyId && emp.UserId != employee.UserId && emp.Status;
                     List<EmpUser> targetEmployeeList = _employeeRepository.Get(exp).ToList();
@@ -812,10 +816,53 @@ namespace Codeji.CMS.Services.Employees
                         }));
                     }
                 }
+            }
+            if (EmployeeAnniversaryList.Any())
+            {
+                foreach (EmpUser employee in EmployeeAnniversaryList)
+                {
+                    Expression<Func<EmpUser, bool>> exp = emp => emp.CompanyId == employee.CompanyId && emp.UserId != employee.UserId && emp.Status;
+                    List<EmpUser> targetEmployeeList = _employeeRepository.Get(exp).ToList();
+                    Notifications notification = new()
+                    {
+                        NotificationId = Guid.NewGuid().ToString(),
+                        CreatedDateTime = DateTime.UtcNow,
+                        NotificationType = EnumsHelper.NotificationTypes.WorkAnniversary,
+                        Body = $"{employee.FirstName} {employee.LastName}"
+                    };
+                    await _notificationsRepository.AddOne(notification);
+                    foreach (var emp in targetEmployeeList)
+                    {
+                        UserNotifications userNotification = new()
+                        {
+                            UserNotificationId = Guid.NewGuid().ToString(),
+                            UserId = emp.UserId,
+                            NotificationId = notification.NotificationId,
+                            IsRead = false,
+                            CreatedDateTime = DateTime.UtcNow,
+                            IsDeleted = false
+                        };
+                        userNotifications.Add(userNotification);
+                        notificationTasks.Add(_notificationService.SendNotificationToUser(emp.UserId, new NotificationViewModel()
+                        {
+                            Title = notification.Title,
+                            Body = notification.Body,
+                            IsRead = false,
+                            SentDateTime = DateTime.UtcNow,
+                            TargetId = notification.TargetId,
+                            NotificationTypes = notification.NotificationType,
+                            UserNotificationId = userNotification.UserNotificationId
+                        }));
+                    }
+                }
+            }
+
+            if (userNotifications.Count > 0)
+            {
                 // insert all user notification into db
-                await _userNotificationRepository.AddMany(userNotifications);
                 // process all notificatios task
                 await Task.WhenAll(notificationTasks);
+                await _userNotificationRepository.AddMany(userNotifications);
             }
         }
     }

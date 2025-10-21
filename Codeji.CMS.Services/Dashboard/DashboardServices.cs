@@ -3,6 +3,7 @@ using System.Linq.Expressions;
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Dashboard;
+using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Company;
@@ -166,12 +167,12 @@ namespace Codeji.CMS.Services.Dashboard
                                    from jobRole in empJobTitleGroup.DefaultIfEmpty()
                                    select new
                                    {
-                                       emp.EmployeeId,
+                                       EmployeeId = emp.EmployeeId,
                                        EmployeeName = $"{emp.FirstName} {emp.LastName}",
                                        JobRole = jobRole?.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label),
-                                       emp.DateOfBirth,
-                                       emp.DateOfJoining,
-                                       ProfileUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl)
+                                       DateOfBirth = emp.DateOfBirth,
+                                       DateOfJoining = emp.DateOfJoining,
+                                       ProfileUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl),
                                    }).ToList();
 
             var upcomingBirthdays = empJobTitleJoin
@@ -189,7 +190,8 @@ namespace Codeji.CMS.Services.Dashboard
                         EmployeeName = emp.EmployeeName,
                         ProfileUrl = emp.ProfileUrl,
                         JobRole = emp.JobRole,
-                        Date = nextBirthday
+                        Date = nextBirthday,
+                        Ordinal = nextBirthday.Year - dob.Year
                     };
                 })
                 .Where(x => x != null)
@@ -212,7 +214,8 @@ namespace Codeji.CMS.Services.Dashboard
                         EmployeeName = emp.EmployeeName,
                         ProfileUrl = emp.ProfileUrl,
                         JobRole = emp.JobRole,
-                        Date = nextAnniv
+                        Date = nextAnniv,
+                        Ordinal = nextAnniv.Year - doj.Year
                     };
                 })
                 .Where(x => x != null)
