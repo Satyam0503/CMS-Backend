@@ -1,17 +1,13 @@
+using static Codeji.CMS.Utility.Enums.EnumsHelper;
+
 namespace Codeji.CMS.DTO.Calendar;
 
 public class CalendarResponseDto
 {
-    public string? OccasionId { get; set; }
-    public string OccasionName { get; set; }
+    public string Id { get; set; }
+    public string Name { get; set; }
     public DateTime Date { get; set; }
-    public string Detail { get; set; }
-    public string? HolidayImageUrl { get; set; }
-    public string? HolidayCoverImageUrl { get; set; }
-    // {
-    //     get
-    //     {
-    //         return !string.IsNullOrEmpty(HolidayImageUrl) ? Common.GetHolidayCoverImagePath(HolidayImageUrl) : null;
-    //     }
-    // }
+    public string Description { get; set; }
+    public CalendarResponseItem Type { get; set; }
+    public string? ImageUrl { get; set; }
 }

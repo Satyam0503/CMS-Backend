@@ -1,5 +1,6 @@
 ﻿using AutoMapper;
 using Codeji.CMS.DTO;
+using Codeji.CMS.DTO.Calendar;
 using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.Company.CustomAttribute;
 using Codeji.CMS.DTO.Company.Department;
@@ -52,6 +53,7 @@ namespace Codeji.CMS.Services.Registration
             CreateMap<LeaveTypes, LeaveTypeResponseDto>().ReverseMap();
             CreateMap<LeaveRequest, MyLeaveRequestResponse>().ReverseMap();
             CreateMap<CalendarEntity, UpComingHolidayEventResponseDto>().ReverseMap();
+            CreateMap<CalendarEntity, CalendarResponseDto>().ReverseMap();
         }
     }
 

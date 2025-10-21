@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Linq.Expressions;
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
@@ -6,6 +7,8 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Calendar.Interface;
+using Codeji.CMS.Utility;
+using Codeji.CMS.Utility.Enums;
 using Microsoft.AspNetCore.Http;
 
 namespace Codeji.CMS.Services.Calendar;
@@ -14,19 +17,85 @@ public class CalendarServices : ICalendarServices
 {
     readonly IMapper _mapper;
     readonly IMongoDbRepository<CalendarEntity> _calendarRepository;
-    readonly IMongoDbRepository<EmpUser> _empRepository;
+    readonly IMongoDbRepository<EmpUser> _employeeRepository;
     public CalendarServices(IMapper mapper, IMongoDbRepository<CalendarEntity> calendarRepository, IMongoDbRepository<EmpUser> empRepository)
     {
         _mapper = mapper;
         _calendarRepository = calendarRepository;
-        _empRepository = empRepository;
+        _employeeRepository = empRepository;
     }
 
-    public Task<Result<CalendarResponseDto>> GetAllCalendarItems(CalendarFilters? filter)
+    public async Task<Result<CalendarResponseDto>> GetAllCalendarItems(CalendarFilters filter)
     {
+        // get all holidays
+        Result<CalendarResponseDto> result = new();
+        IEnumerable<CalendarResponseDto> calendarItems = [];
+        var year = filter.Year ?? DateTime.UtcNow.Year;
+        Expression<Func<CalendarEntity, bool>> expression = cl => cl.Recurring || (filter.Type == null || cl.Type == filter.Type) && cl.Date.Year == year;
+        calendarItems = (await _calendarRepository.GetAll(expression)).Select(ci =>
+        {
+            if (ci.Recurring)
+            {
+                var date = ci.Date;
+                ci.Date = new DateTime(year, date.Month, date.Day, date.Hour, date.Minute, date.Second, date.Kind);
+            }
+            return new CalendarResponseDto
+            {
+                Id = ci.Id,
+                Name = ci.Name,
+                Date = ci.Date,
+                Description = ci.Description,
+                Type = (EnumsHelper.CalendarResponseItem)ci.Type,
+                ImageUrl = ci.ImageUrl
+            };
+        });
 
-        // write logic to get all holidays
-        throw new NotImplementedException();
+        // get employee birthdays and work anniversaries
+        var today = DateTime.Today;
+        string dateFormat = "yyyy-MM-dd";
+        var employeesList = await _employeeRepository.GetAll(e => e.DateOfBirth != null || e.DateOfJoining != null);
+        if (employeesList == null || !employeesList.Any())
+        {
+            result.MethodResults = calendarItems.ToList() ?? [];
+            return result;
+        }
+        var birthdaysThisYear = employeesList.Select(emp =>
+        {
+            if (!DateTime.TryParseExact(emp.DateOfBirth, dateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dob))
+                return null; // Skip if invalid format
+
+            var thisYearBirthday = new DateTime(today.Year, dob.Month, dob.Day);
+
+            return new CalendarResponseDto
+            {
+                Id = emp.UserId,
+                Name = $"{emp.FirstName} {emp.LastName}",
+                ImageUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl),
+                Description = $"{emp.FirstName} {emp.LastName}'s Birthday",
+                Date = thisYearBirthday,
+                Type = EnumsHelper.CalendarResponseItem.Birthday
+            };
+        })
+        .Where(x => x != null);
+
+        var workAnniversariesThisYear = employeesList.Select(emp =>
+        {
+            if (!DateTime.TryParseExact(emp.DateOfJoining, dateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime doj))
+                return null;
+            var thisYearAnniversary = new DateTime(today.Year, doj.Month, doj.Day);
+            return new CalendarResponseDto
+            {
+                Id = emp.UserId,
+                Name = $"{emp.FirstName} {emp.LastName}",
+                ImageUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl),
+                Description = $"{emp.FirstName} {emp.LastName}'s Work Anniversary",
+                Date = thisYearAnniversary,
+                Type = EnumsHelper.CalendarResponseItem.WorkAnniversary
+            };
+        })
+        .Where(x => x != null);
+        result.MethodResults = calendarItems.Concat(birthdaysThisYear).Concat(workAnniversariesThisYear).ToList();
+        return result;
     }
 
     public async Task<Result> AddUpdateCalendarItem(CalendarRequestDto model)

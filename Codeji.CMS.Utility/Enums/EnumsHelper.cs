@@ -67,6 +67,14 @@
             Holiday = 1,
             Event = 2,
         }
+        public enum CalendarResponseItem
+        {
+            Holiday = 1,
+            Event = 2,
+            Birthday = 3,
+            WorkAnniversary = 4
+        }
+
         public enum LeaveRequestStatus
         {
             Pending = 1,
