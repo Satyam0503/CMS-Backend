@@ -22,11 +22,10 @@ public class BirthDayAndAnniversaryNotificationHostedServices : BackgroundServic
         while (!stoppingToken.IsCancellationRequested)
         {
             var now = DateTime.Now;  // get current time
-            // var nextRun = DateTime.Today.AddHours(1); // set date to today 1 am
-            var nextRun = now.AddMinutes(2); // set date to today 1 am
+            var nextRun = DateTime.Today.AddHours(1); // set date to today 1 am
             if (now > nextRun)
             {
-                nextRun = nextRun.AddMinutes(2); // set next run to tommarrow 1 am 
+                nextRun = nextRun.AddDays(1); // set next run to tommarrow 1 am 
             }
 
             var delay = nextRun - now;

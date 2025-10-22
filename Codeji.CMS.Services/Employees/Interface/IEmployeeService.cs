@@ -7,6 +7,7 @@ using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
+using Codeji.CMS.Utility.Enums;
 
 namespace Codeji.CMS.Services.Employees.Interface
 {
@@ -48,5 +49,10 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<Result> RemoveProfileImage(string userId);
                 Task<List<string>> GetCollegeNameSuggestions(string searchValue);
                 Task SendBirthDayAndAnniversaryNotificationToEmployees();
+
+                // notification preference service methods
+                Dictionary<EnumsHelper.NotificationPreferenceType, bool> GetDefaultNotificationPreferences();
+                Task<Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>>> GetNotificationPreferences(string userId);
+                Task<Result> UpdateNotificationPreferences(string userId, Dictionary<EnumsHelper.NotificationPreferenceType, bool> preferences);
         }
 }

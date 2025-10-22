@@ -63,6 +63,15 @@
             BirthDay = 5,
             WorkAnniversary = 6
         }
+        public enum NotificationPreferenceType
+        {
+            BirthdayNotification,
+            WorkAnniversaries,
+            LeaveStatusUpdate,
+            Notice,
+            HolidayReminder,
+        }
+
         public enum CalendarItem
         {
             Holiday = 1,

@@ -13,6 +13,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Account.Interface;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility.Constraints;
+using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
@@ -437,5 +438,20 @@ public class UserController : BaseApiController
         };
     }
 
+    [HttpGet]
+    [Route("GetNotificationPreferences")]
+    public async Task<Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>>> GetNotificationPreferences()
+    {
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _employeeService.GetNotificationPreferences(userId);
+    }
+
+    [HttpPost]
+    [Route("UpdateNotificationPreferences")]
+    public async Task<Result> UpdateNotificationPreferences([FromBody] Dictionary<EnumsHelper.NotificationPreferenceType, bool> preferences)
+    {
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _employeeService.UpdateNotificationPreferences(userId, preferences);
+    }
 }
 

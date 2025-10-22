@@ -19,8 +19,16 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Primitives;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
+using MongoDB.Bson.Serialization.Serializers;
+using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+BsonSerializer.RegisterSerializer(
+new EnumSerializer<NotificationPreferenceType>(BsonType.String)
+);
 
 // Add services to the container
 builder.Services.AddControllers();
