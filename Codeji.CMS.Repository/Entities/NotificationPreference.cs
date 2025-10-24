@@ -9,7 +9,8 @@ namespace Codeji.CMS.Repository.Entities;
 public class NotificationPreference : BaseClass
 {
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
-    public string UserId { get; set; }
+    public string Id { get; set; }
+    public required string UserId { get; set; }
 
     [BsonDictionaryOptions(DictionaryRepresentation.Document)]
     [JsonConverter(typeof(JsonStringEnumConverter))]

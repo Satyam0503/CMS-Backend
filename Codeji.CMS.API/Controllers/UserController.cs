@@ -442,13 +442,15 @@ public class UserController : BaseApiController
     [Route("GetNotificationPreferences")]
     public async Task<Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>>> GetNotificationPreferences()
     {
+        Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>> result = new();
         string userId = CurrentContext.UserId(_httpContextAccessor);
-        return await _employeeService.GetNotificationPreferences(userId);
+        result.MethodResult = await _employeeService.GetNotificationPreferences(userId);
+        return result;
     }
 
     [HttpPost]
     [Route("UpdateNotificationPreferences")]
-    public async Task<Result> UpdateNotificationPreferences([FromBody] Dictionary<EnumsHelper.NotificationPreferenceType, bool> preferences)
+    public async Task<Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>>> UpdateNotificationPreferences([FromBody] Dictionary<EnumsHelper.NotificationPreferenceType, bool> preferences)
     {
         string userId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.UpdateNotificationPreferences(userId, preferences);

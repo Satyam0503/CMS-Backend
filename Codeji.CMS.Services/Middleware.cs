@@ -4,8 +4,10 @@ using Codeji.CMS.DTO;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.Helpers;
+using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.Services
 {
@@ -14,13 +16,18 @@ namespace Codeji.CMS.Services
         private readonly IMongoDbRepository<EmpUser> _userRepository;
         private readonly IMongoDbRepository<EmpEmailLogs> _emailLogRepository;
         private readonly IMapper _mapper;
+        readonly IMongoDbRepository<NotificationPreference> _notificationPreferenceRepository;
+        readonly IEmployeeService _employeeService;
         public MiddlewareService(IMongoDbRepository<EmpUser> userRepository,
             IMongoDbRepository<EmpEmailLogs> emailLogRepository,
-            IMapper mapper)
+            IMapper mapper,
+            IMongoDbRepository<NotificationPreference> notificationPreferenceRepository
+        )
         {
             _userRepository = userRepository;
             _emailLogRepository = emailLogRepository;
             _mapper = mapper;
+            _notificationPreferenceRepository = notificationPreferenceRepository;
         }
 
 
@@ -77,6 +84,29 @@ namespace Codeji.CMS.Services
             empEmailLogs.CreatedDate = DateTime.UtcNow;
             empEmailLogs.CreatedBy = empEmailLogs.UserFrom;
             await _emailLogRepository.AddOne(empEmailLogs);
+        }
+
+
+        public Dictionary<NotificationPreferenceType, bool> GetDefaultNotificationPreferences()
+        {
+            var defaultPreferences = Enum.GetValues(typeof(NotificationPreferenceType)).Cast<NotificationPreferenceType>().ToDictionary(pref => pref, pref => true);
+            return defaultPreferences;
+        }
+
+        // method to check user notification preference
+        public bool IsUserNotificationPreferenceEnabled(string userId, NotificationPreferenceType preferenceType)
+        {
+            var preferenceResult = _notificationPreferenceRepository.FirstOrDefault(n => n.UserId == userId).Result;
+            if (preferenceResult == null)
+            {
+                var defaultPreferences = GetDefaultNotificationPreferences();
+                return defaultPreferences[preferenceType];
+            }
+            if (preferenceResult != null && preferenceResult.Preferences != null && preferenceResult.Preferences.TryGetValue(preferenceType, out bool value))
+            {
+                return value;
+            }
+            return false;
         }
     }
 }

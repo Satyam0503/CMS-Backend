@@ -70,6 +70,7 @@
             LeaveStatusUpdate,
             Notice,
             HolidayReminder,
+            MessageNotification,
         }
 
         public enum CalendarItem

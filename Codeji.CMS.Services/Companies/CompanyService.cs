@@ -29,6 +29,7 @@ namespace Codeji.CMS.Services
         private readonly IMapper _mapper;
         private readonly IRoleService _roleService;
         private readonly IEmployeeService _employeeService;
+        readonly IMiddlewareService _middlewareService;
 
         public CompanyService(
             IMongoDbRepository<Company> companyRepo,
@@ -39,7 +40,8 @@ namespace Codeji.CMS.Services
             IMongoDbRepository<RolePermission> rolePermissionRepo,
             IMongoDbRepository<NotificationPreference> notificationPreferenceRepo,
             IRoleService roleService,
-            IEmployeeService employeeService
+            IEmployeeService employeeService,
+            IMiddlewareService middlewareService
             )
         {
             _roleService = roleService;
@@ -51,6 +53,7 @@ namespace Codeji.CMS.Services
             _mapper = mapper;
             _notificationPreferenceRepo = notificationPreferenceRepo;
             _employeeService = employeeService;
+            _middlewareService = middlewareService;
         }
 
         public async Task<Result> Register(CompanyRequestModel companyModel)
@@ -87,7 +90,7 @@ namespace Codeji.CMS.Services
             var notificationPreferenceSetting = new NotificationPreference()
             {
                 UserId = user.UserId,
-                Preferences = _employeeService.GetDefaultNotificationPreferences(),
+                Preferences = _middlewareService.GetDefaultNotificationPreferences(),
             };
 
             result = await _companyRepo.AddOne(company);

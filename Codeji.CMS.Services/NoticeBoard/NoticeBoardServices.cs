@@ -12,6 +12,7 @@ using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.NoticeBoard;
 using Codeji.CMS.Services.Employees.Interface;
+using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
@@ -29,6 +30,7 @@ public class NoticeBoardServices : INoticeBoardService
     private readonly INotificationService _notificationService;
     private readonly IEmployeeService _employeeService;
     private readonly IMongoDbRepository<JobTitles> _jobTitlesRepository;
+    readonly IMiddlewareService _middlewareService;
     public NoticeBoardServices(
         IMapper mapper,
         IMongoDbRepository<Notice> noticeRepository,
@@ -37,7 +39,8 @@ public class NoticeBoardServices : INoticeBoardService
         IMongoDbRepository<UserNotifications> userNotificationsRepository,
         INotificationService notificationService,
         IMongoDbRepository<JobTitles> jobTitlesRepository,
-        IEmployeeService employeeService
+        IEmployeeService employeeService,
+        IMiddlewareService middlewareService
         )
     {
         _mapper = mapper;
@@ -48,7 +51,7 @@ public class NoticeBoardServices : INoticeBoardService
         _notificationService = notificationService;
         _jobTitlesRepository = jobTitlesRepository;
         _employeeService = employeeService;
-
+        _middlewareService = middlewareService;
     }
 
     public async Task<Result> PostNotice(AddNoticeRequestModel model, string userId)
@@ -82,6 +85,8 @@ public class NoticeBoardServices : INoticeBoardService
             Expression<Func<EmpUser, bool>> whereCondition = x => (model.Departments.Equals("all") || x.Department.Equals(model.Departments))
             && (model.Target.Equals("all") || x.RoleId.Equals(model.Target)) && x.UserId != userId;
             IEnumerable<EmpUser> empUsers = await _empUserRepository.GetAll(whereCondition);
+            empUsers = empUsers.Where(emp => _middlewareService.IsUserNotificationPreferenceEnabled(emp.UserId, EnumsHelper.NotificationPreferenceType.Notice));
+
             if (empUsers.Any())
             {
                 List<UserNotifications> userNotifications = [];

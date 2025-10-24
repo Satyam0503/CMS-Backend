@@ -150,7 +150,7 @@ namespace Codeji.CMS.Services.Employees
             var notificationPreferences = new NotificationPreference()
             {
                 UserId = userId,
-                Preferences = GetDefaultNotificationPreferences(),
+                Preferences = _middlewareService.GetDefaultNotificationPreferences(),
             };
             await _notificationPreferenceRepository.AddOne(notificationPreferences);
 
@@ -877,32 +877,25 @@ namespace Codeji.CMS.Services.Employees
         }
 
         // notification preference service methods
-        public Dictionary<EnumsHelper.NotificationPreferenceType, bool> GetDefaultNotificationPreferences()
-        {
-            var defaultPreferences = Enum.GetValues(typeof(EnumsHelper.NotificationPreferenceType)).Cast<EnumsHelper.NotificationPreferenceType>().ToDictionary(pref => pref, pref => true);
-            return defaultPreferences;
-        }
 
-        public async Task<Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>>> GetNotificationPreferences(string userId)
+        public async Task<Dictionary<EnumsHelper.NotificationPreferenceType, bool>> GetNotificationPreferences(string userId)
         {
-            Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>> result = new();
+            Dictionary<EnumsHelper.NotificationPreferenceType, bool> result = new();
             var data = await _notificationPreferenceRepository.FirstOrDefault(n => n.UserId == userId);
             if (data == null)
             {
-                result.MethodResult = GetDefaultNotificationPreferences();
-                return result;
+                result = _middlewareService.GetDefaultNotificationPreferences();
             }
             else
             {
-                result.MethodResult = data.Preferences;
-                result.Success = true;
-                return result;
+                result = data.Preferences;
             }
+            return result;
         }
 
-        public async Task<Result> UpdateNotificationPreferences(string userId, Dictionary<EnumsHelper.NotificationPreferenceType, bool> preferences)
+        public async Task<Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>>> UpdateNotificationPreferences(string userId, Dictionary<EnumsHelper.NotificationPreferenceType, bool> preferences)
         {
-            Result result = new();
+            Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>> result = new();
             Expression<Func<NotificationPreference, bool>> whereCondition = n => n.UserId == userId;
             var existingPreferences = await _notificationPreferenceRepository.FirstOrDefault(whereCondition);
             if (existingPreferences == null)
@@ -912,9 +905,10 @@ namespace Codeji.CMS.Services.Employees
                     UserId = userId,
                     Preferences = preferences,
                 };
-                return await _notificationPreferenceRepository.AddOne(newPreference);
+                await _notificationPreferenceRepository.AddOne(newPreference);
             }
-            result = await _notificationPreferenceRepository.UpdateMany(whereCondition, Builders<NotificationPreference>.Update.Set(n => n.Preferences, preferences));
+            await _notificationPreferenceRepository.UpdateMany(whereCondition, Builders<NotificationPreference>.Update.Set(n => n.Preferences, preferences));
+            result.MethodResult = await GetNotificationPreferences(userId);
             return result;
         }
     }

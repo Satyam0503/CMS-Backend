@@ -51,8 +51,7 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task SendBirthDayAndAnniversaryNotificationToEmployees();
 
                 // notification preference service methods
-                Dictionary<EnumsHelper.NotificationPreferenceType, bool> GetDefaultNotificationPreferences();
-                Task<Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>>> GetNotificationPreferences(string userId);
-                Task<Result> UpdateNotificationPreferences(string userId, Dictionary<EnumsHelper.NotificationPreferenceType, bool> preferences);
+                Task<Dictionary<EnumsHelper.NotificationPreferenceType, bool>> GetNotificationPreferences(string userId);
+                Task<Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>>> UpdateNotificationPreferences(string userId, Dictionary<EnumsHelper.NotificationPreferenceType, bool> preferences);
         }
 }
