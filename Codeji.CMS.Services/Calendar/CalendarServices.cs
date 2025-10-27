@@ -101,44 +101,44 @@ public class CalendarServices : ICalendarServices
     public async Task<Result> AddUpdateCalendarItem(CalendarRequestDto model)
     {
         Result result = new();
-        if (string.IsNullOrEmpty(model.OccasionId))
+        if (string.IsNullOrEmpty(model.Id))
         {
-            var existingItem = await _calendarRepository.FirstOrDefault(ci => ci.Name.Equals(model.OccasionName, StringComparison.OrdinalIgnoreCase) && ci.Type == model.OccasionType);
-            if (existingItem != null)
-            {
-                result.Success = false;
-                return result;
-            }
+            // var existingItem = await _calendarRepository.FirstOrDefault(ci => ci.Name.Equals(model.Name, StringComparison.OrdinalIgnoreCase) && ci.Type == model.Type);
+            // if (existingItem != null)
+            // {
+            //     result.Success = false;
+            //     return result;
+            // }
 
             var newItem = new CalendarEntity
             {
-                Name = model.OccasionName,
+                Name = model.Name,
                 Date = model.Date,
-                Description = model.Detail,
-                Type = model.OccasionType,
+                Description = model.Description,
+                Type = model.Type,
                 Recurring = model.Recurring,
-                ImageUrl = model.OccasionImage == null ? null : await AddUpdateCalenderItemImage(model.OccasionImage)
+                ImageUrl = model.Image == null ? null : await AddUpdateCalenderItemImage(model.Image)
             };
             result = await _calendarRepository.AddOne(newItem);
         }
         else
         {
-            Expression<Func<CalendarEntity, bool>> whereCondition = c => c.Id == model.OccasionId;
-            var existingItem = await _calendarRepository.FirstOrDefault(ci => ci.Name.Equals(model.OccasionName, StringComparison.OrdinalIgnoreCase));
+            Expression<Func<CalendarEntity, bool>> whereCondition = c => c.Id == model.Id;
+            var existingItem = await _calendarRepository.FirstOrDefault(ci => ci.Name.Equals(model.Name, StringComparison.OrdinalIgnoreCase));
             var existingCalendarItem = await _calendarRepository.FirstOrDefault(whereCondition);
             if (existingCalendarItem == null)
             {
                 result.Success = false;
                 return result;
             }
-            if (existingItem != null && existingItem.Name == model.OccasionName && existingItem.Id != model.OccasionId)
+            if (existingItem != null && existingItem.Name == model.Name && existingItem.Id != model.Id)
             {
                 result.Success = false;
                 return result;
             }
-            if (model.OccasionImage != null)
+            if (model.Image != null)
             {
-                existingCalendarItem.ImageUrl = await AddUpdateCalenderItemImage(model.OccasionImage, existingCalendarItem.ImageUrl);
+                existingCalendarItem.ImageUrl = await AddUpdateCalenderItemImage(model.Image, existingCalendarItem.ImageUrl);
             }
             else
             {
@@ -148,10 +148,10 @@ public class CalendarServices : ICalendarServices
                     existingCalendarItem.ImageUrl = null;
                 }
             }
-            existingCalendarItem.Name = model.OccasionName;
+            existingCalendarItem.Name = model.Name;
             existingCalendarItem.Date = model.Date;
-            existingCalendarItem.Type = model.OccasionType;
-            existingCalendarItem.Description = model.Detail;
+            existingCalendarItem.Type = model.Type;
+            existingCalendarItem.Description = model.Description;
             result = await _calendarRepository.Update(whereCondition, existingCalendarItem);
         }
         return result;
