@@ -46,7 +46,7 @@ public class CalendarServices : ICalendarServices
                 Date = ci.Date,
                 Description = ci.Description,
                 Type = (EnumsHelper.CalendarResponseItem)ci.Type,
-                ImageUrl = ci.ImageUrl
+                ImageUrl = Common.GetCalendarItemCoverImagePath(ci.ImageUrl)
             };
         });
 

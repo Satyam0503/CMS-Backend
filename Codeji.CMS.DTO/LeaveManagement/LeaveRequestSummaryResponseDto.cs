@@ -10,7 +10,6 @@ public class LeaveRequestSummaryResponseDto
     public List<LeaveTypeSummary> LeaveTypeSummary { get; set; }
 }
 
-
 public class LeaveTypeSummary
 {
     public LeaveTypes LeaveType { get; set; }

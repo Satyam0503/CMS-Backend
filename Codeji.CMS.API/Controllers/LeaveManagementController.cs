@@ -120,4 +120,15 @@ public class LeaveManagementController : ControllerBase
     {
         return await _leaveManagementService.GetLeaveRequestSummary();
     }
+
+    [Route("GetMonthlyTakenLeaveSummary/{year}")]
+    [HttpGet]
+    public async Task<Result<MonthlyTakenLeaveSummaryResponseDto>> GetMonthlyTakenLeaveSummary(int? year)
+    {
+        if (year == null || year <= 0)
+        {
+            year = DateTime.UtcNow.Year;
+        }
+        return await _leaveManagementService.GetMonthlyTakenLeaveSummary(year);
+    }
 }

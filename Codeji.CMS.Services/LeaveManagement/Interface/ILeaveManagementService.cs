@@ -25,4 +25,6 @@ public interface ILeaveManagementService
     Task<Result> DeleteLeaveRequest(string leaveRequestId);
     Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, LeaveRequestUpdateDto model);
     Task<Result<LeaveRequestSummaryResponseDto>> GetLeaveRequestSummary();
+
+    Task<Result<MonthlyTakenLeaveSummaryResponseDto>> GetMonthlyTakenLeaveSummary(int? year);
 }

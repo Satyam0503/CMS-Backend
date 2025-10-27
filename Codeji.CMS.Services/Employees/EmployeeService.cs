@@ -793,7 +793,7 @@ namespace Codeji.CMS.Services.Employees
                 foreach (EmpUser employee in birthDayEmployeeList)
                 {
                     Expression<Func<EmpUser, bool>> exp = emp => emp.CompanyId == employee.CompanyId && emp.UserId != employee.UserId && emp.Status;
-                    List<EmpUser> targetEmployeeList = _employeeRepository.Get(exp).ToList();
+                    List<EmpUser> targetEmployeeList = _employeeRepository.Get(exp).Where(emp => _middlewareService.IsUserNotificationPreferenceEnabled(emp.UserId, EnumsHelper.NotificationPreferenceType.BirthdayNotification)).ToList();
                     Notifications notification = new()
                     {
                         NotificationId = Guid.NewGuid().ToString(),
@@ -832,7 +832,7 @@ namespace Codeji.CMS.Services.Employees
                 foreach (EmpUser employee in EmployeeAnniversaryList)
                 {
                     Expression<Func<EmpUser, bool>> exp = emp => emp.CompanyId == employee.CompanyId && emp.UserId != employee.UserId && emp.Status;
-                    List<EmpUser> targetEmployeeList = _employeeRepository.Get(exp).ToList();
+                    List<EmpUser> targetEmployeeList = _employeeRepository.Get(exp).Where(emp => _middlewareService.IsUserNotificationPreferenceEnabled(emp.UserId, EnumsHelper.NotificationPreferenceType.WorkAnniversaries)).ToList();
                     Notifications notification = new()
                     {
                         NotificationId = Guid.NewGuid().ToString(),

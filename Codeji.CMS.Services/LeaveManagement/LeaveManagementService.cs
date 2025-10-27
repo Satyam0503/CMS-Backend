@@ -15,6 +15,7 @@ using Codeji.CMS.Repository.Entities.Holidays;
 using Codeji.CMS.Repository.Entities.Leave;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
+using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
@@ -39,6 +40,7 @@ public class LeaveManagementService : ILeaveManagementService
     private readonly IMongoDbRepository<JobTitles> _jobTitleRepo;
     private readonly IMapper _mapper;
     private readonly IEmployeeService _employeeService;
+    private readonly IMiddlewareService _middlewareService;
     public LeaveManagementService(IMongoDbRepository<LeaveTypes> leaveTypeRepo,
     IMongoDbRepository<EmpUser> employeeRepository,
     IMongoDbRepository<LeaveBalance> leaveBalance,
@@ -49,7 +51,9 @@ public class LeaveManagementService : ILeaveManagementService
     IMongoDbRepository<UserNotifications> userNotificationsRepo,
     IMongoDbRepository<Roles> roleRepository,
     IMongoDbRepository<JobTitles> jobTitleRepo,
-    IEmployeeService employeeService)
+    IEmployeeService employeeService,
+    IMiddlewareService middlewareService
+    )
     {
         _leaveTypeRepo = leaveTypeRepo;
         _httpContextAccessor = httpContextAccessor;
@@ -63,6 +67,7 @@ public class LeaveManagementService : ILeaveManagementService
         _roleRepository = roleRepository;
         _employeeService = employeeService;
         _jobTitleRepo = jobTitleRepo;
+        _middlewareService = middlewareService;
     }
 
     public async Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto)
@@ -696,12 +701,14 @@ public class LeaveManagementService : ILeaveManagementService
         }
         else if (status == EnumsHelper.LeaveRequestStatus.Accepted)
         {
+            if (!_middlewareService.IsUserNotificationPreferenceEnabled(leaveDomain.EmployeeId, EnumsHelper.NotificationPreferenceType.LeaveStatusUpdate)) return;
             targetUserIds.Add(leaveDomain.EmployeeId);
             notification.Body = await _employeeService.GetEmployeeNameById(leaveDomain.ReviewedBy);
             notification.NotificationType = EnumsHelper.NotificationTypes.LeaveRequestApproved;
         }
         else
         {
+            if (!_middlewareService.IsUserNotificationPreferenceEnabled(leaveDomain.EmployeeId, EnumsHelper.NotificationPreferenceType.LeaveStatusUpdate)) return;
             targetUserIds.Add(leaveDomain.EmployeeId);
             notification.Body = await _employeeService.GetEmployeeNameById(leaveDomain.ReviewedBy);
             notification.NotificationType = EnumsHelper.NotificationTypes.LeaveRequestReject;
@@ -763,6 +770,26 @@ public class LeaveManagementService : ILeaveManagementService
             LeaveStatusSummary = leaveStatusSummary,
             LeaveTypeSummary = leaveTypeSummary.ToList(),
         };
+        return result;
+    }
+    public async Task<Result<MonthlyTakenLeaveSummaryResponseDto>> GetMonthlyTakenLeaveSummary(int? year)
+    {
+        Result<MonthlyTakenLeaveSummaryResponseDto> result = new();
+        var leaveRequests = (await _leave.GetAll(lr => lr.Status == EnumsHelper.LeaveRequestStatus.Accepted && lr.StartDate.Year == year))
+            .GroupBy(lr => lr.StartDate.Month)
+            .Select(g => new MonthlyTakenLeaveSummaryResponseDto
+            {
+                Month = g.Key,
+                TotalLeavesTaken = g.Count()
+            }).ToList();
+
+        // Fill missing months with 0
+        result.MethodResults = Enumerable.Range(1, 12).Select(m => new MonthlyTakenLeaveSummaryResponseDto
+        {
+            Month = m,
+            TotalLeavesTaken = leaveRequests.FirstOrDefault(x => x.Month == m)?.TotalLeavesTaken ?? 0
+        }).ToList();
+
         return result;
     }
 
