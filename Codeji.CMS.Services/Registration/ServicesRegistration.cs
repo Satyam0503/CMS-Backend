@@ -1,12 +1,12 @@
 
 using Codeji.CMS.Services.Account;
 using Codeji.CMS.Services.Account.Interface;
+using Codeji.CMS.Services.Calendar;
+using Codeji.CMS.Services.Calendar.Interface;
 using Codeji.CMS.Services.Companies;
 using Codeji.CMS.Services.Dashboard;
 using Codeji.CMS.Services.Employees;
 using Codeji.CMS.Services.Employees.Interface;
-using Codeji.CMS.Services.Holiday;
-using Codeji.CMS.Services.Holiday.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.LeaveManagement;
 using Codeji.CMS.Services.NoticeBoard;
@@ -31,7 +31,7 @@ public static class ServicesRegistration
         services.AddScoped<ICompanyMasterService, CompanyMasterService>();
         services.AddScoped<IDashboardService, DashboardServices>();
         services.AddScoped<INoticeBoardService, NoticeBoardServices>();
-        services.AddScoped<IHolidayService, HolidayService>();
+        services.AddScoped<ICalendarServices, CalendarServices>();
         services.AddScoped<ILeaveManagementService, LeaveManagementService>();
         services.AddScoped<IAccountServices, AccountServices>();
         services.AddScoped<IPayRollServices, PayRollServices>();

@@ -4,10 +4,7 @@ namespace Codeji.CMS.DTO.Leave.LeaveRequest;
 
 public class LeaveRequestDto
 {
-
-
     public string? LeaveRequestId { get; set; }
-    public string EmployeeId { get; set; }
     public bool IsHalfDay { get; set; }
     public EnumsHelper.LeaveTypes LeaveType { get; set; }
     public DateTime StartDate { get; set; }
@@ -15,4 +12,10 @@ public class LeaveRequestDto
     public string Reason { get; set; }
     public string? ReviewedBy { get; set; }
     public EnumsHelper.LeaveRequestStatus? Status { get; set; }
+}
+
+public class LeaveRequestUpdateDto
+{
+    public string Comment { get; set; }
+    public EnumsHelper.LeaveRequestStatus Status { get; set; }
 }

@@ -1,0 +1,54 @@
+using Codeji.CMS.Domain.Models;
+using Codeji.CMS.DTO.Calendar;
+using Codeji.CMS.Services.Calendar.Interface;
+using Codeji.CMS.Utility.middlewares;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace Codeji.CMS.API.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class CalendarController : ControllerBase
+{
+    readonly ICalendarServices _calendarServices;
+    readonly IHttpContextAccessor _httpContextAccessor;
+    public CalendarController(ICalendarServices calendarServices, IHttpContextAccessor httpContextAccessor)
+    {
+        _calendarServices = calendarServices;
+        _httpContextAccessor = httpContextAccessor;
+    }
+
+    [HttpPost]
+    [Route("GetAllCalendarItems")]
+    public async Task<Result<CalendarResponseDto>> GetAllCalendarItems([FromBody] CalendarFilters? filters)
+    {
+        Result<CalendarResponseDto> result = new()
+        {
+            Success = false
+        };
+        if (!ModelState.IsValid) return result;
+        result = await _calendarServices.GetAllCalendarItems(filters);
+        return result;
+    }
+
+    [Route("AddUpdateCalendarItem")]
+    [HttpPost]
+    public async Task<Result> AddUpdateCalendarItem([FromForm] CalendarRequestDto model)
+    {
+        Result result = new();
+        result = await _calendarServices.AddUpdateCalendarItem(model);
+        return result;
+    }
+
+    [Route("DeleteCalendarItem/{itemId}")]
+    [HttpDelete]
+    public async Task<Result> DeleteCalendarItem(string itemId)
+    {
+        Result result = new();
+        result = await _calendarServices.DeleteItem(itemId);
+        return result;
+    }
+
+}

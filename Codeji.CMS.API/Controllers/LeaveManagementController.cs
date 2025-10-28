@@ -7,6 +7,7 @@ using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
 using Codeji.CMS.Services.LeaveManagement;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Enums;
+using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -19,10 +20,12 @@ public class LeaveManagementController : ControllerBase
 {
 
     private readonly ILeaveManagementService _leaveManagementService;
+    private readonly IHttpContextAccessor _httpContextAccessor;
 
-    public LeaveManagementController(ILeaveManagementService leaveManagementService)
+    public LeaveManagementController(ILeaveManagementService leaveManagementService, IHttpContextAccessor httpContextAccessor)
     {
         _leaveManagementService = leaveManagementService;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     [Route("CreateUpdateLeaveType")]
@@ -30,6 +33,7 @@ public class LeaveManagementController : ControllerBase
     [ModulePermission(AppModule.LeaveManagement, [Permission.Create, Permission.Edit])]
     public async Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto)
     {
+        Result result = new();
         return await _leaveManagementService.CreateUpdateLeaveType(leaveTypeRequestDto);
     }
 
@@ -48,7 +52,6 @@ public class LeaveManagementController : ControllerBase
         return await _leaveManagementService.DeleteLeaveType(leaveTypeId);
     }
 
-
     // leave Balance
     [Route("CreateUpdateLeaveBalance")]
     [HttpPost]
@@ -65,20 +68,28 @@ public class LeaveManagementController : ControllerBase
         return await _leaveManagementService.GetLeaveBalance(leaveBalanceFilter);
     }
 
-
     // leave request
     [Route("CreateUpdateLeave")]
     [HttpPost]
     public async Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto)
     {
-        return await _leaveManagementService.CreateUpdateLeave(leaveRequestDto);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _leaveManagementService.CreateUpdateLeave(leaveRequestDto, userId);
     }
 
     [Route("GetLeaveRequest")]
     [HttpPost]
-    public async Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveFilter? leaveFilter)
+    public async Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveRequestFilter? leaveFilter)
     {
         return await _leaveManagementService.GetLeaveRequest(leaveFilter);
+    }
+
+    [Route("GetMyLeaveRequests")]
+    [HttpPost]
+    public async Task<Result<MyLeaveRequestResponse>> GetMyLeaveRequests(LeaveRequestFilter leaveFilter)
+    {
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _leaveManagementService.GetMyLeaveRequests(leaveFilter, userId);
     }
 
     [Route("DeleteLeaveRequest/{leaveRequestId}")]
@@ -90,9 +101,9 @@ public class LeaveManagementController : ControllerBase
 
     [Route("LeaveRequest/{leaveRequestId}/Status")]
     [HttpPatch]
-    public async Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, [FromBody] EnumsHelper.LeaveRequestStatus status)
+    public async Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, [FromBody] LeaveRequestUpdateDto model)
     {
-        return await _leaveManagementService.UpdateLeaveRequestStatus(leaveRequestId, status);
+        return await _leaveManagementService.UpdateLeaveRequestStatus(leaveRequestId, model);
     }
 
     [Route("GetEmployeeLeaveBalance/{employeeId}")]
@@ -101,5 +112,23 @@ public class LeaveManagementController : ControllerBase
     {
         var result = await _leaveManagementService.GetEmployeeLeaveBalance(employeeId);
         return result;
+    }
+
+    [Route("GetLeaveRequestSummary")]
+    [HttpGet]
+    public async Task<Result<LeaveRequestSummaryResponseDto>> GetLeaveRequestSummary()
+    {
+        return await _leaveManagementService.GetLeaveRequestSummary();
+    }
+
+    [Route("GetMonthlyTakenLeaveSummary/{year}")]
+    [HttpGet]
+    public async Task<Result<MonthlyTakenLeaveSummaryResponseDto>> GetMonthlyTakenLeaveSummary(int? year)
+    {
+        if (year == null || year <= 0)
+        {
+            year = DateTime.UtcNow.Year;
+        }
+        return await _leaveManagementService.GetMonthlyTakenLeaveSummary(year);
     }
 }

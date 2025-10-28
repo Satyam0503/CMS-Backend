@@ -4,6 +4,7 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.GenericRepository.Interfaces;
+using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.RolePermissions;
@@ -24,9 +25,11 @@ namespace Codeji.CMS.Services
         private readonly IMongoDbRepository<Roles> _companyRoleRepo;
         private readonly IMongoDbRepository<ModulePermission> _modulePermissisonRepo;
         private readonly IMongoDbRepository<RolePermission> _rolePermissionRepo;
+        private readonly IMongoDbRepository<NotificationPreference> _notificationPreferenceRepo;
         private readonly IMapper _mapper;
         private readonly IRoleService _roleService;
-
+        private readonly IEmployeeService _employeeService;
+        readonly IMiddlewareService _middlewareService;
 
         public CompanyService(
             IMongoDbRepository<Company> companyRepo,
@@ -35,8 +38,10 @@ namespace Codeji.CMS.Services
             IMongoDbRepository<Roles> companyRoleRepo,
             IMongoDbRepository<ModulePermission> modulePermissisonRepo,
             IMongoDbRepository<RolePermission> rolePermissionRepo,
-            IRoleService roleService
-
+            IMongoDbRepository<NotificationPreference> notificationPreferenceRepo,
+            IRoleService roleService,
+            IEmployeeService employeeService,
+            IMiddlewareService middlewareService
             )
         {
             _roleService = roleService;
@@ -46,7 +51,9 @@ namespace Codeji.CMS.Services
             _modulePermissisonRepo = modulePermissisonRepo;
             _rolePermissionRepo = rolePermissionRepo;
             _mapper = mapper;
-
+            _notificationPreferenceRepo = notificationPreferenceRepo;
+            _employeeService = employeeService;
+            _middlewareService = middlewareService;
         }
 
         public async Task<Result> Register(CompanyRequestModel companyModel)
@@ -80,12 +87,20 @@ namespace Codeji.CMS.Services
                 Status = true,
             };
 
-            Result result1 = await _companyRepo.AddOne(company);
-            if (!result1.Success)
+            var notificationPreferenceSetting = new NotificationPreference()
             {
-                return result1;
+                UserId = user.UserId,
+                Preferences = _middlewareService.GetDefaultNotificationPreferences(),
+            };
+
+            result = await _companyRepo.AddOne(company);
+            if (result.Success)
+            {
+                await _userRepo.AddOne(user);
+                await _notificationPreferenceRepo.AddOne(notificationPreferenceSetting);
+                return result;
             }
-            return await _userRepo.AddOne(user);
+            return result;
         }
 
         public async Task<List<Company>> GetAllCompanyList()

@@ -75,10 +75,18 @@ namespace Codeji.CMS.API.Controllers
         }
 
         [HttpGet]
-        [Route("GetUpComingHolidays")]
-        public async Task<Result<UpComingHolidayResponseDto>> GetUpComingHolidays()
+        [Route("GetUpComingHolidayAndEvents")]
+        public async Task<Result<UpComingHolidayEventResponseDto>> GetUpComingHolidays()
         {
-            var result = await _dashboardService.GetUpComingHolidays();
+            var result = await _dashboardService.GetUpComingHolidayAndEvents();
+            return result;
+        }
+
+        [HttpGet]
+        [Route("GetUpComingCelebrations")]
+        public async Task<Result<UpcomingCelebrations>> GetUpComingCelebrations()
+        {
+            var result = await _dashboardService.GetUpComingCelebrations();
             return result;
         }
 

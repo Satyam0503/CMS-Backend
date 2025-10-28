@@ -9,8 +9,6 @@ public class LeaveTypeResponseDto
     public bool IsHalfDay { get; set; }
     public int? MinAdvanceNoticeDate { get; set; }
     public bool IsActive { get; set; }
-    public DateTime? CreatedOn { get; set; } = DateTime.UtcNow;
-    public string CreatedBy { get; set; }
     public EnumsHelper.LeaveTypes LeaveType { get; set; }
 
 }

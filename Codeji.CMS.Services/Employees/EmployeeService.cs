@@ -50,6 +50,7 @@ namespace Codeji.CMS.Services.Employees
         readonly IHttpContextAccessor _httpContextAccessor;
         readonly IMongoDbRepository<CustomAttribute> _customAttributeRepository;
         readonly IMongoDbRepository<CustomAttributeValue> _customAttributeValueRepository;
+        readonly IMongoDbRepository<NotificationPreference> _notificationPreferenceRepository;
         readonly INotificationService _notificationService;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
@@ -73,7 +74,8 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<JobTitles> jobTitlesRepository,
             IMongoDbRepository<CustomAttribute> customAttributeRepository,
             IMongoDbRepository<CustomAttributeValue> customAttributeValueRepository,
-            INotificationService notificationService
+            INotificationService notificationService,
+            IMongoDbRepository<NotificationPreference> notificationPreferenceRepository
             )
         {
             _employeeRepository = employeeRepository;
@@ -99,6 +101,7 @@ namespace Codeji.CMS.Services.Employees
             _customAttributeRepository = customAttributeRepository;
             _customAttributeValueRepository = customAttributeValueRepository;
             _notificationService = notificationService;
+            _notificationPreferenceRepository = notificationPreferenceRepository;
         }
         public async Task<Result> AddEmployee(UserModel user, string currentUserId)
         {
@@ -129,7 +132,7 @@ namespace Codeji.CMS.Services.Employees
                 BloodGroup = user.BloodGroup,
                 PersonalEmail = user.PersonalEmail,
                 EmergencyContact = user.EmergencyContact,
-                DateOfJoining = user.DateOfJoining,
+                DateOfJoining = user.DateOfJoining ?? DateTime.Now.ToString("yyyy-MM-dd"),
                 Status = true,
                 IsEmailVerified = false,
                 Address = user.Address,
@@ -143,6 +146,14 @@ namespace Codeji.CMS.Services.Employees
                 result.Success = false;
                 return result;
             }
+            // set default notification preferences for new employee
+            var notificationPreferences = new NotificationPreference()
+            {
+                UserId = userId,
+                Preferences = _middlewareService.GetDefaultNotificationPreferences(),
+            };
+            await _notificationPreferenceRepository.AddOne(notificationPreferences);
+
             UserModel currentUser = _middlewareService.GetUserById(currentUserId);
             Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
 
@@ -277,7 +288,6 @@ namespace Codeji.CMS.Services.Employees
                           }).ToList();
             return result;
         }
-
         public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters)
         {
             List<EmpUser> employeeList = [];
@@ -763,7 +773,7 @@ namespace Codeji.CMS.Services.Employees
         }
 
         // Get a list of employee
-        public async Task SendBirthDayNotificationToEmployees()
+        public async Task SendBirthDayAndAnniversaryNotificationToEmployees()
         {
             var currentDate = DateTime.UtcNow.Date;
             var currentMonthDay = currentDate.ToString("MM-dd");
@@ -771,15 +781,19 @@ namespace Codeji.CMS.Services.Employees
             Expression<Func<EmpUser, bool>> expression = emp =>
                 !string.IsNullOrEmpty(emp.DateOfBirth)
                 && emp.DateOfBirth.Substring(5, 5) == currentMonthDay;
-            IEnumerable<EmpUser> employeeList = await _employeeRepository.GetAll(expression, withDefaultFilter: false);
-            if (employeeList.Any())
+
+            IEnumerable<EmpUser> birthDayEmployeeList = await _employeeRepository.GetAll(expression, withDefaultFilter: false);
+            IEnumerable<EmpUser> EmployeeAnniversaryList = await _employeeRepository.GetAll(emp => !string.IsNullOrEmpty(emp.DateOfJoining) && emp.DateOfJoining.Substring(5, 5) == currentMonthDay, withDefaultFilter: false);
+
+            var notificationTasks = new List<Task>();
+            List<UserNotifications> userNotifications = [];
+            //  check if there are employees having birthday today
+            if (birthDayEmployeeList.Any())
             {
-                var notificationTasks = new List<Task>();
-                List<UserNotifications> userNotifications = [];
-                foreach (EmpUser employee in employeeList)
+                foreach (EmpUser employee in birthDayEmployeeList)
                 {
                     Expression<Func<EmpUser, bool>> exp = emp => emp.CompanyId == employee.CompanyId && emp.UserId != employee.UserId && emp.Status;
-                    List<EmpUser> targetEmployeeList = _employeeRepository.Get(exp).ToList();
+                    List<EmpUser> targetEmployeeList = _employeeRepository.Get(exp).Where(emp => _middlewareService.IsUserNotificationPreferenceEnabled(emp.UserId, EnumsHelper.NotificationPreferenceType.BirthdayNotification)).ToList();
                     Notifications notification = new()
                     {
                         NotificationId = Guid.NewGuid().ToString(),
@@ -812,11 +826,90 @@ namespace Codeji.CMS.Services.Employees
                         }));
                     }
                 }
+            }
+            if (EmployeeAnniversaryList.Any())
+            {
+                foreach (EmpUser employee in EmployeeAnniversaryList)
+                {
+                    Expression<Func<EmpUser, bool>> exp = emp => emp.CompanyId == employee.CompanyId && emp.UserId != employee.UserId && emp.Status;
+                    List<EmpUser> targetEmployeeList = _employeeRepository.Get(exp).Where(emp => _middlewareService.IsUserNotificationPreferenceEnabled(emp.UserId, EnumsHelper.NotificationPreferenceType.WorkAnniversaries)).ToList();
+                    Notifications notification = new()
+                    {
+                        NotificationId = Guid.NewGuid().ToString(),
+                        CreatedDateTime = DateTime.UtcNow,
+                        NotificationType = EnumsHelper.NotificationTypes.WorkAnniversary,
+                        Body = $"{employee.FirstName} {employee.LastName}"
+                    };
+                    await _notificationsRepository.AddOne(notification);
+                    foreach (var emp in targetEmployeeList)
+                    {
+                        UserNotifications userNotification = new()
+                        {
+                            UserNotificationId = Guid.NewGuid().ToString(),
+                            UserId = emp.UserId,
+                            NotificationId = notification.NotificationId,
+                            IsRead = false,
+                            CreatedDateTime = DateTime.UtcNow,
+                            IsDeleted = false
+                        };
+                        userNotifications.Add(userNotification);
+                        notificationTasks.Add(_notificationService.SendNotificationToUser(emp.UserId, new NotificationViewModel()
+                        {
+                            Title = notification.Title,
+                            Body = notification.Body,
+                            IsRead = false,
+                            SentDateTime = DateTime.UtcNow,
+                            TargetId = notification.TargetId,
+                            NotificationTypes = notification.NotificationType,
+                            UserNotificationId = userNotification.UserNotificationId
+                        }));
+                    }
+                }
+            }
+
+            if (userNotifications.Count > 0)
+            {
                 // insert all user notification into db
-                await _userNotificationRepository.AddMany(userNotifications);
                 // process all notificatios task
                 await Task.WhenAll(notificationTasks);
+                await _userNotificationRepository.AddMany(userNotifications);
             }
+        }
+
+        // notification preference service methods
+
+        public async Task<Dictionary<EnumsHelper.NotificationPreferenceType, bool>> GetNotificationPreferences(string userId)
+        {
+            Dictionary<EnumsHelper.NotificationPreferenceType, bool> result = new();
+            var data = await _notificationPreferenceRepository.FirstOrDefault(n => n.UserId == userId);
+            if (data == null)
+            {
+                result = _middlewareService.GetDefaultNotificationPreferences();
+            }
+            else
+            {
+                result = data.Preferences;
+            }
+            return result;
+        }
+
+        public async Task<Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>>> UpdateNotificationPreferences(string userId, Dictionary<EnumsHelper.NotificationPreferenceType, bool> preferences)
+        {
+            Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>> result = new();
+            Expression<Func<NotificationPreference, bool>> whereCondition = n => n.UserId == userId;
+            var existingPreferences = await _notificationPreferenceRepository.FirstOrDefault(whereCondition);
+            if (existingPreferences == null)
+            {
+                NotificationPreference newPreference = new()
+                {
+                    UserId = userId,
+                    Preferences = preferences,
+                };
+                await _notificationPreferenceRepository.AddOne(newPreference);
+            }
+            await _notificationPreferenceRepository.UpdateMany(whereCondition, Builders<NotificationPreference>.Update.Set(n => n.Preferences, preferences));
+            result.MethodResult = await GetNotificationPreferences(userId);
+            return result;
         }
     }
 }

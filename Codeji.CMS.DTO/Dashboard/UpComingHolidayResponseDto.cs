@@ -1,12 +1,19 @@
-using Codeji.CMS.Utility;
-
+using static Codeji.CMS.Utility.Enums.EnumsHelper;
 namespace Codeji.CMS.DTO.Dashboard
 {
-    public class UpComingHolidayResponseDto
+    public class UpComingHolidayEventResponseDto
     {
-        public string? HolidayId { get; set; }
-        public string HolidayName { get; set; }
+        public List<CalendarItemDto> Holiday { get; set; }
+        public List<CalendarItemDto> Event { get; set; }
+    }
+
+    public class CalendarItemDto
+    {
+        public string Id { get; set; }
+        public string Name { get; set; }
         public DateTime Date { get; set; }
-        public string? HolidayCoverImageUrl { get; set; }
+        public string Description { get; set; }
+        public CalendarItem Type { get; set; }
+        public string? ImageUrl { get; set; }
     }
 }

@@ -125,11 +125,12 @@ public class RoleServices : IRoleService
     //Get company's all roles
     public async Task<List<RoleModel>> GetRoles(string companyId, bool? excludeAdmin)
     {
-        IEnumerable<Roles> roles = await _RolesRepository.GetAll(x => x.CompanyId == companyId);
+        Expression<Func<Roles, bool>> expression = r => r.CompanyId == companyId;
         if (excludeAdmin.HasValue && excludeAdmin.Value)
         {
-            roles = roles.Where(x => x.RoleType != 1 && x.Titles != "Company Administrator");
+            expression = r => r.CompanyId == companyId && r.RoleType != Convert.ToInt32(EnumsHelper.Roles.Administrator) && r.Titles != "Company Administrator";
         }
+        IEnumerable<Roles> roles = (await _RolesRepository.GetAll(expression)).OrderBy(r => r.RoleType).ToList();
         return _mapper.Map<List<RoleModel>>(roles);
     }
     //Fetch matched role with given Id

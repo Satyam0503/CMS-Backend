@@ -60,15 +60,32 @@
             LeaveRequest = 2,
             LeaveRequestApproved = 3,
             LeaveRequestReject = 4,
-            BirthDay = 5
+            BirthDay = 5,
+            WorkAnniversary = 6
         }
-        public enum HolidayTypes
+        public enum NotificationPreferenceType
         {
-            Cultural = 1,
-            Health = 2,
-            Religious = 3,
-            National = 4,
+            BirthdayNotification,
+            WorkAnniversaries,
+            LeaveStatusUpdate,
+            Notice,
+            HolidayReminder,
+            MessageNotification,
         }
+
+        public enum CalendarItem
+        {
+            Holiday = 1,
+            Event = 2,
+        }
+        public enum CalendarResponseItem
+        {
+            Holiday = 1,
+            Event = 2,
+            Birthday = 3,
+            WorkAnniversary = 4
+        }
+
         public enum LeaveRequestStatus
         {
             Pending = 1,
@@ -82,7 +99,6 @@
             Earned = 3,
             Maternity = 4,
             Paternity = 5,
-
         }
     }
 }
