@@ -46,7 +46,8 @@ public class CalendarServices : ICalendarServices
                 Date = ci.Date,
                 Description = ci.Description,
                 Type = (EnumsHelper.CalendarResponseItem)ci.Type,
-                ImageUrl = Common.GetCalendarItemCoverImagePath(ci.ImageUrl)
+                ImageUrl = Common.GetCalendarItemCoverImagePath(ci.ImageUrl),
+                Recurring = ci.Recurring
             };
         });
 

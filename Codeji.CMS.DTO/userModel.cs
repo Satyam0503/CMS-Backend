@@ -37,6 +37,7 @@ public class UserModel
 
     [RegularExpression(@"^[0-9]{9,18}$", ErrorMessage = "Invalid Account Number")]
     public ulong? BankAccountNumber { get; set; }
+    public int TotalWorkExperience { get; set; } = 0;
 }
 
 

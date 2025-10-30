@@ -237,6 +237,7 @@ namespace Codeji.CMS.Services.Employees
                 userModel.DepartmentTitle = department?.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label);
             }
             userModel.ProfileUrl = Common.GetEmployeeImageUrl(user.ProfileUrl);
+            userModel.TotalWorkExperience = GetEmployeeTotalExperience(userId);
             if (user.CustomAttributeList.Count != 0)
             {
                 List<UserCustomAttribute> customAttributeList = [];
@@ -259,7 +260,6 @@ namespace Codeji.CMS.Services.Employees
             }
             return userModel;
         }
-
         public async Task<string> GetEmployeeNameById(string employeeId)
         {
             EmpUser? empUser = await _employeeRepository.FirstOrDefault(emp => emp.UserId == employeeId);
@@ -678,6 +678,45 @@ namespace Codeji.CMS.Services.Employees
             return [];
         }
 
+        private int GetEmployeeTotalExperience(string userId)
+        {
+            int totalWorkExperienceInMonths = 0;
+            IEnumerable<EmpWorkHistory> empWorkHistories = _empWorkHistoryRepository.GetAll(w => w.UserId == userId).Result;
+            if (!empWorkHistories.Any()) return totalWorkExperienceInMonths;
+
+            // sort work history by start date
+            var sortedList = empWorkHistories.OrderBy(wh => wh.StartDate).ToList();
+            List<(DateTime Start, DateTime End)> mergedDates = new List<(DateTime, DateTime)>();
+            var currentStart = sortedList[0].StartDate;
+            var currentEnd = sortedList[0].EndDate ?? DateTime.UtcNow;
+
+            foreach (var period in sortedList.Skip(1))
+            {
+                DateTime periodEnd = period.EndDate ?? DateTime.UtcNow;
+                if (period.StartDate <= currentEnd)
+                {
+                    period.EndDate = period.EndDate == null ? DateTime.UtcNow : period.EndDate;
+                    currentEnd = periodEnd > currentEnd ? periodEnd : currentEnd;
+                }
+                else
+                {
+                    mergedDates.Add((currentStart, currentEnd));
+                    currentStart = period.StartDate;
+                    currentEnd = periodEnd;
+                }
+            }
+            mergedDates.Add((currentStart, currentEnd));
+
+            // Calculate total months
+            foreach (var range in mergedDates)
+            {
+                int months = ((range.End.Year - range.Start.Year) * 12) + (range.End.Month - range.Start.Month);
+                if (range.End.Day >= range.Start.Day) months++;
+                totalWorkExperienceInMonths += months;
+            }
+            return totalWorkExperienceInMonths;
+        }
+
         public async Task<Result> DeleteWorkHistory(string workId, string userId)
         {
             bool exits = await _empWorkHistoryRepository.Exist(x => x.WorkHistoryId.Equals(workId));
@@ -877,7 +916,6 @@ namespace Codeji.CMS.Services.Employees
         }
 
         // notification preference service methods
-
         public async Task<Dictionary<EnumsHelper.NotificationPreferenceType, bool>> GetNotificationPreferences(string userId)
         {
             Dictionary<EnumsHelper.NotificationPreferenceType, bool> result = new();
