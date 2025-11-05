@@ -36,6 +36,21 @@ public class UserController : BaseApiController
         _accountServices = accountServices;
     }
 
+    [Route("InviteNewEmployee")]
+    [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.Create)]
+    public async Task<Result<InviteEmployeeDto>> InviteNewEmployee([FromBody] InviteEmployeeDto model)
+    {
+        Result<InviteEmployeeDto> result = new() { Success = false };
+        if (!ModelState.IsValid)
+        {
+            return result;
+        }
+        var currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        return await _employeeService.InviteNewEmployee(model, currentUserId);
+    }
+
+
     [Route("AddEmployees")]
     [HttpPost]
     [ModulePermission(AppModule.Employees, Permission.Create)]

@@ -7,7 +7,7 @@ public class EmpUser : BaseClass
 {
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
     public string UserId { get; set; }
-    public required string RoleId { get; set; }
+    public string RoleId { get; set; }
     public required string FirstName { get; set; }
     public required string? LastName { get; set; }
     public required string Email { get; set; }

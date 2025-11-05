@@ -133,7 +133,7 @@ public class AccountServices : IAccountServices
             RefreshToken = refreshToken
         };
         result.Success = true;
-        result.StatusCode = 200;
+        result.StatusCode = StatusCodes.Status200OK;
         return result;
     }
 

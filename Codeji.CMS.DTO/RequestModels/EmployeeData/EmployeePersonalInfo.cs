@@ -7,6 +7,8 @@ namespace Codeji.CMS.DTO.RequestModels.EmployeeData
     {
         public required string FirstName { get; set; }
         public required string LastName { get; set; }
+        public required string Gender { get; set; }
+        public required string RoleId { get; set; }
         public string? DateOfBirth { get; set; }
         public string? DateOfJoining { get; set; }
         public string? PhoneNumber { get; set; }

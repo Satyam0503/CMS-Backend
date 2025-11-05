@@ -103,6 +103,81 @@ namespace Codeji.CMS.Services.Employees
             _notificationService = notificationService;
             _notificationPreferenceRepository = notificationPreferenceRepository;
         }
+
+        public async Task<Result<InviteEmployeeDto>> InviteNewEmployee(InviteEmployeeDto model, string currentUserId)
+        {
+            Result<InviteEmployeeDto> result = new() { Success = false };
+            bool IsEmpIdExist = await _employeeRepository.Exist(e => e.EmployeeId.Equals(model.EmployeeId, StringComparison.OrdinalIgnoreCase) || e.Email == model.Email);
+            if (IsEmpIdExist)
+            {
+                result.StatusCode = CustomStatusCode.EmployeeIdAlreadyExist;
+                return result;
+            }
+            var userId = Guid.NewGuid().ToString();
+            EmpUser employee = new EmpUser()
+            {
+                UserId = userId,
+                FirstName = model.FirstName,
+                LastName = model.LastName,
+                Email = model.Email,
+                EmployeeId = model.EmployeeId,
+                IsEmailVerified = false,
+                Status = true
+            };
+            var res = await _employeeRepository.AddOne(employee);
+            if (res.Success)
+            {
+                model.UserId = employee.UserId;
+                result.Success = true;
+                result.MethodResult = model;
+            }
+            // set default notification preferences for new employee
+            var notificationPreferences = new NotificationPreference()
+            {
+                UserId = userId,
+                Preferences = _middlewareService.GetDefaultNotificationPreferences(),
+            };
+            await _notificationPreferenceRepository.AddOne(notificationPreferences);
+
+            UserModel currentUser = _middlewareService.GetUserById(currentUserId);
+            Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
+
+            // generate password creation token for newly added employee
+            string token = TokenHelper.GenerateToken();
+            string tokenHash = TokenHelper.ComputeSha256Hash(token);
+            int tokenExpiryTime = 24;
+            PasswordResetTokens passwordResetTokens = new()
+            {
+                UserId = userId,
+                TokenHash = tokenHash,
+                IsUsed = false,
+                Expiry = DateTime.UtcNow.AddHours(tokenExpiryTime),
+            };
+            var result2 = await _passwordResetTokens.AddOne(passwordResetTokens);
+
+            //Acknowledgement Email Logic 
+            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.CreateNewPasswordMail);
+            string replacedBody = HtmlTemplate.Render(emailContent.body, new
+            {
+                RecipientName = employee.FirstName + " " + employee.LastName,
+                PasswordCreationLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={userId}",
+                CompanyName = company != null ? company.CompanyName : "",
+            });
+
+            _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
+            {
+                _middlewareService.EmailSendAndSave(new EmpEmailLogs()
+                {
+                    UserTo = employee.UserId,
+                    Subject = emailContent.subject,
+                    Body = replacedBody,
+                    EmailLogType = EnumsHelper.MailType.CreateNewPasswordMail,
+                    Email = employee.Email,
+                    UserFrom = currentUser.UserId,
+                });
+            }, priority: 1);
+            return result;
+        }
         public async Task<Result> AddEmployee(UserModel user, string currentUserId)
         {
             Result result = new();
