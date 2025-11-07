@@ -4,9 +4,12 @@ using Codeji.CMS.DTO.Leave.LeaveRequest;
 using Codeji.CMS.DTO.LeaveManagement;
 using Codeji.CMS.DTO.LeaveManagement.Leave;
 using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
+using Codeji.CMS.DTO.LeaveManagement.LeavePolicy;
+using Codeji.CMS.Repository.Entities.Leave;
 using Codeji.CMS.Services.LeaveManagement;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Enums;
+using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -27,6 +30,65 @@ public class LeaveManagementController : ControllerBase
         _leaveManagementService = leaveManagementService;
         _httpContextAccessor = httpContextAccessor;
     }
+
+
+    [Route("CreateLeavePolicy")]
+    [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Create)]
+    public async Task<Result> CreateNewLeavePolicy([FromBody] LeavePolicyRequest model)
+    {
+        Result result = new();
+        if (!ModelState.IsValid) return result;
+        if ((model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly) && model.AccrualAmount == null)
+        {
+            result.StatusCode = CustomStatusCode.AccrualAmountRequired;
+            return result;
+        }
+        if (model.CarryOverAllowed && model.CarryOverLimit == null)
+        {
+            result.StatusCode = CustomStatusCode.CarryOverLimitRequired;
+            return result;
+        }
+        if (!model.CarryOverAllowed)
+        {
+            model.CarryOverLimit = null;
+        }
+        if (model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.None)
+        {
+            model.AccrualAmount = null;
+        }
+        result = await _leaveManagementService.CreateNewLeavePolicy(model);
+        return result;
+    }
+
+    [Route("UpdateLeavePolicy")]
+    [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Edit)]
+    public async Task<Result<UpdateLeavePolicyRequest>> UpdateLeavePolicy([FromBody] UpdateLeavePolicyRequest model)
+    {
+        Result<UpdateLeavePolicyRequest> result = new() { Success = false };
+        if (!ModelState.IsValid) return result;
+        if ((model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly) && model.AccrualAmount == null)
+        {
+            result.StatusCode = CustomStatusCode.AccrualAmountRequired;
+            return result;
+        }
+        if (model.CarryOverAllowed && model.CarryOverLimit == null)
+        {
+            result.StatusCode = CustomStatusCode.CarryOverLimitRequired;
+            return result;
+        }
+        if (!model.CarryOverAllowed)
+        {
+            model.CarryOverLimit = null;
+        }
+        if (model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.None)
+        {
+            model.AccrualAmount = null;
+        }
+        return await _leaveManagementService.UpdateLeavePolicy(model);
+    }
+
 
     [Route("CreateUpdateLeaveType")]
     [HttpPost]
@@ -73,8 +135,11 @@ public class LeaveManagementController : ControllerBase
     [HttpPost]
     public async Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
-        return await _leaveManagementService.CreateUpdateLeave(leaveRequestDto, userId);
+        if (string.IsNullOrEmpty(leaveRequestDto.UserId))
+        {
+            leaveRequestDto.UserId = CurrentContext.UserId(_httpContextAccessor);
+        }
+        return await _leaveManagementService.CreateUpdateLeave(leaveRequestDto);
     }
 
     [Route("GetLeaveRequest")]

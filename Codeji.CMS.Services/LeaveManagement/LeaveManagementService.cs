@@ -6,6 +6,7 @@ using Codeji.CMS.DTO.Leave.LeaveRequest;
 using Codeji.CMS.DTO.LeaveManagement;
 using Codeji.CMS.DTO.LeaveManagement.Leave;
 using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
+using Codeji.CMS.DTO.LeaveManagement.LeavePolicy;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
@@ -41,6 +42,7 @@ public class LeaveManagementService : ILeaveManagementService
     private readonly IMapper _mapper;
     private readonly IEmployeeService _employeeService;
     private readonly IMiddlewareService _middlewareService;
+    private readonly IMongoDbRepository<LeavePolicy> _leavePolicyRepo;
     public LeaveManagementService(IMongoDbRepository<LeaveTypes> leaveTypeRepo,
     IMongoDbRepository<EmpUser> employeeRepository,
     IMongoDbRepository<LeaveBalance> leaveBalance,
@@ -52,7 +54,8 @@ public class LeaveManagementService : ILeaveManagementService
     IMongoDbRepository<Roles> roleRepository,
     IMongoDbRepository<JobTitles> jobTitleRepo,
     IEmployeeService employeeService,
-    IMiddlewareService middlewareService
+    IMiddlewareService middlewareService,
+    IMongoDbRepository<LeavePolicy> leavePolicyRepo
     )
     {
         _leaveTypeRepo = leaveTypeRepo;
@@ -68,6 +71,47 @@ public class LeaveManagementService : ILeaveManagementService
         _employeeService = employeeService;
         _jobTitleRepo = jobTitleRepo;
         _middlewareService = middlewareService;
+        _leavePolicyRepo = leavePolicyRepo;
+    }
+
+    public async Task<Result> CreateNewLeavePolicy(LeavePolicyRequest leavePolicyDto)
+    {
+        Result result = new();
+        // check if policy already exist;
+        var exist = await _leavePolicyRepo.Exist(lp => lp.Name.Equals(leavePolicyDto.Name, StringComparison.CurrentCultureIgnoreCase) || lp.Code.Equals(leavePolicyDto.Code, StringComparison.CurrentCultureIgnoreCase));
+        if (exist)
+        {
+            result.StatusCode = CustomStatusCode.LeavePolicyAlreadyExist;
+            return result;
+        }
+        // insert record
+        LeavePolicy leavePolicy = _mapper.Map<LeavePolicy>(leavePolicyDto);
+        result = await _leavePolicyRepo.AddOne(leavePolicy);
+        return result;
+    }
+
+    public async Task<Result<UpdateLeavePolicyRequest>> UpdateLeavePolicy(UpdateLeavePolicyRequest model)
+    {
+        Result<UpdateLeavePolicyRequest> result = new() { Success = false };
+        // check if leave policy exits or not;
+        Expression<Func<LeavePolicy, bool>> expression = lp => lp.Id == model.Id;
+        var leavePolicy = await _leavePolicyRepo.FirstOrDefault(expression);
+        if (leavePolicy == null) return result;
+
+        bool duplicateLeavePolicy = await _leavePolicyRepo.Exist(lp => (lp.Name.Equals(model.Name, StringComparison.CurrentCultureIgnoreCase) || lp.Code.Equals(model.Code, StringComparison.CurrentCultureIgnoreCase)) && lp.Id != model.Id);
+        if (duplicateLeavePolicy)
+        {
+            result.StatusCode = CustomStatusCode.DuplicationLeavePolicy;
+            return result;
+        }
+        LeavePolicy updatedPolicyModel = _mapper.Map<LeavePolicy>(model);
+        var updateResult = await _leavePolicyRepo.Update(expression, updatedPolicyModel);
+        result.Success = updateResult.Success;
+        if (result.Success)
+        {
+            result.MethodResult = model;
+        }
+        return result;
     }
 
     public async Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto)
@@ -308,7 +352,7 @@ public class LeaveManagementService : ILeaveManagementService
         return result;
     }
 
-    public async Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto, string userId)
+    public async Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto)
     {
         Result result = new();
         // if (leaveRequestDto.StartDate < DateTime.UtcNow.Date || leaveRequestDto.EndDate < DateTime.UtcNow.Date)
@@ -324,7 +368,7 @@ public class LeaveManagementService : ILeaveManagementService
             return result;
         }
 
-        Expression<Func<LeaveBalance, bool>> leaveBalanceCondition = lb => lb.EmployeeId == userId && lb.Year.Year == DateTime.UtcNow.Year;
+        Expression<Func<LeaveBalance, bool>> leaveBalanceCondition = lb => lb.EmployeeId == leaveRequestDto.UserId && lb.Year.Year == DateTime.UtcNow.Year;
         var selectedEmpLeaveBal = await _leaveBalance.FirstOrDefault(leaveBalanceCondition);
         if (selectedEmpLeaveBal == null)
         {
@@ -341,7 +385,7 @@ public class LeaveManagementService : ILeaveManagementService
         // if user has pending leave request
         if (leaveRequestDto.LeaveRequestId == null)
         {
-            int pendingLeaves = await _leave.Count(l => l.EmployeeId == userId && l.Status == EnumsHelper.LeaveRequestStatus.Pending);
+            int pendingLeaves = await _leave.Count(l => l.EmployeeId == leaveRequestDto.UserId && l.Status == EnumsHelper.LeaveRequestStatus.Pending);
             if (pendingLeaves > 0)
             {
                 result.Success = false;
@@ -350,7 +394,7 @@ public class LeaveManagementService : ILeaveManagementService
             }
         }
         // check if emp already has apporoved leave on request date
-        var upcomingApprovedLeaves = await _leave.GetAll(lr => lr.EmployeeId == userId && lr.Status == EnumsHelper.LeaveRequestStatus.Accepted && lr.EndDate >= DateTime.UtcNow.Date);
+        var upcomingApprovedLeaves = await _leave.GetAll(lr => lr.EmployeeId == leaveRequestDto.UserId && lr.Status == EnumsHelper.LeaveRequestStatus.Accepted && lr.EndDate >= DateTime.UtcNow.Date);
         bool isOverlapping = upcomingApprovedLeaves.Any(lr => leaveRequestDto.StartDate <= lr.EndDate && leaveRequestDto.EndDate >= lr.StartDate);
         if (isOverlapping)
         {
@@ -369,7 +413,7 @@ public class LeaveManagementService : ILeaveManagementService
         {
             var leaveDomain = new LeaveRequest
             {
-                EmployeeId = userId,
+                EmployeeId = leaveRequestDto.UserId,
                 LeaveType = leaveRequestDto.LeaveType,
                 StartDate = leaveRequestDto.StartDate,
                 EndDate = leaveRequestDto.IsHalfDay ? leaveRequestDto.StartDate : leaveRequestDto.EndDate,

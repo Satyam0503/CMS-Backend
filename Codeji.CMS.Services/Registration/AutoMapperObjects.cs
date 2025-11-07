@@ -9,6 +9,7 @@ using Codeji.CMS.DTO.Dashboard;
 using Codeji.CMS.DTO.LeaveManagement;
 using Codeji.CMS.DTO.LeaveManagement.Leave;
 using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
+using Codeji.CMS.DTO.LeaveManagement.LeavePolicy;
 using Codeji.CMS.DTO.NoticeBoard;
 using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.RequestModels;
@@ -54,6 +55,8 @@ namespace Codeji.CMS.Services.Registration
             CreateMap<LeaveRequest, MyLeaveRequestResponse>().ReverseMap();
             CreateMap<CalendarEntity, UpComingHolidayEventResponseDto>().ReverseMap();
             CreateMap<CalendarEntity, CalendarResponseDto>().ReverseMap();
+            CreateMap<LeavePolicy, LeavePolicyRequest>().ReverseMap();
+            CreateMap<LeavePolicy, UpdateLeavePolicyRequest>().ReverseMap();
         }
     }
 

@@ -3,12 +3,15 @@ using Codeji.CMS.DTO.Leave.LeaveRequest;
 using Codeji.CMS.DTO.LeaveManagement;
 using Codeji.CMS.DTO.LeaveManagement.Leave;
 using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
-using Codeji.CMS.Utility.Enums;
+using Codeji.CMS.DTO.LeaveManagement.LeavePolicy;
 
 namespace Codeji.CMS.Services.LeaveManagement;
 
 public interface ILeaveManagementService
 {
+    // leave policy
+    Task<Result> CreateNewLeavePolicy(LeavePolicyRequest leavePolicyDto);
+    Task<Result<UpdateLeavePolicyRequest>> UpdateLeavePolicy(UpdateLeavePolicyRequest model);
     Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto);
     Task<Result<LeaveTypeResponseDto>> GetLeaveType(bool? IsActive);
     Task<Result> DeleteLeaveType(string leaveTypeId);
@@ -19,7 +22,7 @@ public interface ILeaveManagementService
     Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string employeeId);
 
     // leave
-    Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto, string userId);
+    Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto);
     Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveRequestFilter filter);
     Task<Result<MyLeaveRequestResponse>> GetMyLeaveRequests(LeaveRequestFilter filter, string userId);
     Task<Result> DeleteLeaveRequest(string leaveRequestId);

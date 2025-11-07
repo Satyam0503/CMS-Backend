@@ -50,24 +50,6 @@ public class UserController : BaseApiController
         return await _employeeService.InviteNewEmployee(model, currentUserId);
     }
 
-
-    [Route("AddEmployees")]
-    [HttpPost]
-    [ModulePermission(AppModule.Employees, Permission.Create)]
-    public async Task<Result> AddEmployees(UserModel user)
-    {
-        Result result = new();
-        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
-        bool isEmailExist = await _employeeService.IsEmailExist(user.Email);
-        if (isEmailExist)
-        {
-            result.StatusCode = CustomStatusCode.EmployeeAlreadyExist;
-            return result;
-        }
-        result = await _employeeService.AddEmployee(user, currentUserId);
-        return result;
-    }
-
     [Route("EditEmployees")]
     [HttpPost]
     public async Task<Result<UserModel>> EditEmployees(EmployeePersonalInfo user, string userId)

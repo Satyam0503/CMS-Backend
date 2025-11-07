@@ -12,6 +12,7 @@ public class LeaveRequestDto
     public string Reason { get; set; }
     public string? ReviewedBy { get; set; }
     public EnumsHelper.LeaveRequestStatus? Status { get; set; }
+    public string? UserId { get; set; }
 }
 
 public class LeaveRequestUpdateDto

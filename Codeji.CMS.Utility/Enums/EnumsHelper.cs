@@ -100,6 +100,12 @@
             Maternity = 4,
             Paternity = 5,
         }
+        public enum LeaveAccrualPeriod
+        {
+            Monthly = 1,
+            Yearly,
+            None,
+        }
     }
 }
 
