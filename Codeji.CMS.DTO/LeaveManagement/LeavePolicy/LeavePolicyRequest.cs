@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.DTO.LeaveManagement.LeavePolicy;
@@ -21,4 +22,7 @@ public class LeavePolicyRequest
     public bool HalfDayAllowed { get; set; } = false;
     public bool WeekendInclusive { get; set; } = false;
     public bool HolidayInclusive { get; set; } = false;
+    public string[]? ApplicableTo { get; set; } = [];
+
 }
+

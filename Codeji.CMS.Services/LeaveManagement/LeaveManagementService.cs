@@ -43,6 +43,7 @@ public class LeaveManagementService : ILeaveManagementService
     private readonly IEmployeeService _employeeService;
     private readonly IMiddlewareService _middlewareService;
     private readonly IMongoDbRepository<LeavePolicy> _leavePolicyRepo;
+    private readonly IMongoDbRepository<EmployeeLeaveBalance> _employeeLeaveBalanceRepo;
     public LeaveManagementService(IMongoDbRepository<LeaveTypes> leaveTypeRepo,
     IMongoDbRepository<EmpUser> employeeRepository,
     IMongoDbRepository<LeaveBalance> leaveBalance,
@@ -55,7 +56,8 @@ public class LeaveManagementService : ILeaveManagementService
     IMongoDbRepository<JobTitles> jobTitleRepo,
     IEmployeeService employeeService,
     IMiddlewareService middlewareService,
-    IMongoDbRepository<LeavePolicy> leavePolicyRepo
+    IMongoDbRepository<LeavePolicy> leavePolicyRepo,
+    IMongoDbRepository<EmployeeLeaveBalance> employeeLeaveBalanceRepo
     )
     {
         _leaveTypeRepo = leaveTypeRepo;
@@ -72,9 +74,10 @@ public class LeaveManagementService : ILeaveManagementService
         _jobTitleRepo = jobTitleRepo;
         _middlewareService = middlewareService;
         _leavePolicyRepo = leavePolicyRepo;
+        _employeeLeaveBalanceRepo = employeeLeaveBalanceRepo;
     }
 
-    public async Task<Result> CreateNewLeavePolicy(LeavePolicyRequest leavePolicyDto)
+    public async Task<Result> CreateNewLeavePolicy(LeavePolicyRequest leavePolicyDto, string company_id)
     {
         Result result = new();
         // check if policy already exist;
@@ -87,6 +90,40 @@ public class LeaveManagementService : ILeaveManagementService
         // insert record
         LeavePolicy leavePolicy = _mapper.Map<LeavePolicy>(leavePolicyDto);
         result = await _leavePolicyRepo.AddOne(leavePolicy);
+
+        // add leave policy to applicable employees 
+        if (leavePolicyDto.ApplicableTo != null)
+        {
+            //  apply for all employee if empty array
+            List<string> EmpIdList = [];
+            if (leavePolicyDto.ApplicableTo.Length == 0)
+            {
+                EmpIdList = (await _employeeRepository.GetAll(emp => emp.Status && emp.CompanyId == company_id)).Select(emp => emp.UserId).ToList();
+            }
+            else
+            {
+                foreach (string empId in leavePolicyDto.ApplicableTo)
+                {
+                    bool employeeExist = await _employeeRepository.Exist(emp => emp.UserId == empId && emp.CompanyId == company_id && emp.Status);
+                    if (employeeExist) EmpIdList.Add(empId);
+                }
+            }
+
+            // add balance for employees
+            List<EmployeeLeaveBalance> employeeLeaveBalancesList = [];
+            foreach (string empId in EmpIdList)
+            {
+                EmployeeLeaveBalance employeeLeaveBalance = new()
+                {
+                    UserId = empId,
+                    Balance = (decimal)(leavePolicy.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly ? leavePolicyDto.AccrualAmount : leavePolicyDto.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly ? leavePolicyDto.AccrualAmount : 0),
+                    UsedBalance = 0,
+                    LastAccrual = DateTime.UtcNow,
+                };
+                employeeLeaveBalancesList.Add(employeeLeaveBalance);
+            }
+            await _employeeLeaveBalanceRepo.AddMany(employeeLeaveBalancesList);
+        }
         return result;
     }
 
@@ -113,6 +150,19 @@ public class LeaveManagementService : ILeaveManagementService
         }
         return result;
     }
+
+    public async Task<Result<UpdateLeavePolicyRequest>> GetAllLeavePolicies(string companyId)
+    {
+        Expression<Func<LeavePolicy, bool>> expression = lp => lp.CompanyId == companyId;
+        IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(expression);
+        var list = _mapper.Map<List<UpdateLeavePolicyRequest>>(leavePolicies);
+        return new Result<UpdateLeavePolicyRequest>()
+        {
+            Success = true,
+            MethodResults = list
+        };
+    }
+
 
     public async Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto)
     {

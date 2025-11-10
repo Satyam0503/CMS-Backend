@@ -10,8 +10,15 @@ namespace Codeji.CMS.Services.LeaveManagement;
 public interface ILeaveManagementService
 {
     // leave policy
-    Task<Result> CreateNewLeavePolicy(LeavePolicyRequest leavePolicyDto);
+    Task<Result> CreateNewLeavePolicy(LeavePolicyRequest leavePolicyDto, string company_id);
     Task<Result<UpdateLeavePolicyRequest>> UpdateLeavePolicy(UpdateLeavePolicyRequest model);
+    Task<Result<UpdateLeavePolicyRequest>> GetAllLeavePolicies(string companyId);
+
+    // leave balance services 
+
+    // Task<Result> AddLeaveBalance();
+
+
     Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto);
     Task<Result<LeaveTypeResponseDto>> GetLeaveType(bool? IsActive);
     Task<Result> DeleteLeaveType(string leaveTypeId);

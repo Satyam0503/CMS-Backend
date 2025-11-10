@@ -57,7 +57,8 @@ public class LeaveManagementController : ControllerBase
         {
             model.AccrualAmount = null;
         }
-        result = await _leaveManagementService.CreateNewLeavePolicy(model);
+        string company_id = CurrentContext.CompanyId(_httpContextAccessor);
+        result = await _leaveManagementService.CreateNewLeavePolicy(model, company_id);
         return result;
     }
 
@@ -89,6 +90,14 @@ public class LeaveManagementController : ControllerBase
         return await _leaveManagementService.UpdateLeavePolicy(model);
     }
 
+    [Route("GetAllLeavePolicies")]
+    [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Edit)]
+    public async Task<Result<UpdateLeavePolicyRequest>> GetAllLeavePolicies()
+    {
+        string company_id = CurrentContext.CompanyId(_httpContextAccessor);
+        return await _leaveManagementService.GetAllLeavePolicies(company_id);
+    }
 
     [Route("CreateUpdateLeaveType")]
     [HttpPost]
