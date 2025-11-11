@@ -90,7 +90,8 @@
         {
             Pending = 1,
             Accepted = 2,
-            Rejected = 3
+            Rejected = 3,
+            WithDraw = 4
         }
         public enum LeaveTypes
         {

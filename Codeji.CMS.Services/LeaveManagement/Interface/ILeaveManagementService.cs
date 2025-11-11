@@ -14,9 +14,9 @@ public interface ILeaveManagementService
     Task<Result<UpdateLeavePolicyRequest>> UpdateLeavePolicy(UpdateLeavePolicyRequest model);
     Task<Result<UpdateLeavePolicyRequest>> GetAllLeavePolicies(string companyId);
 
-    // leave balance services 
-
-    // Task<Result> AddLeaveBalance();
+    // leave request services 
+    Task<Result> CreateLeaveRequest(LeaveRequestDto leaveRequest);
+    Task<Result> UpdateLeaveRequest(UpdateLeaveRequestDto leaveRequestDto);
 
 
     Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto);
@@ -29,7 +29,6 @@ public interface ILeaveManagementService
     Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string employeeId);
 
     // leave
-    Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto);
     Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveRequestFilter filter);
     Task<Result<MyLeaveRequestResponse>> GetMyLeaveRequests(LeaveRequestFilter filter, string userId);
     Task<Result> DeleteLeaveRequest(string leaveRequestId);
