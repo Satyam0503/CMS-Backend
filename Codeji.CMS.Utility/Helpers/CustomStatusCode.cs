@@ -36,4 +36,5 @@ public static class CustomStatusCode
     public const int AccrualAmountRequired = 32;
     public const int CarryOverLimitRequired = 33;
     public const int DuplicationLeavePolicy = 34;
+    public const int LeaveBalanceLimitExceed = 35;
 }

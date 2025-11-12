@@ -99,7 +99,6 @@ public class LeaveManagementController : ControllerBase
         return await _leaveManagementService.GetAllLeavePolicies(company_id);
     }
 
-
     [Route("GetEmployeeLeaveBalance/{employeeId}")]
     [HttpGet]
     public async Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string employeeId)
@@ -128,50 +127,7 @@ public class LeaveManagementController : ControllerBase
     }
 
 
-
-    // old endpoints 
-
-    [Route("CreateUpdateLeaveType")]
-    [HttpPost]
-    [ModulePermission(AppModule.LeaveManagement, [Permission.Create, Permission.Edit])]
-    public async Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto)
-    {
-        Result result = new();
-        return await _leaveManagementService.CreateUpdateLeaveType(leaveTypeRequestDto);
-    }
-
-    [Route("GetLeaveType")]
-    [HttpGet]
-    public async Task<Result<LeaveTypeResponseDto>> GetLeaveType(bool? IsActive)
-    {
-        return await _leaveManagementService.GetLeaveType(IsActive);
-    }
-
-    [Route("DeleteLeaveType/{leaveTypeId}")]
-    [HttpDelete]
-    [ModulePermission(AppModule.LeaveManagement, Permission.Delete)]
-    public async Task<Result> DeleteLeaveType(string leaveTypeId)
-    {
-        return await _leaveManagementService.DeleteLeaveType(leaveTypeId);
-    }
-
-    // leave Balance
-    [Route("CreateUpdateLeaveBalance")]
-    [HttpPost]
-    [ModulePermission(AppModule.LeaveManagement, [Permission.Create, Permission.Edit])]
-    public async Task<Result> CreateUpdateLeaveBalance(LeaveBalanceRequestDto LeaveBalanceRequestDto)
-    {
-        return await _leaveManagementService.CreateUpdateLeaveBalance(LeaveBalanceRequestDto);
-    }
-
-    [Route("GetLeaveBalance")]
-    [HttpPost]
-    public async Task<Result<LeaveBalanceResponseDto>> GetLeaveBalance(LeaveBalanceFilter? leaveBalanceFilter)
-    {
-        return await _leaveManagementService.GetLeaveBalance(leaveBalanceFilter);
-    }
-
-    [Route("GetLeaveRequest")]
+    [Route("GetLeaveRequests")]
     [HttpPost]
     public async Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveRequestFilter? leaveFilter)
     {
@@ -200,8 +156,6 @@ public class LeaveManagementController : ControllerBase
         return await _leaveManagementService.UpdateLeaveRequestStatus(leaveRequestId, model);
     }
 
-
-
     [Route("GetLeaveRequestSummary")]
     [HttpGet]
     public async Task<Result<LeaveRequestSummaryResponseDto>> GetLeaveRequestSummary()
@@ -218,5 +172,14 @@ public class LeaveManagementController : ControllerBase
             year = DateTime.UtcNow.Year;
         }
         return await _leaveManagementService.GetMonthlyTakenLeaveSummary(year);
+    }
+
+    // leave Balance
+    [Route("UpdateEmployeeLeaveBalance")]
+    [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, [Permission.Create, Permission.Edit])]
+    public async Task<Result> UpdateEmpLeaveBalance(List<LeaveBalanceRequestDto> LeaveBalanceRequestDto)
+    {
+        return await _leaveManagementService.UpdateEmployeeLeaveBalance(LeaveBalanceRequestDto);
     }
 }

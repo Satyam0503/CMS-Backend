@@ -10,7 +10,6 @@ public class LeaveRequest : BaseClass
     public string EmployeeId { get; set; }
     public bool IsHalfDay { get; set; }
     public required string LeavePolicyId { get; set; }
-    public EnumsHelper.LeaveTypes LeaveType { get; set; }
     public DateTime StartDate { get; set; }
     public DateTime EndDate { get; set; }
     public decimal TotalDays { get; set; }

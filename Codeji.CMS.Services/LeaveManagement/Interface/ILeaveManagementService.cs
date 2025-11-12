@@ -18,22 +18,14 @@ public interface ILeaveManagementService
     Task<Result> CreateLeaveRequest(LeaveRequestDto leaveRequest);
     Task<Result> UpdateLeaveRequest(UpdateLeaveRequestDto leaveRequestDto);
 
-
-    Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto);
-    Task<Result<LeaveTypeResponseDto>> GetLeaveType(bool? IsActive);
-    Task<Result> DeleteLeaveType(string leaveTypeId);
-
-    // leave balance 
-    Task<Result> CreateUpdateLeaveBalance(LeaveBalanceRequestDto leaveBalanceRequestDto);
-    Task<Result<LeaveBalanceResponseDto>> GetLeaveBalance(LeaveBalanceFilter? leaveBalanceFilter);
-    Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string employeeId);
-
     // leave
     Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveRequestFilter filter);
     Task<Result<MyLeaveRequestResponse>> GetMyLeaveRequests(LeaveRequestFilter filter, string userId);
     Task<Result> DeleteLeaveRequest(string leaveRequestId);
     Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, LeaveRequestUpdateDto model);
     Task<Result<LeaveRequestSummaryResponseDto>> GetLeaveRequestSummary();
-
     Task<Result<MonthlyTakenLeaveSummaryResponseDto>> GetMonthlyTakenLeaveSummary(int? year);
+    // leave balance 
+    Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string employeeId);
+    Task<Result> UpdateEmployeeLeaveBalance(List<LeaveBalanceRequestDto> leaveBalanceRequestDto);
 }

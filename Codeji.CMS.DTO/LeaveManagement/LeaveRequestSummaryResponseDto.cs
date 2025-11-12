@@ -1,5 +1,4 @@
 
-using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.DTO.LeaveManagement;
 
@@ -12,6 +11,7 @@ public class LeaveRequestSummaryResponseDto
 
 public class LeaveTypeSummary
 {
-    public LeaveTypes LeaveType { get; set; }
+    public string LeaveTypeName { get; set; }
+    public string LeaveTypeCode { get; set; }
     public Dictionary<int, int> StatusValues { get; set; }
 }
