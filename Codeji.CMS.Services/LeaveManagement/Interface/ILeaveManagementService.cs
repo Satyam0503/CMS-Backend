@@ -28,4 +28,8 @@ public interface ILeaveManagementService
     // leave balance 
     Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string employeeId);
     Task<Result> UpdateEmployeeLeaveBalance(List<LeaveBalanceRequestDto> leaveBalanceRequestDto);
+
+    // service for leave accrual based on leave policy
+
+    Task EmployeeLeaveBalanceAccrual();
 }

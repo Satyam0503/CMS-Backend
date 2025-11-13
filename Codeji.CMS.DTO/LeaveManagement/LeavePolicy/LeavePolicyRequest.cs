@@ -13,9 +13,9 @@ public class LeavePolicyRequest
     public bool Paid { get; set; } = true;
     [EnumDataType(typeof(LeaveAccrualPeriod), ErrorMessage = "Invalid accrual period value")]
     public LeaveAccrualPeriod AccrualPeriod { get; set; }
-    [Range(0, 100)]
-    public decimal? AccrualAmount { get; set; }
-    public decimal MaxBalance { get; set; } = 0;
+    [Range(1, 100)]
+    public decimal AccrualAmount { get; set; }
+    public decimal? MaxBalance { get; set; } = 0;
     public bool CarryOverAllowed { get; set; } = false;
     public decimal? CarryOverLimit { get; set; }
     public int MinNoticeDays { get; set; } = 0;

@@ -13,7 +13,7 @@ public class LeavePolicy : BaseClass
     public bool Paid { get; set; } = true;
 
     public LeaveAccrualPeriod AccrualPeriod { get; set; }
-    public decimal? AccrualAmount { get; set; }
+    public decimal AccrualAmount { get; set; }
     public decimal? MaxBalance { get; set; } = 0;
 
     public bool CarryOverAllowed { get; set; } = false;

@@ -1,5 +1,4 @@
 using System.Linq.Expressions;
-using System.Threading.Tasks;
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Leave.LeaveRequest;
@@ -13,7 +12,6 @@ using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
-using Codeji.CMS.Repository.Entities.Holidays;
 using Codeji.CMS.Repository.Entities.Leave;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
@@ -22,7 +20,6 @@ using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
-using EllipticCurve.Utils;
 using LinqKit;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
@@ -120,7 +117,7 @@ public class LeaveManagementService : ILeaveManagementService
                 {
                     UserId = empId,
                     LeavePolicyId = leavePolicy.Id,
-                    Balance = (decimal)(leavePolicy.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly ? leavePolicyDto.AccrualAmount : leavePolicyDto.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly ? leavePolicyDto.AccrualAmount : 0),
+                    Balance = leavePolicyDto.AccrualAmount,
                     UsedBalance = 0,
                     LastAccrual = DateTime.UtcNow,
                 };
@@ -455,6 +452,7 @@ public class LeaveManagementService : ILeaveManagementService
                 ReviewedBy = reviewer != null ? $"{reviewer.FirstName} {reviewer.LastName}" : "-",
                 Comment = lr.Comment ?? "",
                 LeavePolicyName = existingLeavePolicy?.Name,
+                LeavePolicyId = existingLeavePolicy?.Id,
                 Code = existingLeavePolicy?.Code,
             };
         }).ToList();
@@ -567,7 +565,7 @@ public class LeaveManagementService : ILeaveManagementService
         {
             TotalRequests = currentMonthLeaveRequest.Count(),
             LeaveStatusSummary = leaveStatusSummary,
-            LeaveTypeSummary = (List<LeaveTypeSummary>)leaveTypeSummary,
+            LeaveTypeSummary = leaveTypeSummary,
         };
         return result;
     }
@@ -751,6 +749,44 @@ public class LeaveManagementService : ILeaveManagementService
         await Task.WhenAll(notificationTasks);
     }
 
-
+    public async Task EmployeeLeaveBalanceAccrual()
+    {
+        // get all active leavePolicy with accrual monthly or yearly
+        IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(lp => lp.Status && lp.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || lp.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly, withDefaultFilter: false);
+        if (!leavePolicies.Any()) return;
+        foreach (var policy in leavePolicies)
+        {
+            // get all active employees with leave policy
+            IEnumerable<EmployeeLeaveBalance> employeeLeaveBalances = await _employeeLeaveBalanceRepo.GetAll(elb => elb.LeavePolicyId == policy.Id, withDefaultFilter: false);
+            if (policy.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly && employeeLeaveBalances.Any())
+            {
+                foreach (EmployeeLeaveBalance empLeave in employeeLeaveBalances)
+                {
+                    var updatedBalance = empLeave.Balance + policy.AccrualAmount;
+                    empLeave.Balance = policy.MaxBalance.HasValue ? Math.Min(updatedBalance, policy.MaxBalance.Value) : updatedBalance;
+                    Expression<Func<EmployeeLeaveBalance, bool>> expression = elb => elb.Id == empLeave.Id;
+                    await _employeeLeaveBalanceRepo.UpdateMany(expression, Builders<EmployeeLeaveBalance>.Update
+                    .Set(b => b.Balance, empLeave.Balance)
+                    .Set(b => b.UsedBalance, 0)
+                    .Set(b => b.LastAccrual, DateTime.UtcNow)
+                    .Set(b => b.UpdatedDate, DateTime.UtcNow));
+                }
+            }
+            if (policy.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly && DateTime.UtcNow.Month == 1)
+            {
+                foreach (EmployeeLeaveBalance empLeave in employeeLeaveBalances)
+                {
+                    var updatedBalance = policy.CarryOverAllowed ? (Math.Min(empLeave.Balance, policy.CarryOverLimit.Value) + policy.AccrualAmount) : policy.AccrualAmount;
+                    empLeave.Balance = policy.MaxBalance.HasValue ? Math.Min(updatedBalance, policy.MaxBalance.Value) : updatedBalance;
+                    Expression<Func<EmployeeLeaveBalance, bool>> expression = elb => elb.Id == empLeave.Id;
+                    await _employeeLeaveBalanceRepo.UpdateMany(expression, Builders<EmployeeLeaveBalance>.Update
+                    .Set(b => b.Balance, empLeave.Balance)
+                    .Set(b => b.UsedBalance, 0)
+                    .Set(b => b.LastAccrual, DateTime.UtcNow)
+                    .Set(b => b.UpdatedDate, DateTime.UtcNow));
+                }
+            }
+        }
+    }
 }
 

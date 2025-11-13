@@ -14,5 +14,6 @@ public class MyLeaveRequestResponse
     public string Comment { get; set; }
     public LeaveRequestStatus Status { get; set; }
     public string LeavePolicyName { get; set; }
+    public string LeavePolicyId { get; set; }
     public string Code { get; set; }
 }

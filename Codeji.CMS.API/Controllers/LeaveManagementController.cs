@@ -39,7 +39,7 @@ public class LeaveManagementController : ControllerBase
     {
         Result result = new();
         if (!ModelState.IsValid) return result;
-        if ((model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly) && model.AccrualAmount == null)
+        if ((model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly) && model.AccrualAmount <= 0)
         {
             result.StatusCode = CustomStatusCode.AccrualAmountRequired;
             return result;
@@ -53,10 +53,10 @@ public class LeaveManagementController : ControllerBase
         {
             model.CarryOverLimit = null;
         }
-        if (model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.None)
-        {
-            model.AccrualAmount = null;
-        }
+        // if (model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.None)
+        // {
+        //     model.AccrualAmount = null;
+        // }
         string company_id = CurrentContext.CompanyId(_httpContextAccessor);
         result = await _leaveManagementService.CreateNewLeavePolicy(model, company_id);
         return result;
@@ -69,7 +69,7 @@ public class LeaveManagementController : ControllerBase
     {
         Result<UpdateLeavePolicyRequest> result = new() { Success = false };
         if (!ModelState.IsValid) return result;
-        if ((model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly) && model.AccrualAmount == null)
+        if ((model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly) && model.AccrualAmount <= 0)
         {
             result.StatusCode = CustomStatusCode.AccrualAmountRequired;
             return result;
@@ -83,10 +83,10 @@ public class LeaveManagementController : ControllerBase
         {
             model.CarryOverLimit = null;
         }
-        if (model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.None)
-        {
-            model.AccrualAmount = null;
-        }
+        // if (model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.None)
+        // {
+        //     model.AccrualAmount = null;
+        // }
         return await _leaveManagementService.UpdateLeavePolicy(model);
     }
 
