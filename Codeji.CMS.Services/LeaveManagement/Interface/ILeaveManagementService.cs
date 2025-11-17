@@ -12,7 +12,7 @@ public interface ILeaveManagementService
     // leave policy
     Task<Result> CreateNewLeavePolicy(LeavePolicyRequest leavePolicyDto, string company_id);
     Task<Result<UpdateLeavePolicyRequest>> UpdateLeavePolicy(UpdateLeavePolicyRequest model);
-    Task<Result<UpdateLeavePolicyRequest>> GetAllLeavePolicies(string companyId);
+    Task<Result<UpdateLeavePolicyRequest>> GetAllLeavePolicies(string companyId, bool? status);
 
     // leave request services 
     Task<Result> CreateLeaveRequest(LeaveRequestDto leaveRequest);

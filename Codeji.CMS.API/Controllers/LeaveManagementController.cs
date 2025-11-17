@@ -92,11 +92,11 @@ public class LeaveManagementController : ControllerBase
 
     [Route("GetAllLeavePolicies")]
     [HttpPost]
-    [ModulePermission(AppModule.LeaveManagement, Permission.Edit)]
-    public async Task<Result<UpdateLeavePolicyRequest>> GetAllLeavePolicies()
+    [ModulePermission(AppModule.LeaveManagement, Permission.View)]
+    public async Task<Result<UpdateLeavePolicyRequest>> GetAllLeavePolicies([FromQuery] bool? status)
     {
         string company_id = CurrentContext.CompanyId(_httpContextAccessor);
-        return await _leaveManagementService.GetAllLeavePolicies(company_id);
+        return await _leaveManagementService.GetAllLeavePolicies(company_id, status);
     }
 
     [Route("GetEmployeeLeaveBalance/{employeeId}")]

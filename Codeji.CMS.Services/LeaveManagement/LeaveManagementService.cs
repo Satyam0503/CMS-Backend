@@ -152,9 +152,9 @@ public class LeaveManagementService : ILeaveManagementService
         return result;
     }
 
-    public async Task<Result<UpdateLeavePolicyRequest>> GetAllLeavePolicies(string companyId)
+    public async Task<Result<UpdateLeavePolicyRequest>> GetAllLeavePolicies(string companyId, bool? status)
     {
-        Expression<Func<LeavePolicy, bool>> expression = lp => lp.CompanyId == companyId;
+        Expression<Func<LeavePolicy, bool>> expression = status.HasValue ? lp => lp.CompanyId == companyId && lp.Status == status.Value : lp => lp.CompanyId == companyId;
         IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(expression);
         var list = _mapper.Map<List<UpdateLeavePolicyRequest>>(leavePolicies);
         return new Result<UpdateLeavePolicyRequest>()
@@ -403,6 +403,7 @@ public class LeaveManagementService : ILeaveManagementService
                                                             Status = leave.Status,
                                                             LeavePolicyName = policy.Name,
                                                             Code = policy.Code,
+                                                            Comment = leave.Comment,
                                                         }
                                                         ).ToList();
 

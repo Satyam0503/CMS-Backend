@@ -17,4 +17,5 @@ public class LeaveResponseDto
     public EnumsHelper.LeaveRequestStatus Status { get; set; }
     public required string LeavePolicyName { get; set; }
     public required string Code { get; set; }
+    public string Comment { get; set; }
 }
