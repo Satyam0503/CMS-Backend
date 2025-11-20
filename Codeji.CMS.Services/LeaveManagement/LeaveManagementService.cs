@@ -593,8 +593,6 @@ public class LeaveManagementService : ILeaveManagementService
     }
 
 
-
-
     // leave balance services
     public async Task<Result> UpdateEmployeeLeaveBalance(List<LeaveBalanceRequestDto> leaveBalanceRequestDto)
     {
@@ -678,6 +676,63 @@ public class LeaveManagementService : ILeaveManagementService
         result.MethodResults = empLeaveBalanceResult;
         result.Success = true;
         result.TotalRecords = empLeaveBalanceResult.Count;
+        return result;
+    }
+    public async Task<Result<AllEmployeeLeaveBalance>> GetAllEmployeeLeaveBalances(LeaveBalanceFilter filter, string companyId)
+    {
+        Result<AllEmployeeLeaveBalance> result = new() { Success = false };
+
+        // get employee list based on filter
+        Expression<Func<EmpUser, bool>> empExpression = string.IsNullOrEmpty(filter.EmployeeName) ? u => u.Status : u => u.Status && (u.FirstName.Contains(filter.EmployeeName, StringComparison.CurrentCultureIgnoreCase) || u.LastName.Contains(filter.EmployeeName, StringComparison.CurrentCultureIgnoreCase));
+        int totalRecords = await _employeeRepository.Count(empExpression);
+        List<EmpUser> empUsers = (await _employeeRepository.GetAggregateDataAsync<EmpUser>(empExpression, pageNo: filter.PageNo, pageSize: filter.PageSize)).ToList();
+
+        if (!empUsers.Any()) return result;
+        List<string> empIds = empUsers.Select(e => e.UserId).ToList();
+
+        // get employee job roles id
+        List<string> empJobRoleId = empUsers.Where(emp => emp.JobRole != null).Select(emp => emp.JobRole).Distinct().ToList();
+        IEnumerable<JobTitles> jobTitles = await _jobTitleRepo.GetAll(jr => empJobRoleId.Contains(jr.JobTitleId));
+
+        // get employee leave balances
+        Expression<Func<EmployeeLeaveBalance, bool>> expression = lb => empIds.Contains(lb.UserId);
+        IEnumerable<EmployeeLeaveBalance> employeeLeaveBalances = await _employeeLeaveBalanceRepo.GetAll(expression);
+
+        // get leave policies details
+        List<string> leavePolicyIds = employeeLeaveBalances.Select(elb => elb.LeavePolicyId).Distinct().ToList();
+        IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(lp => leavePolicyIds.Contains(lp.Id) && lp.CompanyId == companyId);
+
+        var empLeaveBalanceResult = empUsers.Select(emp =>
+            {
+                var balances = employeeLeaveBalances.Where(lb => lb.UserId == emp.UserId).Select(lb =>
+                {
+                    LeavePolicy? policy = leavePolicies.FirstOrDefault(lp => lp.Id == lb.LeavePolicyId);
+                    return new LeaveBalanceDetail
+                    {
+                        LeaveBalanceId = lb.Id,
+                        LeavePolicyId = lb.LeavePolicyId,
+                        LeavePolicyName = policy != null ? policy.Name : string.Empty,
+                        LeavePolicyCode = policy != null ? policy.Code : string.Empty,
+                        Remaining = lb.Balance,
+                        UsedLeave = lb.UsedBalance
+                    };
+                }).ToList();
+
+                JobTitles? jobTitle = emp.JobRole != null ? jobTitles.FirstOrDefault(jt => jt.JobTitleId == emp.JobRole) : null;
+
+                return new AllEmployeeLeaveBalance
+                {
+                    EmployeeId = emp.UserId,
+                    EmployeeName = emp.FirstName + " " + emp.LastName,
+                    EmployeeCode = emp.EmployeeId,
+                    Designation = jobTitle?.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label),
+                    ProfilePicture = Common.GetEmployeeImageUrl(emp.ProfileUrl),
+                    LeaveBalances = balances
+                };
+            }).ToList();
+        result.MethodResults = empLeaveBalanceResult;
+        result.TotalRecords = totalRecords;
+        result.Success = true;
         return result;
     }
 

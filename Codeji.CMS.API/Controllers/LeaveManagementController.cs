@@ -182,4 +182,13 @@ public class LeaveManagementController : ControllerBase
     {
         return await _leaveManagementService.UpdateEmployeeLeaveBalance(LeaveBalanceRequestDto);
     }
+
+    [Route("GetAllEmployeeLeaveBalances")]
+    [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.View)]
+    public async Task<Result<AllEmployeeLeaveBalance>> GetAllEmployeeLeaveBalances([FromBody] LeaveBalanceFilter filter)
+    {
+        string company_id = CurrentContext.CompanyId(_httpContextAccessor);
+        return await _leaveManagementService.GetAllEmployeeLeaveBalances(filter, company_id);
+    }
 }
