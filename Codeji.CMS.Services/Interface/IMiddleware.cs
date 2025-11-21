@@ -13,6 +13,7 @@ namespace Codeji.CMS.Services.Interface
 
         Dictionary<NotificationPreferenceType, bool> GetDefaultNotificationPreferences();
         bool IsUserNotificationPreferenceEnabled(string userId, NotificationPreferenceType preferenceType);
+        string GetCompanyLogoAsDataUrl(string companyLogoPath);
     }
 }
 

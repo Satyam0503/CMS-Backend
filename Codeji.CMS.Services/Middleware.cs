@@ -108,6 +108,14 @@ namespace Codeji.CMS.Services
             }
             return false;
         }
+        public string GetCompanyLogoAsDataUrl(string companyLogoPath)
+        {
+            if (!File.Exists(companyLogoPath)) return string.Empty;
+            byte[] logoByteArray = File.ReadAllBytes(companyLogoPath);
+            string logoBase64Format = Convert.ToBase64String(logoByteArray);
+            string logoExtension = companyLogoPath.Split('.').Last();
+            string logoDataUrl = $"data:image/{logoExtension};base64,{logoBase64Format}";
+            return logoDataUrl;
+        }
     }
 }
-

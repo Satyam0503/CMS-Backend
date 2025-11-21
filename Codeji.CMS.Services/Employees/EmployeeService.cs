@@ -156,12 +156,14 @@ namespace Codeji.CMS.Services.Employees
             var result2 = await _passwordResetTokens.AddOne(passwordResetTokens);
 
             //Acknowledgement Email Logic 
-            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.CreateNewPasswordMail);
+            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.EmployeeWelcomeMail);
             string replacedBody = HtmlTemplate.Render(emailContent.body, new
             {
-                RecipientName = employee.FirstName + " " + employee.LastName,
+                EmployeeName = employee.FirstName + " " + employee.LastName,
                 PasswordCreationLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={userId}",
-                CompanyName = company != null ? company.CompanyName : "",
+                CompanyName = company != null ? company.CompanyName : string.Empty,
+                CompanyLogo = company.CompanyLogo != null ? _middlewareService.GetCompanyLogoAsDataUrl(Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "CompanyLogo", company.CompanyLogo)) : string.Empty,
+                Year = DateTime.UtcNow.Year
             });
 
             _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
@@ -171,7 +173,7 @@ namespace Codeji.CMS.Services.Employees
                     UserTo = employee.UserId,
                     Subject = emailContent.subject,
                     Body = replacedBody,
-                    EmailLogType = EnumsHelper.MailType.CreateNewPasswordMail,
+                    EmailLogType = EnumsHelper.MailType.EmployeeWelcomeMail,
                     Email = employee.Email,
                     UserFrom = currentUser.UserId,
                 });
