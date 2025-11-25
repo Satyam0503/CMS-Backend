@@ -37,4 +37,5 @@ public static class CustomStatusCode
     public const int CarryOverLimitRequired = 33;
     public const int DuplicationLeavePolicy = 34;
     public const int LeaveBalanceLimitExceed = 35;
+    public const int PasswordResetLinkAlreadySent = 36;
 }

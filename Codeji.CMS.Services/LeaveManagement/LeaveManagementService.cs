@@ -684,7 +684,7 @@ public class LeaveManagementService : ILeaveManagementService
 
         // get employee list based on filter
         Expression<Func<EmpUser, bool>> empExpression = string.IsNullOrEmpty(filter.EmployeeName) ? u => u.Status : u => u.Status && (u.FirstName.Contains(filter.EmployeeName, StringComparison.CurrentCultureIgnoreCase) || u.LastName.Contains(filter.EmployeeName, StringComparison.CurrentCultureIgnoreCase));
-        int totalRecords = await _employeeRepository.Count(empExpression);
+
         List<EmpUser> empUsers = (await _employeeRepository.GetAggregateDataAsync<EmpUser>(empExpression, pageNo: filter.PageNo, pageSize: filter.PageSize)).ToList();
 
         if (!empUsers.Any()) return result;
@@ -693,12 +693,6 @@ public class LeaveManagementService : ILeaveManagementService
         // get employee job roles id
         List<string> empJobRoleId = empUsers.Where(emp => emp.JobRole != null).Select(emp => emp.JobRole).Distinct().ToList();
         IEnumerable<JobTitles> jobTitles = await _jobTitleRepo.GetAll(jr => empJobRoleId.Contains(jr.JobTitleId));
-
-        // // get employee leave balances
-        // Expression<Func<EmployeeLeaveBalance, bool>> expression = lb => empIds.Contains(lb.UserId) && (filter.LeavePolicies.Count == 0 || filter.LeavePolicies.Contains(lb.LeavePolicyId));
-        // empUsers = empUsers.Where(e => filteredEmpIds.Contains(e.UserId)).ToList();
-
-        // IEnumerable<EmployeeLeaveBalance> employeeLeaveBalances = await _employeeLeaveBalanceRepo.GetAll(expression);
 
         // get employee leave balances
         Expression<Func<EmployeeLeaveBalance, bool>> leaveBalanceExpression;
@@ -752,7 +746,7 @@ public class LeaveManagementService : ILeaveManagementService
                 };
             }).ToList();
         result.MethodResults = empLeaveBalanceResult;
-        result.TotalRecords = totalRecords;
+        result.TotalRecords = empUsers.Count;
         result.Success = true;
         return result;
     }

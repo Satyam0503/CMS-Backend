@@ -107,6 +107,14 @@
             Yearly,
             None,
         }
+        public enum SecurityTokenType
+        {
+            Invite,
+            PasswordReset,
+            // EmailVerification,
+            // TwoFactorAuth,
+            // AccountUnlock
+        }
     }
 }
 

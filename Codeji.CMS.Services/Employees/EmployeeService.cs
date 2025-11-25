@@ -42,7 +42,6 @@ namespace Codeji.CMS.Services.Employees
         readonly IMiddlewareService _middlewareService;
         readonly IMongoDbRepository<Department> _departmentRepository;
         readonly IMongoDbRepository<Skills> _skillsRepository;
-        readonly IMongoDbRepository<PasswordResetTokens> _passwordResetTokens;
         readonly IMongoDbRepository<EmpWorkHistory> _empWorkHistoryRepository;
         readonly IMongoDbRepository<UserNotifications> _userNotificationRepository;
         readonly IMongoDbRepository<Notifications> _notificationsRepository;
@@ -52,6 +51,7 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<CustomAttributeValue> _customAttributeValueRepository;
         readonly IMongoDbRepository<NotificationPreference> _notificationPreferenceRepository;
         readonly INotificationService _notificationService;
+        readonly IMongoDbRepository<UserSecurityToken> _userSecurityTokenRepository;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
@@ -67,7 +67,6 @@ namespace Codeji.CMS.Services.Employees
             IHttpContextAccessor httpContextAccessor,
             IMongoDbRepository<Department> departmentRepository,
             IMongoDbRepository<Skills> skillsRepository,
-            IMongoDbRepository<PasswordResetTokens> passwordResetTokens,
             IMongoDbRepository<EmpWorkHistory> empWorkHistoryRepository,
             IMongoDbRepository<UserNotifications> userNotificationRepository,
             IMongoDbRepository<Notifications> notificationsRepository,
@@ -75,7 +74,8 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<CustomAttribute> customAttributeRepository,
             IMongoDbRepository<CustomAttributeValue> customAttributeValueRepository,
             INotificationService notificationService,
-            IMongoDbRepository<NotificationPreference> notificationPreferenceRepository
+            IMongoDbRepository<NotificationPreference> notificationPreferenceRepository,
+            IMongoDbRepository<UserSecurityToken> userSecurityTokenRepository
             )
         {
             _employeeRepository = employeeRepository;
@@ -92,7 +92,6 @@ namespace Codeji.CMS.Services.Employees
             _middlewareService = middlewareService;
             _departmentRepository = departmentRepository;
             _skillsRepository = skillsRepository;
-            _passwordResetTokens = passwordResetTokens;
             _httpContextAccessor = httpContextAccessor;
             _empWorkHistoryRepository = empWorkHistoryRepository;
             _userNotificationRepository = userNotificationRepository;
@@ -102,6 +101,7 @@ namespace Codeji.CMS.Services.Employees
             _customAttributeValueRepository = customAttributeValueRepository;
             _notificationService = notificationService;
             _notificationPreferenceRepository = notificationPreferenceRepository;
+            _userSecurityTokenRepository = userSecurityTokenRepository;
         }
 
         public async Task<Result<InviteEmployeeDto>> InviteNewEmployee(InviteEmployeeDto model, string currentUserId)
@@ -146,14 +146,15 @@ namespace Codeji.CMS.Services.Employees
             string token = TokenHelper.GenerateToken();
             string tokenHash = TokenHelper.ComputeSha256Hash(token);
             int tokenExpiryTime = 24;
-            PasswordResetTokens passwordResetTokens = new()
+            UserSecurityToken securityToken = new()
             {
                 UserId = userId,
                 TokenHash = tokenHash,
                 IsUsed = false,
                 Expiry = DateTime.UtcNow.AddHours(tokenExpiryTime),
+                Type = EnumsHelper.SecurityTokenType.Invite
             };
-            var result2 = await _passwordResetTokens.AddOne(passwordResetTokens);
+            await _userSecurityTokenRepository.AddOne(securityToken);
 
             //Acknowledgement Email Logic 
             MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.EmployeeWelcomeMail);
@@ -162,8 +163,9 @@ namespace Codeji.CMS.Services.Employees
                 EmployeeName = employee.FirstName + " " + employee.LastName,
                 PasswordCreationLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={userId}",
                 CompanyName = company != null ? company.CompanyName : string.Empty,
-                CompanyLogo = company.CompanyLogo != null ? _middlewareService.GetCompanyLogoAsDataUrl(Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "CompanyLogo", company.CompanyLogo)) : string.Empty,
-                Year = DateTime.UtcNow.Year
+                // CompanyLogo = company.CompanyLogo != null ? _middlewareService.GetCompanyLogoAsDataUrl(Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "CompanyLogo", company.CompanyLogo)) : string.Empty,
+                CompanyLogo = company.CompanyLogo != null ? Common.GetCompanyLogoUrl(company.CompanyLogo) : string.Empty,
+                Year = DateTime.UtcNow.Year,
             });
 
             _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
@@ -180,6 +182,7 @@ namespace Codeji.CMS.Services.Employees
             }, priority: 1);
             return result;
         }
+
         public async Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId)
         {
             UpdateDefinitionBuilder<EmpUser> update = Builders<EmpUser>.Update;

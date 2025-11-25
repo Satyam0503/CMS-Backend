@@ -14,6 +14,7 @@ using Codeji.CMS.Services.Account.Interface;
 using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
@@ -28,32 +29,32 @@ public class AccountServices : IAccountServices
     readonly IMongoDbRepository<EmpUser> _employeeRepository;
     readonly IMongoDbRepository<RefreshToken> _refreshTokenRepository;
     readonly IMongoDbRepository<Roles> _rolesRepository;
-    readonly IMongoDbRepository<PasswordResetTokens> _passwordResetTokens;
     readonly IMongoDbRepository<Company> _companyRepository;
     readonly IMongoDbRepository<MailTemplate> _mailTemplateRepository;
-    private readonly IPriorityTaskQueue _priorityTaskQueue;
-    private readonly IMiddlewareService _middlewareService;
+    readonly IPriorityTaskQueue _priorityTaskQueue;
+    readonly IMiddlewareService _middlewareService;
+    readonly IMongoDbRepository<UserSecurityToken> _userSecurityTokenRepository;
     public AccountServices(
-     IEmployeeService employeeService,
-     IMongoDbRepository<EmpUser> employeeRepository,
-     IMongoDbRepository<RefreshToken> refreshTokenRepository,
-    IMongoDbRepository<Roles> rolesRepository,
-    IMongoDbRepository<PasswordResetTokens> passwordResetTokens,
-     IMongoDbRepository<Company> companyRepository,
-      IMongoDbRepository<MailTemplate> mailTemplateRepository,
-      IPriorityTaskQueue priorityTaskQueue,
-       IMiddlewareService middlewareService
+        IEmployeeService employeeService,
+        IMongoDbRepository<EmpUser> employeeRepository,
+        IMongoDbRepository<RefreshToken> refreshTokenRepository,
+        IMongoDbRepository<Roles> rolesRepository,
+        IMongoDbRepository<Company> companyRepository,
+        IMongoDbRepository<MailTemplate> mailTemplateRepository,
+        IPriorityTaskQueue priorityTaskQueue,
+        IMiddlewareService middlewareService,
+        IMongoDbRepository<UserSecurityToken> userSecurityTokenRepository
     )
     {
         _employeeService = employeeService;
         _employeeRepository = employeeRepository;
         _refreshTokenRepository = refreshTokenRepository;
         _rolesRepository = rolesRepository;
-        _passwordResetTokens = passwordResetTokens;
         _companyRepository = companyRepository;
         _mailTemplateRepository = mailTemplateRepository;
         _priorityTaskQueue = priorityTaskQueue;
         _middlewareService = middlewareService;
+        _userSecurityTokenRepository = userSecurityTokenRepository;
     }
     public async Task<Result> ResetPassword(string userId, ChangePasswordRequest password)
     {
@@ -140,23 +141,33 @@ public class AccountServices : IAccountServices
     public async Task<Result> GenerateTokenAndSendEmail(string email)
     {
         Result result = new();
+        // get employee by email
         var emp = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(email));
         if (emp is null) return result;
+
+        //  check if employee already has a pending valid token / link 
+        Expression<Func<UserSecurityToken, bool>> expression = t => t.UserId == emp.UserId && t.Type == EnumsHelper.SecurityTokenType.PasswordReset && t.IsUsed == false && t.Expiry > DateTime.UtcNow;
+        UserSecurityToken userSecurityToken = await _userSecurityTokenRepository.FirstOrDefault(expression);
+        if (userSecurityToken != null)
+        {
+            result.StatusCode = CustomStatusCode.PasswordResetLinkAlreadySent;
+            return result;
+        }
+
+        // generate fresh token and send mail
         var token = TokenHelper.GenerateToken();
         var hashedToken = TokenHelper.ComputeSha256Hash(token);
         int tokenExpiryMinutes = 15;
-        PasswordResetTokens passwordResetTokens = new()
+        UserSecurityToken securityToken = new()
         {
             UserId = emp.UserId,
             TokenHash = hashedToken,
             IsUsed = false,
             Expiry = DateTime.UtcNow.AddMinutes(tokenExpiryMinutes),
+            Type = EnumsHelper.SecurityTokenType.PasswordReset,
         };
-        var result2 = await _passwordResetTokens.AddOne(passwordResetTokens);
-        if (!result2.Success)
-        {
-            return result;
-        }
+        await _userSecurityTokenRepository.AddOne(securityToken);
+
         Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == emp.CompanyId);
         MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ResetPassword);
         string replacedBody = HtmlTemplate.Render(emailContent?.body, new
@@ -164,7 +175,9 @@ public class AccountServices : IAccountServices
             EmployeeName = emp.FirstName + " " + emp.LastName,
             PasswordResetLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}",
             CompanyName = company != null ? company.CompanyName : "",
-            LinkExpiryTime = $"{tokenExpiryMinutes} Minutes"
+            LinkExpiryTime = $"{tokenExpiryMinutes} Minutes",
+            CompanyLogo = company.CompanyLogo != null ? Common.GetCompanyLogoUrl(company.CompanyLogo) : string.Empty,
+            Year = DateTime.UtcNow.Year,
         });
         string replacedSubject = HtmlTemplate.Render(emailContent.subject, new
         {
@@ -172,17 +185,17 @@ public class AccountServices : IAccountServices
         });
 
         _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
-            {
-                _middlewareService.EmailSendAndSave(new EmpEmailLogs()
                 {
-                    UserTo = emp.UserId,
-                    Subject = replacedSubject,
-                    Body = replacedBody,
-                    EmailLogType = EnumsHelper.MailType.ResetPassword,
-                    Email = emp.Email,
-                    UserFrom = "",
-                });
-            }, priority: 1);
+                    _middlewareService.EmailSendAndSave(new EmpEmailLogs()
+                    {
+                        UserTo = emp.UserId,
+                        Subject = replacedSubject,
+                        Body = replacedBody,
+                        EmailLogType = EnumsHelper.MailType.ResetPassword,
+                        Email = emp.Email,
+                        UserFrom = "",
+                    });
+                }, priority: 1);
 
         result.Success = true;
         result.StatusCode = CustomStatusCode.PasswordResetLinkSent;
@@ -193,19 +206,21 @@ public class AccountServices : IAccountServices
     {
         Result result = new();
         var tokenHash = TokenHelper.ComputeSha256Hash(model.Token);
-        PasswordResetTokens? token = await _passwordResetTokens.FirstOrDefault(x => x.TokenHash == tokenHash && !x.IsUsed);
-        if (token is null)
+        // UserSecurityToken? userSecurityToken = await _userSecurityTokenRepository.FirstOrDefault(t => t.TokenHash == tokenHash && t.Type == EnumsHelper.SecurityTokenType.Invite && !t.IsUsed);
+        UserSecurityToken? userSecurityToken = await _userSecurityTokenRepository.FirstOrDefault(t => t.TokenHash == tokenHash && !t.IsUsed);
+        // PasswordResetTokens? token = await _passwordResetTokens.FirstOrDefault(x => x.TokenHash == tokenHash && !x.IsUsed);
+        if (userSecurityToken is null)
         {
             result.StatusCode = CustomStatusCode.InvalidExpiredToken;
             return result;
         }
-        if (token?.Expiry < DateTime.UtcNow)
+        if (userSecurityToken?.Expiry < DateTime.UtcNow)
         {
             result.StatusCode = CustomStatusCode.PasswordResetLinkExpired;
             return result;
         }
 
-        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == token.UserId);
+        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userSecurityToken.UserId);
         if (user is null) return result;
         user.Password = AuthenticationHandler.HashedPassword(model.NewPassword);
         user.IsEmailVerified = true;
@@ -213,13 +228,12 @@ public class AccountServices : IAccountServices
         await _employeeRepository.Update(whereCondition, user);
 
         // mark current token used
-        Expression<Func<PasswordResetTokens, bool>> exp = rt => rt.Id == token.Id;
-        token.IsUsed = true;
-        await _passwordResetTokens.Update(exp, token);
+        Expression<Func<UserSecurityToken, bool>> userTokenExpression = ut => ut.Id == userSecurityToken.Id;
+        await _userSecurityTokenRepository.UpdateMany(userTokenExpression, Builders<UserSecurityToken>.Update.Set(t => t.IsUsed, true).Set(t => t.UsedAt, DateTime.UtcNow));
 
         // delete all the used and expired tokens of current user
-        Expression<Func<PasswordResetTokens, bool>> expression = x => x.UserId == user.UserId && (x.IsUsed || x.Expiry < DateTime.UtcNow);
-        await _passwordResetTokens.DeleteAll(expression);
+        Expression<Func<UserSecurityToken, bool>> expression = x => x.UserId == user.UserId && (x.IsUsed || x.Expiry < DateTime.UtcNow);
+        await _userSecurityTokenRepository.DeleteAll(expression);
         result.Success = true;
         result.StatusCode = CustomStatusCode.PasswordResetSuccess;
         return result;
