@@ -4,14 +4,15 @@ using Codeji.CMS.DTO.PayRoll;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.Utility.Helpers;
-using LinqKit;
 
 namespace Codeji.CMS.Services.PayRoll;
 
 public class PayRollServices : IPayRollServices
 {
+    readonly IMiddlewareService _middlewareService;
     readonly IMongoDbRepository<EmpPayRoll> _empPayRollRepository;
     readonly IMongoDbRepository<EmpUser> _employeeRepository;
     readonly IMongoDbRepository<Company> _companyRepository;
@@ -22,7 +23,8 @@ public class PayRollServices : IPayRollServices
         IMongoDbRepository<EmpUser> employeeRepository,
         IMongoDbRepository<Company> companyRepository,
         IMongoDbRepository<JobTitles> jobTitlesRepository,
-        PdfService pdfService
+        PdfService pdfService,
+        IMiddlewareService middlewareService
     )
     {
         _empPayRollRepository = empPayRollRepository;
@@ -30,6 +32,7 @@ public class PayRollServices : IPayRollServices
         _companyRepository = companyRepository;
         _jobTitlesRepository = jobTitlesRepository;
         _pdfService = pdfService;
+        _middlewareService = middlewareService;
     }
 
 
@@ -89,13 +92,7 @@ public class PayRollServices : IPayRollServices
             if (company.CompanyLogo != null)
             {
                 string logoPath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "CompanyLogo", company.CompanyLogo);
-                if (File.Exists(logoPath))
-                {
-                    byte[] logoByteArray = File.ReadAllBytes(logoPath);
-                    string logoBase64Format = Convert.ToBase64String(logoByteArray);
-                    string logoExtension = company.CompanyLogo.Split(".").Last();
-                    salarySlipModel.CompanyLogo = $"data:image/{logoExtension};base64,{logoBase64Format}";
-                }
+                salarySlipModel.CompanyLogo = _middlewareService.GetCompanyLogoAsDataUrl(logoPath);
             }
 
             string templateContent = HtmlTemplate.Render(fileContent, salarySlipModel);

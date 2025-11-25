@@ -103,13 +103,13 @@ namespace Codeji.CMS.Services.Employees
             _notificationService = notificationService;
             _notificationPreferenceRepository = notificationPreferenceRepository;
         }
-        public async Task<Result> AddEmployee(UserModel user, string currentUserId)
+
+        public async Task<Result<InviteEmployeeDto>> InviteNewEmployee(InviteEmployeeDto model, string currentUserId)
         {
-            Result result = new();
-            bool IsEmpIdExist = await _employeeRepository.Exist(e => e.EmployeeId.Equals(user.EmployeeId, StringComparison.OrdinalIgnoreCase));
+            Result<InviteEmployeeDto> result = new() { Success = false };
+            bool IsEmpIdExist = await _employeeRepository.Exist(e => e.EmployeeId.Equals(model.EmployeeId, StringComparison.OrdinalIgnoreCase) || e.Email == model.Email);
             if (IsEmpIdExist)
             {
-                result.Success = false;
                 result.StatusCode = CustomStatusCode.EmployeeIdAlreadyExist;
                 return result;
             }
@@ -117,34 +117,19 @@ namespace Codeji.CMS.Services.Employees
             EmpUser employee = new EmpUser()
             {
                 UserId = userId,
-                FirstName = user.FirstName,
-                LastName = user.LastName,
-                Email = user.Email,
-                RoleId = user.RoleId,
-                Gender = user.Gender,
-                EmployeeId = user.EmployeeId,
-                JobRole = user.JobRole,
-                EmploymentType = user.EmploymentType,
-                DateOfBirth = user.DateOfBirth,
-                Department = user.Department,
-                ReportingManager = user.ReportingManager,
-                PhoneNumber = user.PhoneNumber,
-                BloodGroup = user.BloodGroup,
-                PersonalEmail = user.PersonalEmail,
-                EmergencyContact = user.EmergencyContact,
-                DateOfJoining = user.DateOfJoining ?? DateTime.Now.ToString("yyyy-MM-dd"),
-                Status = true,
+                FirstName = model.FirstName,
+                LastName = model.LastName,
+                Email = model.Email,
+                EmployeeId = model.EmployeeId,
                 IsEmailVerified = false,
-                Address = user.Address,
-                BankAccountNumber = user.BankAccountNumber,
-                PanNumber = user.PanNumber,
+                Status = true
             };
-
-            result = await _employeeRepository.AddOne(employee);
-            if (!result.Success)
+            var res = await _employeeRepository.AddOne(employee);
+            if (res.Success)
             {
-                result.Success = false;
-                return result;
+                model.UserId = employee.UserId;
+                result.Success = true;
+                result.MethodResult = model;
             }
             // set default notification preferences for new employee
             var notificationPreferences = new NotificationPreference()
@@ -171,12 +156,14 @@ namespace Codeji.CMS.Services.Employees
             var result2 = await _passwordResetTokens.AddOne(passwordResetTokens);
 
             //Acknowledgement Email Logic 
-            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.CreateNewPasswordMail);
+            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.EmployeeWelcomeMail);
             string replacedBody = HtmlTemplate.Render(emailContent.body, new
             {
-                RecipientName = employee.FirstName + " " + employee.LastName,
+                EmployeeName = employee.FirstName + " " + employee.LastName,
                 PasswordCreationLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={userId}",
-                CompanyName = company != null ? company.CompanyName : "",
+                CompanyName = company != null ? company.CompanyName : string.Empty,
+                CompanyLogo = company.CompanyLogo != null ? _middlewareService.GetCompanyLogoAsDataUrl(Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "CompanyLogo", company.CompanyLogo)) : string.Empty,
+                Year = DateTime.UtcNow.Year
             });
 
             _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
@@ -186,7 +173,7 @@ namespace Codeji.CMS.Services.Employees
                     UserTo = employee.UserId,
                     Subject = emailContent.subject,
                     Body = replacedBody,
-                    EmailLogType = EnumsHelper.MailType.CreateNewPasswordMail,
+                    EmailLogType = EnumsHelper.MailType.EmployeeWelcomeMail,
                     Email = employee.Email,
                     UserFrom = currentUser.UserId,
                 });
@@ -237,6 +224,7 @@ namespace Codeji.CMS.Services.Employees
                 userModel.DepartmentTitle = department?.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label);
             }
             userModel.ProfileUrl = Common.GetEmployeeImageUrl(user.ProfileUrl);
+            userModel.TotalWorkExperience = GetEmployeeTotalExperience(userId);
             if (user.CustomAttributeList.Count != 0)
             {
                 List<UserCustomAttribute> customAttributeList = [];
@@ -259,7 +247,6 @@ namespace Codeji.CMS.Services.Employees
             }
             return userModel;
         }
-
         public async Task<string> GetEmployeeNameById(string employeeId)
         {
             EmpUser? empUser = await _employeeRepository.FirstOrDefault(emp => emp.UserId == employeeId);
@@ -678,6 +665,45 @@ namespace Codeji.CMS.Services.Employees
             return [];
         }
 
+        private int GetEmployeeTotalExperience(string userId)
+        {
+            int totalWorkExperienceInMonths = 0;
+            IEnumerable<EmpWorkHistory> empWorkHistories = _empWorkHistoryRepository.GetAll(w => w.UserId == userId).Result;
+            if (!empWorkHistories.Any()) return totalWorkExperienceInMonths;
+
+            // sort work history by start date
+            var sortedList = empWorkHistories.OrderBy(wh => wh.StartDate).ToList();
+            List<(DateTime Start, DateTime End)> mergedDates = new List<(DateTime, DateTime)>();
+            var currentStart = sortedList[0].StartDate;
+            var currentEnd = sortedList[0].EndDate ?? DateTime.UtcNow;
+
+            foreach (var period in sortedList.Skip(1))
+            {
+                DateTime periodEnd = period.EndDate ?? DateTime.UtcNow;
+                if (period.StartDate <= currentEnd)
+                {
+                    period.EndDate = period.EndDate == null ? DateTime.UtcNow : period.EndDate;
+                    currentEnd = periodEnd > currentEnd ? periodEnd : currentEnd;
+                }
+                else
+                {
+                    mergedDates.Add((currentStart, currentEnd));
+                    currentStart = period.StartDate;
+                    currentEnd = periodEnd;
+                }
+            }
+            mergedDates.Add((currentStart, currentEnd));
+
+            // Calculate total months
+            foreach (var range in mergedDates)
+            {
+                int months = ((range.End.Year - range.Start.Year) * 12) + (range.End.Month - range.Start.Month);
+                if (range.End.Day >= range.Start.Day) months++;
+                totalWorkExperienceInMonths += months;
+            }
+            return totalWorkExperienceInMonths;
+        }
+
         public async Task<Result> DeleteWorkHistory(string workId, string userId)
         {
             bool exits = await _empWorkHistoryRepository.Exist(x => x.WorkHistoryId.Equals(workId));
@@ -877,7 +903,6 @@ namespace Codeji.CMS.Services.Employees
         }
 
         // notification preference service methods
-
         public async Task<Dictionary<EnumsHelper.NotificationPreferenceType, bool>> GetNotificationPreferences(string userId)
         {
             Dictionary<EnumsHelper.NotificationPreferenceType, bool> result = new();

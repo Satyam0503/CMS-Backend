@@ -8,8 +8,8 @@ public class EmpWorkHistory : BaseClass
     public string WorkHistoryId { get; set; }
     public required string UserId { get; set; }
     public required string OrganisationName { get; set; }
-    public required string StartDate { get; set; }
-    public string? EndDate { get; set; }
+    public required DateTime StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
     public required string JobRole { get; set; }
     public string? JobLocation { get; set; }
 }

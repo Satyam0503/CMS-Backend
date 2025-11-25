@@ -32,4 +32,9 @@ public static class CustomStatusCode
     public const int LeaveBalanceAlreadyExists = 28;
     public const int LeaveTypeBalanceNotExists = 29;
     public const int LeaveDateOverlaps = 30;
+    public const int LeavePolicyAlreadyExist = 31;
+    public const int AccrualAmountRequired = 32;
+    public const int CarryOverLimitRequired = 33;
+    public const int DuplicationLeavePolicy = 34;
+    public const int LeaveBalanceLimitExceed = 35;
 }

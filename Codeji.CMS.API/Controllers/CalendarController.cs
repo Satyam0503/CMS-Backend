@@ -1,6 +1,8 @@
+using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Calendar;
 using Codeji.CMS.Services.Calendar.Interface;
+using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -35,6 +37,7 @@ public class CalendarController : ControllerBase
 
     [Route("AddUpdateCalendarItem")]
     [HttpPost]
+    [ModulePermission(AppModule.Calendar, [Permission.Create, Permission.Edit])]
     public async Task<Result> AddUpdateCalendarItem([FromForm] CalendarRequestDto model)
     {
         Result result = new();
@@ -44,6 +47,7 @@ public class CalendarController : ControllerBase
 
     [Route("DeleteCalendarItem/{itemId}")]
     [HttpDelete]
+    [ModulePermission(AppModule.Calendar, Permission.Delete)]
     public async Task<Result> DeleteCalendarItem(string itemId)
     {
         Result result = new();

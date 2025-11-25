@@ -4,9 +4,12 @@ using Codeji.CMS.DTO.Leave.LeaveRequest;
 using Codeji.CMS.DTO.LeaveManagement;
 using Codeji.CMS.DTO.LeaveManagement.Leave;
 using Codeji.CMS.DTO.LeaveManagement.LeaveBalance;
+using Codeji.CMS.DTO.LeaveManagement.LeavePolicy;
+using Codeji.CMS.Repository.Entities.Leave;
 using Codeji.CMS.Services.LeaveManagement;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Enums;
+using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -28,56 +31,103 @@ public class LeaveManagementController : ControllerBase
         _httpContextAccessor = httpContextAccessor;
     }
 
-    [Route("CreateUpdateLeaveType")]
+
+    [Route("CreateLeavePolicy")]
     [HttpPost]
-    [ModulePermission(AppModule.LeaveManagement, [Permission.Create, Permission.Edit])]
-    public async Task<Result> CreateUpdateLeaveType(LeaveTypeRequestDto leaveTypeRequestDto)
+    [ModulePermission(AppModule.LeaveManagement, Permission.Create)]
+    public async Task<Result> CreateNewLeavePolicy([FromBody] LeavePolicyRequest model)
     {
         Result result = new();
-        return await _leaveManagementService.CreateUpdateLeaveType(leaveTypeRequestDto);
+        if (!ModelState.IsValid) return result;
+        if ((model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly) && model.AccrualAmount <= 0)
+        {
+            result.StatusCode = CustomStatusCode.AccrualAmountRequired;
+            return result;
+        }
+        if (model.CarryOverAllowed && model.CarryOverLimit == null)
+        {
+            result.StatusCode = CustomStatusCode.CarryOverLimitRequired;
+            return result;
+        }
+        if (!model.CarryOverAllowed)
+        {
+            model.CarryOverLimit = null;
+        }
+        // if (model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.None)
+        // {
+        //     model.AccrualAmount = null;
+        // }
+        string company_id = CurrentContext.CompanyId(_httpContextAccessor);
+        result = await _leaveManagementService.CreateNewLeavePolicy(model, company_id);
+        return result;
     }
 
-    [Route("GetLeaveType")]
+    [Route("UpdateLeavePolicy")]
+    [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Edit)]
+    public async Task<Result<UpdateLeavePolicyRequest>> UpdateLeavePolicy([FromBody] UpdateLeavePolicyRequest model)
+    {
+        Result<UpdateLeavePolicyRequest> result = new() { Success = false };
+        if (!ModelState.IsValid) return result;
+        if ((model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly) && model.AccrualAmount <= 0)
+        {
+            result.StatusCode = CustomStatusCode.AccrualAmountRequired;
+            return result;
+        }
+        if (model.CarryOverAllowed && model.CarryOverLimit == null)
+        {
+            result.StatusCode = CustomStatusCode.CarryOverLimitRequired;
+            return result;
+        }
+        if (!model.CarryOverAllowed)
+        {
+            model.CarryOverLimit = null;
+        }
+        // if (model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.None)
+        // {
+        //     model.AccrualAmount = null;
+        // }
+        return await _leaveManagementService.UpdateLeavePolicy(model);
+    }
+
+    [Route("GetAllLeavePolicies")]
+    [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.View)]
+    public async Task<Result<UpdateLeavePolicyRequest>> GetAllLeavePolicies([FromQuery] bool? status)
+    {
+        string company_id = CurrentContext.CompanyId(_httpContextAccessor);
+        return await _leaveManagementService.GetAllLeavePolicies(company_id, status);
+    }
+
+    [Route("GetEmployeeLeaveBalance/{employeeId}")]
     [HttpGet]
-    public async Task<Result<LeaveTypeResponseDto>> GetLeaveType(bool? IsActive)
+    public async Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string employeeId)
     {
-        return await _leaveManagementService.GetLeaveType(IsActive);
+        var result = await _leaveManagementService.GetEmployeeLeaveBalance(employeeId);
+        return result;
     }
 
-    [Route("DeleteLeaveType/{leaveTypeId}")]
-    [HttpDelete]
-    [ModulePermission(AppModule.LeaveManagement, Permission.Delete)]
-    public async Task<Result> DeleteLeaveType(string leaveTypeId)
-    {
-        return await _leaveManagementService.DeleteLeaveType(leaveTypeId);
-    }
-
-    // leave Balance
-    [Route("CreateUpdateLeaveBalance")]
+    // leave request services 
+    [Route("CreateLeaveRequest")]
     [HttpPost]
-    [ModulePermission(AppModule.LeaveManagement, [Permission.Create, Permission.Edit])]
-    public async Task<Result> CreateUpdateLeaveBalance(LeaveBalanceRequestDto LeaveBalanceRequestDto)
+    public async Task<Result> CreateLeaveRequest([FromBody] LeaveRequestDto leaveRequest)
     {
-        return await _leaveManagementService.CreateUpdateLeaveBalance(LeaveBalanceRequestDto);
+        if (!ModelState.IsValid) return new Result();
+        leaveRequest.UserId ??= CurrentContext.UserId(_httpContextAccessor);
+        return await _leaveManagementService.CreateLeaveRequest(leaveRequest);
     }
 
-    [Route("GetLeaveBalance")]
+    [Route("UpdateLeaveRequest")]
     [HttpPost]
-    public async Task<Result<LeaveBalanceResponseDto>> GetLeaveBalance(LeaveBalanceFilter? leaveBalanceFilter)
+    public async Task<Result> UpdateLeaveRequest([FromBody] UpdateLeaveRequestDto leaveRequest)
     {
-        return await _leaveManagementService.GetLeaveBalance(leaveBalanceFilter);
+        if (!ModelState.IsValid) return new Result();
+        leaveRequest.UserId ??= CurrentContext.UserId(_httpContextAccessor);
+        return await _leaveManagementService.UpdateLeaveRequest(leaveRequest);
     }
 
-    // leave request
-    [Route("CreateUpdateLeave")]
-    [HttpPost]
-    public async Task<Result> CreateUpdateLeave(LeaveRequestDto leaveRequestDto)
-    {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
-        return await _leaveManagementService.CreateUpdateLeave(leaveRequestDto, userId);
-    }
 
-    [Route("GetLeaveRequest")]
+    [Route("GetLeaveRequests")]
     [HttpPost]
     public async Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveRequestFilter? leaveFilter)
     {
@@ -106,14 +156,6 @@ public class LeaveManagementController : ControllerBase
         return await _leaveManagementService.UpdateLeaveRequestStatus(leaveRequestId, model);
     }
 
-    [Route("GetEmployeeLeaveBalance/{employeeId}")]
-    [HttpGet]
-    public async Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string employeeId)
-    {
-        var result = await _leaveManagementService.GetEmployeeLeaveBalance(employeeId);
-        return result;
-    }
-
     [Route("GetLeaveRequestSummary")]
     [HttpGet]
     public async Task<Result<LeaveRequestSummaryResponseDto>> GetLeaveRequestSummary()
@@ -130,5 +172,23 @@ public class LeaveManagementController : ControllerBase
             year = DateTime.UtcNow.Year;
         }
         return await _leaveManagementService.GetMonthlyTakenLeaveSummary(year);
+    }
+
+    // leave Balance
+    [Route("UpdateEmployeeLeaveBalance")]
+    [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, [Permission.Create, Permission.Edit])]
+    public async Task<Result> UpdateEmpLeaveBalance(List<LeaveBalanceRequestDto> LeaveBalanceRequestDto)
+    {
+        return await _leaveManagementService.UpdateEmployeeLeaveBalance(LeaveBalanceRequestDto);
+    }
+
+    [Route("GetAllEmployeeLeaveBalances")]
+    [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.View)]
+    public async Task<Result<AllEmployeeLeaveBalance>> GetAllEmployeeLeaveBalances([FromBody] LeaveBalanceFilter filter)
+    {
+        string company_id = CurrentContext.CompanyId(_httpContextAccessor);
+        return await _leaveManagementService.GetAllEmployeeLeaveBalances(filter, company_id);
     }
 }

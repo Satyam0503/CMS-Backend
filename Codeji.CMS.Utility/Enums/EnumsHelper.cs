@@ -36,7 +36,7 @@
         }
         public enum MailType
         {
-            CreateNewPasswordMail = 0,
+            EmployeeWelcomeMail = 0,
             SelectedMail = 1,
             RejectedMail = 2,
             ApplyNowMailToHR = 3,
@@ -90,7 +90,8 @@
         {
             Pending = 1,
             Accepted = 2,
-            Rejected = 3
+            Rejected = 3,
+            WithDrawn = 4
         }
         public enum LeaveTypes
         {
@@ -99,6 +100,12 @@
             Earned = 3,
             Maternity = 4,
             Paternity = 5,
+        }
+        public enum LeaveAccrualPeriod
+        {
+            Monthly = 1,
+            Yearly,
+            None,
         }
     }
 }

@@ -6,7 +6,7 @@ namespace Codeji.CMS.Utility.Constraints
         public const string Employees = "Employees";
         public const string Attendance = "Attendance";
         public const string LeaveManagement = "Leave_Management";
-        public const string Holidays = "Holidays";
+        public const string Calendar = "Calendar";
         public const string NoticeBoard = "Notice_Board";
         public const string Jobs = "Jobs";
         public const string Applications = "Applications";

@@ -10,4 +10,5 @@ public class CalendarResponseDto
     public string Description { get; set; }
     public CalendarResponseItem Type { get; set; }
     public string? ImageUrl { get; set; }
+    public bool Recurring { get; set; }
 }

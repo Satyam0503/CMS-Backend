@@ -46,7 +46,8 @@ public class CalendarServices : ICalendarServices
                 Date = ci.Date,
                 Description = ci.Description,
                 Type = (EnumsHelper.CalendarResponseItem)ci.Type,
-                ImageUrl = Common.GetCalendarItemCoverImagePath(ci.ImageUrl)
+                ImageUrl = Common.GetCalendarItemCoverImagePath(ci.ImageUrl),
+                Recurring = ci.Recurring
             };
         });
 
@@ -152,6 +153,7 @@ public class CalendarServices : ICalendarServices
             existingCalendarItem.Date = model.Date;
             existingCalendarItem.Type = model.Type;
             existingCalendarItem.Description = model.Description;
+            existingCalendarItem.Recurring = model.Recurring;
             result = await _calendarRepository.Update(whereCondition, existingCalendarItem);
         }
         return result;
