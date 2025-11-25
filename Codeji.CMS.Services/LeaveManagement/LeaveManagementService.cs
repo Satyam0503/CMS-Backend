@@ -694,9 +694,30 @@ public class LeaveManagementService : ILeaveManagementService
         List<string> empJobRoleId = empUsers.Where(emp => emp.JobRole != null).Select(emp => emp.JobRole).Distinct().ToList();
         IEnumerable<JobTitles> jobTitles = await _jobTitleRepo.GetAll(jr => empJobRoleId.Contains(jr.JobTitleId));
 
+        // // get employee leave balances
+        // Expression<Func<EmployeeLeaveBalance, bool>> expression = lb => empIds.Contains(lb.UserId) && (filter.LeavePolicies.Count == 0 || filter.LeavePolicies.Contains(lb.LeavePolicyId));
+        // empUsers = empUsers.Where(e => filteredEmpIds.Contains(e.UserId)).ToList();
+
+        // IEnumerable<EmployeeLeaveBalance> employeeLeaveBalances = await _employeeLeaveBalanceRepo.GetAll(expression);
+
         // get employee leave balances
-        Expression<Func<EmployeeLeaveBalance, bool>> expression = lb => empIds.Contains(lb.UserId);
-        IEnumerable<EmployeeLeaveBalance> employeeLeaveBalances = await _employeeLeaveBalanceRepo.GetAll(expression);
+        Expression<Func<EmployeeLeaveBalance, bool>> leaveBalanceExpression;
+        if (filter.LeavePolicies != null && filter.LeavePolicies.Count > 0)
+        {
+            leaveBalanceExpression = lb => empIds.Contains(lb.UserId) && filter.LeavePolicies.Contains(lb.LeavePolicyId);
+        }
+        else
+        {
+            leaveBalanceExpression = lb => empIds.Contains(lb.UserId);
+        }
+        IEnumerable<EmployeeLeaveBalance> employeeLeaveBalances = await _employeeLeaveBalanceRepo.GetAll(leaveBalanceExpression);
+
+        // filter employees by leave policy if filter.LeavePolicies has any element
+        if (filter.LeavePolicies != null && filter.LeavePolicies.Count > 0)
+        {
+            var filteredEmpIds = employeeLeaveBalances.Select(lb => lb.UserId).Distinct().ToList();
+            empUsers = empUsers.Where(e => filteredEmpIds.Contains(e.UserId)).ToList();
+        }
 
         // get leave policies details
         List<string> leavePolicyIds = employeeLeaveBalances.Select(elb => elb.LeavePolicyId).Distinct().ToList();
