@@ -604,9 +604,14 @@ public class LeaveManagementService : ILeaveManagementService
             {
                 // add balance 
                 var leavePolicy = await _leavePolicyRepo.FirstOrDefault(lp => lp.Id == balanceItem.LeavePolicyId);
-                if (leavePolicy == null) return result;
+                if (leavePolicy == null)
+                {
+                    result.Success = false;
+                    return result;
+                }
                 if (balanceItem.Balance > leavePolicy.MaxBalance)
                 {
+                    result.Success = false;
                     result.StatusCode = CustomStatusCode.LeaveBalanceLimitExceed;
                     return result;
                 }
@@ -623,12 +628,20 @@ public class LeaveManagementService : ILeaveManagementService
             {
                 // update balnce
                 var leaveBalance = await _employeeLeaveBalanceRepo.FirstOrDefault(elb => elb.Id == balanceItem.LeaveBalanceId && elb.UserId == balanceItem.EmployeeId);
-                if (leaveBalance == null) return result;
-
+                if (leaveBalance == null)
+                {
+                    result.Success = false;
+                    return result;
+                }
                 var leavePolicy = await _leavePolicyRepo.FirstOrDefault(lp => lp.Id == leaveBalance.LeavePolicyId);
-                if (leavePolicy == null) return result;
+                if (leavePolicy == null)
+                {
+                    result.Success = false;
+                    return result;
+                }
                 if (balanceItem.Balance > leavePolicy.MaxBalance)
                 {
+                    result.Success = false;
                     result.StatusCode = CustomStatusCode.LeaveBalanceLimitExceed;
                     return result;
                 }

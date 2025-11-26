@@ -8,4 +8,5 @@ public interface ICalendarServices
     Task<Result> AddUpdateCalendarItem(CalendarRequestDto model);
     Task<Result<CalendarResponseDto>> GetAllCalendarItems(CalendarFilters filter);
     Task<Result> DeleteItem(string itemId);
+    Task<Result<HolidayResponseDto>> GetHolidays(HolidayFilter filter);
 }

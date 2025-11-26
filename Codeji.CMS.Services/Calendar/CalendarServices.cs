@@ -203,4 +203,53 @@ public class CalendarServices : ICalendarServices
         fileInfo.Delete();
     }
 
+    public async Task<Result<HolidayResponseDto>> GetHolidays(HolidayFilter filter)
+    {
+        Result<HolidayResponseDto> result = new();
+
+        var allHolidays = await _calendarRepository.GetAll(cl => cl.Type == EnumsHelper.CalendarItem.Holiday);
+
+        List<HolidayResponseDto> holidaysInRange = new();
+
+        foreach (var holiday in allHolidays)
+        {
+            if (holiday.Recurring)
+            {
+                // Generate the holiday date for each year in the range
+                for (int year = filter.FromDate.Year; year <= filter.ToDate.Year; year++)
+                {
+                    var recurringDate = new DateTime(year, holiday.Date.Month, holiday.Date.Day, holiday.Date.Hour, holiday.Date.Minute, holiday.Date.Second, holiday.Date.Kind);
+
+                    if (recurringDate >= filter.FromDate && recurringDate <= filter.ToDate)
+                    {
+                        holidaysInRange.Add(new HolidayResponseDto
+                        {
+                            Id = holiday.Id,
+                            Name = holiday.Name,
+                            Date = recurringDate,
+                            Description = holiday.Description
+                        });
+                    }
+                }
+            }
+            else
+            {
+                if (holiday.Date >= filter.FromDate && holiday.Date <= filter.ToDate)
+                {
+                    holidaysInRange.Add(new HolidayResponseDto
+                    {
+                        Id = holiday.Id,
+                        Name = holiday.Name,
+                        Date = holiday.Date,
+                        Description = holiday.Description
+                    });
+                }
+            }
+        }
+
+        result.MethodResults = holidaysInRange;
+        result.Success = true;
+        result.TotalRecords = holidaysInRange.Count;
+        return result;
+    }
 }

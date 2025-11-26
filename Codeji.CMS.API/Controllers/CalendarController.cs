@@ -3,7 +3,6 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Calendar;
 using Codeji.CMS.Services.Calendar.Interface;
 using Codeji.CMS.Utility.Constraints;
-using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -55,4 +54,18 @@ public class CalendarController : ControllerBase
         return result;
     }
 
+    [Route("GetHolidays")]
+    [HttpPost]
+    public async Task<Result<HolidayResponseDto>> GetHolidays([FromBody] HolidayFilter filter)
+    {
+        Result<HolidayResponseDto> result = new();
+        if (filter.FromDate > filter.ToDate)
+        {
+            result.Success = false;
+            result.Message = "FromDate cannot be greater than ToDate.";
+            return result;
+        }
+        result = await _calendarServices.GetHolidays(filter);
+        return result;
+    }
 }
