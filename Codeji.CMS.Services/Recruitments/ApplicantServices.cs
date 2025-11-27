@@ -172,7 +172,7 @@ namespace Codeji.CMS.Services.Recruitments
                 || x.FirstName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
                 || x.LastName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
                 || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));
-                applicantList = await _applicantRepository.GetAggregateDataAsync<Applicant>(whereCondition, pageNo: filters.PageNo, pageSize: filters.Records);
+                applicantList = await _applicantRepository.GetAggregateDataAsync<Applicant>(whereCondition, pageNo: filters.PageNo, pageSize: filters.Records, isAscending: false, orderedKey: "CreatedDate");
                 count = await _applicantRepository.Count(whereCondition);
             }
             List<JobVacancy> vacancies = (await _jobVacancyRepository.GetAll()).ToList();

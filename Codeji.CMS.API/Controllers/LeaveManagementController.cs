@@ -136,10 +136,10 @@ public class LeaveManagementController : ControllerBase
 
     [Route("GetMyLeaveRequests")]
     [HttpPost]
-    public async Task<Result<MyLeaveRequestResponse>> GetMyLeaveRequests(LeaveRequestFilter leaveFilter)
+    public async Task<Result<MyLeaveRequestResponse>> GetMyLeaveRequests([FromBody] EmpLeaveRequestFilter leaveFilter)
     {
-        string userId = CurrentContext.UserId(_httpContextAccessor);
-        return await _leaveManagementService.GetMyLeaveRequests(leaveFilter, userId);
+        leaveFilter.EmployeeId ??= CurrentContext.UserId(_httpContextAccessor);
+        return await _leaveManagementService.GetMyLeaveRequests(leaveFilter);
     }
 
     [Route("DeleteLeaveRequest/{leaveRequestId}")]

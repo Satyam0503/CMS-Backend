@@ -53,5 +53,6 @@ namespace Codeji.CMS.Services.Employees.Interface
                 // notification preference service methods
                 Task<Dictionary<EnumsHelper.NotificationPreferenceType, bool>> GetNotificationPreferences(string userId);
                 Task<Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>>> UpdateNotificationPreferences(string userId, Dictionary<EnumsHelper.NotificationPreferenceType, bool> preferences);
+                Task<Result> GetLastEmployeeId(string companyId);
         }
 }

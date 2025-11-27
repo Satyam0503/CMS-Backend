@@ -415,11 +415,11 @@ public class LeaveManagementService : ILeaveManagementService
         };
     }
 
-    public async Task<Result<MyLeaveRequestResponse>> GetMyLeaveRequests(LeaveRequestFilter filter, string userId)
+    public async Task<Result<MyLeaveRequestResponse>> GetMyLeaveRequests(EmpLeaveRequestFilter filter)
     {
         Result<MyLeaveRequestResponse> result = new();
         Expression<Func<LeaveRequest, bool>> whereCondition = lr =>
-                lr.EmployeeId == userId
+                lr.EmployeeId == filter.EmployeeId
             && (filter.Status == null || (lr.Status == filter.Status))
             && ((filter.StartDate == null || (lr.StartDate >= filter.StartDate)) && (filter.EndDate == null || (lr.StartDate <= filter.EndDate)));
 

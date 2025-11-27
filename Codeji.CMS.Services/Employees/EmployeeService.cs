@@ -920,7 +920,6 @@ namespace Codeji.CMS.Services.Employees
             }
             return result;
         }
-
         public async Task<Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>>> UpdateNotificationPreferences(string userId, Dictionary<EnumsHelper.NotificationPreferenceType, bool> preferences)
         {
             Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>> result = new();
@@ -937,6 +936,23 @@ namespace Codeji.CMS.Services.Employees
             }
             await _notificationPreferenceRepository.UpdateMany(whereCondition, Builders<NotificationPreference>.Update.Set(n => n.Preferences, preferences));
             result.MethodResult = await GetNotificationPreferences(userId);
+            return result;
+        }
+
+        // get last employee id
+        public async Task<Result> GetLastEmployeeId(string companyId)
+        {
+            Result result = new();
+            var lastAddedEmployee = (await _employeeRepository.GetAll(e => e.CompanyId == companyId, false)).OrderByDescending(e => e.CreatedDate).FirstOrDefault();
+            if (lastAddedEmployee != null)
+            {
+                result.Success = true;
+                result.Message = lastAddedEmployee.EmployeeId;
+            }
+            else
+            {
+                result.Message = null;
+            }
             return result;
         }
     }

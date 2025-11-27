@@ -49,6 +49,13 @@ public class UserController : BaseApiController
         var currentUserId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.InviteNewEmployee(model, currentUserId);
     }
+    [Route("GetLastEmployeeId")]
+    [HttpGet]
+    public async Task<Result> GetLastEmployeeId()
+    {
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        return await _employeeService.GetLastEmployeeId(companyId);
+    }
 
     [Route("EditEmployees")]
     [HttpPost]
