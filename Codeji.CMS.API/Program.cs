@@ -190,11 +190,17 @@ if (Convert.ToBoolean(configuration.GetSection("AppConfiguration:AppSettings:isF
 // CORS configuration
 app.UseCors(corsName);
 
+// ensure Uploads folder exists before serving static files 
+string uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads");
+if (!Directory.Exists(uploadsPath))
+{
+    Directory.CreateDirectory(uploadsPath);
+}
+
 // Serve static files
-//app.UseStaticFiles();
 app.UseStaticFiles(new StaticFileOptions
 {
-    FileProvider = new PhysicalFileProvider(Path.Combine(Directory.GetCurrentDirectory(), "Uploads")),
+    FileProvider = new PhysicalFileProvider(uploadsPath),
     RequestPath = new PathString("/fs")
 });
 
