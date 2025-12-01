@@ -106,10 +106,7 @@ namespace Codeji.CMS.Services.Dashboard
         public async Task<Result<UpComingHolidayEventResponseDto>> GetUpComingHolidayAndEvents()
         {
             Result<UpComingHolidayEventResponseDto> result = new();
-            Expression<Func<CalendarEntity, bool>> whereCondition = ci => ci.Date.Date >= DateTime.UtcNow.Date;
-
             var recurringItems = await _calendarRepository.GetAll(ci => ci.Recurring);
-
             var upcomingEventOrHolidays = recurringItems.Select(ci =>
             {
                 var date = ci.Date;
@@ -130,9 +127,13 @@ namespace Codeji.CMS.Services.Dashboard
                 };
             }).Where(ci => ci.Date > DateTime.UtcNow).OrderBy(ci => ci.Date);
 
-            var data = (await _calendarRepository.GetAggregateDataAsync<CalendarEntity>(whereCondition, isAscending: true, orderedKey: "Date", pageSize: 10)).ToList();
+            Expression<Func<CalendarEntity, bool>> holidayExpressiojn = ci => ci.Date.Date >= DateTime.UtcNow.Date && ci.Recurring == false && ci.Type == EnumsHelper.CalendarItem.Holiday;
+            var upcomingHoliday = (await _calendarRepository.GetAggregateDataAsync<CalendarEntity>(holidayExpressiojn, isAscending: true, orderedKey: "Date", pageSize: 5)).ToList();
 
-            var combinedItems = data.Concat(upcomingEventOrHolidays).OrderBy(ci => ci.Date).Select(x =>
+            Expression<Func<CalendarEntity, bool>> eventExpression = ci => ci.Date.Date >= DateTime.UtcNow.Date && ci.Recurring == false && ci.Type == EnumsHelper.CalendarItem.Event;
+            var upcomingEvent = (await _calendarRepository.GetAggregateDataAsync<CalendarEntity>(eventExpression, isAscending: true, orderedKey: "Date", pageSize: 5)).ToList();
+
+            var combinedItems = upcomingHoliday.Concat(upcomingEvent).Concat(upcomingEventOrHolidays).OrderBy(ci => ci.Date).Select(x =>
                 new CalendarItemDto()
                 {
                     Id = x.Id,
@@ -145,8 +146,8 @@ namespace Codeji.CMS.Services.Dashboard
             ).ToList();
             result.MethodResult = new UpComingHolidayEventResponseDto
             {
-                Holiday = combinedItems.Where(x => x.Type == EnumsHelper.CalendarItem.Holiday).ToList(),
-                Event = combinedItems.Where(x => x.Type == EnumsHelper.CalendarItem.Event).ToList()
+                Holiday = combinedItems.Where(x => x.Type == EnumsHelper.CalendarItem.Holiday).Take(5).ToList(),
+                Event = combinedItems.Where(x => x.Type == EnumsHelper.CalendarItem.Event).Take(5).ToList()
             };
             return result;
         }
