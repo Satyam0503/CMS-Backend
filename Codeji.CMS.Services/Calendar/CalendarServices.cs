@@ -10,6 +10,7 @@ using Codeji.CMS.Services.Calendar.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
 using Microsoft.AspNetCore.Http;
+using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.Services.Calendar;
 
@@ -31,25 +32,42 @@ public class CalendarServices : ICalendarServices
         Result<CalendarResponseDto> result = new();
         IEnumerable<CalendarResponseDto> calendarItems = [];
         var year = filter.Year ?? DateTime.UtcNow.Year;
-        Expression<Func<CalendarEntity, bool>> expression = cl => cl.Recurring || (filter.Type == null || cl.Type == filter.Type) && cl.Date.Year == year;
-        calendarItems = (await _calendarRepository.GetAll(expression)).Select(ci =>
+
+        if (filter.Type == null || filter.Type == CalendarResponseItem.Holiday || filter.Type == CalendarResponseItem.Event)
         {
-            if (ci.Recurring)
+            Expression<Func<CalendarEntity, bool>> expression;
+            if (filter.Type == null)
             {
-                var date = ci.Date;
-                ci.Date = new DateTime(year, date.Month, date.Day, date.Hour, date.Minute, date.Second, date.Kind);
+                expression = cl => cl.Recurring || cl.Date.Year == year;
             }
-            return new CalendarResponseDto
+            else if (filter.Type == CalendarResponseItem.Holiday)
             {
-                Id = ci.Id,
-                Name = ci.Name,
-                Date = ci.Date,
-                Description = ci.Description,
-                Type = (EnumsHelper.CalendarResponseItem)ci.Type,
-                ImageUrl = Common.GetCalendarItemCoverImagePath(ci.ImageUrl),
-                Recurring = ci.Recurring
-            };
-        });
+                expression = cl => (cl.Recurring && cl.Type == CalendarItem.Holiday) || (cl.Date.Year == year && cl.Type == CalendarItem.Holiday);
+            }
+            else
+            {
+                expression = cl => (cl.Recurring && cl.Type == CalendarItem.Event) || (cl.Date.Year == year && cl.Type == CalendarItem.Event);
+            }
+
+            calendarItems = (await _calendarRepository.GetAll(expression)).Select(ci =>
+            {
+                if (ci.Recurring)
+                {
+                    var date = ci.Date;
+                    ci.Date = new DateTime(year, date.Month, date.Day, date.Hour, date.Minute, date.Second, date.Kind);
+                }
+                return new CalendarResponseDto
+                {
+                    Id = ci.Id,
+                    Name = ci.Name,
+                    Date = ci.Date,
+                    Description = ci.Description,
+                    Type = (CalendarResponseItem)ci.Type,
+                    ImageUrl = Common.GetCalendarItemCoverImagePath(ci.ImageUrl),
+                    Recurring = ci.Recurring
+                };
+            });
+        }
 
         // get employee birthdays and work anniversaries
         var today = DateTime.Today;
@@ -60,41 +78,49 @@ public class CalendarServices : ICalendarServices
             result.MethodResults = calendarItems.ToList() ?? [];
             return result;
         }
-        var birthdaysThisYear = employeesList.Select(emp =>
+        IEnumerable<CalendarResponseDto?> birthdaysThisYear = [];
+        if (filter.Type == CalendarResponseItem.Birthday || filter.Type == null)
         {
-            if (!DateTime.TryParseExact(emp.DateOfBirth, dateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dob))
-                return null; // Skip if invalid format
-
-            var thisYearBirthday = new DateTime(today.Year, dob.Month, dob.Day);
-
-            return new CalendarResponseDto
+            birthdaysThisYear = employeesList.Select(emp =>
             {
-                Id = emp.UserId,
-                Name = $"{emp.FirstName} {emp.LastName}",
-                ImageUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl),
-                Description = $"{emp.FirstName} {emp.LastName}'s Birthday",
-                Date = thisYearBirthday,
-                Type = EnumsHelper.CalendarResponseItem.Birthday
-            };
-        })
-        .Where(x => x != null);
+                if (!DateTime.TryParseExact(emp.DateOfBirth, dateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dob))
+                    return null; // Skip if invalid format
 
-        var workAnniversariesThisYear = employeesList.Select(emp =>
+                var thisYearBirthday = new DateTime(year, dob.Month, dob.Day);
+
+                return new CalendarResponseDto
+                {
+                    Id = emp.UserId,
+                    Name = $"{emp.FirstName} {emp.LastName}",
+                    ImageUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl),
+                    Description = $"{emp.FirstName} {emp.LastName}'s Birthday",
+                    Date = thisYearBirthday,
+                    Type = EnumsHelper.CalendarResponseItem.Birthday
+                };
+            }).Where(x => x != null);
+        }
+
+        // get work anniversaries the year
+        IEnumerable<CalendarResponseDto?> workAnniversariesThisYear = [];
+        if (filter.Type == CalendarResponseItem.WorkAnniversary || filter.Type == null)
         {
-            if (!DateTime.TryParseExact(emp.DateOfJoining, dateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime doj))
-                return null;
-            var thisYearAnniversary = new DateTime(today.Year, doj.Month, doj.Day);
-            return new CalendarResponseDto
+            workAnniversariesThisYear = employeesList.Select(emp =>
             {
-                Id = emp.UserId,
-                Name = $"{emp.FirstName} {emp.LastName}",
-                ImageUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl),
-                Description = $"{emp.FirstName} {emp.LastName}'s Work Anniversary",
-                Date = thisYearAnniversary,
-                Type = EnumsHelper.CalendarResponseItem.WorkAnniversary
-            };
-        })
-        .Where(x => x != null);
+                if (!DateTime.TryParseExact(emp.DateOfJoining, dateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime doj))
+                    return null;
+                var thisYearAnniversary = new DateTime(year, doj.Month, doj.Day);
+                return new CalendarResponseDto
+                {
+                    Id = emp.UserId,
+                    Name = $"{emp.FirstName} {emp.LastName}",
+                    ImageUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl),
+                    Description = $"{emp.FirstName} {emp.LastName}'s Work Anniversary",
+                    Date = thisYearAnniversary,
+                    Type = EnumsHelper.CalendarResponseItem.WorkAnniversary
+                };
+            })
+            .Where(x => x != null);
+        }
         result.MethodResults = calendarItems.Concat(birthdaysThisYear).Concat(workAnniversariesThisYear).ToList();
         return result;
     }
