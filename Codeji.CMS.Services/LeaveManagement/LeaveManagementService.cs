@@ -846,28 +846,35 @@ public class LeaveManagementService : ILeaveManagementService
             {
                 foreach (EmployeeLeaveBalance empLeave in employeeLeaveBalances)
                 {
-                    var updatedBalance = empLeave.Balance + policy.AccrualAmount;
-                    empLeave.Balance = policy.MaxBalance.HasValue ? Math.Min(updatedBalance, policy.MaxBalance.Value) : updatedBalance;
-                    Expression<Func<EmployeeLeaveBalance, bool>> expression = elb => elb.Id == empLeave.Id;
-                    await _employeeLeaveBalanceRepo.UpdateMany(expression, Builders<EmployeeLeaveBalance>.Update
-                    .Set(b => b.Balance, empLeave.Balance)
-                    .Set(b => b.UsedBalance, 0)
-                    .Set(b => b.LastAccrual, DateTime.UtcNow)
-                    .Set(b => b.UpdatedDate, DateTime.UtcNow));
+                    // check if leave is already credited for this month 
+                    if (empLeave.LastAccrual?.Date != DateTime.UtcNow.Date)
+                    {
+                        var updatedBalance = empLeave.Balance + policy.AccrualAmount;
+                        empLeave.Balance = policy.MaxBalance.HasValue ? Math.Min(updatedBalance, policy.MaxBalance.Value) : updatedBalance;
+                        Expression<Func<EmployeeLeaveBalance, bool>> expression = elb => elb.Id == empLeave.Id;
+                        await _employeeLeaveBalanceRepo.UpdateMany(expression, Builders<EmployeeLeaveBalance>.Update
+                        .Set(b => b.Balance, empLeave.Balance)
+                        .Set(b => b.UsedBalance, 0)
+                        .Set(b => b.LastAccrual, DateTime.UtcNow)
+                        .Set(b => b.UpdatedDate, DateTime.UtcNow));
+                    }
                 }
             }
             if (policy.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly && DateTime.UtcNow.Month == 1)
             {
                 foreach (EmployeeLeaveBalance empLeave in employeeLeaveBalances)
                 {
-                    var updatedBalance = policy.CarryOverAllowed ? (Math.Min(empLeave.Balance, policy.CarryOverLimit.Value) + policy.AccrualAmount) : policy.AccrualAmount;
-                    empLeave.Balance = policy.MaxBalance.HasValue ? Math.Min(updatedBalance, policy.MaxBalance.Value) : updatedBalance;
-                    Expression<Func<EmployeeLeaveBalance, bool>> expression = elb => elb.Id == empLeave.Id;
-                    await _employeeLeaveBalanceRepo.UpdateMany(expression, Builders<EmployeeLeaveBalance>.Update
-                    .Set(b => b.Balance, empLeave.Balance)
-                    .Set(b => b.UsedBalance, 0)
-                    .Set(b => b.LastAccrual, DateTime.UtcNow)
-                    .Set(b => b.UpdatedDate, DateTime.UtcNow));
+                    if (empLeave.LastAccrual?.Date != DateTime.UtcNow.Date)
+                    {
+                        var updatedBalance = policy.CarryOverAllowed ? (Math.Min(empLeave.Balance, policy.CarryOverLimit.Value) + policy.AccrualAmount) : policy.AccrualAmount;
+                        empLeave.Balance = policy.MaxBalance.HasValue ? Math.Min(updatedBalance, policy.MaxBalance.Value) : updatedBalance;
+                        Expression<Func<EmployeeLeaveBalance, bool>> expression = elb => elb.Id == empLeave.Id;
+                        await _employeeLeaveBalanceRepo.UpdateMany(expression, Builders<EmployeeLeaveBalance>.Update
+                        .Set(b => b.Balance, empLeave.Balance)
+                        .Set(b => b.UsedBalance, 0)
+                        .Set(b => b.LastAccrual, DateTime.UtcNow)
+                        .Set(b => b.UpdatedDate, DateTime.UtcNow));
+                    }
                 }
             }
         }

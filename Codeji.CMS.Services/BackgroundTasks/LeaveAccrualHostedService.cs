@@ -20,22 +20,26 @@ public class LeaveAccrualHostedService : BackgroundService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var now = DateTime.Now;
+            var now = DateTime.UtcNow;
             DateTime nextRun;
-            // If today is the 1st of the current month, run immediately
             if (now.Day == 1)
             {
-                nextRun = now;
-                _logger.LogInformation("Running leave accrual service on the 1st of the month: {NextRun}", nextRun);
+                _logger.LogInformation("Running leave accrual service on the 1st of the month: {Now}", now);
+                await RunJob(stoppingToken);
+                nextRun = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(1);
+                _logger.LogInformation("Leave accrual service Next run scheduled for: {NextRun}", nextRun);
             }
             else
             {
-                // Otherwise, schedule for the 1st of the next month
-                nextRun = new DateTime(now.Year, now.Month, 1).AddMonths(1).Date;
-                _logger.LogInformation("Next run scheduled for the 1st of next month: {NextRun}", nextRun);
+                // Schedule for the 1st of next month if todat is not 1st day of month
+                nextRun = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(1);
+                _logger.LogInformation("Leave accrual service Next run scheduled for: {NextRun}", nextRun);
             }
-
-            var delay = nextRun - now; // Calculate delay until next run
+            var delay = nextRun - now;
+            if (delay <= TimeSpan.Zero)
+            {
+                delay = TimeSpan.FromSeconds(1);
+            }
 
             try
             {
@@ -45,17 +49,25 @@ public class LeaveAccrualHostedService : BackgroundService
             {
                 break;
             }
+        }
+    }
 
-            try
-            {
-                using var scope = _serviceProvider.CreateScope();
-                var leaveServices = scope.ServiceProvider.GetRequiredService<ILeaveManagementService>();
-                await leaveServices.EmployeeLeaveBalanceAccrual();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error occurred while accrual leave balance");
-            }
+    private async Task RunJob(CancellationToken token = default)
+    {
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var leaveServices = scope.ServiceProvider.GetRequiredService<ILeaveManagementService>();
+            await leaveServices.EmployeeLeaveBalanceAccrual();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error occurred while accrual leave balance");
         }
     }
 }
+
+
+
+
+
