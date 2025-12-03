@@ -4,10 +4,10 @@ namespace Codeji.CMS.Utility
 {
     public static class Common
     {
-        public static string GetApplicantResumeFullPath(string resumeUrl)
+        public static string? GetApplicantResumeFullPath(string? resumeUrl)
         {
             if (string.IsNullOrEmpty(resumeUrl))
-                return string.Empty;
+                return null;
             return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.ViewResumeUrl + resumeUrl;
         }
 

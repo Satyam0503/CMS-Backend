@@ -12,6 +12,7 @@ using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
@@ -192,8 +193,7 @@ namespace Codeji.CMS.Services.Recruitments
                                                  State = applicant.State,
                                                  Experience = applicant.Experience,
                                                  ApplyDate = applicant.CreatedDate,
-                                                 UpdateDate = applicant.UpdatedDate,
-                                                 ResumeUrl = applicant.ResumeUrl,
+                                                 FullApplicantResumePath = Common.GetApplicantResumeFullPath(applicant.ResumeUrl)
                                              }).OrderByDescending(x => x.ApplyDate).ToList();
             return new Result<ApplicantViewModel>
             {
@@ -224,9 +224,7 @@ namespace Codeji.CMS.Services.Recruitments
                     State = applicant.State,
                     Experience = applicant.Experience,
                     ApplyDate = applicant.CreatedDate,
-                    UpdateDate = applicant.UpdatedDate,
-                    ResumeUrl = applicant.ResumeUrl,
-
+                    FullApplicantResumePath = Common.GetApplicantResumeFullPath(applicant.ResumeUrl)
                 };
                 result.Success = true;
                 result.MethodResult = data;
