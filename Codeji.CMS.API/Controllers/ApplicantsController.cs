@@ -5,6 +5,7 @@ using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.Constraints;
+using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -45,10 +46,7 @@ namespace Codeji.CMS.API.Controllers
         public async Task<Result> AddApplicant([FromBody] ApplicantAddEditModel applicantRegisterModel)
         {
             Result result = new Result();
-            if (!ModelState.IsValid)
-            {
-                return result;
-            }
+            if (!ModelState.IsValid) return result;
             result = await _applicantsService.RegisterApplicants(applicantRegisterModel);
             return result;
         }
@@ -58,7 +56,9 @@ namespace Codeji.CMS.API.Controllers
         [ModulePermission(AppModule.Applications, Permission.Edit)]
         public async Task<Result> EditApplicants([FromBody] ApplicantAddEditModel model)
         {
-            var result = await _applicantsService.UpdateApplicants(model);
+            Result result = new();
+            if (!ModelState.IsValid) return result;
+            result = await _applicantsService.UpdateApplicants(model);
             return result;
         }
 
@@ -70,33 +70,22 @@ namespace Codeji.CMS.API.Controllers
         public async Task<Result> UploadResume([FromForm] ResumeApplicantModel model, string email)
         {
             Result result = new Result();
-            //string companyId = CurrentContext.CurrentUserCompanyId(_httpContextAccessor);
-            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads/Resume/");
-            string fileExtension = Path.GetExtension(model.File.FileName);
-            if (!Directory.Exists(uploadFolder))
-            {
-                Directory.CreateDirectory(uploadFolder);
-            }
-            string fileName = $"{Guid.NewGuid().ToString()}{fileExtension}";
-            string filePath = Path.Combine(uploadFolder + fileName);
-            using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
-            {
-                await model.File.CopyToAsync(fileStream);
-            }
-            ;
-            string? resume = await _applicantsService.GetApplicantExistingResume(email);
-            if (string.IsNullOrEmpty(resume))
-            {
-                result = await _applicantsService.AddAppicantResume(fileName, email, filePath);
-            }
-            else
-            {
-                string oldPath = Path.Combine(uploadFolder, resume);
-                FileInfo fileInfo = new(oldPath);
-                fileInfo.Delete();
-                result = await _applicantsService.AddAppicantResume(fileName, email, filePath);
-            }
+            string[] supportedFileFormat = [".pdf"];
+            long maxFileSize = 5;  // 5MB
 
+            string fileExtension = Path.GetExtension(model.File.FileName);
+            long fileSize = model.File.Length / (1024 * 1024);
+            if (!supportedFileFormat.Contains(fileExtension))
+            {
+                result.StatusCode = CustomStatusCode.InvalidFileFormat;
+                return result;
+            }
+            if (fileSize > maxFileSize)
+            {
+                result.StatusCode = CustomStatusCode.FileSizeLimitExceed;
+                return result;
+            }
+            result = await _applicantsService.UploadResume(model.File, email);
             return result;
         }
 

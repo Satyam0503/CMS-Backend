@@ -213,59 +213,34 @@ namespace Codeji.CMS.API.Controllers
         [Route("applicant/applyJob")]
         public async Task<Result> RegisterApplicants([FromBody] ApplicantAddEditModel applicantRegisterModel)
         {
-            Result result = new Result();
-            if (!ModelState.IsValid)
-            {
-                return result;
-            }
-            Result ApplicantId = await _applicantsServices.GetApplicantsExistingId(applicantRegisterModel.Email);
-            if (ApplicantId.Success)
-            {
-                applicantRegisterModel.ActivityType = string.IsNullOrEmpty(ApplicantId.Message)
-                ? EnumsHelper.ActivityType.New :
-                EnumsHelper.ActivityType.ReApply;
-                applicantRegisterModel.Status = EnumsHelper.ActivityStatus.Active;
-                result = await _applicantsServices.RegisterApplicants(applicantRegisterModel);
-                if (result.Success)
-                {
-                    result.Message = "Your application has been submitted successfully";
-                }
-            }
-            else
-            {
-                result.Success = false;
-                result.Message = "You have already applied. Please re-apply after the waiting period.";
-            }
+            Result result = new();
+            if (!ModelState.IsValid) return result;
+            result = await _applicantsServices.ApplyNowService(applicantRegisterModel);
             return result;
         }
 
-        [HttpGet]
-        [Route("VerificationCaptch")]
-        [AllowAnonymous]
-        public async Task<bool> GetreCaptchaResponse(string userResponse)
-        {
-            string? reCaptchaSecretKey = ConfigManager.ReCaptcha.SecretKey;
-            if (reCaptchaSecretKey != null && userResponse != null)
-            {
-                FormUrlEncodedContent content = new FormUrlEncodedContent(new Dictionary<string, string>
-                {
-                    {"secret", reCaptchaSecretKey },
-                    {"response", userResponse }
-                });
-                HttpResponseMessage response = await _httpClient.PostAsync("https://www.google.com/recaptcha/api/siteverify", content);
-                if (response.IsSuccessStatusCode)
-                {
-                    reCaptchaResponse? result = await response.Content.ReadFromJsonAsync<reCaptchaResponse>();
-                    return result.Success;
-                }
-            }
-            return false;
-        }
-        public class reCaptchaResponse
-        {
-            public bool Success { get; set; }
-            public string[] ErrorCodes { get; set; }
-        }
+        // [HttpGet]
+        // [Route("VerificationCaptch")]
+        // [AllowAnonymous]
+        // public async Task<bool> GetreCaptchaResponse(string userResponse)
+        // {
+        //     string? reCaptchaSecretKey = ConfigManager.ReCaptcha.SecretKey;
+        //     if (reCaptchaSecretKey != null && userResponse != null)
+        //     {
+        //         FormUrlEncodedContent content = new FormUrlEncodedContent(new Dictionary<string, string>
+        //         {
+        //             {"secret", reCaptchaSecretKey },
+        //             {"response", userResponse }
+        //         });
+        //         HttpResponseMessage response = await _httpClient.PostAsync("https://www.google.com/recaptcha/api/siteverify", content);
+        //         if (response.IsSuccessStatusCode)
+        //         {
+        //             reCaptchaResponse? result = await response.Content.ReadFromJsonAsync<reCaptchaResponse>();
+        //             return result.Success;
+        //         }
+        //     }
+        //     return false;
+        // }
     }
 }
 

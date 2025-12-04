@@ -98,11 +98,11 @@ namespace Codeji.CMS.Services.Recruitments
 
         public async Task<Result> UpdateApplicants(ApplicantAddEditModel model)
         {
+            Result result = new();
             Expression<Func<Applicant, bool>> whereCondition = x => x.ApplicantId == model.ApplicantId && x.Email == model.Email;
-            //to do improvement
             Applicant? entity = await _applicantRepository.FirstOrDefault(whereCondition);
-            if (entity == null) return new Result();
-            entity.UpdatedDate = DateTime.Now;
+            if (entity == null) return result;
+
             entity.Experience = model.Experience;
             entity.VacancyId = model.VacancyId;
             entity.FirstName = model.FirstName;
@@ -112,43 +112,84 @@ namespace Codeji.CMS.Services.Recruitments
             entity.ActivityType = model.ActivityType;
             entity.Status = model.Status;
             entity.State = model.State;
-            Result res = await _applicantRepository.Update(whereCondition, entity);
-            if (res.Success)
-            {
-                await SendEmailToApplicant(entity);
-            }
-            return res;
+            result = await _applicantRepository.Update(whereCondition, entity);
+            if (result.Success) await SendEmailToApplicant(entity);
+            return result;
         }
-
-        public async Task<bool> IsEmailExist(string email)
-        {
-            bool res = await _applicantRepository.Exist(x => x.Email == email);
-            return res;
-        }
-        public async Task<Result> GetApplicantsExistingId(string email)
+        public async Task<Result> ApplyNowService(ApplicantAddEditModel model)
         {
             Result result = new();
-            Applicant? applicant = await _applicantRepository.FirstOrDefault(x => x.Email == email);
-            if (applicant is null)
+            Applicant? applicant = await _applicantRepository.FirstOrDefault(a => a.Email == model.Email);
+            if (applicant != null)
             {
-                result.Success = true;
+                var canApplyAgain = DateTime.UtcNow.AddMonths(-6) > applicant.CreatedDate;
+                if (!canApplyAgain)
+                {
+                    result.Success = false;
+                    result.StatusCode = CustomStatusCode.ApplyAfterWaitingPeriod;
+                    return result;
+                }
+                else
+                {
+                    model.ActivityType = EnumsHelper.ActivityType.ReApply;
+                    model.Status = EnumsHelper.ActivityStatus.Active;
+                }
             }
-            else if (applicant.CreatedDate > DateTime.Now.AddMonths(-6))
+
+            Applicant user = new Applicant()
             {
-                result.Success = false;
-            }
-            else
+                ApplicantId = Guid.NewGuid().ToString(),
+                FirstName = model.FirstName,
+                LastName = model.LastName,
+                Experience = model.Experience,
+                VacancyId = model.VacancyId,
+                Phone = model.Phone,
+                Email = model.Email,
+                Status = EnumsHelper.ActivityStatus.Active,
+                State = model.State,
+                ActivityType = EnumsHelper.ActivityType.New,
+            };
+            result = await _applicantRepository.AddOne(user);
+            if (result.Success)
             {
-                result.Message = applicant.ApplicantId;
-                result.Success = true;
+                await SendEmailToApplicant(user);
             }
             return result;
         }
 
-        public async Task<string> GetApplicantExistingResume(string email)
+        public async Task<Result> UploadResume(IFormFile resume, string email)
         {
-            Applicant? res = await _applicantRepository.FirstOrDefault(x => x.Email == email);
-            return res?.ResumeUrl ?? string.Empty;
+            Result result = new();
+            Applicant? applicant = await _applicantRepository.FirstOrDefault(a => a.Email == email);
+            if (applicant is null) return result;
+
+            // upload folder path 
+            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Resume");
+            if (!Directory.Exists(uploadFolder))
+            {
+                Directory.CreateDirectory(uploadFolder);
+            }
+            string fileExtension = Path.GetExtension(resume.FileName);
+            string fileName = $"{Guid.NewGuid().ToString()}{fileExtension}";
+            string filePath = Path.Combine(uploadFolder, fileName);
+            using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
+            {
+                await resume.CopyToAsync(fileStream);
+            }
+
+            // check if applicant already has resume uploaded
+            if (!string.IsNullOrEmpty(applicant.ResumeUrl))
+            {
+                string oldPath = Path.Combine(uploadFolder, applicant.ResumeUrl);
+                if (File.Exists(oldPath))
+                {
+                    FileInfo fileInfo = new(oldPath);
+                    fileInfo.Delete();
+                }
+            }
+            // upload resume
+            Expression<Func<Applicant, bool>> expression = a => a.ApplicantId == applicant.ApplicantId;
+            return await _applicantRepository.UpdateMany(expression, Builders<Applicant>.Update.Set(a => a.ResumeUrl, fileName).Set(a => a.UpdatedDate, DateTime.UtcNow));
         }
 
         //Get Applicant List Using Filter Change this logic in Future
@@ -232,22 +273,6 @@ namespace Codeji.CMS.Services.Recruitments
             return result;
         }
 
-        public async Task<Result> AddAppicantResume(string fileName, string email, string filePath)
-        {
-            Expression<Func<Applicant, bool>> whereCondition = x => x.Email == email;
-            Applicant? resume = await _applicantRepository.FirstOrDefault(whereCondition);
-            if (resume == null)
-            {
-                return new Result()
-                {
-                    Success = false,
-                    Message = "Applicant Not Found"
-                };
-            }
-            whereCondition = x => x.ApplicantId == resume.ApplicantId;
-            resume.ResumeUrl = fileName;
-            return await _applicantRepository.Update(whereCondition, resume);
-        }
         //Logic For Addig Comment on Applicant By Employee (Admin And HR Manager )
 
         public async Task<Result> AddComment(string userId, CommentRequestModel model)

@@ -38,4 +38,7 @@ public static class CustomStatusCode
     public const int DuplicationLeavePolicy = 34;
     public const int LeaveBalanceLimitExceed = 35;
     public const int PasswordResetLinkAlreadySent = 36;
+    public const int ApplyAfterWaitingPeriod = 37;
+    public const int InvalidFileFormat = 38;
+    public const int FileSizeLimitExceed = 39;
 }
