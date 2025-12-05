@@ -10,6 +10,9 @@
     <Compile Remove="Upload\**" />
     <Content Remove="Upload\**" />
     <EmbeddedResource Remove="Upload\**" />
+    <Content Include="Templates\**\*.*">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <None Remove="Upload\**" />
   </ItemGroup>
   <ItemGroup>

@@ -391,6 +391,7 @@ public class LeaveManagementService : ILeaveManagementService
                                                         {
                                                             LeaveRequestId = leave.LeaveRequestId,
                                                             EmployeeName = user.FirstName + " " + user.LastName,
+                                                            EmployeeId = user.EmployeeId,
                                                             ProfileUrl = Common.GetEmployeeImageUrl(user.ProfileUrl),
                                                             JobRole = jobTitle?.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label),
                                                             IsHalfDay = leave.IsHalfDay,
