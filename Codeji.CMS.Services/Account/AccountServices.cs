@@ -80,14 +80,14 @@ public class AccountServices : IAccountServices
     public async Task<Result<TokenResponseDto>> VerifyAndGenerateToken(LoginModel model)
     {
         Result<TokenResponseDto> result = new();
-        bool isEmailExist = await _employeeService.IsEmailExist(model.Email);
-        if (!isEmailExist)
+        bool isEmpExistOrActive = await _employeeRepository.Exist(emp => emp.Email == model.Email && emp.Status);
+        if (!isEmpExistOrActive)
         {
             result.Success = false;
             result.StatusCode = CustomStatusCode.InvalidCredential;
             return result;
         }
-        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase));
+        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase) && x.Status);
         if (!user.IsEmailVerified)
         {
             result.Success = false;
