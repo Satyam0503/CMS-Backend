@@ -542,9 +542,9 @@ public class LeaveManagementService : ILeaveManagementService
     public async Task<Result<LeaveRequestSummaryResponseDto>> GetLeaveRequestSummary()
     {
         Result<LeaveRequestSummaryResponseDto> result = new();
-        var currentMonth = DateTime.UtcNow.Month;
-        var currentYear = DateTime.UtcNow.Year;
-        Expression<Func<LeaveRequest, bool>> expression = lr => lr.CreatedDate.HasValue && lr.CreatedDate.Value.Month == currentMonth && lr.CreatedDate.HasValue && lr.CreatedDate.Value.Year == currentYear;
+        // get last 30 days leave request
+        var fromDate = DateTime.UtcNow.AddDays(-30);
+        Expression<Func<LeaveRequest, bool>> expression = lr => lr.CreatedDate.HasValue && lr.CreatedDate.Value.Date >= fromDate.Date;
         var currentMonthLeaveRequest = await _leave.GetAll(expression);
         Dictionary<int, int> leaveStatusSummary = new();
         currentMonthLeaveRequest.GroupBy(lr => lr.Status).ForEach(lr =>
