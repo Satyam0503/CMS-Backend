@@ -41,4 +41,5 @@ public static class CustomStatusCode
     public const int ApplyAfterWaitingPeriod = 37;
     public const int InvalidFileFormat = 38;
     public const int FileSizeLimitExceed = 39;
+    public const int EmpAlreadyVerified = 40;
 }

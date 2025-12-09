@@ -459,5 +459,14 @@ public class UserController : BaseApiController
         string userId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.UpdateNotificationPreferences(userId, preferences);
     }
+
+    [HttpPost]
+    [Route("ResendInvite/{userId}")]
+    [ModulePermission(AppModule.Employees, Permission.Create)]
+    public async Task<Result> ResendInviteLink(string userId)
+    {
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        return await _employeeService.ResendInviteLink(userId, currentUserId);
+    }
 }
 

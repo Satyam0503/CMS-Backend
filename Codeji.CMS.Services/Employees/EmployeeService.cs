@@ -138,7 +138,12 @@ namespace Codeji.CMS.Services.Employees
                 Preferences = _middlewareService.GetDefaultNotificationPreferences(),
             };
             await _notificationPreferenceRepository.AddOne(notificationPreferences);
+            await SendInvitationLink(currentUserId, employee);
+            return result;
+        }
 
+        private async Task SendInvitationLink(string currentUserId, EmpUser employee)
+        {
             UserModel currentUser = _middlewareService.GetUserById(currentUserId);
             Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
 
@@ -148,7 +153,7 @@ namespace Codeji.CMS.Services.Employees
             int tokenExpiryTime = 24;
             UserSecurityToken securityToken = new()
             {
-                UserId = userId,
+                UserId = employee.UserId,
                 TokenHash = tokenHash,
                 IsUsed = false,
                 Expiry = DateTime.UtcNow.AddHours(tokenExpiryTime),
@@ -161,11 +166,12 @@ namespace Codeji.CMS.Services.Employees
             string replacedBody = HtmlTemplate.Render(emailContent.body, new
             {
                 EmployeeName = employee.FirstName + " " + employee.LastName,
-                PasswordCreationLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={userId}",
+                PasswordCreationLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={employee.UserId}",
                 CompanyName = company != null ? company.CompanyName : string.Empty,
                 // CompanyLogo = company.CompanyLogo != null ? _middlewareService.GetCompanyLogoAsDataUrl(Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "CompanyLogo", company.CompanyLogo)) : string.Empty,
                 CompanyLogo = company.CompanyLogo != null ? Common.GetCompanyLogoUrl(company.CompanyLogo) : string.Empty,
                 Year = DateTime.UtcNow.Year,
+                LinkExpiryTime = tokenExpiryTime,
             });
 
             _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
@@ -180,7 +186,6 @@ namespace Codeji.CMS.Services.Employees
                     UserFrom = currentUser.UserId,
                 });
             }, priority: 1);
-            return result;
         }
 
         public async Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId)
@@ -953,6 +958,31 @@ namespace Codeji.CMS.Services.Employees
             {
                 result.Message = null;
             }
+            return result;
+        }
+        public async Task<Result> ResendInviteLink(string userId, string currentUserId)
+        {
+            Result result = new();
+            EmpUser? empUser = await _employeeRepository.FirstOrDefault(e => e.UserId == userId && e.Status);
+            if (empUser == null)
+            {
+                result.StatusCode = CustomStatusCode.EmployeeNotExist;
+                return result;
+            }
+            if (empUser.IsEmailVerified)
+            {
+                result.StatusCode = CustomStatusCode.EmpAlreadyVerified;
+                return result;
+            }
+
+            Expression<Func<UserSecurityToken, bool>> expression = t => t.UserId == empUser.UserId && t.Type == EnumsHelper.SecurityTokenType.Invite && t.Expiry > DateTime.UtcNow && t.IsUsed == false;
+            int activeTokenCount = await _userSecurityTokenRepository.Count(expression);
+            if (activeTokenCount > 0)
+            {
+                await _userSecurityTokenRepository.UpdateMany(expression, Builders<UserSecurityToken>.Update.Set(t => t.IsUsed, true));
+            }
+            await SendInvitationLink(currentUserId, empUser);
+            result.Success = true;
             return result;
         }
     }
