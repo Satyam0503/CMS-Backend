@@ -337,6 +337,7 @@ namespace Codeji.CMS.Services.Employees
                             PhoneNumber = emp.PhoneNumber,
                             DateOfBirth = emp.DateOfBirth,
                             FullProfileUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl),
+                            IsVerified = emp.IsEmailVerified,
                         }).ToList();
             return new Result<GetAllEmployeeResponseModel>()
             {
