@@ -18,7 +18,7 @@ namespace Codeji.CMS.DTO.Recruitments
         public string State { get; set; }
         public decimal Experience { get; set; }
         public DateTime? ApplyDate { get; set; }
-        public string? FullApplicantResumePath { get; set; }
+        public string? ResumeUrl { get; set; }
     }
 }
 

@@ -214,7 +214,7 @@ namespace Codeji.CMS.Services.Recruitments
                 || x.FirstName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
                 || x.LastName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
                 || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));
-                applicantList = await _applicantRepository.GetAggregateDataAsync<Applicant>(whereCondition, pageNo: filters.PageNo, pageSize: filters.Records, isAscending: false, orderedKey: "CreatedDate");
+                applicantList = await _applicantRepository.GetAggregateDataAsync<Applicant>(whereCondition, pageNo: filters.PageNo, pageSize: filters.PageSize, isAscending: false, orderedKey: "CreatedDate");
                 count = await _applicantRepository.Count(whereCondition);
             }
             List<JobVacancy> vacancies = (await _jobVacancyRepository.GetAll()).ToList();
@@ -234,7 +234,7 @@ namespace Codeji.CMS.Services.Recruitments
                                                  State = applicant.State,
                                                  Experience = applicant.Experience,
                                                  ApplyDate = applicant.CreatedDate,
-                                                 FullApplicantResumePath = Common.GetApplicantResumeFullPath(applicant.ResumeUrl)
+                                                 ResumeUrl = Common.GetApplicantResumeFullPath(applicant.ResumeUrl)
                                              }).OrderByDescending(x => x.ApplyDate).ToList();
             return new Result<ApplicantViewModel>
             {
@@ -265,7 +265,7 @@ namespace Codeji.CMS.Services.Recruitments
                     State = applicant.State,
                     Experience = applicant.Experience,
                     ApplyDate = applicant.CreatedDate,
-                    FullApplicantResumePath = Common.GetApplicantResumeFullPath(applicant.ResumeUrl)
+                    ResumeUrl = Common.GetApplicantResumeFullPath(applicant.ResumeUrl)
                 };
                 result.Success = true;
                 result.MethodResult = data;

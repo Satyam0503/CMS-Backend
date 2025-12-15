@@ -13,7 +13,7 @@ namespace Codeji.CMS.DTO.Recruitments
         public int? MinExperience { get; set; }
         public int? MaxExperience { get; set; }
         public int PageNo { get; set; }
-        public int Records { get; set; }
+        public int PageSize { get; set; }
     }
 }
 
