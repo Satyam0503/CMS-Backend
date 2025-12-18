@@ -15,10 +15,11 @@ namespace Codeji.CMS.Services.Recruitments
         readonly IMongoDbRepository<Applicant> _applicantRepository;
         readonly IMapper _mapper;
 
-        public JobVacancyService(IMongoDbRepository<JobVacancy> jobVacancyRepo, IMapper mapper)
+        public JobVacancyService(IMongoDbRepository<JobVacancy> jobVacancyRepo, IMongoDbRepository<Applicant> applicantRepo, IMapper mapper)
         {
             _jobVacancyRepo = jobVacancyRepo;
             _mapper = mapper;
+            _applicantRepository = applicantRepo;
         }
 
         public async Task<Result<JobVacancyModel>> AddJobVacancy(JobVacancyModel jobVacancy)
@@ -60,23 +61,45 @@ namespace Codeji.CMS.Services.Recruitments
             };
         }
 
-        public async Task<Result<JobVacancyModel>> GetAllVacancy(JobRequestModel model)
+        public async Task<Result<GetJobVacancyModel>> GetAllVacancy(JobRequestModel model)
         {
             IEnumerable<JobVacancy> jobList = [];
             int count = 0;
             Expression<Func<JobVacancy, bool>> whereCondition = x =>
            (model.JobTypes.Count == 0 || model.JobTypes.Contains(x.JobType)) &&
             (model.Status == null || x.Status == model.Status) &&
-            (string.IsNullOrEmpty(model.Search) || x.Title.Contains(model.Search, StringComparison.CurrentCultureIgnoreCase));
+            (string.IsNullOrEmpty(model.Search) || x.Title.ToLower().Contains(model.Search.ToLower()));
 
-            jobList = await _jobVacancyRepo.GetAggregateDataAsync<JobVacancy>(whereCondition, isAscending: false, orderedKey: "CreatedDate", pageSize: model.Records, pageNo: model.PageNo);
+            jobList = (await _jobVacancyRepo.GetAggregateDataAsync<JobVacancy>(whereCondition, isAscending: false, orderedKey: "CreatedDate", pageSize: model.Records, pageNo: model.PageNo)).ToList();
             count = await _jobVacancyRepo.Count(whereCondition);
-            List<JobVacancyModel> data = _mapper.Map<List<JobVacancyModel>>(jobList);
-            Result<JobVacancyModel> result = new Result<JobVacancyModel>()
+
+            List<string> jobIds = jobList.Select(j => j.JobId).ToList();
+
+            Expression<Func<Applicant, bool>> expression = a => jobIds.Contains(a.VacancyId);
+            Dictionary<string, int> applicationCounts = _applicantRepository.Get(expression)
+                                    .GroupBy(a => a.VacancyId)
+                                    .Select(g => new
+                                    {
+                                        JobId = g.Key,
+                                        Count = g.Count()
+                                    })
+                                    .ToDictionary(x => x.JobId, x => x.Count);
+
+            var data = jobList.Select(job => new GetJobVacancyModel()
+            {
+                JobId = job.JobId,
+                Title = job.Title,
+                Vacancies = job.Vacancies,
+                JobType = job.JobType,
+                Status = job.Status,
+                Description = job.Description,
+                TotalApplication = applicationCounts.GetValueOrDefault(job.JobId, 0),
+            });
+            Result<GetJobVacancyModel> result = new Result<GetJobVacancyModel>()
             {
                 Success = true,
                 TotalRecords = count,
-                MethodResults = data,
+                MethodResults = [.. data],
             };
             return result;
         }
