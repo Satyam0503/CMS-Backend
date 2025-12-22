@@ -1,12 +1,15 @@
 ﻿using System.Net;
 using System.Text;
 using Codeji.CMS.API.App_Start;
+using Codeji.CMS.API.ChatHub;
 using Codeji.CMS.API.Notification;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.GenericRepository.Registration;
 using Codeji.CMS.GenericRepository.Settings;
 using Codeji.CMS.Services;
 using Codeji.CMS.Services.BackgroundTasks;
+using Codeji.CMS.Services.Employees;
+using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Registration;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
@@ -36,7 +39,7 @@ builder.Services.AddControllers();
 string corsName = "codeji";
 builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
 {
-    builder.AllowCredentials().WithOrigins("http://127.0.0.1:5173", "http://localhost:5173").AllowAnyHeader().AllowAnyMethod();
+    builder.AllowCredentials().WithOrigins("http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:4173").AllowAnyHeader().AllowAnyMethod();
     // builder.AllowCredentials().AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
 }));
 
@@ -136,7 +139,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var accessToken = context.Request.Query["access_token"];
                 // If the request is for our hub...
                 var path = context.HttpContext.Request.Path;
-                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/notificationhub"))
+                if (!string.IsNullOrEmpty(accessToken) && (path.StartsWithSegments("/notificationhub") || path.StartsWithSegments("/chathub")))
                 {
                     // Read the token out of the query string
                     context.Token = accessToken;
@@ -168,6 +171,9 @@ builder.Services.AddSignalR(options =>
     options.MaximumReceiveMessageSize = null;
     options.EnableDetailedErrors = true;
 });
+
+// to track users presence in application 
+builder.Services.AddSingleton<IEmployeePresenceService, EmployeePresenceService>();
 
 // Configure IIS Integration
 builder.WebHost.UseIISIntegration();
@@ -218,7 +224,12 @@ app.MapHub<NotificationHub>("/notificationhub", options =>
     options.TransportMaxBufferSize = 6000000;
 });
 
-// app.MapHub<NoticeBoardHub>("/notice-board");
+app.MapHub<ChatHub>("/chathub", options =>
+{
+    options.Transports = HttpTransportType.WebSockets;
+    options.ApplicationMaxBufferSize = 6000000;
+    options.TransportMaxBufferSize = 6000000;
+});
 
 // Configure controller routes
 app.MapControllers();
