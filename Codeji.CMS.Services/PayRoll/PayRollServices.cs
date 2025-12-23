@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Linq.Expressions;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.PayRoll;
@@ -7,6 +8,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.Utility.Helpers;
+using Humanizer;
 
 namespace Codeji.CMS.Services.PayRoll;
 
@@ -85,6 +87,7 @@ public class PayRollServices : IPayRollServices
             salarySlipModel.GrossPay = payRoll.BasicPay + payRoll.Allowance.HRA + payRoll.Allowance.LTA + payRoll.Bonus + payRoll.Allowance.OtherAllowance;
             salarySlipModel.TotalDeduction = payRoll.Deduction.IncomeTax + payRoll.Deduction.HealthInsurance + payRoll.Deduction.LossOfPay;
             salarySlipModel.NetSalary = salarySlipModel.GrossPay - salarySlipModel.TotalDeduction;
+            salarySlipModel.NetSalaryInWords = NumberToWordsExtension.ToWords((int)salarySlipModel.NetSalary, CultureInfo.CurrentCulture).Replace("-", " ");
 
             string templateFilePath = Path.Combine(Directory.GetCurrentDirectory(), "Templates", "SalarySlipTemplate.html");
             string fileContent = File.ReadAllText(templateFilePath);

@@ -13,6 +13,7 @@
     <None Remove="NewFolder2\**" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Humanizer.Core" Version="3.0.1" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.3" />
     <PackageReference Include="AutoMapper" Version="13.0.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.3" />

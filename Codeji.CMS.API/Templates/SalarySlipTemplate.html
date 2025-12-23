@@ -10,6 +10,19 @@
         margin: 40px;
         color: #000;
       }
+      .watermark {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) rotate(-30deg);
+        font-size: 150px;
+        color: rgba(0, 0, 0, 0.06);
+        z-index: -10;
+        pointer-events: none;
+        white-space: wrap;
+        text-align: center;
+        font-weight: bold;
+      }
 
       .salary-slip {
         max-width: 900px;
@@ -130,6 +143,7 @@
   </head>
 
   <body>
+    <div class="watermark">[CompanyName]</div>
     <div class="salary-slip">
       <div class="header">
         <h1>Monthly Salary Slip</h1>
