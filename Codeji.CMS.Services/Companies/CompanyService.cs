@@ -2,6 +2,7 @@
 using AutoMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
+using Codeji.CMS.DTO.Company.Policy;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
@@ -26,10 +27,12 @@ namespace Codeji.CMS.Services
         private readonly IMongoDbRepository<ModulePermission> _modulePermissisonRepo;
         private readonly IMongoDbRepository<RolePermission> _rolePermissionRepo;
         private readonly IMongoDbRepository<NotificationPreference> _notificationPreferenceRepo;
+        readonly IMongoDbRepository<Policy> _policyRepo;
         private readonly IMapper _mapper;
         private readonly IRoleService _roleService;
         private readonly IEmployeeService _employeeService;
         readonly IMiddlewareService _middlewareService;
+
 
         public CompanyService(
             IMongoDbRepository<Company> companyRepo,
@@ -39,6 +42,7 @@ namespace Codeji.CMS.Services
             IMongoDbRepository<ModulePermission> modulePermissisonRepo,
             IMongoDbRepository<RolePermission> rolePermissionRepo,
             IMongoDbRepository<NotificationPreference> notificationPreferenceRepo,
+            IMongoDbRepository<Policy> policyRepo,
             IRoleService roleService,
             IEmployeeService employeeService,
             IMiddlewareService middlewareService
@@ -54,6 +58,7 @@ namespace Codeji.CMS.Services
             _notificationPreferenceRepo = notificationPreferenceRepo;
             _employeeService = employeeService;
             _middlewareService = middlewareService;
+            _policyRepo = policyRepo;
         }
 
         public async Task<Result> Register(CompanyRequestModel companyModel)
@@ -215,5 +220,69 @@ namespace Codeji.CMS.Services
             Result resutl = await _companyRepo.UpdateMany(whereCondition, Builders<Company>.Update.Set(x => x.CompanyLogo, fileName).Set(x => x.UpdatedDate, DateTime.UtcNow));
             return resutl.Success;
         }
+
+        // services related to company policies
+        public async Task<Result> AddPolicy(CreatePolicyRequestModel model, string companyId)
+        {
+            Result result = new();
+            Policy policy = _mapper.Map<Policy>(model);
+            result = await _policyRepo.AddOne(policy);
+            if (!result.Success) return result;
+            result.Success = true;
+            return result;
+        }
+
+        public async Task<Result<PolicyResponseModel>> UpdatePolicy(UpdatePolicyRequestModel model, string companyId)
+        {
+            Result<PolicyResponseModel> result = new();
+            Expression<Func<Policy, bool>> whereCondition = x => x.PolicyId == model.PolicyId && x.CompanyId == companyId;
+            Policy? existingPolicy = await _policyRepo.FirstOrDefault(whereCondition);
+            if (existingPolicy is null)
+            {
+                result.Success = false;
+                return result;
+            }
+            existingPolicy.PolicyName = model.PolicyName;
+            existingPolicy.Description = model.Description;
+            existingPolicy.Departments = model.Departments;
+            existingPolicy.Roles = model.Roles;
+            existingPolicy.IsActive = model.IsActive;
+
+            Result updateResult = await _policyRepo.Update(whereCondition, existingPolicy);
+            if (!updateResult.Success)
+            {
+                result.Success = false;
+                return result;
+            }
+            PolicyResponseModel responseModel = _mapper.Map<PolicyResponseModel>(existingPolicy);
+            result.MethodResult = responseModel;
+            result.Success = true;
+            return result;
+        }
+        public async Task<Result<PolicyResponseModel>> GetAllPolicies(string userId, string companyId)
+        {
+            Result<PolicyResponseModel> result = new() { Success = false };
+            var empUser = await _userRepo.FirstOrDefault(emp => emp.UserId == userId && emp.Status && emp.IsEmailVerified);
+            if (empUser is null) return result;
+            var userRole = empUser.RoleId;
+            var userDepartment = empUser.Department ?? string.Empty;
+
+            // check if user has create or edit permission for policy module
+
+            Expression<Func<Policy, bool>> expression = pl => (pl.Departments.Count == 0 || pl.Departments.Contains(userDepartment)) && (pl.Roles.Count == 0 || pl.Roles.Contains(userRole)) && pl.IsActive && pl.CompanyId == companyId;
+            var policies = await _policyRepo.GetAll(expression);
+            var policyResponse = _mapper.Map<List<PolicyResponseModel>>(policies);
+            result.Success = true;
+            result.MethodResults = policyResponse;
+            return result;
+        }
+
+        public async Task<Result<PolicyVersionResponseModel>> GetPoliciesVersions(string policyId)
+        {
+            Result<PolicyVersionResponseModel> result = new();
+            // work in progress
+            return result;
+        }
+
     }
 }

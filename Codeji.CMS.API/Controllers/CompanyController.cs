@@ -5,6 +5,8 @@ using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using Codeji.CMS.DTO.Company.Policy;
+using System.Security.Policy;
 namespace Codeji.CMS.API.Controllers
 {
     [Route("api/[controller]")]
@@ -51,5 +53,34 @@ namespace Codeji.CMS.API.Controllers
             return result;
         }
 
+        // services related to company policies
+
+        [HttpPost]
+        [Route("AddPolicy")]
+        public async Task<Result> AddPolicy([FromBody] CreatePolicyRequestModel model)
+        {
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var result = await _companyService.AddPolicy(model, companyId);
+            return result;
+        }
+
+        [HttpPost]
+        [Route("UpdatePolicy")]
+        public async Task<Result<PolicyResponseModel>> UpdatePolicy([FromBody] UpdatePolicyRequestModel model)
+        {
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var result = await _companyService.UpdatePolicy(model, companyId);
+            return result;
+        }
+
+        [HttpGet]
+        [Route("GetAllPolicies")]
+        public async Task<Result<PolicyResponseModel>> GetAllPolicies()
+        {
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            string userId = CurrentContext.UserId(_httpContextAccessor);
+            var result = await _companyService.GetAllPolicies(userId, companyId);
+            return result;
+        }
     }
 }

@@ -5,6 +5,7 @@ using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.Company.CustomAttribute;
 using Codeji.CMS.DTO.Company.Department;
 using Codeji.CMS.DTO.Company.JobTitle;
+using Codeji.CMS.DTO.Company.Policy;
 using Codeji.CMS.DTO.Dashboard;
 using Codeji.CMS.DTO.LeaveManagement.Leave;
 using Codeji.CMS.DTO.LeaveManagement.LeavePolicy;
@@ -52,6 +53,8 @@ namespace Codeji.CMS.Services.Registration
             CreateMap<CalendarEntity, CalendarResponseDto>().ReverseMap();
             CreateMap<LeavePolicy, LeavePolicyRequest>().ReverseMap();
             CreateMap<LeavePolicy, UpdateLeavePolicyRequest>().ReverseMap();
+            CreateMap<Policy, CreatePolicyRequestModel>().ReverseMap();
+            CreateMap<Policy, PolicyResponseModel>().ReverseMap();
         }
     }
 
