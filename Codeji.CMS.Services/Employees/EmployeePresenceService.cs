@@ -9,40 +9,42 @@ namespace Codeji.CMS.Services.Employees;
 public class EmployeePresenceService : IEmployeePresenceService
 {
     // using concurrentDictionary for thread safety
-    private readonly ConcurrentDictionary<string, int> onlineUser = new();
-
-    public EmployeePresenceService()
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _onlineUsers = new();
+    public void AddUserToGroup(string groupName, string connectionId, string userId)
     {
+        var group = _onlineUsers.GetOrAdd(
+            groupName,
+            _ => new ConcurrentDictionary<string, string>()
+        );
+
+        // Track by connectionId (supports multiple devices)
+        group[connectionId] = userId;
     }
 
-    public void UserConnected(string userId)
+    public void RemoveUserFromGroup(string groupName, string connectionId)
     {
-        onlineUser.AddOrUpdate(userId, 1, (_, count) => count + 1);
-    }
-
-    public void UserDisconnected(string userId)
-    {
-        if (onlineUser.TryGetValue(userId, out var count))
+        if (_onlineUsers.TryGetValue(groupName, out var group))
         {
-            if (count <= 1)
+            group.TryRemove(connectionId, out _);
+
+            // Remove group if empty
+            if (group.IsEmpty)
             {
-                onlineUser.TryRemove(userId, out _);
-            }
-            else
-            {
-                onlineUser[userId] = count - 1;
+                _onlineUsers.TryRemove(groupName, out _);
             }
         }
     }
-    public bool IsUserOnline(string userId)
-    {
-        return onlineUser.ContainsKey(userId);
-    }
 
-    public IReadOnlyList<string> GetOnlineUser(List<string> userIds)
+    public List<string> GetOnlineUsersInGroup(string groupName, string excludeUserId = null)
     {
-        ICollection<string> onLineUsers = onlineUser.Keys;
-        return onLineUsers.Where(u => userIds.Contains(u)).ToList();
-    }
+        if (_onlineUsers.TryGetValue(groupName, out var group))
+        {
+            return group.Values
+                .Distinct()
+                .Where(u => excludeUserId == null || u != excludeUserId)
+                .ToList();
+        }
 
+        return new List<string>();
+    }
 }
