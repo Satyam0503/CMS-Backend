@@ -42,4 +42,6 @@ public static class CustomStatusCode
     public const int InvalidFileFormat = 38;
     public const int FileSizeLimitExceed = 39;
     public const int EmpAlreadyVerified = 40;
+    public const int FileUploadFailed = 41;
+    public const int PolicyAlreadyExist = 42;
 }

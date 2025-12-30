@@ -27,5 +27,9 @@ namespace Codeji.CMS.Utility
         {
             return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.CalendarItemCoverImage + imageUrl;
         }
+        public static string GetPolicyDocumentPath(string docName)
+        {
+            return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.PolicyDocument + docName;
+        }
     }
 }

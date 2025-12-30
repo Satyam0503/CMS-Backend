@@ -27,6 +27,8 @@ namespace Codeji.CMS.Services.Interface
         Task<Result<PolicyResponseModel>> UpdatePolicy(UpdatePolicyRequestModel model, string companyId);
         Task<Result<PolicyResponseModel>> GetAllPolicies(string userId, string companyId);
 
-        Task<Result<PolicyVersionResponseModel>> GetPoliciesVersions(string policyId);
+        Task<Result<PolicyVersionResponseModel>> AddPolicyVersion(PolicyVersionRequestModel model);
+        Task<Result<PolicyVersionResponseModel>> EditPolicyVersion(PolicyVersionUpdateModel model);
+        Task<Result<PolicyVersionResponseModel>> GetAllPolicyVersion(string policyId);
     }
 }

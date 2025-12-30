@@ -28,6 +28,7 @@ namespace Codeji.CMS.Services
         private readonly IMongoDbRepository<RolePermission> _rolePermissionRepo;
         private readonly IMongoDbRepository<NotificationPreference> _notificationPreferenceRepo;
         readonly IMongoDbRepository<Policy> _policyRepo;
+        readonly IMongoDbRepository<PolicyVersion> _policyVersionRepo;
         private readonly IMapper _mapper;
         private readonly IRoleService _roleService;
         private readonly IEmployeeService _employeeService;
@@ -43,6 +44,7 @@ namespace Codeji.CMS.Services
             IMongoDbRepository<RolePermission> rolePermissionRepo,
             IMongoDbRepository<NotificationPreference> notificationPreferenceRepo,
             IMongoDbRepository<Policy> policyRepo,
+            IMongoDbRepository<PolicyVersion> policyVersionRepo,
             IRoleService roleService,
             IEmployeeService employeeService,
             IMiddlewareService middlewareService
@@ -59,6 +61,7 @@ namespace Codeji.CMS.Services
             _employeeService = employeeService;
             _middlewareService = middlewareService;
             _policyRepo = policyRepo;
+            _policyVersionRepo = policyVersionRepo;
         }
 
         public async Task<Result> Register(CompanyRequestModel companyModel)
@@ -226,6 +229,13 @@ namespace Codeji.CMS.Services
         {
             Result result = new();
             Policy policy = _mapper.Map<Policy>(model);
+            // check for existing policy with same name in the company
+            bool isPolicyExist = await _policyRepo.Exist(p => p.PolicyName.Equals(model.PolicyName, StringComparison.CurrentCultureIgnoreCase) && p.CompanyId == companyId && p.IsActive);
+            if (isPolicyExist)
+            {
+                result.StatusCode = CustomStatusCode.PolicyAlreadyExist;
+                return result;
+            }
             result = await _policyRepo.AddOne(policy);
             if (!result.Success) return result;
             result.Success = true;
@@ -277,12 +287,151 @@ namespace Codeji.CMS.Services
             return result;
         }
 
-        public async Task<Result<PolicyVersionResponseModel>> GetPoliciesVersions(string policyId)
+        public async Task<Result<PolicyVersionResponseModel>> AddPolicyVersion(PolicyVersionRequestModel model)
         {
-            Result<PolicyVersionResponseModel> result = new();
-            // work in progress
-            return result;
+            Result<PolicyVersionResponseModel> response = new() { Success = false };
+            bool isPolicyExist = await _policyRepo.Exist(p => p.PolicyId == model.PolicyId && p.IsActive);
+            if (!isPolicyExist) return response;
+            Result result = await AddUpdatePolicyDocument(model.PolicyDoc);
+            if (!result.Success)
+            {
+                response.StatusCode = result.StatusCode;
+                return response;
+            }
+            PolicyVersion policyVersion = new()
+            {
+                Id = Guid.NewGuid().ToString(),
+                PolicyId = model.PolicyId,
+                VersionName = model.VersionName,
+                DocUrl = result.Message,
+                IsCurrent = model.IsCurrent,
+            };
+
+            var addResult = await _policyVersionRepo.AddOne(policyVersion);
+            if (!addResult.Success) return response;
+            response.Success = true;
+            response.MethodResult = new PolicyVersionResponseModel()
+            {
+                PolicyDocUrl = Common.GetPolicyDocumentPath(policyVersion.DocUrl),
+                VersionName = policyVersion.VersionName,
+                Id = policyVersion.Id,
+            };
+            return response;
         }
 
+        public async Task<Result<PolicyVersionResponseModel>> EditPolicyVersion(PolicyVersionUpdateModel model)
+        {
+            Result<PolicyVersionResponseModel> response = new() { Success = false };
+            Result result = new();
+            PolicyVersion? existingPolicyVersion = await _policyVersionRepo.FirstOrDefault(pr => pr.Id == model.Id);
+            if (existingPolicyVersion is null) return response;
+
+            bool isPolicyExist = await _policyRepo.Exist(p => p.PolicyId == model.PolicyId && p.IsActive);
+            if (!isPolicyExist) return response;
+
+            string? newDocFileName = existingPolicyVersion.DocUrl;
+
+            if (model.PolicyDoc != null)
+            {
+                result = await AddUpdatePolicyDocument(model.PolicyDoc, existingPolicyVersion.DocUrl);
+                if (!result.Success)
+                {
+                    response.StatusCode = result.StatusCode;
+                    return response;
+                }
+                newDocFileName = result.Message;
+            }
+            existingPolicyVersion.VersionName = model.VersionName;
+            existingPolicyVersion.DocUrl = newDocFileName;
+            existingPolicyVersion.IsCurrent = model.IsCurrent;
+
+            Expression<Func<PolicyVersion, bool>> expression = pv => pv.Id == existingPolicyVersion.Id;
+            var updateResult = await _policyVersionRepo.Update(expression, existingPolicyVersion);
+
+            if (!updateResult.Success) return response;
+            response.Success = true;
+            response.MethodResult = new PolicyVersionResponseModel()
+            {
+                PolicyDocUrl = Common.GetPolicyDocumentPath(existingPolicyVersion.DocUrl),
+                VersionName = existingPolicyVersion.VersionName,
+                Id = existingPolicyVersion.Id,
+            };
+            return response;
+        }
+
+
+
+        private static async Task<Result> AddUpdatePolicyDocument(IFormFile policyDoc, string? oldPolicyDocUrl = null)
+        {
+            Result result = new();
+            string[] supportedFileFormat = [".doc", ".pdf", ".docx"];
+            long maxAllowedFileSizeInMB = 5 * 1024 * 1024;
+
+            string fileExtension = Path.GetExtension(policyDoc.FileName);
+            long fileSize = policyDoc.Length;
+
+            // validate file attribute
+
+            if (!supportedFileFormat.Contains(fileExtension))
+            {
+                result.StatusCode = CustomStatusCode.InvalidFileFormat;
+                return result;
+            }
+            if (fileSize > maxAllowedFileSizeInMB)
+            {
+                result.StatusCode = CustomStatusCode.FileSizeLimitExceed;
+                return result;
+            }
+
+            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Policy");
+            if (!Directory.Exists(uploadFolder))
+            {
+                Directory.CreateDirectory(uploadFolder);
+            }
+            string fileName = $"{Guid.NewGuid().ToString()}{fileExtension}";
+            string filePath = Path.Combine(uploadFolder, fileName);
+
+            try
+            {
+                await using (var stream = new FileStream(filePath, FileMode.Create))
+                {
+                    await policyDoc.CopyToAsync(stream);
+                }
+
+                // delete old file only after successful upload
+                if (!string.IsNullOrEmpty(oldPolicyDocUrl))
+                {
+                    string oldFilePath = Path.Combine(uploadFolder, oldPolicyDocUrl);
+                    if (File.Exists(oldFilePath))
+                        File.Delete(oldFilePath);
+                }
+
+                result.Success = true;
+                result.Message = fileName;
+                return result;
+            }
+            catch
+            {
+                result.StatusCode = CustomStatusCode.FileUploadFailed;
+                return result;
+            }
+        }
+
+
+        public async Task<Result<PolicyVersionResponseModel>> GetAllPolicyVersion(string policyId)
+        {
+            var policyVersions = await _policyVersionRepo.GetAll(pv => pv.PolicyId == policyId);
+            var response = new Result<PolicyVersionResponseModel>();
+            var policyVersionResponseModels = policyVersions.Select(pv => new PolicyVersionResponseModel
+            {
+                PolicyDocUrl = Common.GetPolicyDocumentPath(pv.DocUrl),
+                VersionName = pv.VersionName,
+                Id = pv.Id
+            }).ToList();
+
+            response.Success = true;
+            response.MethodResults = policyVersionResponseModels;
+            return response;
+        }
     }
 }

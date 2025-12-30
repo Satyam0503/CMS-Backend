@@ -43,7 +43,7 @@ public class FileSettings
     public string ViewResumeUrl { get; set; }
     public string CompanyLogoUrl { get; set; }
     public string CalendarItemCoverImage { get; set; }
-
+    public string PolicyDocument { get; set; }
 }
 
 public class EmailSettings

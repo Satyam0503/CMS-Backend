@@ -11,7 +11,6 @@ namespace Codeji.CMS.API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize(Policy = "AdminOnly")]
     public class CompanyController : ControllerBase
     {
         private readonly ICompanyService _companyService;
@@ -24,7 +23,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetAllCompanyList")]
-
+        [Authorize(Policy = "AdminOnly")]
         public async Task<Result<Company>> GetAllCompanyList()
         {
             Result<Company> result = new Result<Company>();
@@ -36,6 +35,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetCompanyDetails")]
+        [Authorize(Policy = "AdminOnly")]
         public async Task<Result<Company>> GetCompanyDetails()
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -45,7 +45,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("UpdateCompanyDetails")]
-
+        [Authorize(Policy = "AdminOnly")]
         public async Task<Result<Company>> UpdateCompanyDetails([FromForm] UpdateCompanyInfoRequestModel model)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -81,6 +81,27 @@ namespace Codeji.CMS.API.Controllers
             string userId = CurrentContext.UserId(_httpContextAccessor);
             var result = await _companyService.GetAllPolicies(userId, companyId);
             return result;
+        }
+
+        [HttpPost]
+        [Route("CreatePolicyVersion")]
+        public async Task<Result<PolicyVersionResponseModel>> AddPolicyVersion([FromForm] PolicyVersionRequestModel model)
+        {
+            return await _companyService.AddPolicyVersion(model);
+        }
+
+        [HttpPost]
+        [Route("EditPolicyVersion")]
+        public async Task<Result<PolicyVersionResponseModel>> EditPolicyVersion([FromForm] PolicyVersionUpdateModel model)
+        {
+            return await _companyService.EditPolicyVersion(model);
+        }
+
+        [HttpGet]
+        [Route("GetAllPolicyVersion/{policyId}")]
+        public async Task<Result<PolicyVersionResponseModel>> GetAllPolicyVersion(string policyId)
+        {
+            return await _companyService.GetAllPolicyVersion(policyId);
         }
     }
 }
