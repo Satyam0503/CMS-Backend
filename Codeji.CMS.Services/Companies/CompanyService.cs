@@ -294,7 +294,38 @@ namespace Codeji.CMS.Services
             result.MethodResults = policyResponse;
             return result;
         }
+        public async Task<Result> DeletePolicy(string policyId, string companyId)
+        {
+            Result result = new();
+            // check policy exist or not
+            var policy = await _policyRepo.FirstOrDefault(p => p.PolicyId == policyId && p.CompanyId == companyId);
+            if (policy == null)
+            {
+                result.StatusCode = CustomStatusCode.PolicyNotFound;
+                return result;
+            }
 
+            // check if policy has current active version 
+            bool hasActiveVersion = await _policyVersionRepo.Exist(pv => pv.PolicyId == policyId && pv.CompanyId == companyId && pv.IsCurrent);
+            if (hasActiveVersion)
+            {
+                result.Success = false;
+                result.StatusCode = CustomStatusCode.PolicyHasActiveVersion;
+                return result;
+            }
+
+            policy.IsActive = false;
+            policy.IsDeleted = true;
+
+            Expression<Func<Policy, bool>> expression = p => p.PolicyId == policy.PolicyId;
+            result = await _policyRepo.Update(expression, policy);
+
+
+            Expression<Func<PolicyVersion, bool>> expression2 = pv => pv.PolicyId == policy.PolicyId;
+            // 6. Deactivate all versions
+            await _policyVersionRepo.UpdateMany(expression2, Builders<PolicyVersion>.Update.Set(pv => pv.IsDeleted, true).Set(pv => pv.IsCurrent, false));
+            return result;
+        }
         public async Task<Result<PolicyVersionResponseModel>> AddPolicyVersion(PolicyVersionRequestModel model)
         {
             Result<PolicyVersionResponseModel> response = new() { Success = false };
@@ -347,6 +378,13 @@ namespace Codeji.CMS.Services
 
             bool isPolicyExist = await _policyRepo.Exist(p => p.PolicyId == model.PolicyId && p.IsActive);
             if (!isPolicyExist) return response;
+
+            if (existingPolicyVersion.IsCurrent && !model.IsCurrent)
+            {
+                response.StatusCode = CustomStatusCode.PolicyDontHaveCurrentVersion;
+                response.Success = false;
+                return response;
+            }
 
             string? newDocFileName = existingPolicyVersion.DocUrl;
 
@@ -469,6 +507,32 @@ namespace Codeji.CMS.Services
                 IsCurrent = pv.IsCurrent
             }).ToList();
             return response;
+        }
+
+        public async Task<Result> DeletePolicyVersion(string policyVersionId, string companyId)
+        {
+            Result result = new();
+            // check if version exist or not
+            var policyVersion = await _policyVersionRepo.FirstOrDefault(pv => pv.Id == policyVersionId && pv.CompanyId == companyId);
+            if (policyVersion is null)
+            {
+                return result;
+            }
+            //check if policy version is current version 
+            if (policyVersion.IsCurrent)
+            {
+                result.StatusCode = CustomStatusCode.CannotDeleteCurrentPolicyVersion;
+                return result;
+            }
+            // check if parent policy exist or not deleted
+            var policy = await _policyRepo.FirstOrDefault(p => p.PolicyId == policyVersion.PolicyId);
+            if (policy == null)
+            {
+                result.StatusCode = CustomStatusCode.PolicyNotFound;
+                return result;
+            }
+            Expression<Func<PolicyVersion, bool>> expression = pv => pv.Id == policyVersion.Id;
+            return await _policyVersionRepo.UpdateMany(expression, Builders<PolicyVersion>.Update.Set(pv => pv.IsDeleted, true));
         }
     }
 }

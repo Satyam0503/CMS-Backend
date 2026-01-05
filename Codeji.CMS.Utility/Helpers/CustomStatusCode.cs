@@ -44,4 +44,9 @@ public static class CustomStatusCode
     public const int EmpAlreadyVerified = 40;
     public const int FileUploadFailed = 41;
     public const int PolicyAlreadyExist = 42;
+    public const int PolicyDontHaveCurrentVersion = 43;
+    public const int PolicyHasActiveVersion = 44;
+    public const int PolicyNotFound = 45;
+    public const int CannotDeleteCurrentPolicyVersion = 46;
+
 }

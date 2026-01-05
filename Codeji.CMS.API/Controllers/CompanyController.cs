@@ -87,6 +87,15 @@ namespace Codeji.CMS.API.Controllers
             return result;
         }
 
+        [HttpDelete]
+        [Route("DeletePolicy/{policyId}")]
+        [ModulePermission(AppModule.Policy, Permission.Delete)]
+        public async Task<Result> DeletePolicy(string policyId)
+        {
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            return await _companyService.DeletePolicy(policyId, companyId);
+        }
+
         [HttpPost]
         [Route("CreatePolicyVersion")]
         [ModulePermission(AppModule.Policy, Permission.Create)]
@@ -112,5 +121,15 @@ namespace Codeji.CMS.API.Controllers
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
             return await _companyService.GetAllPolicyVersion(policyId, userId, companyId);
         }
+
+        [HttpDelete]
+        [Route("DeletePolicyVersion/{policyVersionId}")]
+        [ModulePermission(AppModule.Policy, Permission.Delete)]
+        public async Task<Result> DeletePolicyVersion(string policyVersionId)
+        {
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            return await _companyService.DeletePolicyVersion(policyVersionId, companyId);
+        }
+
     }
 }
