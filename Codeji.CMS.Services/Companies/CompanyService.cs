@@ -272,16 +272,26 @@ namespace Codeji.CMS.Services
         public async Task<Result<PolicyResponseModel>> GetAllPolicies(string userId, string companyId)
         {
             Result<PolicyResponseModel> result = new() { Success = false };
-            var empUser = await _userRepo.FirstOrDefault(emp => emp.UserId == userId && emp.Status && emp.IsEmailVerified);
-            if (empUser is null) return result;
-            var userRole = empUser.RoleId;
-            var userDepartment = empUser.Department ?? string.Empty;
-
+            // check if user has create or edit permission for policy.
+            List<PolicyResponseModel> policyResponse = [];
+            bool canViewAllPolicies = await _roleService.VerifyUserAccess(AppModule.Policy, [Utility.Constraints.Permission.Create, Utility.Constraints.Permission.Edit], userId, companyId);
+            if (canViewAllPolicies)
+            {
+                Expression<Func<Policy, bool>> expression = pl => pl.CompanyId == companyId;
+                var policies = (await _policyRepo.GetAll(expression)).OrderBy(k => k.CreatedDate);
+                policyResponse = _mapper.Map<List<PolicyResponseModel>>(policies);
+            }
+            else
+            {
+                var empUser = await _userRepo.FirstOrDefault(emp => emp.UserId == userId && emp.Status && emp.IsEmailVerified);
+                if (empUser is null) return result;
+                var userRole = empUser.RoleId;
+                var userDepartment = empUser.Department ?? string.Empty;
+                Expression<Func<Policy, bool>> expression = pl => (pl.Departments.Count == 0 || pl.Departments.Contains(userDepartment)) && (pl.Roles.Count == 0 || pl.Roles.Contains(userRole)) && pl.IsActive && pl.CompanyId == companyId;
+                var policies = await _policyRepo.GetAll(expression);
+                policyResponse = _mapper.Map<List<PolicyResponseModel>>(policies);
+            }
             // check if user has create or edit permission for policy module
-
-            Expression<Func<Policy, bool>> expression = pl => (pl.Departments.Count == 0 || pl.Departments.Contains(userDepartment)) && (pl.Roles.Count == 0 || pl.Roles.Contains(userRole)) && pl.IsActive && pl.CompanyId == companyId;
-            var policies = await _policyRepo.GetAll(expression);
-            var policyResponse = _mapper.Map<List<PolicyResponseModel>>(policies);
             result.Success = true;
             result.MethodResults = policyResponse;
             return result;
@@ -292,12 +302,21 @@ namespace Codeji.CMS.Services
             Result<PolicyVersionResponseModel> response = new() { Success = false };
             bool isPolicyExist = await _policyRepo.Exist(p => p.PolicyId == model.PolicyId && p.IsActive);
             if (!isPolicyExist) return response;
+
             Result result = await AddUpdatePolicyDocument(model.PolicyDoc);
             if (!result.Success)
             {
                 response.StatusCode = result.StatusCode;
                 return response;
             }
+
+            // Ensure only one current version
+            if (model.IsCurrent)
+            {
+                Expression<Func<PolicyVersion, bool>> expression = pv => pv.PolicyId == model.PolicyId;
+                await _policyVersionRepo.UpdateMany(expression, Builders<PolicyVersion>.Update.Set(pv => pv.IsCurrent, false));
+            }
+
             PolicyVersion policyVersion = new()
             {
                 Id = Guid.NewGuid().ToString(),
@@ -323,6 +342,7 @@ namespace Codeji.CMS.Services
         {
             Result<PolicyVersionResponseModel> response = new() { Success = false };
             Result result = new();
+
             PolicyVersion? existingPolicyVersion = await _policyVersionRepo.FirstOrDefault(pr => pr.Id == model.Id);
             if (existingPolicyVersion is null) return response;
 
@@ -345,6 +365,12 @@ namespace Codeji.CMS.Services
             existingPolicyVersion.DocUrl = newDocFileName;
             existingPolicyVersion.IsCurrent = model.IsCurrent;
 
+            // Ensure only one current version
+            if (model.IsCurrent)
+            {
+                Expression<Func<PolicyVersion, bool>> whereCondition = pv => pv.PolicyId == existingPolicyVersion.PolicyId;
+                await _policyVersionRepo.UpdateMany(whereCondition, Builders<PolicyVersion>.Update.Set(pv => pv.IsCurrent, false));
+            }
             Expression<Func<PolicyVersion, bool>> expression = pv => pv.Id == existingPolicyVersion.Id;
             var updateResult = await _policyVersionRepo.Update(expression, existingPolicyVersion);
 

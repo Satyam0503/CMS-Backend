@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Codeji.CMS.DTO.Company.Policy;
 using System.Security.Policy;
+using Codeji.CMS.API.App_Start;
+using Codeji.CMS.Utility.Constraints;
 namespace Codeji.CMS.API.Controllers
 {
     [Route("api/[controller]")]
@@ -54,9 +56,9 @@ namespace Codeji.CMS.API.Controllers
         }
 
         // services related to company policies
-
         [HttpPost]
         [Route("AddPolicy")]
+        [ModulePermission(AppModule.Policy, Permission.Create)]
         public async Task<Result> AddPolicy([FromBody] CreatePolicyRequestModel model)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -66,6 +68,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("UpdatePolicy")]
+        [ModulePermission(AppModule.Policy, Permission.Edit)]
         public async Task<Result<PolicyResponseModel>> UpdatePolicy([FromBody] UpdatePolicyRequestModel model)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -75,6 +78,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetAllPolicies")]
+        [ModulePermission(AppModule.Policy, Permission.View)]
         public async Task<Result<PolicyResponseModel>> GetAllPolicies()
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -85,6 +89,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("CreatePolicyVersion")]
+        [ModulePermission(AppModule.Policy, Permission.Create)]
         public async Task<Result<PolicyVersionResponseModel>> AddPolicyVersion([FromForm] PolicyVersionRequestModel model)
         {
             return await _companyService.AddPolicyVersion(model);
@@ -92,6 +97,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpPost]
         [Route("EditPolicyVersion")]
+        [ModulePermission(AppModule.Policy, Permission.Edit)]
         public async Task<Result<PolicyVersionResponseModel>> EditPolicyVersion([FromForm] PolicyVersionUpdateModel model)
         {
             return await _companyService.EditPolicyVersion(model);
