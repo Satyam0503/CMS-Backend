@@ -69,7 +69,7 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("UpdatePolicy")]
         [ModulePermission(AppModule.Policy, Permission.Edit)]
-        public async Task<Result<PolicyResponseModel>> UpdatePolicy([FromBody] UpdatePolicyRequestModel model)
+        public async Task<Result> UpdatePolicy([FromBody] UpdatePolicyRequestModel model)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
             var result = await _companyService.UpdatePolicy(model, companyId);
@@ -105,9 +105,12 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetAllPolicyVersion/{policyId}")]
+        [ModulePermission(AppModule.Policy, Permission.View)]
         public async Task<Result<PolicyVersionResponseModel>> GetAllPolicyVersion(string policyId)
         {
-            return await _companyService.GetAllPolicyVersion(policyId);
+            string userId = CurrentContext.UserId(_httpContextAccessor);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            return await _companyService.GetAllPolicyVersion(policyId, userId, companyId);
         }
     }
 }

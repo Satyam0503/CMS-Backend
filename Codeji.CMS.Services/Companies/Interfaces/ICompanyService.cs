@@ -24,11 +24,11 @@ namespace Codeji.CMS.Services.Interface
 
         // services related to company policies
         Task<Result> AddPolicy(CreatePolicyRequestModel model, string companyId);
-        Task<Result<PolicyResponseModel>> UpdatePolicy(UpdatePolicyRequestModel model, string companyId);
+        Task<Result> UpdatePolicy(UpdatePolicyRequestModel model, string companyId);
         Task<Result<PolicyResponseModel>> GetAllPolicies(string userId, string companyId);
 
         Task<Result<PolicyVersionResponseModel>> AddPolicyVersion(PolicyVersionRequestModel model);
         Task<Result<PolicyVersionResponseModel>> EditPolicyVersion(PolicyVersionUpdateModel model);
-        Task<Result<PolicyVersionResponseModel>> GetAllPolicyVersion(string policyId);
+        Task<Result<PolicyVersionResponseModel>> GetAllPolicyVersion(string policyId, string userId, string companyId);
     }
 }

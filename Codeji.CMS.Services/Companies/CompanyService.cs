@@ -249,9 +249,9 @@ namespace Codeji.CMS.Services
             return result;
         }
 
-        public async Task<Result<PolicyResponseModel>> UpdatePolicy(UpdatePolicyRequestModel model, string companyId)
+        public async Task<Result> UpdatePolicy(UpdatePolicyRequestModel model, string companyId)
         {
-            Result<PolicyResponseModel> result = new();
+            Result result = new();
             Expression<Func<Policy, bool>> whereCondition = x => x.PolicyId == model.PolicyId && x.CompanyId == companyId;
             Policy? existingPolicy = await _policyRepo.FirstOrDefault(whereCondition);
             if (existingPolicy is null)
@@ -265,15 +265,7 @@ namespace Codeji.CMS.Services
             existingPolicy.Roles = model.Roles;
             existingPolicy.IsActive = model.IsActive;
 
-            Result updateResult = await _policyRepo.Update(whereCondition, existingPolicy);
-            if (!updateResult.Success)
-            {
-                result.Success = false;
-                return result;
-            }
-            PolicyResponseModel responseModel = _mapper.Map<PolicyResponseModel>(existingPolicy);
-            result.MethodResult = responseModel;
-            result.Success = true;
+            result = await _policyRepo.Update(whereCondition, existingPolicy);
             return result;
         }
         public async Task<Result<PolicyResponseModel>> GetAllPolicies(string userId, string companyId)
@@ -298,7 +290,6 @@ namespace Codeji.CMS.Services
                 var policies = await _policyRepo.GetAll(expression);
                 policyResponse = _mapper.Map<List<PolicyResponseModel>>(policies);
             }
-            // check if user has create or edit permission for policy module
             result.Success = true;
             result.MethodResults = policyResponse;
             return result;
@@ -341,6 +332,7 @@ namespace Codeji.CMS.Services
                 PolicyDocUrl = Common.GetPolicyDocumentPath(policyVersion.DocUrl),
                 VersionName = policyVersion.VersionName,
                 Id = policyVersion.Id,
+                IsCurrent = policyVersion.IsCurrent,
             };
             return response;
         }
@@ -388,11 +380,10 @@ namespace Codeji.CMS.Services
                 PolicyDocUrl = Common.GetPolicyDocumentPath(existingPolicyVersion.DocUrl),
                 VersionName = existingPolicyVersion.VersionName,
                 Id = existingPolicyVersion.Id,
+                IsCurrent = existingPolicyVersion.IsCurrent,
             };
             return response;
         }
-
-
 
         private static async Task<Result> AddUpdatePolicyDocument(IFormFile policyDoc, string? oldPolicyDocUrl = null)
         {
@@ -450,20 +441,33 @@ namespace Codeji.CMS.Services
             }
         }
 
-
-        public async Task<Result<PolicyVersionResponseModel>> GetAllPolicyVersion(string policyId)
+        public async Task<Result<PolicyVersionResponseModel>> GetAllPolicyVersion(string policyId, string userId, string companyId)
         {
-            var policyVersions = await _policyVersionRepo.GetAll(pv => pv.PolicyId == policyId);
             var response = new Result<PolicyVersionResponseModel>();
-            var policyVersionResponseModels = policyVersions.Select(pv => new PolicyVersionResponseModel
+            bool canViewAllPolicyVersion = await _roleService.VerifyUserAccess(AppModule.Policy, [Utility.Constraints.Permission.Create, Utility.Constraints.Permission.Edit], userId, companyId);
+
+            List<PolicyVersion> policyVersions = [];
+            if (canViewAllPolicyVersion)
+            {
+                policyVersions = (await _policyVersionRepo.GetAll(pv => pv.PolicyId == policyId)).ToList();
+            }
+            else
+            {
+                var policyVersion = await _policyVersionRepo.FirstOrDefault(pv => pv.PolicyId == policyId && pv.CompanyId == companyId && pv.IsCurrent);
+                if (policyVersion != null)
+                {
+                    policyVersions.Add(policyVersion);
+                }
+            }
+
+            response.Success = true;
+            response.MethodResults = policyVersions.Select(pv => new PolicyVersionResponseModel
             {
                 PolicyDocUrl = Common.GetPolicyDocumentPath(pv.DocUrl),
                 VersionName = pv.VersionName,
-                Id = pv.Id
+                Id = pv.Id,
+                IsCurrent = pv.IsCurrent
             }).ToList();
-
-            response.Success = true;
-            response.MethodResults = policyVersionResponseModels;
             return response;
         }
     }

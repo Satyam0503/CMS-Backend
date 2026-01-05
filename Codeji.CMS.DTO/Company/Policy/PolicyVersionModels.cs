@@ -7,6 +7,7 @@ public class PolicyVersionResponseModel
     public string? PolicyDocUrl { get; set; }
     public string VersionName { get; set; }
     public string Id { get; set; }
+    public bool IsCurrent { get; set; }
 }
 
 public class PolicyVersionRequestModel
