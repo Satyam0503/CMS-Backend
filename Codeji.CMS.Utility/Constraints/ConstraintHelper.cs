@@ -12,6 +12,7 @@ namespace Codeji.CMS.Utility.Constraints
         public const string Applications = "Applications";
         public const string ProcessLog = "Process_Log";
         public const string PayRoll = "PayRoll";
+        public const string Policy = "Policy";
     }
 
     public static class Permission

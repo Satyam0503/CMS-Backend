@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Codeji.CMS.Utility", "Codej
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Codeji.CMS.DTO", "Codeji.CMS.DTO\Codeji.CMS.DTO.csproj", "{BCBF78BC-B7F1-44B6-A8FE-DAD8789929FA}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Codeji.CMS.Migrations", "Codeji.CMS.Migrations\Codeji.CMS.Migrations.csproj", "{CADDD36A-91B0-4E0B-9BAC-6B1EF4A39C43}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -39,6 +41,10 @@ Global
 		{BCBF78BC-B7F1-44B6-A8FE-DAD8789929FA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{BCBF78BC-B7F1-44B6-A8FE-DAD8789929FA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{BCBF78BC-B7F1-44B6-A8FE-DAD8789929FA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CADDD36A-91B0-4E0B-9BAC-6B1EF4A39C43}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CADDD36A-91B0-4E0B-9BAC-6B1EF4A39C43}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CADDD36A-91B0-4E0B-9BAC-6B1EF4A39C43}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CADDD36A-91B0-4E0B-9BAC-6B1EF4A39C43}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
