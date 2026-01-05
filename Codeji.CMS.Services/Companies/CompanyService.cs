@@ -228,7 +228,6 @@ namespace Codeji.CMS.Services
         public async Task<Result> AddPolicy(CreatePolicyRequestModel model, string companyId)
         {
             Result result = new();
-            Policy policy = _mapper.Map<Policy>(model);
             // check for existing policy with same name in the company
             bool isPolicyExist = await _policyRepo.Exist(p => p.PolicyName.Equals(model.PolicyName, StringComparison.CurrentCultureIgnoreCase) && p.CompanyId == companyId && p.IsActive);
             if (isPolicyExist)
@@ -236,6 +235,14 @@ namespace Codeji.CMS.Services
                 result.StatusCode = CustomStatusCode.PolicyAlreadyExist;
                 return result;
             }
+            Policy policy = new()
+            {
+                PolicyName = model.PolicyName,
+                Description = model.Description,
+                Departments = model.Departments,
+                Roles = model.Roles,
+                IsActive = model.IsActive,
+            };
             result = await _policyRepo.AddOne(policy);
             if (!result.Success) return result;
             result.Success = true;

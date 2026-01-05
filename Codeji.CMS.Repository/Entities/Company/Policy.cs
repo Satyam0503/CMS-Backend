@@ -5,7 +5,7 @@ namespace Codeji.CMS.Repository.Entities.Company;
 public class Policy : BaseClass
 {
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
-    public required string PolicyId { get; set; }
+    public string PolicyId { get; set; }
     public required string PolicyName { get; set; }
     public string Description { get; set; }
 
