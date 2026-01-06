@@ -48,5 +48,6 @@ public static class CustomStatusCode
     public const int PolicyHasActiveVersion = 44;
     public const int PolicyNotFound = 45;
     public const int CannotDeleteCurrentPolicyVersion = 46;
+    public const int PolicyVersionNotFound = 47;
 
 }

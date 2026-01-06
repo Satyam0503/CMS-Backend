@@ -516,6 +516,7 @@ namespace Codeji.CMS.Services
             var policyVersion = await _policyVersionRepo.FirstOrDefault(pv => pv.Id == policyVersionId && pv.CompanyId == companyId);
             if (policyVersion is null)
             {
+                result.StatusCode = CustomStatusCode.PolicyVersionNotFound;
                 return result;
             }
             //check if policy version is current version 
