@@ -229,7 +229,7 @@ namespace Codeji.CMS.Services
         {
             Result result = new();
             // check for existing policy with same name in the company
-            bool isPolicyExist = await _policyRepo.Exist(p => p.PolicyName.Equals(model.PolicyName, StringComparison.CurrentCultureIgnoreCase) && p.CompanyId == companyId && p.IsActive);
+            bool isPolicyExist = await _policyRepo.Exist(p => p.PolicyName.Equals(model.PolicyName, StringComparison.CurrentCultureIgnoreCase) && p.CompanyId == companyId);
             if (isPolicyExist)
             {
                 result.StatusCode = CustomStatusCode.PolicyAlreadyExist;
@@ -304,14 +304,16 @@ namespace Codeji.CMS.Services
                 result.StatusCode = CustomStatusCode.PolicyNotFound;
                 return result;
             }
-
-            // check if policy has current active version 
-            bool hasActiveVersion = await _policyVersionRepo.Exist(pv => pv.PolicyId == policyId && pv.CompanyId == companyId && pv.IsCurrent);
-            if (hasActiveVersion)
+            if (policy.IsActive)
             {
-                result.Success = false;
-                result.StatusCode = CustomStatusCode.PolicyHasActiveVersion;
-                return result;
+                // check if policy has current active version 
+                bool hasActiveVersion = await _policyVersionRepo.Exist(pv => pv.PolicyId == policyId && pv.CompanyId == companyId && pv.IsCurrent);
+                if (hasActiveVersion)
+                {
+                    result.Success = false;
+                    result.StatusCode = CustomStatusCode.PolicyHasActiveVersion;
+                    return result;
+                }
             }
 
             policy.IsActive = false;
