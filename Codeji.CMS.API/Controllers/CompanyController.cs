@@ -131,5 +131,26 @@ namespace Codeji.CMS.API.Controllers
             return await _companyService.DeletePolicyVersion(policyVersionId, companyId);
         }
 
+        [HttpGet]
+        [Route("GetPolicyDocument/{policyVersionId}")]
+        [ModulePermission(AppModule.Policy, Permission.View)]
+        public async Task<IActionResult> GetPolicyDocument(string policyVersionId)
+        {
+            string userId = CurrentContext.UserId(_httpContextAccessor);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+
+            var result = await _companyService.GetPolicyDocument(policyVersionId, userId, companyId);
+
+            if (!result.Success || result.MethodResult == null)
+                return Unauthorized(result.Message);
+
+            var document = result.MethodResult;
+
+            return File(
+                document.FileContent,
+                document.ContentType,
+                document.FileName
+            );
+        }
     }
 }

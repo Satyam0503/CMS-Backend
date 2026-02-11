@@ -66,7 +66,7 @@ namespace Codeji.CMS.API.Controllers
         [Route("UploadResume")]
         //[FilesExtensions([".pdf"])]
         [AllowAnonymous]
-        //[CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
+        // [CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
         public async Task<Result> UploadResume([FromForm] ResumeApplicantModel model, string email)
         {
             Result result = new Result();

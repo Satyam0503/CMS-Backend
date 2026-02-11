@@ -229,10 +229,10 @@ public class RoleServices : IRoleService
 
 
             res = (from rp in rolePermissions
-                   join mp in modulePermissions on rp equals mp.ModulePermissionId
-                   join m in modules on mp.ModuleId equals m.ModuleId
-                   join p in permissions on mp.PermissionId equals p.PermissionId
-                   select String.Format($"{m.ModuleConstant}.{p.PermissionConstant}")).OrderBy(x => x).ToArray();
+                    join mp in modulePermissions on rp equals mp.ModulePermissionId
+                    join m in modules on mp.ModuleId equals m.ModuleId
+                    join p in permissions on mp.PermissionId equals p.PermissionId
+                    select String.Format($"{m.ModuleConstant}.{p.PermissionConstant}")).OrderBy(x => x).ToArray();
         }
         return res;
     }

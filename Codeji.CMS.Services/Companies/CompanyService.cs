@@ -503,7 +503,7 @@ namespace Codeji.CMS.Services
             response.Success = true;
             response.MethodResults = policyVersions.Select(pv => new PolicyVersionResponseModel
             {
-                PolicyDocUrl = Common.GetPolicyDocumentPath(pv.DocUrl),
+                PolicyDocUrl = Path.GetExtension(Common.GetPolicyDocumentPath(pv.DocUrl)),
                 VersionName = pv.VersionName,
                 Id = pv.Id,
                 IsCurrent = pv.IsCurrent
@@ -536,6 +536,67 @@ namespace Codeji.CMS.Services
             }
             Expression<Func<PolicyVersion, bool>> expression = pv => pv.Id == policyVersion.Id;
             return await _policyVersionRepo.UpdateMany(expression, Builders<PolicyVersion>.Update.Set(pv => pv.IsDeleted, true));
+        }
+
+        public async Task<Result<PolicyDocumentResult>> GetPolicyDocument(
+            string policyVersionId,
+            string userId,
+            string companyId)
+        {
+            var response = new Result<PolicyDocumentResult>();
+            bool canViewAllPolicyVersion =
+                await _roleService.VerifyUserAccess(
+                    AppModule.Policy,
+                    [Utility.Constraints.Permission.Create, Utility.Constraints.Permission.Edit],
+                    userId,
+                    companyId);
+            PolicyVersion policyVersion;
+            if (canViewAllPolicyVersion)
+            {
+                policyVersion = await _policyVersionRepo.FirstOrDefault(pv => pv.Id == policyVersionId);
+            }
+            else
+            {
+                policyVersion = await _policyVersionRepo
+                    .FirstOrDefault(pv =>
+                        pv.Id == policyVersionId &&
+                        pv.CompanyId == companyId &&
+                        pv.IsCurrent);
+            }
+            if (policyVersion == null)
+            {
+                response.Success = false;
+                response.Message = "Unauthorized or document not found";
+                return response;
+            }
+            string uploadFolder = Path.Combine(
+                Directory.GetCurrentDirectory(),
+                "Uploads",
+                "Policy");
+            string filePath = Path.Combine(uploadFolder, policyVersion.DocUrl);
+            if (!File.Exists(filePath))
+            {
+                response.Success = false;
+                response.Message = "Document file not found";
+                return response;
+            }
+            byte[] fileBytes = await File.ReadAllBytesAsync(filePath);
+            string contentType = Path.GetExtension(filePath).ToLower() switch
+            {
+                ".pdf"  => "application/pdf",
+                ".doc"  => "application/msword",
+                ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                _       => "application/octet-stream"
+            };
+            response.Success = true;
+            response.MethodResult= 
+                new PolicyDocumentResult
+                {
+                    FileContent = fileBytes,
+                    FileName = policyVersion.DocUrl,
+                    ContentType = contentType
+                };
+            return response;
         }
     }
 }

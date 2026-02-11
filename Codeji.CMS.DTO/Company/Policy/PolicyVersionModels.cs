@@ -26,3 +26,10 @@ public class PolicyVersionUpdateModel
     public IFormFile? PolicyDoc { get; set; }
     public bool IsCurrent { get; set; }
 }
+
+public class PolicyDocumentResult
+{
+    public byte[] FileContent { get; set; }
+    public string FileName { get; set; }
+    public string ContentType { get; set; }
+}
