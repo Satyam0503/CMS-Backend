@@ -34,7 +34,7 @@ stages:
   - stage: Build
     displayName: "Build Backend"
     pool:
-      vmImage: "windows-latest"
+      name: Codeji-Pool
     jobs:
       - job: BuildJob
         displayName: "Build and Publish"
