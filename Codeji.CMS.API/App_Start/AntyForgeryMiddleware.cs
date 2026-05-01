@@ -12,65 +12,59 @@ namespace Codeji.CMS.API.App_Start
     public class AntiforgeryMiddleware : IMiddleware
     {
         private readonly IAntiforgery _antiforgery;
-        public AntiforgeryMiddleware(IAntiforgery antiforgery)
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+        public AntiforgeryMiddleware(IAntiforgery antiforgery, IHttpContextAccessor httpContextAccessor)
         {
-            _antiforgery = antiforgery;
+            _antiforgery = antiforgery ?? throw new ArgumentNullException(nameof(antiforgery));
+            _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         }
+
         public async Task InvokeAsync(HttpContext context, RequestDelegate next)
         {
-            try
+            var debugModeEnabled = ConfigManager.AppSettings?.IsForDebug ?? false;
+            var isHttpGet = string.Equals(context.Request.Method, "GET", StringComparison.OrdinalIgnoreCase);
+            var currentCompanyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var path = context?.Request?.Path.Value ?? string.Empty;
+
+            if (!debugModeEnabled && !isHttpGet && !context.User.Identity.IsAuthenticated)
             {
-                var debugModeEnabled = Convert.ToBoolean(ConfigManager.AppSettings.IsForDebug);
-                var isHttpGet = string.Equals(context.Request.Method, "GET", StringComparison.OrdinalIgnoreCase);
-                var httpContextAccessor = context.RequestServices.GetService(typeof(IHttpContextAccessor)) as IHttpContextAccessor;
-                var currentCompanyId = CurrentContext.CompanyId(httpContextAccessor);
-                var currentUserId = CurrentContext.UserId(httpContextAccessor);
-                var path = context?.Request?.Path.Value ?? string.Empty;
-                if (!debugModeEnabled && !isHttpGet && !context.User.Identity.IsAuthenticated)
+                await _antiforgery.ValidateRequestAsync(context);
+            }
+
+            // check if app version is present in request and path is not in pathForNOCompanyIdRequired then return unauthorized
+            #region "App version check"
+            context.Request.Headers.TryGetValue("AppVersion", out var versionFromHeader);
+            var incomingAppVersion = versionFromHeader.FirstOrDefault()?.Trim() ?? string.Empty;
+            var configuredAppVersion = ConfigManager.AppSettings.AppVersion;
+            string[] ignoredEndpoints = new string[] { "/notificationhub", "/GetAppVersion", "/antiforgerytoken" };
+
+            if (!debugModeEnabled &&
+                !ignoredEndpoints.Any(path.Contains) &&
+                (string.IsNullOrWhiteSpace(incomingAppVersion) ||
+                 !string.Equals(incomingAppVersion, configuredAppVersion, StringComparison.OrdinalIgnoreCase)))
+            {
+                var upgradePrompt = new
                 {
-                    _antiforgery.ValidateRequestAsync(context).GetAwaiter().GetResult();
-                }
-                // check if app version is present in request and path is not in pathForNOCompanyIdRequired then return unauthorized
-                #region "App version check"
-                context.Request.Headers.TryGetValue("AppVersion", out var versionFromHeader);
-                var incomingAppVersion = versionFromHeader.FirstOrDefault()?.Trim() ?? string.Empty;
-                var cleanPath = path.TrimEnd('/');
-                var configuredAppVersion = ConfigManager.AppSettings.AppVersion;
-                string[] ignoredEndpoints = new string[] { "/notificationhub", "/GetAppVersion", "/antiforgerytoken" };
-                if (!debugModeEnabled &&
-                    !ignoredEndpoints.Any(path.Contains) &&
-                    (string.IsNullOrWhiteSpace(incomingAppVersion) ||
-                     !string.Equals(incomingAppVersion, configuredAppVersion, StringComparison.OrdinalIgnoreCase)))
-                {
-                    var upgradePrompt = new
-                    {
-                        StatusCode = HttpStatusCode.UpgradeRequired,
-                        Message = "Upgrade Required"
-                    };
+                    StatusCode = HttpStatusCode.UpgradeRequired,
+                    Message = "Upgrade Required"
+                };
 
-                    context.Response.ContentType = "application/json";
-                    context.Response.StatusCode = (int)HttpStatusCode.UpgradeRequired;
-                    await context.Response.WriteAsync(JsonConvert.SerializeObject(upgradePrompt));
-                    return;
-                }
-                #endregion
-                // check if user id is present in request and path is not in pathForNOCompanyIdRequired then return unauthorized
-                var con = await CompanyIdMiddleware.AuthenticateUserRequest(httpContextAccessor);
-                if (con == null)
-                    return;
-
-                context.Items["CompanyId"] = currentCompanyId;
-                await next(con);
-
+                context.Response.ContentType = "application/json";
+                context.Response.StatusCode = (int)HttpStatusCode.UpgradeRequired;
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(upgradePrompt));
+                return;
             }
-            catch (AntiforgeryValidationException)
+            #endregion
+
+            var con = await CompanyIdMiddleware.AuthenticateUserRequest(_httpContextAccessor);
+            if (con == null)
             {
-                throw;
+                return;
             }
-            catch (Exception)
-            {
-                throw;
-            }
+
+            context.Items["CompanyId"] = currentCompanyId;
+            await next(con);
         }
     }
 }

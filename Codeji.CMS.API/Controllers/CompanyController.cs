@@ -13,7 +13,8 @@ namespace Codeji.CMS.API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class CompanyController : ControllerBase
+    [Authorize]
+    public class CompanyController : BaseApiController
     {
         private readonly ICompanyService _companyService;
         readonly IHttpContextAccessor _httpContextAccessor;

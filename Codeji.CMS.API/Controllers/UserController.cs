@@ -51,6 +51,7 @@ public class UserController : BaseApiController
     }
     [Route("GetLastEmployeeId")]
     [HttpGet]
+    [ModulePermission(AppModule.Employees, Permission.View)]
     public async Task<Result> GetLastEmployeeId()
     {
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -59,6 +60,7 @@ public class UserController : BaseApiController
 
     [Route("EditEmployees")]
     [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
     public async Task<Result<UserModel>> EditEmployees(EmployeePersonalInfo user, string userId)
     {
         UserModel isUserExist = await _employeeService.GetEmployeeById(userId);
@@ -75,6 +77,7 @@ public class UserController : BaseApiController
 
     [Route("GetAllEmployees")]
     [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.View)]
     public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters)
     {
         Result<GetAllEmployeeResponseModel> data = await _employeeService.GetAllEmployees(filters);
@@ -292,6 +295,7 @@ public class UserController : BaseApiController
 
     [Route("DeleteEmployee")]
     [HttpDelete]
+    [ModulePermission(AppModule.Employees, Permission.Delete)]
     public async Task<Result> DeleteEmployee([FromQuery] string employeeId)
     {
         Result data = await _employeeService.DeleteEmployee(employeeId);

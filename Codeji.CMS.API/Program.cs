@@ -26,7 +26,15 @@ using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Serializers;
 using static Codeji.CMS.Utility.Enums.EnumsHelper;
-
+using Codeji.CMS.Services.Attendance;
+using MongoDB.Driver;
+using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Repositories;
+using Codeji.CMS.Repository.Interfaces;
+using Codeji.CMS.Services.Interfaces;
+using Codeji.CMS.Services.PayRoll;
+using Codeji.CMS.Services.PayRoll.Interface;
+using Codeji.CMS.Services.Interface;
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 BsonSerializer.RegisterSerializer(
@@ -35,12 +43,23 @@ new EnumSerializer<NotificationPreferenceType>(BsonType.String)
 
 // Add services to the container
 builder.Services.AddControllers();
+    // .AddJsonOptions(options =>
+    // {
+    //     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    // });
 
 string corsName = "codeji";
-builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
+builder.Services.AddCors(option => option.AddPolicy(corsName, corsBuilder =>
 {
-    builder.AllowCredentials().WithOrigins("http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:4173").AllowAnyHeader().AllowAnyMethod();
-    // builder.AllowCredentials().AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+    // Get allowed origin from configuration (AppUrl from AppSettings)
+    var appUrl = builder.Configuration["AppConfiguration:AppSettings:AppUrl"];
+
+    // For local development, also allow common localhost ports if AppUrl is not set
+    var allowedOrigins = !string.IsNullOrEmpty(appUrl)
+        ? new[] { appUrl.TrimEnd('/') }
+        : new[] { "http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:4173", "http://localhost:4173" };
+
+    corsBuilder.AllowCredentials().WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod();
 }));
 
 // Swagger config
@@ -89,32 +108,68 @@ builder.Services.AddHostedService<PriorityQueuedHostedService>();
 builder.Services.AddHostedService<BirthDayAndAnniversaryNotificationHostedServices>();
 builder.Services.AddHostedService<LeaveAccrualHostedService>();
 builder.Services.AddHttpContextAccessor();
+// Register Attendance Repository
+builder.Services.AddScoped<IAttendanceRepository, AttendanceRepository>();
+
+// Register Service Layer
+builder.Services.AddScoped<IAdminAttendanceService, AdminAttendanceService>();
+
 
 // MongoDB Configuration
 ConfigurationManager configuration = builder.Configuration;
 builder.Services.Configure<List<MongoDbSettings>>(configuration.GetSection("MongoDbSettings"));
 //builder.Services.Configure<AppConfiguration>(configuration.GetSection("AppConfiguration"));
-AppConfiguration? appConfigurations = configuration.GetSection("AppConfiguration").Get<AppConfiguration>();
-ConfigManager.Initialize(appConfigurations);
+// MongoDB manual registration (REQUIRED for AttendanceRepository)
+builder.Services.AddSingleton<IMongoClient>(sp =>
+{
+    var settings = configuration
+        .GetSection("MongoDbSettings")
+        .Get<List<MongoDbSettings>>()?
+        .FirstOrDefault();
 
-builder.Services.AddSingleton(appConfigurations); // Optional, if needed elsewhere
-// Register business logic services
+    if (settings == null || string.IsNullOrEmpty(settings.Connection))
+        throw new Exception("MongoDB settings not configured properly.");
+
+    return new MongoDB.Driver.MongoClient(settings.Connection);
+});
+
+
+builder.Services.AddScoped<IMongoDatabase>(sp =>
+{
+    var settings = configuration
+        .GetSection("MongoDbSettings")
+        .Get<List<MongoDbSettings>>()?
+        .FirstOrDefault();
+
+    if (settings == null || string.IsNullOrEmpty(settings.DatabaseName))
+        throw new Exception("MongoDB database name missing.");
+
+    var client = sp.GetRequiredService<IMongoClient>();
+    return client.GetDatabase(settings.DatabaseName);
+});
+
+
+AppConfiguration? appConfiguration = builder.Configuration.GetSection("AppConfiguration").Get<AppConfiguration>();
+
+if (appConfiguration == null)
+{
+    throw new Exception("AppConfiguration section is missing in appsettings.json");
+}
+
+ConfigManager.Initialize(appConfiguration);
+builder.Services.AddSingleton(appConfiguration);
+
+
 builder.Services.AddBusinessServices();
 
-// Register HTTP client service
 builder.Services.AddHttpClient();
 
-// Register repository services
 builder.Services.AddRepositoryServices();
 
-// Initialize configuration helper
 ConfigurationHelper.Initialize(configuration);
-// register authorization handler to service collection
 builder.Services.AddSingleton<IAuthorizationHandler, RoleHandler>();
-//automapper
 builder.Services.AddAutoMapper(typeof(AutoMapperObjects));
 
-// register pdf services
 
 builder.Services.AddTransient<PdfService>();
 
@@ -175,6 +230,37 @@ builder.Services.AddSignalR(options =>
 // to track users presence in application 
 builder.Services.AddSingleton<IEmployeePresenceService, EmployeePresenceService>();
 
+
+// mogodb repositories
+builder.Services.AddScoped<IMongoDbRepository<EmpUser>, MongoRepository<EmpUser>>();
+builder.Services.AddScoped<IMongoDbRepository<EmpPayRoll>, MongoRepository<EmpPayRoll>>();
+// salary 
+builder.Services.AddScoped<MongoDbContext>();
+builder.Services.AddScoped<ISalaryRepository, SalaryRepository>();
+builder.Services.AddScoped<ISalaryService, SalaryService>();
+
+
+// Payroll Services
+builder.Services.AddScoped<IPayRollServices, PayRollServices>();
+
+//attendance 
+// builder.Services.AddScoped<IAttendanceService, IAttendanceService>();
+// Register Attendance Repository
+builder.Services.AddScoped<IAttendanceRepository, AttendanceRepository>();
+
+// Register Service Layer
+builder.Services.AddScoped<IAdminAttendanceService, AdminAttendanceService>();
+
+// builder.Services.AddScoped<IAttendanceService, IAttendanceService>();
+// Auto Payroll Services
+builder.Services.AddScoped<AutoPayrollServices>();
+
+// Hosted Services
+builder.Services.AddHostedService<PayrollHostedService>();
+
+//company Services 
+builder.Services.AddScoped<ICompanyService, CompanyService>();
+
 // Configure IIS Integration
 builder.WebHost.UseIISIntegration();
 builder.Logging.AddConsole();
@@ -193,8 +279,7 @@ if (Convert.ToBoolean(configuration.GetSection("AppConfiguration:AppSettings:isF
 
 }
 
-// CORS configuration
-app.UseCors(corsName);
+
 
 // ensure Uploads folder exists before serving static files 
 string uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads");
@@ -209,10 +294,13 @@ app.UseStaticFiles(new StaticFileOptions
     FileProvider = new PhysicalFileProvider(uploadsPath),
     RequestPath = new PathString("/fs")
 });
+// CORS configuration
 
+app.UseCors(corsName);
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
+
 app.UseMiddleware<AntiforgeryMiddleware>();
 // app.UseMiddleware<CompanyIdMiddleware>();
 
@@ -258,6 +346,7 @@ app.Use(async (context, next) =>
     }
     await next();
 });
+
 
 // Run the application
 app.Run();

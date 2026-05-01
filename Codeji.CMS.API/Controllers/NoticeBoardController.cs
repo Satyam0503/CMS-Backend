@@ -1,6 +1,8 @@
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.NoticeBoard;
+using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Services.NoticeBoard;
+using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -22,6 +24,7 @@ public class NoticeBoardController : BaseApiController
 
     [HttpPost]
     [Route("PostNotice")]
+    [ModulePermission(AppModule.NoticeBoard, Permission.Create)]
     public async Task<Result> PostNotice(AddNoticeRequestModel notice)
     {
         if (!ModelState.IsValid)
@@ -38,6 +41,7 @@ public class NoticeBoardController : BaseApiController
 
     [HttpPost]
     [Route("GetAllNotice")]
+    [ModulePermission(AppModule.NoticeBoard, Permission.View)]
     public async Task<Result<NoticeViewModel>> GetAllNotices([FromBody] GetNoticeRequest filter)
     {
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
@@ -46,6 +50,7 @@ public class NoticeBoardController : BaseApiController
 
     [HttpGet]
     [Route("GetNoticeById/{noticeId}")]
+    [ModulePermission(AppModule.NoticeBoard, Permission.View)]
     public async Task<Result<NoticeViewModel>> GetNoticeById(string noticeId)
     {
         Result<NoticeViewModel> result = new();
@@ -65,6 +70,7 @@ public class NoticeBoardController : BaseApiController
 
     [HttpGet]
     [Route("GetMyNotices")]
+    [ModulePermission(AppModule.NoticeBoard, Permission.View)]
     public async Task<Result<MyNoticeDTO>> GetMyNotices([FromQuery] int pageNo, [FromQuery] int records)
     {
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
@@ -73,6 +79,7 @@ public class NoticeBoardController : BaseApiController
 
     [HttpPut]
     [Route("UpdateMyNotice")]
+    [ModulePermission(AppModule.NoticeBoard, Permission.Edit)]
     public async Task<Result> UpdateMyNotice([FromBody] UpdateNoticeDto notice)
     {
         if (!ModelState.IsValid)
@@ -85,6 +92,7 @@ public class NoticeBoardController : BaseApiController
 
     [HttpDelete]
     [Route("DeleteNotice/{noticeId}")]
+    [ModulePermission(AppModule.NoticeBoard, Permission.Delete)]
     public async Task<Result> DeleteNotice(string noticeId)
     {
         Result result = new();

@@ -1,7 +1,6 @@
 ﻿using AutoMapper;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Calendar;
-using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.Company.CustomAttribute;
 using Codeji.CMS.DTO.Company.Department;
 using Codeji.CMS.DTO.Company.JobTitle;
@@ -55,6 +54,17 @@ namespace Codeji.CMS.Services.Registration
             CreateMap<LeavePolicy, UpdateLeavePolicyRequest>().ReverseMap();
             CreateMap<Policy, CreatePolicyRequestModel>().ReverseMap();
             CreateMap<Policy, PolicyResponseModel>().ReverseMap();
+            CreateMap<AdminAttendanceCreateDto, AttendanceModel>()
+    .ForMember(dest => dest.AttendanceId, opt => opt.Ignore())
+    .ForMember(dest => dest.TotalHours, opt => opt.Ignore())
+    .ForMember(dest => dest.Remarks, opt => opt.Ignore());
+
+    CreateMap<AttendanceModel, AttendanceResponseDto>();
+
+    CreateMap<AttendanceUpdateDto, AttendanceModel>()
+    .ForAllMembers(opts => 
+        opts.Condition((src, dest, srcMember) => srcMember != null));
+
         }
     }
 

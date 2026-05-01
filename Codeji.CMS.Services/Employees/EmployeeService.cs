@@ -144,7 +144,7 @@ namespace Codeji.CMS.Services.Employees
 
         private async Task SendInvitationLink(string currentUserId, EmpUser employee)
         {
-            UserModel currentUser = _middlewareService.GetUserById(currentUserId);
+            UserModel currentUser = await _middlewareService.GetUserById(currentUserId);
             Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
 
             // generate password creation token for newly added employee
@@ -176,7 +176,7 @@ namespace Codeji.CMS.Services.Employees
 
             _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
             {
-                _middlewareService.EmailSendAndSave(new EmpEmailLogs()
+                await _middlewareService.EmailSendAndSave(new EmpEmailLogs()
                 {
                     UserTo = employee.UserId,
                     Subject = emailContent.subject,
@@ -828,7 +828,15 @@ namespace Codeji.CMS.Services.Employees
                 foreach (EmpUser employee in birthDayEmployeeList)
                 {
                     Expression<Func<EmpUser, bool>> exp = emp => emp.CompanyId == employee.CompanyId && emp.UserId != employee.UserId && emp.Status;
-                    List<EmpUser> targetEmployeeList = _employeeRepository.Get(exp).Where(emp => _middlewareService.IsUserNotificationPreferenceEnabled(emp.UserId, EnumsHelper.NotificationPreferenceType.BirthdayNotification)).ToList();
+                    List<EmpUser> allEmployees = _employeeRepository.Get(exp).ToList();
+                    List<EmpUser> targetEmployeeList = new();
+                    foreach (var emp in allEmployees)
+                    {
+                        if (await _middlewareService.IsUserNotificationPreferenceEnabled(emp.UserId, EnumsHelper.NotificationPreferenceType.BirthdayNotification))
+                        {
+                            targetEmployeeList.Add(emp);
+                        }
+                    }
                     Notifications notification = new()
                     {
                         NotificationId = Guid.NewGuid().ToString(),
@@ -867,7 +875,15 @@ namespace Codeji.CMS.Services.Employees
                 foreach (EmpUser employee in EmployeeAnniversaryList)
                 {
                     Expression<Func<EmpUser, bool>> exp = emp => emp.CompanyId == employee.CompanyId && emp.UserId != employee.UserId && emp.Status;
-                    List<EmpUser> targetEmployeeList = _employeeRepository.Get(exp).Where(emp => _middlewareService.IsUserNotificationPreferenceEnabled(emp.UserId, EnumsHelper.NotificationPreferenceType.WorkAnniversaries)).ToList();
+                    List<EmpUser> allEmployees = _employeeRepository.Get(exp).ToList();
+                    List<EmpUser> targetEmployeeList = new();
+                    foreach (var emp in allEmployees)
+                    {
+                        if (await _middlewareService.IsUserNotificationPreferenceEnabled(emp.UserId, EnumsHelper.NotificationPreferenceType.WorkAnniversaries))
+                        {
+                            targetEmployeeList.Add(emp);
+                        }
+                    }
                     Notifications notification = new()
                     {
                         NotificationId = Guid.NewGuid().ToString(),

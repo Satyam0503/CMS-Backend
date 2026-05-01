@@ -7,12 +7,12 @@ namespace Codeji.CMS.Services.Interface
 {
     public interface IMiddlewareService
     {
-        UserModel GetUserById(string usierId);
-        void EmailSendAndSave(EmpEmailLogs emailLog);
-        void EmailSendAndSave(EmpEmailLogs emailLog, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null);
+        Task<UserModel> GetUserById(string usierId);
+        Task EmailSendAndSave(EmpEmailLogs emailLog);
+        Task EmailSendAndSave(EmpEmailLogs emailLog, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null);
 
         Dictionary<NotificationPreferenceType, bool> GetDefaultNotificationPreferences();
-        bool IsUserNotificationPreferenceEnabled(string userId, NotificationPreferenceType preferenceType);
+        Task<bool> IsUserNotificationPreferenceEnabled(string userId, NotificationPreferenceType preferenceType);
         string GetCompanyLogoAsDataUrl(string companyLogoPath);
     }
 }

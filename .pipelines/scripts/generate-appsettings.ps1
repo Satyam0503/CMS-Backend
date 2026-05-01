@@ -1,0 +1,109 @@
+# Generate appsettings.{Environment}.json
+# Usage: .\generate-appsettings.ps1 -Environment "Development" -OutputPath "C:\path\to\output" -BuildNumber "1.0.0" [other parameters...]
+
+param(
+    [Parameter(Mandatory=$true)]
+    [ValidateSet("Development", "Production")]
+    [string]$Environment,
+
+    [Parameter(Mandatory=$true)]
+    [string]$OutputPath,
+
+    [Parameter(Mandatory=$true)]
+    [string]$BuildNumber,
+
+    [Parameter(Mandatory=$true)]
+    [string]$MongoConnectionString,
+
+    [Parameter(Mandatory=$true)]
+    [string]$MongoDatabaseName,
+
+    [Parameter(Mandatory=$true)]
+    [string]$JwtSecretKey,
+
+    [Parameter(Mandatory=$true)]
+    [string]$JwtExpiry,
+
+    [Parameter(Mandatory=$true)]
+    [string]$EmailHost,
+
+    [Parameter(Mandatory=$true)]
+    [int]$EmailPort,
+
+    [Parameter(Mandatory=$true)]
+    [string]$EmailFromEmail,
+
+    [Parameter(Mandatory=$true)]
+    [string]$SendGridApiKey,
+
+    [Parameter(Mandatory=$true)]
+    [string]$ReCaptchaSecretKey,
+
+    [Parameter(Mandatory=$true)]
+    [string]$APIUrl,
+
+    [Parameter(Mandatory=$true)]
+    [string]$AppUrl
+)
+
+Write-Host "Generating appsettings.$Environment.json"
+Write-Host "Output Path: $OutputPath"
+
+$isDebug = if ($Environment -eq "Development") { "True" } else { "False" }
+$fromName = if ($Environment -eq "Development") { "Codeji HR Development" } else { "Codeji HR" }
+$logLevel = if ($Environment -eq "Development") { "Information" } else { "Warning" }
+$aspNetLogLevel = if ($Environment -eq "Development") { "Warning" } else { "Error" }
+
+$appsettings = @{
+    MongoDbSettings = @(
+        @{
+            Service = "primary"
+            Connection = $MongoConnectionString
+            DatabaseName = $MongoDatabaseName
+        }
+    )
+    AppConfiguration = @{
+        AppSettings = @{
+            isForDebug = $isDebug
+            appVersion = $BuildNumber
+            APIUrl = $APIUrl
+            AppUrl = $AppUrl
+        }
+        FileSettings = @{
+            UploadUrl = "uploads/"
+            Employee_ImageUrl = "fs/ProfileImage/"
+            viewResumeUrl = "fs/Resume/"
+            CompanyLogoUrl = "fs/CompanyLogo/"
+            CalendarItemCoverImage = "fs/CalendarItemCoverPictures/"
+            PolicyDocument = "fs/Policy/"
+        }
+        EmailSettings = @{
+            Host = $EmailHost
+            Port = $EmailPort
+            FromName = $fromName
+            FromEmail = $EmailFromEmail
+            BccEmail = "hello@codeji.in"
+            SupportEmail = "hr@codeji.in"
+            SENDGRID_API_KEY = $SendGridApiKey
+        }
+        reCaptcha = @{
+            SecretKey = $ReCaptchaSecretKey
+        }
+    }
+    Jwt = @{
+        SecretKey = $JwtSecretKey
+        Expiry = $JwtExpiry
+    }
+    Logging = @{
+        LogLevel = @{
+            Default = $logLevel
+            "Microsoft.AspNetCore" = $aspNetLogLevel
+        }
+    }
+    AllowedHosts = "*"
+}
+
+$outputFile = Join-Path $OutputPath "appsettings.$Environment.json"
+$appsettings | ConvertTo-Json -Depth 10 | Out-File $outputFile -Encoding UTF8
+
+Write-Host "✅ appsettings.$Environment.json generated successfully at: $outputFile"

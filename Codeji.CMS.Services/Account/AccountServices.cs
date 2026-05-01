@@ -80,14 +80,13 @@ public class AccountServices : IAccountServices
     public async Task<Result<TokenResponseDto>> VerifyAndGenerateToken(LoginModel model)
     {
         Result<TokenResponseDto> result = new();
-        bool isEmpExistOrActive = await _employeeRepository.Exist(emp => emp.Email == model.Email && emp.Status);
-        if (!isEmpExistOrActive)
+        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase) && x.Status);
+        if (user == null)
         {
             result.Success = false;
             result.StatusCode = CustomStatusCode.InvalidCredential;
             return result;
         }
-        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase) && x.Status);
         if (!user.IsEmailVerified)
         {
             result.Success = false;
@@ -95,6 +94,12 @@ public class AccountServices : IAccountServices
             return result;
         }
         Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == user.RoleId);
+        if (role == null)
+        {
+            result.Success = false;
+            result.StatusCode = CustomStatusCode.InvalidCredential;
+            return result;
+        }
         if (!role.HasAppAccess)
         {
             result.Success = false;
@@ -186,7 +191,7 @@ public class AccountServices : IAccountServices
 
         _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
                 {
-                    _middlewareService.EmailSendAndSave(new EmpEmailLogs()
+                    await _middlewareService.EmailSendAndSave(new EmpEmailLogs()
                     {
                         UserTo = emp.UserId,
                         Subject = replacedSubject,

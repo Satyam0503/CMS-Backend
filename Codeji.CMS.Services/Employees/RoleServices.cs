@@ -85,7 +85,7 @@ public class RoleServices : IRoleService
         else
         {
 
-            Task<Roles?> currentRole = _RolesRepository.FirstOrDefault(x => x.RolesId == roles.RoleId);
+            Roles? currentRole = await _RolesRepository.FirstOrDefault(x => x.RolesId == roles.RoleId);
             if (currentRole != null)
             {
                 Expression<Func<Roles, bool>> roleWhereCondition = x => x.CompanyId == companyId && x.RolesId == roles.RoleId;
@@ -95,8 +95,8 @@ public class RoleServices : IRoleService
 
                 foreach (ModuleRolePermissionsModel currentRolePermission in roles.RolePermissions)
                 {
-                    Task<RolePermission?> data = _rolePermissionRepository.FirstOrDefault(x => x.RoleId == roles.RoleId && x.RolePermissionId == currentRolePermission.RolePermissionId);
-                    if (data.Result != null)
+                    RolePermission? data = await _rolePermissionRepository.FirstOrDefault(x => x.RoleId == roles.RoleId && x.RolePermissionId == currentRolePermission.RolePermissionId);
+                    if (data != null)
                     {
                         Expression<Func<RolePermission, bool>> whereCondition = x => x.RoleId == currentRolePermission.RolesId && x.RolePermissionId == currentRolePermission.RolePermissionId;
                         await _rolePermissionRepository.UpdateMany(whereCondition, Builders<RolePermission>.Update
@@ -393,7 +393,7 @@ public class RoleServices : IRoleService
         if (!string.IsNullOrEmpty(userId) && !string.IsNullOrEmpty(companyId))
 
         {
-            UserModel user = _middleware.GetUserById(userId);
+            UserModel user = await _middleware.GetUserById(userId);
             string[] modulePermissions = await GetRolePermissionOfuser(user.RoleId);
             string[] permission = Role.Select(_ => $"{module}.{_}").ToArray();
             if (!string.IsNullOrEmpty(module))

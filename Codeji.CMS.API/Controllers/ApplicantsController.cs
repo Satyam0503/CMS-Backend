@@ -91,6 +91,7 @@ namespace Codeji.CMS.API.Controllers
 
         [Route("AddComment")]
         [HttpPost]
+        [ModulePermission(AppModule.Applications, Permission.Edit)]
         public async Task<Result> AddComment(CommentRequestModel model)
         {
             string userId = CurrentContext.UserId(_httpContextAccessor);
@@ -105,6 +106,7 @@ namespace Codeji.CMS.API.Controllers
 
         [Route("GetAllComment/{applicantId}")]
         [HttpGet]
+        [ModulePermission(AppModule.Applications, Permission.View)]
         public async Task<Result<ApplicantLogResponseModel>> GetAllComment(string applicantId, [FromQuery] int pageNo, [FromQuery] int pageSize)
         {
             var data = await _applicantsService.GetAllComment(applicantId, pageNo, pageSize);

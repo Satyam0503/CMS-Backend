@@ -552,9 +552,12 @@ public class LeaveManagementService : ILeaveManagementService
             leaveStatusSummary.Add((int)lr.Key, lr.Count());
         });
 
+        var leavePolicyIds = currentMonthLeaveRequest.Select(lr => lr.LeavePolicyId).Distinct().ToList();
+        var leavePolicyMap = (await _leavePolicyRepo.GetAll(lp => leavePolicyIds.Contains(lp.Id)))
+            .ToDictionary(lp => lp.Id, lp => lp);
         var leaveTypeSummary = currentMonthLeaveRequest.GroupBy(lr => lr.LeavePolicyId).Select(group =>
         {
-            var leavePolicy = _leavePolicyRepo.FirstOrDefault(lp => lp.Id == group.Key).Result;
+            leavePolicyMap.TryGetValue(group.Key, out var leavePolicy);
             return new LeaveTypeSummary()
             {
                 LeaveTypeName = leavePolicy?.Name ?? string.Empty,
@@ -778,7 +781,10 @@ public class LeaveManagementService : ILeaveManagementService
         if (status == EnumsHelper.LeaveRequestStatus.Pending)
         {
             string company_id = CurrentContext.CompanyId(_httpContextAccessor);
-            List<string> roleIds = (await _roleRepository.GetAll(x => x.CompanyId == company_id && x.RoleType == Convert.ToInt32(EnumsHelper.Roles.Administrator) || x.RoleType == Convert.ToInt32(EnumsHelper.Roles.HR))).Select(x => x.RolesId).ToList();
+            List<string> roleIds = (await _roleRepository.GetAll(x =>
+                x.CompanyId == company_id &&
+                (x.RoleType == Convert.ToInt32(EnumsHelper.Roles.Administrator) || x.RoleType == Convert.ToInt32(EnumsHelper.Roles.HR))
+            )).Select(x => x.RolesId).ToList();
             targetUserIds = (await _employeeRepository.GetAll(x => roleIds.Contains(x.RoleId))).Select(x => x.UserId).ToList();
             if (targetUserIds.Contains(leaveDomain.EmployeeId))
             {
@@ -789,14 +795,14 @@ public class LeaveManagementService : ILeaveManagementService
         }
         else if (status == EnumsHelper.LeaveRequestStatus.Accepted)
         {
-            if (!_middlewareService.IsUserNotificationPreferenceEnabled(leaveDomain.EmployeeId, EnumsHelper.NotificationPreferenceType.LeaveStatusUpdate)) return;
+            if (!await _middlewareService.IsUserNotificationPreferenceEnabled(leaveDomain.EmployeeId, EnumsHelper.NotificationPreferenceType.LeaveStatusUpdate)) return;
             targetUserIds.Add(leaveDomain.EmployeeId);
             notification.Body = await _employeeService.GetEmployeeNameById(leaveDomain.ReviewedBy);
             notification.NotificationType = EnumsHelper.NotificationTypes.LeaveRequestApproved;
         }
         else
         {
-            if (!_middlewareService.IsUserNotificationPreferenceEnabled(leaveDomain.EmployeeId, EnumsHelper.NotificationPreferenceType.LeaveStatusUpdate)) return;
+            if (!await _middlewareService.IsUserNotificationPreferenceEnabled(leaveDomain.EmployeeId, EnumsHelper.NotificationPreferenceType.LeaveStatusUpdate)) return;
             targetUserIds.Add(leaveDomain.EmployeeId);
             notification.Body = await _employeeService.GetEmployeeNameById(leaveDomain.ReviewedBy);
             notification.NotificationType = EnumsHelper.NotificationTypes.LeaveRequestReject;
@@ -837,7 +843,10 @@ public class LeaveManagementService : ILeaveManagementService
     public async Task EmployeeLeaveBalanceAccrual()
     {
         // get all active leavePolicy with accrual monthly or yearly
-        IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(lp => lp.Status && lp.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || lp.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly, withDefaultFilter: false);
+        IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(lp =>
+            lp.Status && (lp.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || lp.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly),
+            withDefaultFilter: false
+        );
         if (!leavePolicies.Any()) return;
         foreach (var policy in leavePolicies)
         {

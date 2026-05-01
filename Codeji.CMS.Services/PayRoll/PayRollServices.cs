@@ -275,7 +275,7 @@ public class PayRollServices : IPayRollServices
                 },
                 Deduction = new Deduction()
                 {
-                    LossOfPayDays = model.LossOfPayDays ?? 0,
+                    LossOfPayDays = (float)(model.LossOfPayDays ?? 0m),
                     LossOfPay = model.LossOfPay ?? 0,
                     IncomeTax = model.IncomeTax ?? 0,
                     HealthInsurance = model.HealthInsurance ?? 0
@@ -294,7 +294,7 @@ public class PayRollServices : IPayRollServices
             payRoll.Allowance.HRA = model.HRA ?? 0;
             payRoll.Allowance.LTA = model.LTA ?? 0;
             payRoll.Allowance.OtherAllowance = model.OtherAllowance ?? 0;
-            payRoll.Deduction.LossOfPayDays = model.LossOfPayDays ?? 0;
+            payRoll.Deduction.LossOfPayDays = (float)(model.LossOfPayDays ?? 0);
             payRoll.Deduction.LossOfPay = model.LossOfPay ?? 0;
             payRoll.Deduction.IncomeTax = model.IncomeTax ?? 0;
             payRoll.Deduction.HealthInsurance = model.HealthInsurance ?? 0;

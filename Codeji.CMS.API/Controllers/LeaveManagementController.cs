@@ -19,7 +19,7 @@ namespace Codeji.CMS.API.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class LeaveManagementController : ControllerBase
+public class LeaveManagementController : BaseApiController
 {
 
     private readonly ILeaveManagementService _leaveManagementService;
@@ -101,6 +101,7 @@ public class LeaveManagementController : ControllerBase
 
     [Route("GetEmployeeLeaveBalance/{employeeId}")]
     [HttpGet]
+    [ModulePermission(AppModule.LeaveManagement, Permission.View)]
     public async Task<Result<EmployeeLeaveBalanceResponseDto>> GetEmployeeLeaveBalance(string employeeId)
     {
         var result = await _leaveManagementService.GetEmployeeLeaveBalance(employeeId);
@@ -110,6 +111,7 @@ public class LeaveManagementController : ControllerBase
     // leave request services 
     [Route("CreateLeaveRequest")]
     [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Create)]
     public async Task<Result> CreateLeaveRequest([FromBody] LeaveRequestDto leaveRequest)
     {
         if (!ModelState.IsValid) return new Result();
@@ -119,6 +121,7 @@ public class LeaveManagementController : ControllerBase
 
     [Route("UpdateLeaveRequest")]
     [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Edit)]
     public async Task<Result> UpdateLeaveRequest([FromBody] UpdateLeaveRequestDto leaveRequest)
     {
         if (!ModelState.IsValid) return new Result();
@@ -129,6 +132,7 @@ public class LeaveManagementController : ControllerBase
 
     [Route("GetLeaveRequests")]
     [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.View)]
     public async Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveRequestFilter? leaveFilter)
     {
         return await _leaveManagementService.GetLeaveRequest(leaveFilter);
@@ -136,6 +140,7 @@ public class LeaveManagementController : ControllerBase
 
     [Route("GetMyLeaveRequests")]
     [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.View)]
     public async Task<Result<MyLeaveRequestResponse>> GetMyLeaveRequests([FromBody] EmpLeaveRequestFilter leaveFilter)
     {
         leaveFilter.EmployeeId ??= CurrentContext.UserId(_httpContextAccessor);
@@ -144,6 +149,7 @@ public class LeaveManagementController : ControllerBase
 
     [Route("DeleteLeaveRequest/{leaveRequestId}")]
     [HttpDelete]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Delete)]
     public async Task<Result> DeleteLeaveRequest(string leaveRequestId)
     {
         return await _leaveManagementService.DeleteLeaveRequest(leaveRequestId);
@@ -151,6 +157,7 @@ public class LeaveManagementController : ControllerBase
 
     [Route("LeaveRequest/{leaveRequestId}/Status")]
     [HttpPatch]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Edit)]
     public async Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, [FromBody] LeaveRequestUpdateDto model)
     {
         return await _leaveManagementService.UpdateLeaveRequestStatus(leaveRequestId, model);
@@ -158,6 +165,7 @@ public class LeaveManagementController : ControllerBase
 
     [Route("GetLeaveRequestSummary")]
     [HttpGet]
+    [ModulePermission(AppModule.LeaveManagement, Permission.View)]
     public async Task<Result<LeaveRequestSummaryResponseDto>> GetLeaveRequestSummary()
     {
         return await _leaveManagementService.GetLeaveRequestSummary();
@@ -165,6 +173,7 @@ public class LeaveManagementController : ControllerBase
 
     [Route("GetMonthlyTakenLeaveSummary/{year}")]
     [HttpGet]
+    [ModulePermission(AppModule.LeaveManagement, Permission.View)]
     public async Task<Result<MonthlyTakenLeaveSummaryResponseDto>> GetMonthlyTakenLeaveSummary(int? year)
     {
         if (year == null || year <= 0)

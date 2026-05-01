@@ -85,7 +85,15 @@ public class NoticeBoardServices : INoticeBoardService
             Expression<Func<EmpUser, bool>> whereCondition = x => (model.Departments.Equals("all") || x.Department.Equals(model.Departments))
             && (model.Target.Equals("all") || x.RoleId.Equals(model.Target)) && x.UserId != userId;
             IEnumerable<EmpUser> empUsers = await _empUserRepository.GetAll(whereCondition);
-            empUsers = empUsers.Where(emp => _middlewareService.IsUserNotificationPreferenceEnabled(emp.UserId, EnumsHelper.NotificationPreferenceType.Notice));
+            List<EmpUser> filteredUsers = new();
+            foreach (var emp in empUsers)
+            {
+                if (await _middlewareService.IsUserNotificationPreferenceEnabled(emp.UserId, EnumsHelper.NotificationPreferenceType.Notice))
+                {
+                    filteredUsers.Add(emp);
+                }
+            }
+            empUsers = filteredUsers;
 
             if (empUsers.Any())
             {
@@ -147,9 +155,10 @@ public class NoticeBoardServices : INoticeBoardService
     public async Task<Result<NoticeViewModel>> GetAllNotices(string userId, GetNoticeRequest filter)
     {
         List<string> empIdsList = [];
-        if (filter.PostedBy.Length > 0)
+        var postedBy = filter.PostedBy?.Trim() ?? string.Empty;
+        if (postedBy.Length > 0)
         {
-            empIdsList = (await _empUserRepository.GetAll(x => (x.FirstName + " " + x.LastName).Contains(filter.PostedBy.Trim(), StringComparison.CurrentCultureIgnoreCase))).Select(x => x.UserId).ToList();
+            empIdsList = (await _empUserRepository.GetAll(x => (x.FirstName + " " + x.LastName).Contains(postedBy, StringComparison.CurrentCultureIgnoreCase))).Select(x => x.UserId).ToList();
         }
         EmpUser? employee = await _empUserRepository.FirstOrDefault(x => x.UserId == userId);
 
@@ -157,7 +166,7 @@ public class NoticeBoardServices : INoticeBoardService
         && (x.Target.Equals("all") || x.Target.Equals(employee.RoleId))
         && (filter.NoticeType.Length == 0 || filter.NoticeType.Contains(x.NoticeType))
         && ((!filter.FilterFrom.HasValue || filter.FilterFrom.Value <= x.CreatedDate) && (!filter.FilterTo.HasValue || filter.FilterTo >= x.CreatedDate))
-        && (filter.PostedBy.Trim().Length == 0 || empIdsList.Contains(x.CreatedBy));
+        && (postedBy.Length == 0 || empIdsList.Contains(x.CreatedBy));
 
         int totalRecords = await _noticeRepository.Count(whereCondition);
         List<Notice> noticeList = (await _noticeRepository.GetAggregateDataAsync<Notice>(whereCondition, isAscending: false, orderedKey: "CreatedDate", pageNo: filter.PageNo, pageSize: filter.Records)).ToList();
@@ -239,6 +248,7 @@ public class NoticeBoardServices : INoticeBoardService
             .ToList();
 
         var employeeDetails = await _empUserRepository.GetAll(emp => employeeIds.Contains(emp.UserId));
+        var employeeDetailsById = employeeDetails.ToDictionary(emp => emp.UserId, emp => emp);
         List<MyNoticeDTO> myNoticeList = [];
         foreach (var notice in noticeList)
         {
@@ -257,7 +267,7 @@ public class NoticeBoardServices : INoticeBoardService
 
             foreach (var v in notice.Views)
             {
-                var employeeDetail = employeeDetails.FirstOrDefault(emp => emp.UserId == v.EmployeeId);
+                employeeDetailsById.TryGetValue(v.EmployeeId, out var employeeDetail);
 
                 // If employee details exist, map them to the EmpNoticeView
                 if (employeeDetail != null)

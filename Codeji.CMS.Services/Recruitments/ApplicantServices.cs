@@ -217,7 +217,10 @@ namespace Codeji.CMS.Services.Recruitments
                 applicantList = await _applicantRepository.GetAggregateDataAsync<Applicant>(whereCondition, pageNo: filters.PageNo, pageSize: filters.PageSize, isAscending: false, orderedKey: "CreatedDate");
                 count = await _applicantRepository.Count(whereCondition);
             }
-            List<JobVacancy> vacancies = (await _jobVacancyRepository.GetAll()).ToList();
+            var vacancyIds = applicantList.Select(a => a.VacancyId).Where(v => !string.IsNullOrEmpty(v)).Distinct().ToList();
+            List<JobVacancy> vacancies = vacancyIds.Count == 0
+                ? []
+                : (await _jobVacancyRepository.GetAll(v => vacancyIds.Contains(v.JobId))).ToList();
             List<ApplicantViewModel> data = (from applicant in applicantList
                                              join vacancy in vacancies on applicant.VacancyId equals vacancy.JobId
                                              select new ApplicantViewModel
@@ -369,7 +372,7 @@ namespace Codeji.CMS.Services.Recruitments
         {
             var vacancy = await _jobVacancyService.GetVacancyById(applicant.VacancyId);
             if (vacancy is null) return;
-            var currentUser = _middlewareService.GetUserById(CurrentContext.UserId(_httpContextAccessor));
+            var currentUser = await _middlewareService.GetUserById(CurrentContext.UserId(_httpContextAccessor));
             MailTemplate? emailContent = applicant.ActivityType switch
             {
                 EnumsHelper.ActivityType.New => await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ApplyNowMailToApplicant),
@@ -387,7 +390,7 @@ namespace Codeji.CMS.Services.Recruitments
 
             _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
             {
-                _middlewareService.EmailSendAndSave(new EmpEmailLogs()
+                await _middlewareService.EmailSendAndSave(new EmpEmailLogs()
                 {
                     UserTo = applicant.ApplicantId,
                     Subject = emailContent.subject ?? "",

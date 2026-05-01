@@ -17,4 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Codeji.CMS.Utility\Codeji.CMS.Utility.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="MongoDB.Driver" Version="3.3.0" />
+  </ItemGroup>
 </Project>

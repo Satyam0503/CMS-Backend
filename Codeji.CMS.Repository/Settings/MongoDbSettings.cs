@@ -1,3 +1,5 @@
+using MongoDB.Driver;
+
 namespace Codeji.CMS.GenericRepository.Settings
 {
 
@@ -8,6 +10,6 @@ namespace Codeji.CMS.GenericRepository.Settings
         public string Connection { get; set; }
         public string DatabaseName { get; set; }
         public IEnumerable<string> Collections { get; set; }
-
+        public MongoClientSettings ConnectionString { get; set; }
     }
 }

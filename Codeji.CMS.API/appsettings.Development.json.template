@@ -1,0 +1,48 @@
+{
+  "MongoDbSettings": [
+    {
+      "Service": "primary",
+      "Connection": "mongodb://username:password@YOUR-DEV-SERVER-IP:27017/codejiCmsv2",
+      "DatabaseName": "codejiCmsv2"
+    }
+  ],
+  "AppConfiguration": {
+    "AppSettings": {
+      "isForDebug": "True",
+      "appVersion": "v4.0.0-dev-local",
+      "APIUrl": "http://localhost:5036/",
+      "AppUrl": "http://localhost:5173/"
+    },
+    "FileSettings": {
+      "UploadUrl": "uploads/",
+      "Employee_ImageUrl": "fs/ProfileImage/",
+      "viewResumeUrl": "fs/Resume/",
+      "CompanyLogoUrl": "fs/CompanyLogo/",
+      "CalendarItemCoverImage": "fs/CalendarItemCoverPictures/",
+      "PolicyDocument": "fs/Policy/"
+    },
+    "EmailSettings": {
+      "Host": "smtp.hostinger.com",
+      "Port": 587,
+      "FromName": "Codeji HR Development",
+      "FromEmail": "depapp@codeji.in",
+      "BccEmail": "hello@codeji.in",
+      "SupportEmail": "hr@codeji.in",
+      "SENDGRID_API_KEY": "SG.your-sendgrid-api-key-here"
+    },
+    "reCaptcha": {
+      "SecretKey": "your-recaptcha-secret-key-here"
+    }
+  },
+  "Jwt": {
+    "SecretKey": "GENERATE-A-SECURE-64-CHARACTER-KEY-FOR-DEVELOPMENT",
+    "Expiry": "15"
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*"
+}

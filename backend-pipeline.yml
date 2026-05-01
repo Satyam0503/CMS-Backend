@@ -1,0 +1,158 @@
+# Codeji CMS Backend Pipeline (.NET 8.0)
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - "*"
+
+# Environment configuration - add new environments here
+parameters:
+  - name: environments
+    type: object
+    default:
+      - name: Dev
+        branch: develop
+        environment: Development
+      - name: Prod
+        branch: main
+        environment: Production
+
+variables:
+  solution: "CodejiCMSCore.sln"
+  buildPlatform: "Any CPU"
+  buildConfiguration: "Release"
+  dotnetVersion: "8.0.x"
+
+stages:
+  # ============================================
+  # Build Stage
+  # ============================================
+  - stage: Build
+    displayName: "Build Backend"
+    pool:
+      vmImage: "windows-latest"
+    jobs:
+      - job: BuildJob
+        displayName: "Build and Publish"
+        steps:
+          - checkout: self
+            fetchDepth: 1
+
+          - task: UseDotNet@2
+            displayName: "Install .NET 8.0 SDK"
+            inputs:
+              version: "$(dotnetVersion)"
+
+          - task: DotNetCoreCLI@2
+            displayName: "Restore NuGet Packages"
+            inputs:
+              command: "restore"
+              projects: "$(solution)"
+
+          - task: DotNetCoreCLI@2
+            displayName: "Build Solution"
+            inputs:
+              command: "build"
+              projects: "$(solution)"
+              arguments: "--configuration $(buildConfiguration) --no-restore"
+
+          - task: DotNetCoreCLI@2
+            displayName: "Run Unit Tests"
+            inputs:
+              command: "test"
+              projects: "**/*Tests/*.csproj"
+              arguments: '--configuration $(buildConfiguration) --no-build --collect:"XPlat Code Coverage"'
+            continueOnError: true
+
+          - task: DotNetCoreCLI@2
+            displayName: "Publish API"
+            inputs:
+              command: "publish"
+              publishWebProjects: false
+              projects: "Codeji.CMS.API/Codeji.CMS.API.csproj"
+              arguments: "--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/api"
+              zipAfterPublish: false
+
+          - task: CopyFiles@2
+            displayName: "Copy Deployment Scripts"
+            inputs:
+              SourceFolder: ".pipelines"
+              Contents: "**"
+              TargetFolder: "$(Build.ArtifactStagingDirectory)/.pipelines"
+
+          - task: PublishBuildArtifacts@1
+            displayName: "Publish Artifacts"
+            inputs:
+              PathtoPublish: "$(Build.ArtifactStagingDirectory)"
+              ArtifactName: "backend-drop"
+              publishLocation: "Container"
+
+  # ============================================
+  # Deploy Stages - generated from environments
+  # ============================================
+  - ${{ each env in parameters.environments }}:
+      - stage: Deploy${{ env.name }}
+        displayName: "Deploy to ${{ env.name }}"
+        dependsOn: Build
+        condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/${{ env.branch }}'))
+        variables:
+          - group: codeji-${{ lower(env.name) }}
+        jobs:
+          - deployment: DeployTo${{ env.name }}
+            displayName: "Deploy to ${{ env.name }} VM"
+            environment: "Development.CODEJI-SERVER"
+            strategy:
+              runOnce:
+                deploy:
+                  steps:
+                    - download: current
+                      artifact: "backend-drop"
+
+                    - task: PowerShell@2
+                      displayName: "Generate appsettings.${{ env.name }}.json"
+                      inputs:
+                        targetType: "filePath"
+                        filePath: "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/generate-appsettings.ps1"
+                        arguments: >
+                          -Environment "${{ env.environment }}"
+                          -OutputPath "$(Pipeline.Workspace)/backend-drop/api"
+                          -BuildNumber "$(Build.BuildNumber)"
+                          -MongoConnectionString "$(MongoDB.ConnectionString)"
+                          -MongoDatabaseName "$(MongoDB.DatabaseName)"
+                          -JwtSecretKey "$(Jwt.SecretKey)"
+                          -JwtExpiry "$(Jwt.Expiry)"
+                          -EmailHost "$(EmailSettings.Host)"
+                          -EmailPort $(EmailSettings.Port)
+                          -EmailFromEmail "$(EmailSettings.FromEmail)"
+                          -SendGridApiKey "$(EmailSettings.SendGridApiKey)"
+                          -ReCaptchaSecretKey "$(ReCaptcha.SecretKey)"
+                          -APIUrl "$(AppSettings.APIUrl)"
+                          -AppUrl "$(AppSettings.AppUrl)"
+
+                    - task: PowerShell@2
+                      displayName: "Deploy to ${{ env.name }} IIS"
+                      inputs:
+                        targetType: "inline"
+                        script: |
+                          Write-Host "=========================================="
+                          Write-Host "Deploying to ${{ env.name }}"
+                          Write-Host "   Site: codeji-$(env)"
+                          Write-Host "   Path: $(DeployPath)codeji_$(env)/api"
+                          Write-Host "=========================================="
+
+                          # Setup IIS Website
+                          & "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/setup-iis-website.ps1" -SiteName "codeji-$(env)" -PhysicalPath "$(DeployPath)codeji_$(env)/api" -Port 80
+
+                          # Copy application files
+                          Copy-Item -Path "$(Pipeline.Workspace)/backend-drop/api/*" -Destination "$(DeployPath)codeji_$(env)/api" -Recurse -Force
+
+                          # Start application pool
+                          & "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/start-iis-apppool.ps1" -AppPoolName "codeji-$(env)"
+
+                          Write-Host "=========================================="
+                          Write-Host "${{ env.name }} deployment completed!"
+                          Write-Host "=========================================="

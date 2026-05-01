@@ -29,7 +29,7 @@ public class AppConfiguration
 
 public class AppSettings
 {
-    public string IsForDebug { get; set; }
+    public bool IsForDebug { get; set; }
     public string AppVersion { get; set; }
     public string APIUrl { get; set; }
     public string AppUrl { get; set; }

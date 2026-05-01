@@ -6,6 +6,7 @@ using Codeji.CMS.GenericRepository.Extensions;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.GenericRepository.Repositories;
 using Codeji.CMS.GenericRepository.Services;
+using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Utility.middlewares;
 using LinqKit;
 using Microsoft.AspNetCore.Http;
@@ -13,7 +14,10 @@ using MongoDB.Driver;
 using MongoDB.Driver.Linq;
 using Task = System.Threading.Tasks.Task;
 
-namespace Codeji.CMS.GenericRepository
+
+
+namespace Codeji.CMS.Repository.Repositories
+
 {
     public class MongoRepository<TEntity> : IMongoDbRepository<TEntity>
     {
@@ -46,7 +50,6 @@ namespace Codeji.CMS.GenericRepository
         private void SetCompanyId(TEntity entity)
         {
             string companyId = GetCompanyId();
-            Console.WriteLine(companyId);
             if (!string.IsNullOrEmpty(companyId))
             {
                 // Use reflection to set the CompanyId property dynamically
@@ -351,6 +354,11 @@ namespace Codeji.CMS.GenericRepository
                 // Log exception here
                 return null;
             }
+        }
+
+        public Task<IEnumerable<AttendanceModel>> GetAll(FilterDefinition<AttendanceModel> filter)
+        {
+            throw new NotImplementedException();
         }
 
         #endregion

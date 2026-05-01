@@ -1,7 +1,9 @@
 ﻿using System.Net;
+using System.Runtime.ExceptionServices;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Task = System.Threading.Tasks.Task;
 
@@ -10,12 +12,12 @@ namespace Codeji.CMS.API.App_Start
     public class ExceptionHandlingMiddleware
     {
         private readonly RequestDelegate _next;
-        //private static readonly Logger _logger = LogManager.GetCurrentClassLogger();
+        private readonly ILogger<ExceptionHandlingMiddleware> _logger;
 
-        public ExceptionHandlingMiddleware(RequestDelegate next)
+        public ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger)
         {
             _next = next ?? throw new ArgumentNullException(nameof(next));
-
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         public async Task Invoke(HttpContext context)
@@ -36,11 +38,15 @@ namespace Codeji.CMS.API.App_Start
 
         private async Task HandleExceptionAsync(HttpContext context, Exception ex)
         {
-            bool isForDebug = Convert.ToBoolean(ConfigManager.AppSettings.IsForDebug);
+            bool isForDebug = ConfigManager.AppSettings?.IsForDebug ?? false;
             if (isForDebug)
             {
-                throw ex;
+                ExceptionDispatchInfo.Capture(ex).Throw();
+                return;
             }
+
+            _logger.LogError(ex, "Unhandled exception caught by middleware.");
+
             context.Response.ContentType = "application/json";
 
             Result result = new Result

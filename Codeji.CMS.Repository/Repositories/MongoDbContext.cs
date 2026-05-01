@@ -1,6 +1,6 @@
 using Codeji.CMS.GenericRepository.Repositories;
 using MongoDB.Driver;
-namespace Codeji.CMS.GenericRepository
+namespace Codeji.CMS.Repository.Repositories
 {
     public class MongoDbContext
     {

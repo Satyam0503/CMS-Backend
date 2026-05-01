@@ -1,4 +1,5 @@
 ﻿using System.Threading.Tasks;
+using System.Collections.Concurrent;
 using AutoMapper;
 using Codeji.CMS.DTO;
 using Codeji.CMS.GenericRepository.Interfaces;
@@ -13,6 +14,7 @@ namespace Codeji.CMS.Services
 {
     public class MiddlewareService : IMiddlewareService
     {
+        private static readonly ConcurrentDictionary<string, string> _logoDataUrlCache = new();
         private readonly IMongoDbRepository<EmpUser> _userRepository;
         private readonly IMongoDbRepository<EmpEmailLogs> _emailLogRepository;
         private readonly IMapper _mapper;
@@ -32,23 +34,23 @@ namespace Codeji.CMS.Services
 
 
 
-        public UserModel GetUserById(string id)
+        public async Task<UserModel> GetUserById(string id)
         {
             UserModel userModel = new();
             if (string.IsNullOrEmpty(id))
             {
                 return null;
             }
-            EmpUser user = _userRepository.FirstOrDefault(x => x.UserId == id).Result;
+            EmpUser user = await _userRepository.FirstOrDefault(x => x.UserId == id);
             return _mapper.Map(user, userModel);
         }
-        public void EmailSendAndSave(EmpEmailLogs emailLog)
+        public async Task EmailSendAndSave(EmpEmailLogs emailLog)
         {
-            Task.Run(() => Common(emailLog));
+            await Common(emailLog);
         }
-        public void EmailSendAndSave(EmpEmailLogs emailLog, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
+        public async Task EmailSendAndSave(EmpEmailLogs emailLog, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
         {
-            Task.Run(() => Common(emailLog, attachments));
+            await Common(emailLog, attachments);
         }
         private async Task Common(EmpEmailLogs emailLog, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
         {
@@ -94,9 +96,9 @@ namespace Codeji.CMS.Services
         }
 
         // method to check user notification preference
-        public bool IsUserNotificationPreferenceEnabled(string userId, NotificationPreferenceType preferenceType)
+        public async Task<bool> IsUserNotificationPreferenceEnabled(string userId, NotificationPreferenceType preferenceType)
         {
-            var preferenceResult = _notificationPreferenceRepository.FirstOrDefault(n => n.UserId == userId).Result;
+            var preferenceResult = await _notificationPreferenceRepository.FirstOrDefault(n => n.UserId == userId);
             if (preferenceResult == null)
             {
                 var defaultPreferences = GetDefaultNotificationPreferences();
@@ -111,10 +113,15 @@ namespace Codeji.CMS.Services
         public string GetCompanyLogoAsDataUrl(string companyLogoPath)
         {
             if (!File.Exists(companyLogoPath)) return string.Empty;
+            if (_logoDataUrlCache.TryGetValue(companyLogoPath, out var cachedLogoDataUrl))
+            {
+                return cachedLogoDataUrl;
+            }
             byte[] logoByteArray = File.ReadAllBytes(companyLogoPath);
             string logoBase64Format = Convert.ToBase64String(logoByteArray);
             string logoExtension = companyLogoPath.Split('.').Last();
             string logoDataUrl = $"data:image/{logoExtension};base64,{logoBase64Format}";
+            _logoDataUrlCache[companyLogoPath] = logoDataUrl;
             return logoDataUrl;
         }
     }

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Codeji.CMS.GenericRepository.Interfaces;
-using Codeji.CMS.GenericRepository;
+using Codeji.CMS.Repository.Repositories; 
+
 using Codeji.CMS.GenericRepository.Repositories;
 
 namespace Codeji.CMS.GenericRepository.Registration

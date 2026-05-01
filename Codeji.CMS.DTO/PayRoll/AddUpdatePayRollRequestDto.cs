@@ -10,7 +10,8 @@ public class AddUpdatePayRollRequestDto
     public decimal? HRA { get; set; }
     public decimal? LTA { get; set; }
     public decimal? OtherAllowance { get; set; }
-    public float? LossOfPayDays { get; set; }
+    public decimal? LossOfPayDays { get; set; }
+
     public decimal? LossOfPay { get; set; }
     public decimal? IncomeTax { get; set; }
     public decimal? HealthInsurance { get; set; }
