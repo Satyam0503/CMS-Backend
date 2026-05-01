@@ -41,6 +41,7 @@ public class SeedMailTemplates : IMigration
     [
         new()
         {
+            _id      = Guid.NewGuid().ToString(),
             mailType = EnumsHelper.MailType.EmployeeWelcomeMail,
             subject  = "Welcome to [CompanyName]",
             body     = WrapHtml(
@@ -52,6 +53,7 @@ public class SeedMailTemplates : IMigration
         },
         new()
         {
+            _id      = Guid.NewGuid().ToString(),
             mailType = EnumsHelper.MailType.SelectedMail,
             subject  = "Congratulations [CandidateName] — you've been selected",
             body     = WrapHtml(
@@ -61,6 +63,7 @@ public class SeedMailTemplates : IMigration
         },
         new()
         {
+            _id      = Guid.NewGuid().ToString(),
             mailType = EnumsHelper.MailType.RejectedMail,
             subject  = "Update on your application for [JobTitle]",
             body     = WrapHtml(
@@ -71,6 +74,7 @@ public class SeedMailTemplates : IMigration
         },
         new()
         {
+            _id      = Guid.NewGuid().ToString(),
             mailType = EnumsHelper.MailType.ApplyNowMailToHR,
             subject  = "New application received for [JobTitle]",
             body     = WrapHtml(
@@ -83,6 +87,7 @@ public class SeedMailTemplates : IMigration
         },
         new()
         {
+            _id      = Guid.NewGuid().ToString(),
             mailType = EnumsHelper.MailType.ApplyNowMailToApplicant,
             subject  = "We received your application for [JobTitle]",
             body     = WrapHtml(
@@ -92,6 +97,7 @@ public class SeedMailTemplates : IMigration
         },
         new()
         {
+            _id      = Guid.NewGuid().ToString(),
             mailType = EnumsHelper.MailType.ContactUsMail,
             subject  = "Thanks for contacting [CompanyName]",
             body     = WrapHtml(
@@ -100,6 +106,7 @@ public class SeedMailTemplates : IMigration
         },
         new()
         {
+            _id      = Guid.NewGuid().ToString(),
             mailType = EnumsHelper.MailType.ContactUsMailToHR,
             subject  = "New contact request from [Name]",
             body     = WrapHtml(
@@ -112,6 +119,7 @@ public class SeedMailTemplates : IMigration
         },
         new()
         {
+            _id      = Guid.NewGuid().ToString(),
             mailType = EnumsHelper.MailType.LeaveMailToHR,
             subject  = "Leave request from [EmployeeName]",
             body     = WrapHtml(
@@ -125,6 +133,7 @@ public class SeedMailTemplates : IMigration
         },
         new()
         {
+            _id      = Guid.NewGuid().ToString(),
             mailType = EnumsHelper.MailType.LeaveReplyMail,
             subject  = "Your leave request has been [Status]",
             body     = WrapHtml(
@@ -135,6 +144,7 @@ public class SeedMailTemplates : IMigration
         },
         new()
         {
+            _id      = Guid.NewGuid().ToString(),
             mailType = EnumsHelper.MailType.ResignationMail,
             subject  = "Resignation submitted by [EmployeeName]",
             body     = WrapHtml(
@@ -146,6 +156,7 @@ public class SeedMailTemplates : IMigration
         },
         new()
         {
+            _id      = Guid.NewGuid().ToString(),
             mailType = EnumsHelper.MailType.ResetPassword,
             subject  = "Reset your [CompanyName] password",
             body     = WrapHtml(

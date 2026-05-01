@@ -8,7 +8,7 @@
 #
 # Usage:
 #   .\run-migrations.ps1 `
-#     -MigrationsPath "C:\inetpub\sites\crm-test\backend\migrations" `
+#     -MigrationsPath "D:\Hosting\Codeji\crm-test\backend\migrations" `
 #     -MongoConnectionString "mongodb://user:pass@host:27017/dbname"
 
 param(
@@ -36,15 +36,19 @@ Write-Host "   Path: $MigrationsPath"
 Write-Host "=========================================="
 
 # Overwrite appsettings.json with the environment's connection string.
-# The runner's ConfigurationBuilder reads only this file (see Codeji.CMS.Migrations/Program.cs),
-# so the connection string committed in source is irrelevant once we land here.
-$appsettings = @{
-    ConnectionStrings = @{
+# Format must match the shape Program.cs reads:
+#   { "ConnectionStrings": { "mongodb": "..." } }
+# Use [ordered] so JSON keys appear in the same order on every run, and write via
+# File.WriteAllText so the output is UTF-8 without BOM (Out-File -Encoding UTF8 on
+# Windows PowerShell 5.1 prepends a BOM).
+$appsettings = [ordered]@{
+    ConnectionStrings = [ordered]@{
         mongodb = $MongoConnectionString
     }
 }
 $appsettingsPath = Join-Path $MigrationsPath "appsettings.json"
-$appsettings | ConvertTo-Json -Depth 10 | Out-File $appsettingsPath -Encoding UTF8
+$json = $appsettings | ConvertTo-Json -Depth 10
+[System.IO.File]::WriteAllText($appsettingsPath, $json, [System.Text.UTF8Encoding]::new($false))
 
 # Invoke the runner. The runner is a console app — stdout streams here, exit code propagates.
 Push-Location $MigrationsPath

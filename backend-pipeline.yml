@@ -83,8 +83,9 @@ stages:
               command: "publish"
               publishWebProjects: false
               projects: "Codeji.CMS.Migrations/Codeji.CMS.Migrations.csproj"
-              arguments: "--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/migrations"
+              arguments: "--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/Codeji.CMS.Migrations"
               zipAfterPublish: false
+              modifyOutputPath: false
 
           - task: CopyFiles@2
             displayName: "Copy Deployment Scripts"
@@ -207,8 +208,8 @@ stages:
 
                           # Deploy migrations runner to a sibling folder of the API.
                           # Clean copy each time so old DLLs from prior releases don't linger.
-                          $migrationsSrc  = "$(Pipeline.Workspace)\backend-drop\migrations"
-                          $migrationsPath = "$(DeployRoot)\crm-${{ env.name }}\backend\migrations"
+                          $migrationsSrc  = "$(Pipeline.Workspace)\backend-drop\Codeji.CMS.Migrations"
+                          $migrationsPath = "$(DeployRoot)\crm-${{ env.name }}\backend\Codeji.CMS.Migrations"
                           if (Test-Path $migrationsPath) {
                             Remove-Item -Path $migrationsPath -Recurse -Force
                           }
