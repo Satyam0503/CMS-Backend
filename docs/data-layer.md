@@ -1,0 +1,253 @@
+# Data Layer
+
+MongoDB driver, a single generic repository, and three cross-cutting behaviors stamped onto every entity: **multi-tenancy**, **audit fields**, and **soft delete**. Understand `MongoRepository<T>` and you understand the data layer.
+
+---
+
+## Generic repository
+
+### Interface
+
+[`IMongoDbRepository<TEntity>`](../Codeji.CMS.Repository/Interfaces/IMongoDbRepository.cs)
+
+Public methods (all `async` unless noted):
+
+| Method | Returns | Use for |
+|---|---|---|
+| `GetCollection()` | `IMongoCollection<TEntity>` | Raw collection access — bypasses all default filters; only when you need it |
+| `Get(filter, orderBy, withDeleted)` | `IQueryable<TEntity>` | Composable query (LinqKit-friendly) |
+| `GetAll(where, withDeleted, withDefaultFilter)` | `IEnumerable<TEntity>` | Materialized list with company + soft-delete filters |
+| `FirstOrDefault(filter, withDeleted)` | `TEntity?` | Single entity or null |
+| `Exist(where, withDeleted)` | `bool` | Existence check |
+| `Count(filter, withDeleted)` | `int` | Count |
+| `AddOne(entity)` | `Result` | Insert single — auto-stamps CompanyId, CreatedBy, CreatedDate |
+| `AddMany(entities)` | `Result` | Bulk insert — same stamping |
+| `Update(filter, entity)` | `Result` | Whole-document replace — auto-stamps UpdatedBy, UpdatedDate |
+| `UpdateMany(filter, updateDef, isUpsert)` | `Result` | Field-level update via `Builders<T>.Update.Set(...)` |
+| `Delete(filter)` | `Result` | Hard delete (most call sites prefer soft delete by setting `IsDeleted = true` via UpdateMany) |
+| `DeleteAll(filter)` | `Result` | Bulk hard delete (rare) |
+| `GetAggregateDataAsync<TResult>(filter, projection, withDeleted, ascending, orderKey, page, size, hint)` | `IEnumerable<TResult>` | Projection + paging in one call |
+
+### Implementation
+
+[`MongoRepository<TEntity>`](../Codeji.CMS.Repository/Repositories/MongoRepository.cs)
+
+Three behaviors are stamped automatically — by *reflection* on the entity, not by overriding methods:
+
+1. **CompanyId injection** — `SetCompanyId(entity)` reads the current company from `CurrentContext.CompanyId(_httpContextAccessor)` and writes it onto the entity's `CompanyId` property if present. Runs before insert and replace operations.
+2. **Audit fields** — `AddCreatedBy(entity)` / `AddUpdatedBy(entity)` set `CreatedBy/CreatedDate` and `UpdatedBy/UpdatedDate` from `CurrentContext.UserId(...)` + `DateTime.UtcNow`.
+3. **Default query filter** — `GetQuery()` composes `entity.CompanyId == GetCompanyId() && entity.IsDeleted == false` (when `withDefaultFilter == true`, which is the default).
+
+Reflection is convenient — but it's also load on every CRUD call. If you ever need to optimize, this is the first hot spot.
+
+### Per-entity custom repos
+
+Two entities have specialty subclasses:
+
+| Class | Inherits | Adds |
+|---|---|---|
+| [`AttendanceRepository.cs`](../Codeji.CMS.Repository/Repositories/AttendanceRepository.cs) | `MongoRepository<AttendanceModel>` (via `IAttendanceInterface`) | Attendance-specific queries (e.g. month-grouped) |
+| [`SalaryRepository.cs`](../Codeji.CMS.Repository/Repositories/SalaryRepository.cs) | `MongoRepository<...>` (via `ISalaryRepository`) | Salary-specific projections |
+
+Add a custom repo when generic queries become awkward enough that controllers/services repeat themselves. Don't add one for variety — generic + LinqKit covers most cases.
+
+### DI registration
+
+[`RepositoryServicesRegistration.cs`](../Codeji.CMS.Repository/Registration/RepositoryServicesRegistration.cs) registers the open generic `IMongoDbRepository<>` → `MongoRepository<>`. **You don't register per-entity repositories** — request `IMongoDbRepository<MyEntity>` in any constructor and DI hands you a working instance.
+
+---
+
+## BaseClass and the entity contract
+
+[`BaseClass.cs`](../Codeji.CMS.Repository/Entities/BaseClass.cs):
+
+```csharp
+public class BaseClass : ISupportAuditing, ISupportSoftDelete
+{
+    public string CompanyId   { get; set; }
+    public string CreatedBy   { get; set; }
+    public DateTime? CreatedDate { get; set; } = DateTime.UtcNow;
+    public string UpdatedBy   { get; set; }
+    public DateTime? UpdatedDate { get; set; }
+    public bool IsDeleted     { get; set; }
+}
+```
+
+Every multi-tenant entity inherits this. **Forgetting to inherit it is the #1 way to leak data across tenants** — your queries won't be filtered by `CompanyId`. Double-check when you add an entity.
+
+Three entities intentionally don't inherit:
+
+| Entity | Why |
+|---|---|
+| [`Permission.cs`](../Codeji.CMS.Repository/Entities/RolePermissions/Permission.cs) | Global lookup — same permissions across all tenants |
+| [`Module.cs`](../Codeji.CMS.Repository/Entities/RolePermissions/Module.cs) | Same — global module catalog |
+| [`ModulePermission.cs`](../Codeji.CMS.Repository/Entities/RolePermissions/ModulePermission.cs) | Same |
+
+`Roles` and `RolePermission` *do* inherit `BaseClass` because they are per-company.
+
+### IDs
+
+Most entities use a string GUID generated by [`UniqueIdGenerator`](../Codeji.CMS.Repository/Entities/BaseClass.cs):
+
+```csharp
+[BsonId(IdGenerator = typeof(UniqueIdGenerator))]
+public string MyEntityId { get; set; }
+```
+
+A handful of seedable lookups (`Permission`, `Module`, `ModulePermission`) use integer IDs (`PermissionId`, `ModuleId`, `ModulePermissionId`) instead — easier to reference from code.
+
+### Collection naming
+
+There is no attribute-based mapping. The collection name is `typeof(T).Name` — so `EmpUser` lives in `EmpUser`, `LeaveRequest` in `LeaveRequest`, etc. This means **renaming an entity class also renames its MongoDB collection** — any rename needs a data migration.
+
+---
+
+## Multi-tenancy
+
+### Where the company ID comes from
+
+[`CurrentContext.CompanyId(IHttpContextAccessor)`](../Codeji.CMS.Utility/middlewares/CurrentContext.cs):
+
+```csharp
+public static string CompanyId(IHttpContextAccessor httpContextAccessor)
+{
+    if (httpContextAccessor != null && httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated == true)
+    {
+        var identity = httpContextAccessor.HttpContext.User.Identity as ClaimsIdentity;
+        return identity?.Claims
+            .Where(a => a.Type == ClaimTypesEnum.company_id.ToString())
+            .Select(a => a.Value).SingleOrDefault() ?? "";
+    }
+    return httpContextAccessor?.HttpContext?.Request.Headers["cId"].ToString() ?? string.Empty;
+}
+```
+
+- **Authenticated requests** → `company_id` JWT claim, set at login by `AuthenticationHandler.GenerateJwtToken()`.
+- **Public requests** (career portal applies, contact form) → `cId` header sent by the frontend, populated from the URL of the company's public career page.
+
+### How it's enforced
+
+`MongoRepository<T>.GetQuery()` builds:
+
+```csharp
+expr = entity => entity.CompanyId == GetCompanyId();
+if (typeof(ISupportSoftDelete).IsAssignableFrom(typeof(TEntity)))
+    expr = expr.And(entity => !entity.IsDeleted);
+if (whereExpression != null) expr = expr.And(whereExpression);
+```
+
+Every read goes through this path (unless the caller passes `withDefaultFilter: false` — used by the migration runner and by a handful of cross-tenant admin reports). Don't pass `false` without thinking carefully.
+
+### What this prevents
+
+- Forgetting to filter by `CompanyId` — you can't.
+- Accidentally including soft-deleted records — you don't, by default.
+- Leaking data when an admin user logs in to one company and queries another — the JWT claim is the source of truth.
+
+### What it doesn't prevent
+
+- A bug in the **service** layer that uses `Get()` (raw queryable) and forgets default filters.
+- Aggregations / pipelines that bypass the queryable abstraction.
+- Migrations: those run with no `IHttpContextAccessor` at all and operate at the collection level.
+
+---
+
+## Soft delete
+
+Built-in. `Delete()` is rarely the right choice — most call sites do:
+
+```csharp
+await _repo.UpdateMany(
+    x => x.MyEntityId == id,
+    Builders<MyEntity>.Update.Set(x => x.IsDeleted, true)
+);
+```
+
+Reads filter out `IsDeleted == true` automatically (see above). Pass `withDeletedObjects: true` to include them — used by audit screens.
+
+Hard delete (`Delete()` / `DeleteAll()`) is reserved for true cleanups (user-requested account erasure, GDPR) and the cleanup paths in tests.
+
+---
+
+## Result<T> / Result
+
+Repository methods return [`Result`](../Codeji.CMS.Repository/Domain/Result.cs):
+
+```csharp
+public class Result<T>
+{
+    public string UserId;
+    public bool Success { get; set; } = true;
+    public string Message { get; set; } = "";
+    public int StatusCode { get; set; } = 200;
+    public int TotalRecords { get; set; }
+    public T MethodResult { get; set; }
+    public List<T> MethodResults { get; set; } = new();
+}
+
+public class Result
+{
+    public bool Success { get; set; } = false;
+    public string Message { get; set; } = "";
+    public int StatusCode { get; set; } = 200;
+}
+```
+
+Wraps every response — single record in `MethodResult`, list in `MethodResults`, count for paging in `TotalRecords`. Service and controller layers add to this; the frontend reads `data.success && data.statusCode === 200` and unwraps. See [`conventions.md`](./conventions.md) for the canonical pattern.
+
+(`GetOneResult<T>`, `GetManyResult<T>`, `GetListResult<T>` in [`Results.cs`](../Codeji.CMS.Repository/Domain/Results.cs) are mostly unused — prefer `Result<T>`.)
+
+---
+
+## MongoDbContext and caching
+
+[`MongoDbContext.cs`](../Codeji.CMS.Repository/Repositories/MongoDbContext.cs) is the singleton holding the `IMongoDatabase`. It uses [`MongoDbCacheService.cs`](../Codeji.CMS.Repository/Repositories/MongoDbCacheService.cs) to cache `IMongoCollection<T>` references by entity name so the driver doesn't re-resolve them.
+
+> **Caveat.** [`MongoDbCacheService.cs:27`](../Codeji.CMS.Repository/Repositories/MongoDbCacheService.cs#L27) calls `database.ListCollectionNamesAsync().Result` (blocking on async) inside the constructor. Worth converting to async-init the next time you touch this file.
+
+---
+
+## Entity catalog
+
+Grouped by folder — full list in [Codeji.CMS.Repository/Entities/](../Codeji.CMS.Repository/Entities/):
+
+| Folder | Entities |
+|---|---|
+| [Employees/](../Codeji.CMS.Repository/Entities/Employees/) | `EmpUser`, `EmpSummary`, `EmpEducationDetails`, `EmpCertificationDetails`, `EmpSkills`, `EmpWorkHistory`, `EmpPayRoll` |
+| [Company/](../Codeji.CMS.Repository/Entities/Company/) | `Company`, `Department`, `JobTitles`, `LeaveSettings`, `CustomAttributes`, `CustomAttributeValue`, `Policy`, `PolicyVersion` |
+| [Leave/](../Codeji.CMS.Repository/Entities/Leave/) | `LeavePolicy`, `LeaveRequest`, `EmployeeLeaveBalance` |
+| [Attendance/](../Codeji.CMS.Repository/Entities/Attendance/) | `AttendanceModel` |
+| [Recruitments/](../Codeji.CMS.Repository/Entities/Recruitments/) | `JobVacancy`, `Applicant`, `ApplicantLogs`, `Resume`, `MailTemplate` |
+| [RolePermissions/](../Codeji.CMS.Repository/Entities/RolePermissions/) | `Roles`, `Permission`, `Module`, `ModulePermission`, `RolePermission` |
+| [Calendar/](../Codeji.CMS.Repository/Entities/Calendar/) | `CalendarEntity` |
+| [Holiday/](../Codeji.CMS.Repository/Entities/Holiday/) | `Holidays` |
+| [NoticeBoard/](../Codeji.CMS.Repository/Entities/NoticeBoard/) | `Notice` |
+| (root) | `BaseClass`, `RefreshToken`, `UserSecurityToken`, `Skills`, `EmpEmailLogs`, `Notification`, `NotificationPreference`, `UserNotifications`, `Migration` |
+
+---
+
+## Common pitfalls
+
+### Don't pass `withDefaultFilter: false` casually
+
+Disabling the default filter strips company isolation **and** soft-delete handling. Only the migration runner and a couple of cross-tenant admin paths should ever do this. Code review every new use.
+
+### Pagination is the caller's job
+
+`GetAll()` returns the full result set. Apply `.Skip()` / `.Take()` (or use `GetAggregateDataAsync` with `pageNo`/`pageSize`) when the result could be large. Several services in the codebase don't — see the issues list referenced in [`modules.md`](./modules.md).
+
+### `Get()` returns `IQueryable<TEntity>` but doesn't apply default filters by itself
+
+`Get()` includes the default filter expressions, but if you bypass it and use `GetCollection().Find(...)`, you get raw collection access with no tenant scoping. That's intentional (the migration runner needs it) but dangerous in service code. Use `Get()` / `GetAll()` / `FirstOrDefault()` from services.
+
+### Reflection isn't free
+
+Every `AddOne()` walks the entity properties twice (once for `CompanyId`, once for audit fields). For per-request operations this is fine. For bulk imports of tens of thousands of rows, it's measurable — `AddMany` is the right choice and the reflection happens once per item, not once per insert.
+
+### N+1 traps
+
+Already seen in [`EmployeeService.cs`](../Codeji.CMS.Services/Employees/EmployeeService.cs):
+- `EmployeeService.GetEmployeeById` loops over custom attributes and queries per attribute.
+- `SendBirthDayAndAnniversaryNotificationToEmployees` loops over employees and re-queries inside.
+
+When you write a new aggregation, prefer one query that returns the full set, then transform in memory.

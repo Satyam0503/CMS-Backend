@@ -9,12 +9,14 @@ using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.RolePermissions;
+using Codeji.CMS.Services.Companies;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
 
 namespace Codeji.CMS.Services
@@ -29,10 +31,13 @@ namespace Codeji.CMS.Services
         private readonly IMongoDbRepository<NotificationPreference> _notificationPreferenceRepo;
         readonly IMongoDbRepository<Policy> _policyRepo;
         readonly IMongoDbRepository<PolicyVersion> _policyVersionRepo;
+        private readonly IMongoDbRepository<Department> _departmentRepo;
+        private readonly IMongoDbRepository<JobTitles> _jobTitleRepo;
         private readonly IMapper _mapper;
         private readonly IRoleService _roleService;
         private readonly IEmployeeService _employeeService;
         readonly IMiddlewareService _middlewareService;
+        private readonly ILogger<CompanyService> _logger;
 
 
         public CompanyService(
@@ -45,9 +50,12 @@ namespace Codeji.CMS.Services
             IMongoDbRepository<NotificationPreference> notificationPreferenceRepo,
             IMongoDbRepository<Policy> policyRepo,
             IMongoDbRepository<PolicyVersion> policyVersionRepo,
+            IMongoDbRepository<Department> departmentRepo,
+            IMongoDbRepository<JobTitles> jobTitleRepo,
             IRoleService roleService,
             IEmployeeService employeeService,
-            IMiddlewareService middlewareService
+            IMiddlewareService middlewareService,
+            ILogger<CompanyService> logger
             )
         {
             _roleService = roleService;
@@ -62,6 +70,9 @@ namespace Codeji.CMS.Services
             _middlewareService = middlewareService;
             _policyRepo = policyRepo;
             _policyVersionRepo = policyVersionRepo;
+            _departmentRepo = departmentRepo;
+            _jobTitleRepo = jobTitleRepo;
+            _logger = logger;
         }
 
         public async Task<Result> Register(CompanyRequestModel companyModel)
@@ -106,9 +117,49 @@ namespace Codeji.CMS.Services
             {
                 await _userRepo.AddOne(user);
                 await _notificationPreferenceRepo.AddOne(notificationPreferenceSetting);
+                await SeedDefaultDepartmentsAndJobTitles(company, user.UserId);
                 return result;
             }
             return result;
+        }
+
+        // Seeds the generic set of departments and job titles for a freshly created company.
+        // Idempotent (skips when records already exist for the company) and never propagates
+        // failures — registration must not fail because a default seed could not be inserted.
+        private async Task SeedDefaultDepartmentsAndJobTitles(Company company, string createdBy)
+        {
+            try
+            {
+                var languages = company.ApplicationLanguage is { Count: > 0 }
+                    ? company.ApplicationLanguage
+                    : new List<string> { company.DefaultLanguage ?? Languages.English };
+
+                bool hasDepartments = await _departmentRepo.Exist(d => d.CompanyId == company.CompanyId);
+                if (!hasDepartments)
+                {
+                    var departments = DefaultCompanySeeds.BuildDepartments(company.CompanyId, languages, createdBy);
+                    foreach (var dept in departments)
+                    {
+                        await _departmentRepo.AddOne(dept);
+                    }
+                }
+
+                bool hasJobTitles = await _jobTitleRepo.Exist(j => j.CompanyId == company.CompanyId);
+                if (!hasJobTitles)
+                {
+                    var jobTitles = DefaultCompanySeeds.BuildJobTitles(company.CompanyId, languages, createdBy);
+                    foreach (var jt in jobTitles)
+                    {
+                        await _jobTitleRepo.AddOne(jt);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Failed to seed default departments / job titles for company {CompanyId}. Registration will continue.",
+                    company.CompanyId);
+            }
         }
 
         public async Task<List<Company>> GetAllCompanyList()

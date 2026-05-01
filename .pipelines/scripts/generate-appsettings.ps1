@@ -49,7 +49,7 @@ param(
     [string]$AppUrl
 )
 
-Write-Host "Generating appsettings.$Environment.json"
+Write-Host "Generating appsettings.json"
 Write-Host "Output Path: $OutputPath"
 
 $logLevel = if ($Environment -eq "Development") { "Information" } else { "Warning" }
@@ -98,7 +98,7 @@ $appsettings = @{
     AllowedHosts = "*"
 }
 
-$outputFile = Join-Path $OutputPath "appsettings.$Environment.json"
+$outputFile = Join-Path $OutputPath "appsettings.json"
 $appsettings | ConvertTo-Json -Depth 10 | Out-File $outputFile -Encoding UTF8
 
-Write-Host "appsettings.$Environment.json generated successfully at: $outputFile"
+Write-Host "appsettings.json generated successfully at: $outputFile"

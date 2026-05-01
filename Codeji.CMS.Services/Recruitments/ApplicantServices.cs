@@ -91,9 +91,28 @@ namespace Codeji.CMS.Services.Recruitments
             result = await _applicantRepository.AddOne(applicant);
             if (result.Success)
             {
+                await LogNewApplication(applicant);
                 await SendEmailToApplicant(applicant);
             }
             return result;
+        }
+
+        private async Task LogNewApplication(Applicant applicant)
+        {
+            var vacancy = await _jobVacancyService.GetVacancyById(applicant.VacancyId);
+            string actorUserId = CurrentContext.UserId(_httpContextAccessor) ?? string.Empty;
+            ApplicantLogs log = new()
+            {
+                ApplicantId = applicant.ApplicantId,
+                UserId = actorUserId,
+                ActivityCategory = 0, // CommentAction.Process — initial application submission
+                Description = "New application submitted",
+                JobRole = vacancy?.Title ?? string.Empty,
+                ApplicantName = $"{applicant.FirstName} {applicant.LastName}",
+                CreatedDate = DateTime.UtcNow,
+                CreatedBy = string.IsNullOrEmpty(actorUserId) ? applicant.ApplicantId : actorUserId,
+            };
+            await _ApplicantLogsRepository.AddOne(log);
         }
 
         public async Task<Result> UpdateApplicants(ApplicantAddEditModel model)
@@ -307,7 +326,8 @@ namespace Codeji.CMS.Services.Recruitments
             string[] userIds = logList.Select(x => x.UserId).Distinct().ToArray();
             var users = (await _employeeRepository.GetAll(x => userIds.Contains(x.UserId))).ToList();
             var data = (from log in logList
-                        join user in users on log.UserId equals user.UserId
+                        join user in users on log.UserId equals user.UserId into joined
+                        from user in joined.DefaultIfEmpty()
                         select new ApplicantLogResponseModel
                         {
                             Id = log.Id,
@@ -316,7 +336,7 @@ namespace Codeji.CMS.Services.Recruitments
                             ActivityCategory = log.ActivityCategory,
                             JobRole = log.JobRole,
                             UserId = log.UserId,
-                            UserName = $"{user.FirstName} {user.LastName}",
+                            UserName = user != null ? $"{user.FirstName} {user.LastName}" : log.ApplicantName,
                             CreatedDate = log.CreatedDate,
                             CreatedBy = log.CreatedBy,
                         }).OrderByDescending(x => x.CreatedDate).ToList();
@@ -343,7 +363,8 @@ namespace Codeji.CMS.Services.Recruitments
             string[] empId = logList.Select(x => x.UserId).Distinct().ToArray();
             var users = await _employeeRepository.GetAll(x => empId.Contains(x.UserId));
             var data = (from log in logList
-                        join user in users on log.UserId equals user.UserId
+                        join user in users on log.UserId equals user.UserId into joined
+                        from user in joined.DefaultIfEmpty()
                         select new ApplicantLogResponseModel
                         {
                             Id = log.Id,
@@ -352,7 +373,7 @@ namespace Codeji.CMS.Services.Recruitments
                             ActivityCategory = log.ActivityCategory,
                             JobRole = log.JobRole,
                             UserId = log.UserId,
-                            UserName = $"{user.FirstName} {user.LastName}",
+                            UserName = user != null ? $"{user.FirstName} {user.LastName}" : log.ApplicantName,
                             ApplicantName = log.ApplicantName,
                             CompanyId = log.CompanyId,
                             CreatedBy = log.CreatedBy,
