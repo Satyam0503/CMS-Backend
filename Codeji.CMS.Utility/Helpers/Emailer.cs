@@ -4,20 +4,7 @@ using MailKit.Net.Smtp;
 using MimeKit;
 namespace Codeji.CMS.Utility.Helpers
 {
-    // public class EmailFunctionality
-    // {
-    //     public static async Task SendEmailFromAPI(string to, string subject, string body)
-    //     {
 
-    //         string SendGridAPIKey = ConfigManager.EmailSettings.SENDGRID_API_KEY;
-    //         SendGridClient SendGridClient = new SendGridClient(SendGridAPIKey);
-    //         EmailAddress fromAddress = new EmailAddress(ConfigManager.EmailSettings.FromEmail, ConfigManager.EmailSettings.FromName);
-    //         EmailAddress toAddress = new EmailAddress(to);
-    //         SendGridMessage Message = MailHelper.CreateSingleEmail(fromAddress, toAddress, subject, null, body);
-    //         Response response = await SendGridClient.SendEmailAsync(Message).ConfigureAwait(false);
-
-    //     }
-    // }
     public class Emailer
     {
         public static async Task<(bool isSent, string log)> SendMail(string to, string subject, string body, string[] cc = null, string[] bcc = null, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
@@ -59,55 +46,6 @@ namespace Codeji.CMS.Utility.Helpers
                 return (false, ex.Message.ToString());
             }
         }
-        // private static async Task SendEmailAsync(string toEmail, string subject, string body, string[] ccEmails = null, string[] bccEmails = null, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
-        // {
-        //     using var client = new SmtpClient(ConfigManager.EmailSettings.Host, ConfigManager.EmailSettings.Port)
-        //     {
-        //         Credentials = new NetworkCredential(ConfigManager.EmailSettings.FromEmail, "82cC5TnpEqg6PxH!"),
-        //         EnableSsl = true,
-        //         Timeout = 10000,
-        //         DeliveryMethod = SmtpDeliveryMethod.Network
-        //     };
-
-        //     var mailMessage = new MailMessage
-        //     {
-        //         From = new MailAddress(ConfigManager.EmailSettings.FromEmail, ConfigManager.EmailSettings.FromName),
-
-        //         Subject = subject,
-        //         Body = body,
-        //         IsBodyHtml = true
-        //     };
-
-        //     // To
-        //     mailMessage.To.Add(toEmail);
-
-        //     // CC
-        //     if (ccEmails != null)
-        //     {
-        //         foreach (var cc in ccEmails)
-        //             mailMessage.CC.Add(cc);
-        //     }
-
-        //     // BCC
-        //     if (bccEmails != null)
-        //     {
-        //         foreach (var bcc in bccEmails)
-        //             mailMessage.Bcc.Add(bcc);
-        //     }
-
-        //     // Attachments
-        //     if (attachments != null && attachments.Count > 0)
-        //     {
-        //         foreach (var (fileName, fileContent, contentType) in attachments)
-        //         {
-        //             var stream = new MemoryStream(fileContent);
-        //             var attachment = new System.Net.Mail.Attachment(stream, fileName, contentType);
-        //             mailMessage.Attachments.Add(attachment);
-        //         }
-        //     }
-
-        //     await client.SendMailAsync(mailMessage);
-        // }
         public static async Task SendEmailAsync(
         string to,
         string subject,
@@ -151,7 +89,7 @@ namespace Codeji.CMS.Utility.Helpers
 
             using var smtp = new SmtpClient();
             await smtp.ConnectAsync(ConfigManager.EmailSettings.Host, ConfigManager.EmailSettings.Port, MailKit.Security.SecureSocketOptions.StartTls);
-            await smtp.AuthenticateAsync(ConfigManager.EmailSettings.FromEmail, "82cC5TnpEqg6PxH!");
+            await smtp.AuthenticateAsync(ConfigManager.EmailSettings.FromEmail, ConfigManager.EmailSettings.SecretKey);
             await smtp.SendAsync(email);
             await smtp.DisconnectAsync(true);
         }

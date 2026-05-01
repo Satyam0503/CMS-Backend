@@ -1,6 +1,5 @@
-﻿using System;
-using Codeji.CMS.GenericRepository.Settings;
-using Microsoft.Extensions.Options;
+﻿using Codeji.CMS.GenericRepository.Settings;
+using Microsoft.Extensions.Configuration;
 using MongoDB.Driver;
 
 namespace Codeji.CMS.GenericRepository.Repositories
@@ -14,35 +13,23 @@ namespace Codeji.CMS.GenericRepository.Repositories
 
     public class MongoDbCacheService : IMongoDbCacheService
     {
-        private readonly Dictionary<string, MongoDbSettings> _cache = new();
-        private readonly List<MongoDbSettings> _dbSettings;
+        private readonly MongoDbSettings _settings;
 
-        public MongoDbCacheService(IOptions<List<MongoDbSettings>> options)
+        public MongoDbCacheService(IConfiguration configuration)
         {
-            _dbSettings = options.Value ?? throw new ArgumentException("MongoDbSettings must be provided.");
+            var connection = configuration.GetConnectionString("mongodb")
+                ?? throw new InvalidOperationException("ConnectionStrings:mongodb is not configured.");
 
-            foreach (var setting in _dbSettings)
-            {
-                var client = new MongoClient(setting.Connection);
-                var database = client.GetDatabase(setting.DatabaseName);
-                // Fetch and cache collection names
-                setting.Collections = database.ListCollectionNamesAsync().Result.ToList();
-                _cache[setting.DatabaseName] = setting;
-            }
+            _settings = new MongoDbSettings { Connection = connection };
+
+            var client = new MongoClient(_settings.Connection);
+            var database = client.GetDatabase(_settings.DatabaseName);
+            _settings.Collections = database.ListCollectionNamesAsync().Result.ToList();
         }
 
-        public MongoDbSettings GetDatabaseSettings(string entityName)
-        {
-            // Find database that contains the collection
-            return _dbSettings.FirstOrDefault(x => x.Collections.Contains(entityName))
-                   ?? GetDefaultDatabaseSettings();
-        }
+        public MongoDbSettings GetDatabaseSettings(string entityName) => _settings;
 
-        public MongoDbSettings GetDefaultDatabaseSettings()
-        {
-            return _dbSettings.FirstOrDefault()
-                   ?? throw new InvalidOperationException("No valid MongoDbSettings configuration found.");
-        }
+        public MongoDbSettings GetDefaultDatabaseSettings() => _settings;
     }
 
 }

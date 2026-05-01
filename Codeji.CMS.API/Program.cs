@@ -52,7 +52,7 @@ string corsName = "codeji";
 builder.Services.AddCors(option => option.AddPolicy(corsName, corsBuilder =>
 {
     // Get allowed origin from configuration (AppUrl from AppSettings)
-    var appUrl = builder.Configuration["AppConfiguration:AppSettings:AppUrl"];
+    var appUrl = builder.Configuration["AppSettings:AppUrl"];
 
     // For local development, also allow common localhost ports if AppUrl is not set
     var allowedOrigins = !string.IsNullOrEmpty(appUrl)
@@ -117,47 +117,18 @@ builder.Services.AddScoped<IAdminAttendanceService, AdminAttendanceService>();
 
 // MongoDB Configuration
 ConfigurationManager configuration = builder.Configuration;
-builder.Services.Configure<List<MongoDbSettings>>(configuration.GetSection("MongoDbSettings"));
-//builder.Services.Configure<AppConfiguration>(configuration.GetSection("AppConfiguration"));
-// MongoDB manual registration (REQUIRED for AttendanceRepository)
-builder.Services.AddSingleton<IMongoClient>(sp =>
-{
-    var settings = configuration
-        .GetSection("MongoDbSettings")
-        .Get<List<MongoDbSettings>>()?
-        .FirstOrDefault();
+var mongoConnection = configuration.GetConnectionString("mongodb")
+    ?? throw new Exception("ConnectionStrings:mongodb is not configured.");
+var mongoUrl = MongoUrl.Create(mongoConnection);
+if (string.IsNullOrEmpty(mongoUrl.DatabaseName))
+    throw new Exception("ConnectionStrings:mongodb must include the database name in the path.");
 
-    if (settings == null || string.IsNullOrEmpty(settings.Connection))
-        throw new Exception("MongoDB settings not configured properly.");
-
-    return new MongoDB.Driver.MongoClient(settings.Connection);
-});
-
-
+builder.Services.AddSingleton<IMongoClient>(_ => new MongoDB.Driver.MongoClient(mongoConnection));
 builder.Services.AddScoped<IMongoDatabase>(sp =>
-{
-    var settings = configuration
-        .GetSection("MongoDbSettings")
-        .Get<List<MongoDbSettings>>()?
-        .FirstOrDefault();
-
-    if (settings == null || string.IsNullOrEmpty(settings.DatabaseName))
-        throw new Exception("MongoDB database name missing.");
-
-    var client = sp.GetRequiredService<IMongoClient>();
-    return client.GetDatabase(settings.DatabaseName);
-});
+    sp.GetRequiredService<IMongoClient>().GetDatabase(mongoUrl.DatabaseName));
 
 
-AppConfiguration? appConfiguration = builder.Configuration.GetSection("AppConfiguration").Get<AppConfiguration>();
-
-if (appConfiguration == null)
-{
-    throw new Exception("AppConfiguration section is missing in appsettings.json");
-}
-
-ConfigManager.Initialize(appConfiguration);
-builder.Services.AddSingleton(appConfiguration);
+ConfigManager.Initialize(builder.Configuration);
 
 
 builder.Services.AddBusinessServices();
@@ -166,7 +137,6 @@ builder.Services.AddHttpClient();
 
 builder.Services.AddRepositoryServices();
 
-ConfigurationHelper.Initialize(configuration);
 builder.Services.AddSingleton<IAuthorizationHandler, RoleHandler>();
 builder.Services.AddAutoMapper(typeof(AutoMapperObjects));
 
@@ -185,7 +155,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateIssuerSigningKey = true,
             ValidIssuer = ConfigManager.AppSettings.APIUrl,
             ValidAudience = ConfigManager.AppSettings.AppUrl,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:SecretKey"]))
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(ConfigManager.Jwt.SecretKey))
         };
         options.Events = new JwtBearerEvents
         {
@@ -272,7 +242,7 @@ app.UseMiddleware(typeof(ExceptionHandlingMiddleware));
 
 // Enable Swagger and Swagger UI
 // Configure the HTTP request pipeline
-if (Convert.ToBoolean(configuration.GetSection("AppConfiguration:AppSettings:isForDebug").Value))
+if (Convert.ToBoolean(configuration.GetSection("AppSettings:isForDebug").Value))
 {
     app.UseSwagger();
     app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/V2/swagger.json", "Codeji Backend API"); });

@@ -1,29 +1,32 @@
+using Microsoft.Extensions.Configuration;
+
 namespace Codeji.CMS.Utility.Helpers;
 
 public class ConfigManager
 {
-    public static AppConfiguration Settings { get; private set; } = new();
-
-    public static void Initialize(AppConfiguration settings)
+    public static void Initialize(IConfiguration configuration)
     {
-        Settings = settings;
-        AppSettings = settings.AppSettings;
-        FileSettings = settings.FileSettings;
-        EmailSettings = settings.EmailSettings;
-        ReCaptcha = settings.ReCaptcha;
+        AppSettings = configuration.GetSection("AppSettings").Get<AppSettings>()
+            ?? throw new InvalidOperationException("AppSettings section is missing in appsettings.json");
+
+        FileSettings = configuration.GetSection("FileSettings").Get<FileSettings>()
+            ?? throw new InvalidOperationException("FileSettings section is missing in appsettings.json");
+
+        EmailSettings = configuration.GetSection("EmailSettings").Get<EmailSettings>()
+            ?? throw new InvalidOperationException("EmailSettings section is missing in appsettings.json");
+
+        ReCaptcha = configuration.GetSection("reCaptcha").Get<ReCaptchaSettings>()
+            ?? throw new InvalidOperationException("reCaptcha section is missing in appsettings.json");
+
+        Jwt = configuration.GetSection("Jwt").Get<JwtSettings>()
+            ?? throw new InvalidOperationException("Jwt section is missing in appsettings.json");
     }
+
     public static AppSettings AppSettings;
     public static FileSettings FileSettings;
     public static EmailSettings EmailSettings;
     public static ReCaptchaSettings ReCaptcha;
-
-}
-public class AppConfiguration
-{
-    public AppSettings AppSettings { get; set; }
-    public FileSettings FileSettings { get; set; }
-    public EmailSettings EmailSettings { get; set; }
-    public ReCaptchaSettings ReCaptcha { get; set; }
+    public static JwtSettings Jwt;
 }
 
 
@@ -33,7 +36,6 @@ public class AppSettings
     public string AppVersion { get; set; }
     public string APIUrl { get; set; }
     public string AppUrl { get; set; }
-
 }
 
 public class FileSettings
@@ -54,7 +56,7 @@ public class EmailSettings
     public string FromEmail { get; set; }
     public string BccEmail { get; set; }
     public string SupportEmail { get; set; }
-    public string SENDGRID_API_KEY { get; set; }
+    public string SecretKey { get; set; }
 }
 
 public class ReCaptchaSettings
@@ -62,5 +64,8 @@ public class ReCaptchaSettings
     public string SecretKey { get; set; }
 }
 
-
-
+public class JwtSettings
+{
+    public string SecretKey { get; set; }
+    public int Expiry { get; set; }
+}

@@ -12,14 +12,12 @@ var configuration = new ConfigurationBuilder()
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
     .Build();
 
-// get specific section from configuration file
-var section = configuration.GetSection("MongoDbSettings");
-var _dbSettings = section.Get<MongoDbSettings>();
-
-// connect to database 
-
-var mongodb = new MongoClient(_dbSettings.Connection);
-var db = mongodb.GetDatabase(_dbSettings.DatabaseName);
+// connect to database
+var connection = configuration.GetConnectionString("mongodb")
+    ?? throw new InvalidOperationException("ConnectionStrings:mongodb is not configured.");
+var mongoUrl = MongoUrl.Create(connection);
+var mongodb = new MongoClient(connection);
+var db = mongodb.GetDatabase(mongoUrl.DatabaseName);
 // Load migrations dynamically
 var migrations = MigrationLoader.LoadMigrations();
 

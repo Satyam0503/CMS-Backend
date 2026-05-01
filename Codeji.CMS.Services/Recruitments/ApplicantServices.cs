@@ -195,12 +195,12 @@ namespace Codeji.CMS.Services.Recruitments
         //Get Applicant List Using Filter Change this logic in Future
         public async Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters? filters)
         {
-            IEnumerable<Applicant> applicantList = [];
+            List<Applicant> applicantList = [];
             int count = 0;
             if (filters is null)
             {
-                applicantList = await _applicantRepository.GetAll();
-                count = applicantList.Count();
+                applicantList = (await _applicantRepository.GetAll()).ToList();
+                count = applicantList.Count;
             }
             else
             {
@@ -214,7 +214,7 @@ namespace Codeji.CMS.Services.Recruitments
                 || x.FirstName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
                 || x.LastName.Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase)
                 || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));
-                applicantList = await _applicantRepository.GetAggregateDataAsync<Applicant>(whereCondition, pageNo: filters.PageNo, pageSize: filters.PageSize, isAscending: false, orderedKey: "CreatedDate");
+                applicantList = (await _applicantRepository.GetAggregateDataAsync<Applicant>(whereCondition, pageNo: filters.PageNo, pageSize: filters.PageSize, isAscending: false, orderedKey: "CreatedDate")).ToList();
                 count = await _applicantRepository.Count(whereCondition);
             }
             var vacancyIds = applicantList.Select(a => a.VacancyId).Where(v => !string.IsNullOrEmpty(v)).Distinct().ToList();

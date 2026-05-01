@@ -13,10 +13,10 @@ param(
     [string]$BuildNumber,
 
     [Parameter(Mandatory=$true)]
-    [string]$MongoConnectionString,
+    [string]$IsForDebug,
 
     [Parameter(Mandatory=$true)]
-    [string]$MongoDatabaseName,
+    [string]$MongoConnectionString,
 
     [Parameter(Mandatory=$true)]
     [string]$JwtSecretKey,
@@ -31,10 +31,13 @@ param(
     [int]$EmailPort,
 
     [Parameter(Mandatory=$true)]
+    [string]$EmailFromName,
+
+    [Parameter(Mandatory=$true)]
     [string]$EmailFromEmail,
 
     [Parameter(Mandatory=$true)]
-    [string]$SendGridApiKey,
+    [string]$EmailSecretKey,
 
     [Parameter(Mandatory=$true)]
     [string]$ReCaptchaSecretKey,
@@ -49,46 +52,38 @@ param(
 Write-Host "Generating appsettings.$Environment.json"
 Write-Host "Output Path: $OutputPath"
 
-$isDebug = if ($Environment -eq "Development") { "True" } else { "False" }
-$fromName = if ($Environment -eq "Development") { "Codeji HR Development" } else { "Codeji HR" }
 $logLevel = if ($Environment -eq "Development") { "Information" } else { "Warning" }
 $aspNetLogLevel = if ($Environment -eq "Development") { "Warning" } else { "Error" }
 
 $appsettings = @{
-    MongoDbSettings = @(
-        @{
-            Service = "primary"
-            Connection = $MongoConnectionString
-            DatabaseName = $MongoDatabaseName
-        }
-    )
-    AppConfiguration = @{
-        AppSettings = @{
-            isForDebug = $isDebug
-            appVersion = $BuildNumber
-            APIUrl = $APIUrl
-            AppUrl = $AppUrl
-        }
-        FileSettings = @{
-            UploadUrl = "uploads/"
-            Employee_ImageUrl = "fs/ProfileImage/"
-            viewResumeUrl = "fs/Resume/"
-            CompanyLogoUrl = "fs/CompanyLogo/"
-            CalendarItemCoverImage = "fs/CalendarItemCoverPictures/"
-            PolicyDocument = "fs/Policy/"
-        }
-        EmailSettings = @{
-            Host = $EmailHost
-            Port = $EmailPort
-            FromName = $fromName
-            FromEmail = $EmailFromEmail
-            BccEmail = "hello@codeji.in"
-            SupportEmail = "hr@codeji.in"
-            SENDGRID_API_KEY = $SendGridApiKey
-        }
-        reCaptcha = @{
-            SecretKey = $ReCaptchaSecretKey
-        }
+    ConnectionStrings = @{
+        mongodb = $MongoConnectionString
+    }
+    AppSettings = @{
+        isForDebug = $IsForDebug
+        appVersion = $BuildNumber
+        APIUrl = $APIUrl
+        AppUrl = $AppUrl
+    }
+    FileSettings = @{
+        UploadUrl = "uploads/"
+        Employee_ImageUrl = "fs/ProfileImage/"
+        viewResumeUrl = "fs/Resume/"
+        CompanyLogoUrl = "fs/CompanyLogo/"
+        CalendarItemCoverImage = "fs/CalendarItemCoverPictures/"
+        PolicyDocument = "fs/Policy/"
+    }
+    EmailSettings = @{
+        Host = $EmailHost
+        Port = $EmailPort
+        FromName = $EmailFromName
+        FromEmail = $EmailFromEmail
+        BccEmail = "hello@codeji.in"
+        SupportEmail = "hr@codeji.in"
+        SecretKey = $EmailSecretKey
+    }
+    reCaptcha = @{
+        SecretKey = $ReCaptchaSecretKey
     }
     Jwt = @{
         SecretKey = $JwtSecretKey
@@ -106,4 +101,4 @@ $appsettings = @{
 $outputFile = Join-Path $OutputPath "appsettings.$Environment.json"
 $appsettings | ConvertTo-Json -Depth 10 | Out-File $outputFile -Encoding UTF8
 
-Write-Host "✅ appsettings.$Environment.json generated successfully at: $outputFile"
+Write-Host "appsettings.$Environment.json generated successfully at: $outputFile"

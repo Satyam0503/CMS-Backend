@@ -14,10 +14,10 @@ parameters:
   - name: environments
     type: object
     default:
-      - name: Dev
+      - name: test
         branch: develop
         environment: Development
-      - name: Prod
+      - name: prod
         branch: main
         environment: Production
 
@@ -100,7 +100,7 @@ stages:
         dependsOn: Build
         condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/${{ env.branch }}'))
         variables:
-          - group: codeji-${{ lower(env.name) }}
+          - group: codeji-${{ env.name }}
         jobs:
           - deployment: DeployTo${{ env.name }}
             displayName: "Deploy to ${{ env.name }} VM"
@@ -113,7 +113,16 @@ stages:
                       artifact: "backend-drop"
 
                     - task: PowerShell@2
-                      displayName: "Generate appsettings.${{ env.name }}.json"
+                      displayName: "Resolve URLs from AppSettings"
+                      inputs:
+                        targetType: "inline"
+                        script: |
+                          $apiHost = ([Uri]"$(AppSettings.APIUrl)").Host
+                          Write-Host "##vso[task.setvariable variable=ApiHost]$apiHost"
+                          Write-Host "Resolved: ApiHost=$apiHost"
+
+                    - task: PowerShell@2
+                      displayName: "Generate appsettings.${{ env.environment }}.json"
                       inputs:
                         targetType: "filePath"
                         filePath: "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/generate-appsettings.ps1"
@@ -121,14 +130,15 @@ stages:
                           -Environment "${{ env.environment }}"
                           -OutputPath "$(Pipeline.Workspace)/backend-drop/api"
                           -BuildNumber "$(Build.BuildNumber)"
+                          -IsForDebug "$(AppSettings.isForDebug)"
                           -MongoConnectionString "$(MongoDB.ConnectionString)"
-                          -MongoDatabaseName "$(MongoDB.DatabaseName)"
                           -JwtSecretKey "$(Jwt.SecretKey)"
                           -JwtExpiry "$(Jwt.Expiry)"
                           -EmailHost "$(EmailSettings.Host)"
                           -EmailPort $(EmailSettings.Port)
+                          -EmailFromName "$(EmailSettings.FromName)"
                           -EmailFromEmail "$(EmailSettings.FromEmail)"
-                          -SendGridApiKey "$(EmailSettings.SendGridApiKey)"
+                          -EmailSecretKey "$(EmailSettings.SecretKey)"
                           -ReCaptchaSecretKey "$(ReCaptcha.SecretKey)"
                           -APIUrl "$(AppSettings.APIUrl)"
                           -AppUrl "$(AppSettings.AppUrl)"
@@ -138,20 +148,30 @@ stages:
                       inputs:
                         targetType: "inline"
                         script: |
+                          $siteName = "crm-${{ env.name }}-api"
+                          $deployPath = "$(DeployRoot)\$siteName"
+
                           Write-Host "=========================================="
-                          Write-Host "Deploying to ${{ env.name }}"
-                          Write-Host "   Site: codeji-$(env)"
-                          Write-Host "   Path: $(DeployPath)codeji_$(env)/api"
+                          Write-Host "Deploying API to ${{ env.name }}"
+                          Write-Host "   Site:     $siteName"
+                          Write-Host "   Pool:     $siteName"
+                          Write-Host "   Host:     $(ApiHost)"
+                          Write-Host "   Path:     $deployPath"
                           Write-Host "=========================================="
 
-                          # Setup IIS Website
-                          & "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/setup-iis-website.ps1" -SiteName "codeji-$(env)" -PhysicalPath "$(DeployPath)codeji_$(env)/api" -Port 80
+                          # Setup IIS Website (creates app pool, site, and host-header binding; stops pool to release locks)
+                          & "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/setup-iis-website.ps1" `
+                            -SiteName $siteName `
+                            -PhysicalPath $deployPath `
+                            -Port 80 `
+                            -HostName "$(ApiHost)" `
+                            -AppPoolName $siteName
 
                           # Copy application files
-                          Copy-Item -Path "$(Pipeline.Workspace)/backend-drop/api/*" -Destination "$(DeployPath)codeji_$(env)/api" -Recurse -Force
+                          Copy-Item -Path "$(Pipeline.Workspace)/backend-drop/api/*" -Destination $deployPath -Recurse -Force
 
                           # Start application pool
-                          & "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/start-iis-apppool.ps1" -AppPoolName "codeji-$(env)"
+                          & "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/start-iis-apppool.ps1" -AppPoolName $siteName
 
                           Write-Host "=========================================="
                           Write-Host "${{ env.name }} deployment completed!"

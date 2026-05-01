@@ -13,10 +13,8 @@ namespace Codeji.CMS.Utility.Helpers
         public static bool VerifyPassword(string toMatch, string forMatch) => BCrypt.Net.BCrypt.Verify(toMatch, forMatch);
         public static string GenerateJwtToken(string userId, string companyId, string roleId, List<string> userRole)
         {
-            // Retrieve JWT settings from configuration
-            IConfigurationSection jwtSettings = ConfigurationHelper.config.GetSection("jwt");
-            byte[] key = Encoding.UTF8.GetBytes(jwtSettings["SecretKey"]);
-            int expiryMinutes = int.Parse(jwtSettings["Expiry"]);
+            byte[] key = Encoding.UTF8.GetBytes(ConfigManager.Jwt.SecretKey);
+            int expiryMinutes = ConfigManager.Jwt.Expiry;
 
             // Define claims
             List<Claim> claims = new List<Claim>
