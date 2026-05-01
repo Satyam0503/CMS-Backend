@@ -74,10 +74,17 @@ if (-not $site) {
     }
     Write-Host "IIS Website created successfully"
 } else {
-    Write-Host "IIS Website already exists - reconciling pool and bindings"
+    Write-Host "IIS Website already exists - reconciling pool, physical path, and bindings"
 
     # Ensure correct app pool
     Set-ItemProperty "IIS:\Sites\$SiteName" -Name "applicationPool" -Value $AppPoolName
+
+    # Ensure correct physical path (root application of the site)
+    $currentPath = (Get-WebFilePath "IIS:\Sites\$SiteName").FullName
+    if ($currentPath -ne $PhysicalPath) {
+        Write-Host "Updating physical path: $currentPath -> $PhysicalPath"
+        Set-ItemProperty "IIS:\Sites\$SiteName" -Name "physicalPath" -Value $PhysicalPath
+    }
 
     # Ensure expected binding exists
     $expectedBinding = if ([string]::IsNullOrWhiteSpace($HostName)) { "*:${Port}:" } else { "*:${Port}:${HostName}" }

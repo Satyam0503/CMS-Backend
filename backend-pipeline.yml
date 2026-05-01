@@ -141,7 +141,7 @@ stages:
                         filePath: "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/generate-appsettings.ps1"
                         arguments: >
                           -Environment "${{ env.environment }}"
-                          -OutputPath "$(Pipeline.Workspace)/backend-drop/api"
+                          -OutputPath "$(Pipeline.Workspace)/backend-drop/api/Codeji.CMS.API"
                           -BuildNumber "$(Build.BuildNumber)"
                           -IsForDebug "$(AppSettings.isForDebug)"
                           -MongoConnectionString "$(MongoDB.ConnectionString)"
@@ -162,7 +162,7 @@ stages:
                         targetType: "inline"
                         script: |
                           $siteName = "crm-${{ env.name }}-api"
-                          $deployPath = "$(DeployRoot)\$siteName"
+                          $deployPath = "$(DeployRoot)\crm-${{ env.name }}\backend\Codeji.CMS.API"
 
                           Write-Host "=========================================="
                           Write-Host "Deploying API to ${{ env.name }}"
@@ -183,7 +183,7 @@ stages:
                           # Copy application files - preserve runtime Uploads folder on the server.
                           # Robocopy /E (incl. empty subdirs) /XD excludes the Uploads tree at any case.
                           # Robocopy exit codes 0-7 are success; >=8 is failure.
-                          $src = "$(Pipeline.Workspace)\backend-drop\api"
+                          $src = "$(Pipeline.Workspace)\backend-drop\api\Codeji.CMS.API"
                           robocopy $src $deployPath /E /XD "$src\Uploads" "$src\uploads" /NFL /NDL /NJH /NJS /NP
                           if ($LASTEXITCODE -ge 8) {
                             throw "robocopy failed with exit code $LASTEXITCODE"
