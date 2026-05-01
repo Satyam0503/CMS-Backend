@@ -43,23 +43,23 @@ new EnumSerializer<NotificationPreferenceType>(BsonType.String)
 
 // Add services to the container
 builder.Services.AddControllers();
-    // .AddJsonOptions(options =>
-    // {
-    //     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-    // });
+// .AddJsonOptions(options =>
+// {
+//     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+// });
 
 string corsName = "codeji";
-builder.Services.AddCors(option => option.AddPolicy(corsName, corsBuilder =>
+builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
 {
-    // Get allowed origin from configuration (AppUrl from AppSettings)
-    var appUrl = builder.Configuration["AppSettings:AppUrl"];
-
-    // For local development, also allow common localhost ports if AppUrl is not set
-    var allowedOrigins = !string.IsNullOrEmpty(appUrl)
-        ? new[] { appUrl.TrimEnd('/') }
-        : new[] { "http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:4173", "http://localhost:4173" };
-
-    corsBuilder.AllowCredentials().WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod();
+    builder
+    .AllowCredentials()
+    .SetIsOriginAllowed(origin =>
+    {
+        string host = new Uri(origin).Host;
+        return host == "localhost" || host.EndsWith(".codeji.in");
+    })
+    .AllowAnyHeader()
+    .AllowAnyMethod();
 }));
 
 // Swagger config
