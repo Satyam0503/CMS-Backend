@@ -77,6 +77,15 @@ stages:
               arguments: "--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/api"
               zipAfterPublish: false
 
+          - task: DotNetCoreCLI@2
+            displayName: "Publish Migrations Runner"
+            inputs:
+              command: "publish"
+              publishWebProjects: false
+              projects: "Codeji.CMS.Migrations/Codeji.CMS.Migrations.csproj"
+              arguments: "--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/migrations"
+              zipAfterPublish: false
+
           - task: CopyFiles@2
             displayName: "Copy Deployment Scripts"
             inputs:
@@ -195,6 +204,26 @@ stages:
                             $p = Join-Path $deployPath $d
                             if (-not (Test-Path $p)) { New-Item -Path $p -ItemType Directory -Force | Out-Null }
                           }
+
+                          # Deploy migrations runner to a sibling folder of the API.
+                          # Clean copy each time so old DLLs from prior releases don't linger.
+                          $migrationsSrc  = "$(Pipeline.Workspace)\backend-drop\migrations"
+                          $migrationsPath = "$(DeployRoot)\crm-${{ env.name }}\backend\migrations"
+                          if (Test-Path $migrationsPath) {
+                            Remove-Item -Path $migrationsPath -Recurse -Force
+                          }
+                          robocopy $migrationsSrc $migrationsPath /E /NFL /NDL /NJH /NJS /NP
+                          if ($LASTEXITCODE -ge 8) {
+                            throw "robocopy (migrations) failed with exit code $LASTEXITCODE"
+                          }
+                          $global:LASTEXITCODE = 0
+
+                          # Run migrations BEFORE starting the app pool. A non-zero exit throws,
+                          # so a failed migration aborts the deployment with the previous version
+                          # still serving traffic (app pool stays stopped).
+                          & "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/run-migrations.ps1" `
+                            -MigrationsPath $migrationsPath `
+                            -MongoConnectionString "$(MongoDB.ConnectionString)"
 
                           # Start application pool
                           & "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/start-iis-apppool.ps1" -AppPoolName $siteName
