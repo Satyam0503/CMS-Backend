@@ -95,7 +95,10 @@ public class AddPayrollSettingseAndItsModulePermissions : IMigration
                     }
                 }
             }
-            await rolePermission.InsertManyAsync(payrollSettingsRolePermission);
+            // Skip when no roles exist yet — happens on a fresh DB before any company has registered.
+            // New companies will receive permissions for this module via RoleServices.AddDefaultRole during registration.
+            if (payrollSettingsRolePermission.Count > 0)
+                await rolePermission.InsertManyAsync(payrollSettingsRolePermission);
             await migrations.InsertOneAsync(new()
             {
                 Id = Id,

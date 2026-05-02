@@ -94,7 +94,10 @@ public class AddPolicyModuleAndItsModulePermissions : IMigration
                     }
                 }
             }
-            await rolePermission.InsertManyAsync(policyRolePermission);
+            // Skip when no roles exist yet — happens on a fresh DB before any company has registered.
+            // New companies will receive permissions for this module via RoleServices.AddDefaultRole during registration.
+            if (policyRolePermission.Count > 0)
+                await rolePermission.InsertManyAsync(policyRolePermission);
             await migrations.InsertOneAsync(new()
             {
                 Id = Id,

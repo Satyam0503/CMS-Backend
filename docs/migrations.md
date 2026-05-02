@@ -39,6 +39,19 @@ public string Id => $"2026-05-01-{typeof(MyMigration).Name}";
 
 This means **the date in the ID is what controls run order, not the file's creation date**. If you need a migration to run *between* two existing ones (a hotfix), pick a date that sorts in the right place — and avoid colliding with future planned migrations.
 
+### Seed-first invariant
+
+Seed migrations (the ones that populate global lookup data — `Permission`, `Module`, `ModulePermission`, `MailTemplate`) **must always sort before** module-add migrations. Module-add migrations look up rows from the seed tables when they run, and a fresh DB without the seeds applied first will fail.
+
+This is enforced purely by the date prefix:
+
+| Type | Date convention |
+|---|---|
+| Seed migrations | The earliest possible dates — currently `2024-12-01` and `2024-12-02` |
+| Module-add migrations | A date >= today, in chronological order |
+
+When introducing a new seed migration, give it a date older than all existing module-add migrations (or earlier than the seeds you want to depend on it). When introducing a new module-add migration, use today's date or later.
+
 ---
 
 ## Idempotency

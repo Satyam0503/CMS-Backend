@@ -1,41 +1,34 @@
 {
-  "MongoDbSettings": [
-    {
-      "Service": "primary",
-      "Connection": "mongodb://username:password@YOUR-DEV-SERVER-IP:27017/codejiCmsv2",
-      "DatabaseName": "codejiCmsv2"
-    }
-  ],
-  "AppConfiguration": {
-    "AppSettings": {
-      "isForDebug": "True",
-      "appVersion": "v4.0.0-dev-local",
-      "APIUrl": "http://localhost:5036/",
-      "AppUrl": "http://localhost:5173/"
-    },
-    "FileSettings": {
-      "UploadUrl": "uploads/",
-      "Employee_ImageUrl": "fs/ProfileImage/",
-      "viewResumeUrl": "fs/Resume/",
-      "CompanyLogoUrl": "fs/CompanyLogo/",
-      "CalendarItemCoverImage": "fs/CalendarItemCoverPictures/",
-      "PolicyDocument": "fs/Policy/"
-    },
-    "EmailSettings": {
-      "Host": "smtp.hostinger.com",
-      "Port": 587,
-      "FromName": "Codeji HR Development",
-      "FromEmail": "depapp@codeji.in",
-      "BccEmail": "hello@codeji.in",
-      "SupportEmail": "hr@codeji.in",
-      "SENDGRID_API_KEY": "SG.your-sendgrid-api-key-here"
-    },
-    "reCaptcha": {
-      "SecretKey": "your-recaptcha-secret-key-here"
-    }
+  "ConnectionStrings": {
+    "mongodb": "mongodb://codeji:codejidb@192.168.0.172:27017/codejiCmsv2"
+  },
+  "AppSettings": {
+    "isForDebug": "True",
+    "appVersion": "v4.0.0.15102024",
+    "APIUrl": "http://localhost:5036/",
+    "AppUrl": "http://localhost:5173/"
+  },
+  "FileSettings": {
+    "UploadUrl": "uploads/",
+    "Employee_ImageUrl": "fs/ProfileImage/",
+    "viewResumeUrl": "fs/Resume/",
+    "CompanyLogoUrl": "fs/CompanyLogo/",
+    "CalendarItemCoverImage": "fs/CalendarItemCoverPictures/",
+    "PolicyDocument": "fs/Policy/"
+  },
+  "EmailSettings": {
+    "Host": "smtp.hostinger.com",
+    "Port": 587,
+    "FromName": "Codeji HR Test",
+    "FromEmail": "depapp@codeji.in",
+    "BccEmail": "hello@codeji.in",
+    "SupportEmail": "hr@codeji.in"
+  },
+  "reCaptcha": {
+    "SecretKey": "6LfRlNopAAAAAPXaiN5MQqq4vmTgDHAwmik_A3-d"
   },
   "Jwt": {
-    "SecretKey": "GENERATE-A-SECURE-64-CHARACTER-KEY-FOR-DEVELOPMENT",
+    "SecretKey": "masijdslwjvb6njsw902modsn826snswp2w8ytabdpahmspqudkmd",
     "Expiry": "15"
   },
   "Logging": {
