@@ -57,11 +57,23 @@ if (-not $appPool) {
     Write-Host "Application Pool already exists"
 }
 
-# Stop application pool before deployment (release file locks)
-Write-Host "Stopping Application Pool: $AppPoolName"
-Stop-WebAppPool -Name $AppPoolName -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 5
-Write-Host "Application Pool stopped"
+# Stop application pool before deployment (release file locks).
+# Skip if already stopped, and tolerate IIS throwing a terminating
+# InvalidOperationException ("Object on target path is already stopped")
+# which -ErrorAction SilentlyContinue does NOT suppress.
+$poolState = (Get-Item "IIS:\AppPools\$AppPoolName" -ErrorAction SilentlyContinue).State
+if ($poolState -eq "Started") {
+    Write-Host "Stopping Application Pool: $AppPoolName"
+    try {
+        Stop-WebAppPool -Name $AppPoolName -ErrorAction Stop
+        Start-Sleep -Seconds 5
+        Write-Host "Application Pool stopped"
+    } catch {
+        Write-Host "Stop-WebAppPool reported: $($_.Exception.Message) - continuing"
+    }
+} else {
+    Write-Host "Application Pool is not running (state: $poolState) - skipping stop"
+}
 
 # Check if Website exists, create if not
 $site = Get-Website -Name $SiteName -ErrorAction SilentlyContinue

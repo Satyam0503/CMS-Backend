@@ -69,13 +69,13 @@ stages:
             continueOnError: true
 
           - task: DotNetCoreCLI@2
-            displayName: "Publish API"
+            displayName: "Publish API (zipped)"
             inputs:
               command: "publish"
               publishWebProjects: false
               projects: "Codeji.CMS.API/Codeji.CMS.API.csproj"
               arguments: "--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/api"
-              zipAfterPublish: false
+              zipAfterPublish: true
 
           - task: DotNetCoreCLI@2
             displayName: "Publish Migrations Runner"
@@ -135,6 +135,13 @@ stages:
                     - download: current
                       artifact: "backend-drop"
 
+                    - task: ExtractFiles@1
+                      displayName: "Extract API zip to staging"
+                      inputs:
+                        archiveFilePatterns: "$(Pipeline.Workspace)/backend-drop/api/Codeji.CMS.API.zip"
+                        destinationFolder: "$(Pipeline.Workspace)/api-staging"
+                        cleanDestinationFolder: true
+
                     - task: PowerShell@2
                       displayName: "Resolve URLs from AppSettings"
                       inputs:
@@ -145,13 +152,39 @@ stages:
                           Write-Host "Resolved: ApiHost=$apiHost"
 
                     - task: PowerShell@2
+                      displayName: "Run Database Migrations"
+                      inputs:
+                        targetType: "inline"
+                        script: |
+                          $migrationsDir = "$(Pipeline.Workspace)\backend-drop\Codeji.CMS.Migrations"
+                          if (-not (Test-Path "$migrationsDir\Codeji.CMS.Migrations.exe")) {
+                            throw "Migrations executable not found at $migrationsDir"
+                          }
+
+                          # Inject env-specific Mongo connection string into the runner's appsettings.json
+                          $appsettings = @{
+                              ConnectionStrings = @{
+                                  mongodb = "$(MongoDB.ConnectionString)"
+                              }
+                          }
+                          $appsettings | ConvertTo-Json -Depth 10 |
+                            Out-File "$migrationsDir\appsettings.json" -Encoding UTF8 -Force
+
+                          Write-Host "Running migrations..."
+                          & "$migrationsDir\Codeji.CMS.Migrations.exe"
+                          if ($LASTEXITCODE -ne 0) {
+                            throw "Migrations runner exited with code $LASTEXITCODE"
+                          }
+                          Write-Host "Migrations completed successfully"
+
+                    - task: PowerShell@2
                       displayName: "Generate appsettings.${{ env.environment }}.json"
                       inputs:
                         targetType: "filePath"
                         filePath: "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/generate-appsettings.ps1"
                         arguments: >
                           -Environment "${{ env.environment }}"
-                          -OutputPath "$(Pipeline.Workspace)/backend-drop/api/Codeji.CMS.API"
+                          -OutputPath "$(Pipeline.Workspace)/api-staging"
                           -BuildNumber "$(Build.BuildNumber)"
                           -IsForDebug "$(AppSettings.isForDebug)"
                           -MongoConnectionString "$(MongoDB.ConnectionString)"
@@ -167,7 +200,7 @@ stages:
                           -AppUrl "$(AppSettings.AppUrl)"
 
                     - task: PowerShell@2
-                      displayName: "Deploy to ${{ env.name }} IIS"
+                      displayName: "Deploy API to ${{ env.name }} IIS"
                       inputs:
                         targetType: "inline"
                         script: |
@@ -193,7 +226,7 @@ stages:
                           # Copy application files - preserve runtime Uploads folder on the server.
                           # Robocopy /E (incl. empty subdirs) /XD excludes the Uploads tree at any case.
                           # Robocopy exit codes 0-7 are success; >=8 is failure.
-                          $src = "$(Pipeline.Workspace)\backend-drop\api\Codeji.CMS.API"
+                          $src = "$(Pipeline.Workspace)\api-staging"
                           robocopy $src $deployPath /E /XD "$src\Uploads" "$src\uploads" /NFL /NDL /NJH /NJS /NP
                           if ($LASTEXITCODE -ge 8) {
                             throw "robocopy failed with exit code $LASTEXITCODE"
@@ -239,8 +272,9 @@ stages:
                       inputs:
                         targetType: "inline"
                         script: |
-                          $artifactDir = "$(Pipeline.Workspace)\backend-drop"
-                          if (Test-Path $artifactDir) {
-                            Remove-Item -Path $artifactDir -Recurse -Force -ErrorAction SilentlyContinue
-                            Write-Host "Cleaned up $artifactDir"
+                          foreach ($p in @("$(Pipeline.Workspace)\backend-drop", "$(Pipeline.Workspace)\api-staging")) {
+                            if (Test-Path $p) {
+                              Remove-Item -Path $p -Recurse -Force -ErrorAction SilentlyContinue
+                              Write-Host "Cleaned up $p"
+                            }
                           }
