@@ -312,11 +312,14 @@ namespace Codeji.CMS.Services.Employees
                     TotalRecords = totalRecords,
                 };
             }
-            string[] depId = employeeList.Select(x => x.Department).Distinct().ToArray();
-            var deptList = await _departmentRepository.GetAll(x => depId.Contains(x.DepartmentId));
+            string[] depId = []; employeeList.Select(x => x.Department).Distinct().ToArray();
+            // Materialize immediately. GetAll returns a cursor-backed IEnumerable;
+            // letting the in-memory join below force the enumeration triggers a
+            // Mongo LINQ3 + .NET 10 reflection failure inside PartialEvaluator.
+            var deptList = (await _departmentRepository.GetAll(x => depId.Contains(x.DepartmentId))).ToList();
 
             string[] jobRoleId = employeeList.Select(e => e.JobRole).Distinct().ToArray();
-            var jobRoleList = await _jobTitlesRepository.GetAll(jt => jobRoleId.Contains(jt.JobTitleId));
+            var jobRoleList = (await _jobTitlesRepository.GetAll(jt => jobRoleId.Contains(jt.JobTitleId))).ToList();
 
             var data = (from emp in employeeList
                         join dept in deptList
@@ -379,6 +382,16 @@ namespace Codeji.CMS.Services.Employees
             returnModel.ApplicationLanguage = companyDetails.ApplicationLanguage;
             returnModel.ProfileImage = user.ProfileUrl;
             returnModel.CompanyLogo = Common.GetCompanyLogoUrl(companyDetails.CompanyLogo);
+            // Pick the localized job title: Accept-Language → company default → "en" → first available.
+            if (user.JobRoleTitle != null && user.JobRoleTitle.Count > 0)
+            {
+                string requestLang = CurrentContext.GetLanguage(_httpContextAccessor);
+                returnModel.JobTitle =
+                    (!string.IsNullOrEmpty(requestLang) && user.JobRoleTitle.TryGetValue(requestLang, out var fromHeader) ? fromHeader : null)
+                    ?? (!string.IsNullOrEmpty(companyDetails.DefaultLanguage) && user.JobRoleTitle.TryGetValue(companyDetails.DefaultLanguage, out var fromDefault) ? fromDefault : null)
+                    ?? (user.JobRoleTitle.TryGetValue("en", out var fromEn) ? fromEn : null)
+                    ?? user.JobRoleTitle.Values.FirstOrDefault(v => !string.IsNullOrEmpty(v));
+            }
             return returnModel;
         }
         public async Task<Result> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId)
@@ -787,7 +800,7 @@ namespace Codeji.CMS.Services.Employees
             if (empUser is null) return result;
             if (empUser.ProfileUrl != null)
             {
-                string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\ProfileImage\\");
+                string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "ProfileImage");
                 string oldPath = Path.Combine(uploadFolder, empUser.ProfileUrl);
                 FileInfo fileInfo = new(oldPath);
                 fileInfo.Delete();

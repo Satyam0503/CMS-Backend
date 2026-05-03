@@ -1,10 +1,12 @@
 */bin
 */obj
 .vs
+.vscode/*
 */Uploads/*
 
 .fake
 Codeji.CMS.API/.DS_Store
 Codeji.CMS.API/Properties/.DS_Store
 
-# Environment-specific configuration files with secrets
+Codeji.CMS.API/Uploads/*
+

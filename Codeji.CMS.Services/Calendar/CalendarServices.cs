@@ -201,7 +201,7 @@ public class CalendarServices : ICalendarServices
 
     public static async Task<string> AddUpdateCalenderItemImage(IFormFile image, string? existingImageName = null)
     {
-        string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\CalendarItemCoverPictures\\");
+        string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "CalendarItemCoverPictures");
 
         if (!Directory.Exists(uploadFolder))
         {
@@ -223,7 +223,7 @@ public class CalendarServices : ICalendarServices
     }
     public static void DeleteExistingCoverImage(string imageName)
     {
-        string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\CalendarItemCoverPictures\\");
+        string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "CalendarItemCoverPictures");
         string oldPath = Path.Combine(uploadFolder, imageName);
         FileInfo fileInfo = new(oldPath);
         fileInfo.Delete();

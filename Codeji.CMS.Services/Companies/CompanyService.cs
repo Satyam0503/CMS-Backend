@@ -232,7 +232,7 @@ namespace Codeji.CMS.Services
 
         public async Task<string> UpdateCompanyLogo(IFormFile companyLogo, string companyId)
         {
-            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\CompanyLogo\\");
+            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "CompanyLogo");
             string fileExtension = Path.GetExtension(companyLogo.FileName);
 
             if (!Directory.Exists(uploadFolder))

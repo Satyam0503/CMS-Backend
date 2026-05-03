@@ -1,4 +1,4 @@
-# Codeji CMS Backend Pipeline (.NET 8.0)
+# Codeji CMS Backend Pipeline (.NET 10.0)
 
 trigger:
   branches:
@@ -25,7 +25,7 @@ variables:
   solution: "CodejiCMSCore.sln"
   buildPlatform: "Any CPU"
   buildConfiguration: "Release"
-  dotnetVersion: "8.0.x"
+  dotnetVersion: "10.0.x"
 
 stages:
   # ============================================
@@ -43,7 +43,7 @@ stages:
             fetchDepth: 1
 
           - task: UseDotNet@2
-            displayName: "Install .NET 8.0 SDK"
+            displayName: "Install .NET 10.0 SDK"
             inputs:
               version: "$(dotnetVersion)"
 

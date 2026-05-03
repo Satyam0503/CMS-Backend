@@ -26,30 +26,40 @@ namespace Codeji.CMS.Services.PayRoll
 
     TimeZoneInfo indiaZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
 
-    while (!stoppingToken.IsCancellationRequested)
+    try
     {
-        var nowUtc = DateTime.UtcNow;
-        var nowIndia = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, indiaZone);
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var nowUtc = DateTime.UtcNow;
+            var nowIndia = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, indiaZone);
 
-        // Schedule for 11:11 IST
-        var scheduledTimeIndia = new DateTime(
-            nowIndia.Year,
-            nowIndia.Month,
-            nowIndia.Day,
-            13, 30, 0);
+            // Schedule for 11:11 IST
+            var scheduledTimeIndia = new DateTime(
+                nowIndia.Year,
+                nowIndia.Month,
+                nowIndia.Day,
+                13, 30, 0);
 
-        if (nowIndia >= scheduledTimeIndia)
-            scheduledTimeIndia = scheduledTimeIndia.AddDays(1);
+            if (nowIndia >= scheduledTimeIndia)
+                scheduledTimeIndia = scheduledTimeIndia.AddDays(1);
 
-        var scheduledUtc = TimeZoneInfo.ConvertTimeToUtc(scheduledTimeIndia, indiaZone);
-        var delay = scheduledUtc - nowUtc;
+            var scheduledUtc = TimeZoneInfo.ConvertTimeToUtc(scheduledTimeIndia, indiaZone);
+            var delay = scheduledUtc - nowUtc;
 
-        _logger.LogInformation("Next payroll run at {time}", scheduledTimeIndia);
+            _logger.LogInformation("Next payroll run at {time}", scheduledTimeIndia);
 
-        if (delay.TotalMilliseconds > 0)
-    await Task.Delay(delay, stoppingToken);
+            if (delay.TotalMilliseconds > 0)
+                await Task.Delay(delay, stoppingToken);
 
-        await RunPayroll(stoppingToken);
+            await RunPayroll(stoppingToken);
+        }
+    }
+    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+    {
+        // Graceful shutdown — Task.Delay / RunPayroll cancelled by host.
+        // Catching here marks the exception as user-handled so the debugger
+        // doesn't first-chance-break on every restart during dev.
+        _logger.LogInformation("Payroll Hosted Service shutdown requested.");
     }
 }
 

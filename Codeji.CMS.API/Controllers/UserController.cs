@@ -212,14 +212,14 @@ public class UserController : BaseApiController
     {
 
         string userId = CurrentContext.UserId(_httpContextAccessor);
-        string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads\\ProfileImage\\");
+        string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "ProfileImage");
         string fileExtension = Path.GetExtension(profilePicture.FileName);
         if (!Directory.Exists(uploadFolder))
         {
             Directory.CreateDirectory(uploadFolder);
         }
         string fileName = $"{Guid.NewGuid().ToString()}{fileExtension}";
-        string filePath = Path.Combine(uploadFolder + fileName);
+        string filePath = Path.Combine(uploadFolder, fileName);
         using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
         {
             await profilePicture.CopyToAsync(fileStream);

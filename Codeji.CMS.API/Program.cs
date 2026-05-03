@@ -138,7 +138,9 @@ builder.Services.AddHttpClient();
 builder.Services.AddRepositoryServices();
 
 builder.Services.AddSingleton<IAuthorizationHandler, RoleHandler>();
-builder.Services.AddAutoMapper(typeof(AutoMapperObjects));
+// AutoMapper 14+ changed the AddAutoMapper signature — assembly scan now goes
+// through an Action<IMapperConfigurationExpression> instead of a Type[] list.
+builder.Services.AddAutoMapper(cfg => cfg.AddMaps(typeof(AutoMapperObjects).Assembly));
 
 
 builder.Services.AddTransient<PdfService>();
@@ -258,15 +260,41 @@ if (!Directory.Exists(uploadsPath))
     Directory.CreateDirectory(uploadsPath);
 }
 
+// CORS first — UseStaticFiles is terminal middleware, so the CORS middleware
+// never gets a chance to attach headers to /fs/* responses. We move UseCors
+// above static files for canonical ordering and ALSO attach CORS headers
+// directly via OnPrepareResponse below — that's the only path that actually
+// works for static-file responses.
+app.UseCors(corsName);
+
 // Serve static files
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new PhysicalFileProvider(uploadsPath),
-    RequestPath = new PathString("/fs")
+    RequestPath = new PathString("/fs"),
+    OnPrepareResponse = ctx =>
+    {
+        // Mirror the allow-list from the corsName CORS policy declared at the
+        // top of this file. Keep the two predicates in sync.
+        var origin = ctx.Context.Request.Headers.Origin.ToString();
+        if (string.IsNullOrEmpty(origin)) return;
+        try
+        {
+            var host = new Uri(origin).Host;
+            if (host == "localhost" || host.EndsWith(".codeji.in"))
+            {
+                ctx.Context.Response.Headers["Access-Control-Allow-Origin"] = origin;
+                ctx.Context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
+                ctx.Context.Response.Headers["Vary"] = "Origin";
+            }
+        }
+        catch (UriFormatException)
+        {
+            // Malformed Origin header — silently skip, response gets no CORS
+            // headers and the browser blocks (correct behavior).
+        }
+    }
 });
-// CORS configuration
-
-app.UseCors(corsName);
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -295,25 +323,22 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedHost
 });
-// Add security headers
+// Add security headers.
+// Use indexer assignment (not .Add) so duplicate keys don't throw — .NET 10's
+// IHeaderDictionary.Add throws ArgumentException on existing keys (ASP0019).
 app.Use(async (context, next) =>
 {
-    context.Response.Headers.Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload;");
-    context.Response.Headers.Add("referrer-policy", new StringValues("same-origin"));
-    context.Response.Headers.Add("x-content-type-options", new StringValues("nosniff"));
-    context.Response.Headers.Add("x-frame-options", new StringValues("DENY"));
-    context.Response.Headers.Add("X-Permitted-Cross-Domain-Policies", new StringValues("none"));
-    context.Response.Headers.Add("x-xss-protection", new StringValues("1; mode=block"));
-    context.Response.Headers.Add("Content-Security-Policy", new StringValues("default-src 'self';"));
-    if (context.Response.Headers.ContainsKey("Server"))
-    {
-        context.Response.Headers.Remove("Server");
-    }
-    if (context.Response.Headers.ContainsKey("x-powered-by") || context.Response.Headers.ContainsKey("X-Powered-By"))
-    {
-        context.Response.Headers.Remove("x-powered-by");
-        context.Response.Headers.Remove("X-Powered-By");
-    }
+    var h = context.Response.Headers;
+    h["Strict-Transport-Security"]     = "max-age=31536000; includeSubDomains; preload;";
+    h["referrer-policy"]               = "same-origin";
+    h["x-content-type-options"]        = "nosniff";
+    h["x-frame-options"]               = "DENY";
+    h["X-Permitted-Cross-Domain-Policies"] = "none";
+    h["x-xss-protection"]              = "1; mode=block";
+    h["Content-Security-Policy"]       = "default-src 'self';";
+    h.Remove("Server");
+    h.Remove("x-powered-by");
+    h.Remove("X-Powered-By");
     await next();
 });
 

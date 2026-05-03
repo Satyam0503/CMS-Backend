@@ -1,26 +1,27 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(RunConfiguration)' == 'https' " />
-  <PropertyGroup Condition=" '$(RunConfiguration)' == 'http' " />
   <ItemGroup>
-    <Compile Remove="Upload\**" />
-    <Content Remove="Upload\**" />
-    <EmbeddedResource Remove="Upload\**" />
+    <!-- The .NET 10 SDK trips on the implicit <EmbeddedResource Include="**/*.resx" />
+         when zero files match. Explicit Remove keeps the rest of the implicit globs
+         (Compile, Content) functional. -->
+    <EmbeddedResource Remove="**/*.resx" />
+    <!-- Templates ship next to the binary so HtmlTemplate.Render can read them at runtime. -->
     <Content Include="Templates\**\*.*">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
-    <None Remove="Upload\**" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="HtmlSanitizer" Version="9.0.892" />
-    <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.2.0" />
+    <!-- Microsoft.AspNetCore.SignalR is bundled in the .NET 10 framework
+         (Microsoft.NET.Sdk.Web); the explicit NuGet ref is redundant and trips
+         dotnet watch's NU1510 prune check during hot reload. -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.4.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.11" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Codeji.CMS.Repository\Codeji.CMS.Repository.csproj" />
@@ -29,11 +30,7 @@
     <ProjectReference Include="..\Codeji.CMS.Utility\Codeji.CMS.Utility.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <None Remove="Upload\" />
-  </ItemGroup>
-  <ItemGroup>
+    <!-- Ensure runtime upload directories exist post-publish. -->
     <Folder Include="Properties\" />
-    <Folder Include="Uploads\ProfileImage\" />
-    <Folder Include="Uploads\Resume\" />
   </ItemGroup>
 </Project>

@@ -24,18 +24,28 @@ namespace Codeji.CMS.Services.BackgroundTasks
 
         private async Task BackgroundProcessing(CancellationToken stoppingToken)
         {
-            while (!stoppingToken.IsCancellationRequested)
+            try
             {
-                Func<CancellationToken, Task> workItem = await _taskQueue.DequeueAsync(stoppingToken);
+                while (!stoppingToken.IsCancellationRequested)
+                {
+                    Func<CancellationToken, Task> workItem = await _taskQueue.DequeueAsync(stoppingToken);
 
-                try
-                {
-                    await workItem(stoppingToken);
+                    try
+                    {
+                        await workItem(stoppingToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error occurred executing {WorkItem}.", nameof(workItem));
+                    }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error occurred executing {WorkItem}.", nameof(workItem));
-                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                // Graceful shutdown — DequeueAsync's SemaphoreSlim was cancelled
+                // by the host. Catching here marks the exception as user-handled
+                // so the debugger doesn't first-chance-break on every restart.
+                _logger.LogInformation("Priority Queued Hosted Service shutdown requested.");
             }
         }
     }
