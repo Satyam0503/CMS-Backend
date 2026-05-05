@@ -23,12 +23,16 @@ namespace Codeji.CMS.Utility
                 return null;
             return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.CompanyLogoUrl + logoUrl;
         }
-        public static string GetCalendarItemCoverImagePath(string imageUrl)
+        public static string? GetCalendarItemCoverImagePath(string? imageUrl)
         {
+            if (string.IsNullOrEmpty(imageUrl))
+                return null;
             return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.CalendarItemCoverImage + imageUrl;
         }
-        public static string GetPolicyDocumentPath(string docName)
+        public static string? GetPolicyDocumentPath(string? docName)
         {
+            if (string.IsNullOrEmpty(docName))
+                return null;
             return ConfigManager.AppSettings.APIUrl + ConfigManager.FileSettings.PolicyDocument + docName;
         }
     }

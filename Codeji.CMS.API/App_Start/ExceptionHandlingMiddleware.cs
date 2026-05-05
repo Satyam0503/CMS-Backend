@@ -90,7 +90,7 @@ namespace Codeji.CMS.API.App_Start
         {
             AppException appEx                 => (appEx.StatusCode, appEx.Message),
             AntiforgeryValidationException     => (512, ex.Message),
-            UnauthorizedAccessException        => (StatusCodes.Status401Unauthorized, "Unauthorized"),
+            UnauthorizedAccessException      => (StatusCodes.Status401Unauthorized, "Unauthorized"),
             KeyNotFoundException               => (StatusCodes.Status404NotFound, "Resource not found"),
             ArgumentException                  => (StatusCodes.Status400BadRequest, ex.Message),
             TimeoutException                   => (StatusCodes.Status504GatewayTimeout, "Request timed out"),

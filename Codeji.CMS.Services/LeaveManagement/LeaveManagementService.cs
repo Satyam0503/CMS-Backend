@@ -230,7 +230,7 @@ public class LeaveManagementService : ILeaveManagementService
         if (totalRequestedDays > employeeLeaveBalance.Balance)
         {
             result.Success = false;
-            result.StatusCode = CustomStatusCode.InsufficientLeaveBalanc;
+            result.StatusCode = CustomStatusCode.InsufficientLeaveBalance;
             return result;
         }
 
@@ -317,7 +317,7 @@ public class LeaveManagementService : ILeaveManagementService
         if (totalRequestedDays > employeeLeaveBalance.Balance)
         {
             result.Success = false;
-            result.StatusCode = CustomStatusCode.InsufficientLeaveBalanc;
+            result.StatusCode = CustomStatusCode.InsufficientLeaveBalance;
             return result;
         }
 
@@ -496,7 +496,7 @@ public class LeaveManagementService : ILeaveManagementService
         {
             if (existingLeaveRequest.TotalDays > leaveBalance.Balance)
             {
-                result.StatusCode = CustomStatusCode.InsufficientLeaveBalanc;
+                result.StatusCode = CustomStatusCode.InsufficientLeaveBalance;
                 return result;
             }
             if (model.Status == EnumsHelper.LeaveRequestStatus.Accepted)

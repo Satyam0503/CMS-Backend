@@ -554,7 +554,7 @@ namespace Codeji.CMS.Services
             response.Success = true;
             response.MethodResults = policyVersions.Select(pv => new PolicyVersionResponseModel
             {
-                PolicyDocUrl = Path.GetExtension(Common.GetPolicyDocumentPath(pv.DocUrl)),
+                PolicyDocUrl = Path.GetExtension(Common.GetPolicyDocumentPath(pv.DocUrl) ?? string.Empty),
                 VersionName = pv.VersionName,
                 Id = pv.Id,
                 IsCurrent = pv.IsCurrent

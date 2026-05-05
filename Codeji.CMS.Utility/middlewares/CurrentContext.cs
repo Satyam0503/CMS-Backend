@@ -39,8 +39,9 @@ public static class CurrentContext
         return identity?.Claims.Where(a => a.Type == ClaimTypesEnum.admin_id.ToString()).Select(a => a.Value).SingleOrDefault() ?? "";
     }
 
-    public static string GetLanguage(IHttpContextAccessor httpContextAccessor){
-        var acceptLanguage= httpContextAccessor.HttpContext.Request.Headers["Accept-Language"].ToString();
-        return acceptLanguage;
+    public static string GetLanguage(IHttpContextAccessor httpContextAccessor)
+    {
+        var acceptLanguage = httpContextAccessor.HttpContext?.Request.Headers["Accept-Language"].ToString();
+        return acceptLanguage ?? string.Empty;
     }
 }
