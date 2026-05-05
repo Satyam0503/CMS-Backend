@@ -7,7 +7,7 @@ namespace Codeji.CMS.Services.Interface
 {
     public interface IMiddlewareService
     {
-        Task<UserModel> GetUserById(string usierId);
+        Task<UserModel?> GetUserById(string userId);
         Task EmailSendAndSave(EmpEmailLogs emailLog);
         Task EmailSendAndSave(EmpEmailLogs emailLog, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null);
 

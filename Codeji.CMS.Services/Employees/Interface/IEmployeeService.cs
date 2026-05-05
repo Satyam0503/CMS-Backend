@@ -22,7 +22,7 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters);
                 Task<bool> IsEmailExist(string email);
                 Task<bool> IsEmpExistAndActive(string email);
-                Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId, string companyId);
+                Task<LoginUserViewModel?> GetSignedUserDetails(string userId, string roleId, string companyId);
                 Task<Result> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary, string userId);
                 Task<Result> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);
                 Task<Result> EditEmployeeEducation(EmployeeEducationRequestModel educationDetails, string userId);

@@ -144,7 +144,12 @@ namespace Codeji.CMS.Services.Employees
 
         private async Task SendInvitationLink(string currentUserId, EmpUser employee)
         {
-            UserModel currentUser = await _middlewareService.GetUserById(currentUserId);
+            UserModel? currentUser = await _middlewareService.GetUserById(currentUserId);
+            if (currentUser is null)
+            {
+                return;
+            }
+
             Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == currentUser.CompanyId);
 
             // generate password creation token for newly added employee
@@ -360,23 +365,24 @@ namespace Codeji.CMS.Services.Employees
             return await _employeeRepository.Exist(x => x.Email == email && x.Status && x.Password != null);
         }
 
-        public async Task<LoginUserViewModel> GetSignedUserDetails(string userId, string roleId, string companyId)
+        public async Task<LoginUserViewModel?> GetSignedUserDetails(string userId, string roleId, string companyId)
         {
             LoginUserViewModel returnModel = new();
             UserModel? user = await GetEmployeeById(userId);
             Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == roleId);
             Company? companyDetails = await _companyRepository.FirstOrDefault(x => x.CompanyId == companyId);
-            if (user is null)
+            if (user is null || role is null || companyDetails is null)
             {
                 return null;
             }
+
             string[] allowedModulePermission = await _roleService.GetRolePermissionOfuser(role.RolesId);
             returnModel.UserId = user.UserId;
             returnModel.RoleType = role.RoleType;
             returnModel.FirstName = user.FirstName;
             returnModel.LastName = user.LastName;
             returnModel.CompanyId = companyDetails.CompanyId;
-            returnModel.modulePermission = allowedModulePermission;
+            returnModel.ModulePermission = allowedModulePermission;
             returnModel.CompanyName = companyDetails.CompanyName;
             returnModel.DefaultLanguage = companyDetails.DefaultLanguage;
             returnModel.ApplicationLanguage = companyDetails.ApplicationLanguage;

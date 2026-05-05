@@ -393,7 +393,12 @@ public class RoleServices : IRoleService
         if (!string.IsNullOrEmpty(userId) && !string.IsNullOrEmpty(companyId))
 
         {
-            UserModel user = await _middleware.GetUserById(userId);
+            UserModel? user = await _middleware.GetUserById(userId);
+            if (user is null)
+            {
+                return hasPermission;
+            }
+
             string[] modulePermissions = await GetRolePermissionOfuser(user.RoleId);
             string[] permission = Role.Select(_ => $"{module}.{_}").ToArray();
             if (!string.IsNullOrEmpty(module))
