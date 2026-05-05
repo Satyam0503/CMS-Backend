@@ -147,7 +147,13 @@ stages:
                       inputs:
                         targetType: "inline"
                         script: |
-                          $apiHost = ([Uri]"$(AppSettings.APIUrl)").Host
+                          # Tolerant hostname extraction: matches anything between :// and the
+                          # first / or \, so trailing slashes (forward or back) don't break parsing.
+                          $apiUrlRaw = "$(AppSettings.APIUrl)"
+                          if ($apiUrlRaw -notmatch '^https?://([^/\\?#]+)') {
+                            throw "Could not parse hostname from AppSettings.APIUrl: '$apiUrlRaw'"
+                          }
+                          $apiHost = $matches[1]
                           Write-Host "##vso[task.setvariable variable=ApiHost]$apiHost"
                           Write-Host "Resolved: ApiHost=$apiHost"
 
