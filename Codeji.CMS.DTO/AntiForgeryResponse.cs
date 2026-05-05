@@ -1,8 +1,7 @@
-﻿namespace Codeji.CMS.DTO
+﻿namespace Codeji.CMS.DTO;
+
+public class AntiForgeryResponse
 {
-    public class AntiForgeryResponse
-    {
-        public string RequestToken { get; set; }
-        public string CookieToken { get; set; }
-    }
+    public required string RequestToken { get; set; }
+    public required string CookieToken { get; set; }
 }

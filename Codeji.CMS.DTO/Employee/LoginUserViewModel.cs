@@ -14,7 +14,7 @@
         public string CompanyName { get; set; }
         public string DefaultLanguage { get; set; }
         public List<string> ApplicationLanguage { get; set; }
-        public string[] modulePermission { get; set; }
+        public string[] ModulePermission { get; set; }
         public string? CompanyLogo { get; set; }
         public int RoleType { get; set; }
         // Localized job title — chosen by the server using Accept-Language,

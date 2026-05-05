@@ -141,7 +141,7 @@ namespace Codeji.CMS.Services.Dashboard
                     Date = x.Date,
                     Type = x.Type,
                     Description = x.Description,
-                    ImageUrl = string.IsNullOrEmpty(x.ImageUrl) ? null : Common.GetCalendarItemCoverImagePath(x.ImageUrl)
+                    ImageUrl = Common.GetCalendarItemCoverImagePath(x.ImageUrl)
                 }
             ).ToList();
             result.MethodResult = new UpComingHolidayEventResponseDto

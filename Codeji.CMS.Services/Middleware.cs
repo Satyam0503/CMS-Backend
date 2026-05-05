@@ -34,7 +34,7 @@ namespace Codeji.CMS.Services
 
 
 
-        public async Task<UserModel> GetUserById(string id)
+        public async Task<UserModel?> GetUserById(string id)
         {
             UserModel userModel = new();
             if (string.IsNullOrEmpty(id))

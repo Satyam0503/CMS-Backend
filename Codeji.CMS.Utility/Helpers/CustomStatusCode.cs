@@ -21,7 +21,7 @@ public static class CustomStatusCode
     public const int LeaveBalanceNotExist = 17;
     public const int MinAdvanceLeaveNoticeDays = 18;
     public const int PendingLeaveExist = 19;
-    public const int InsufficientLeaveBalanc = 20;
+    public const int InsufficientLeaveBalance = 20;
     public const int InsufficientMonthLeaveBalance = 21;
     public const int LeaveTypeNotExist = 22;
     public const int LeaveTypeAlreadyExist = 23;

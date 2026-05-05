@@ -72,13 +72,14 @@ namespace Codeji.CMS.API.Controllers
         public Result<AntiForgeryResponse> GetAntiForgeryToken(string appKey)
         {
             Result<AntiForgeryResponse> result = new Result<AntiForgeryResponse>();
-            AntiForgeryResponse model = new AntiForgeryResponse();
             if (appKey == "uiploutssh-817181871" && _httpContextAccessor.HttpContext != null)
             {
                 AntiforgeryTokenSet token = _antiforgery.GetAndStoreTokens(_httpContextAccessor.HttpContext);
-                model.RequestToken = token.RequestToken;
-                model.CookieToken = token.CookieToken;
-                result.MethodResult = model;
+                result.MethodResult = new AntiForgeryResponse
+                {
+                    RequestToken = token.RequestToken ?? string.Empty,
+                    CookieToken = token.CookieToken ?? string.Empty,
+                };
                 result.Success = true;
                 result.StatusCode = StatusCodes.Status200OK;
             }
@@ -173,7 +174,7 @@ namespace Codeji.CMS.API.Controllers
             string userId = CurrentContext.UserId(_httpContextAccessor);
             string roleId = CurrentContext.UserRoleId(_httpContextAccessor);
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-            LoginUserViewModel user = await _employeeService.GetSignedUserDetails(userId, roleId, companyId);
+            LoginUserViewModel? user = await _employeeService.GetSignedUserDetails(userId, roleId, companyId);
             if (user != null)
             {
                 result.MethodResult = user;

@@ -1,5 +1,3 @@
-using Codeji.CMS.GenericRepository.Interfaces;
-using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
@@ -12,13 +10,19 @@ namespace Codeji.CMS.API.ChatHub
     {
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IEmployeePresenceService _onlineUserService;
+        private readonly ILogger<ChatHub> _logger;
 
-        public ChatHub(IHttpContextAccessor httpContextAccessor, IEmployeePresenceService onlineUserService)
+        public ChatHub(
+            IHttpContextAccessor httpContextAccessor,
+            IEmployeePresenceService onlineUserService,
+            ILogger<ChatHub> logger)
         {
             _httpContextAccessor = httpContextAccessor;
             _onlineUserService = onlineUserService;
+            _logger = logger;
         }
-        public async override Task<Task> OnConnectedAsync()
+
+        public override async Task OnConnectedAsync()
         {
             // current connection connectionId and userIdentifier
             var connectionId = Context.ConnectionId;
@@ -29,9 +33,10 @@ namespace Codeji.CMS.API.ChatHub
                 string companyId = CurrentContext.CompanyId(_httpContextAccessor);
                 if (string.IsNullOrEmpty(companyId))
                 {
-                    Console.WriteLine($"Connection rejected for User {userIdentifier}: CompanyId is missing.");
+                    _logger.LogWarning("Connection rejected for User {UserId}: CompanyId is missing.", userIdentifier);
                     Context.Abort();
-                    return base.OnConnectedAsync();
+                    await base.OnConnectedAsync();
+                    return;
                 }
                 var groupName = $"company_{companyId}";
                 // Add user to the company group using their connectionId
@@ -46,10 +51,10 @@ namespace Codeji.CMS.API.ChatHub
                 // notify company members that this user is online
                 await Clients.Group(groupName).SendAsync("employeeOnline", new { userIds = onlineUsers });
             }
-            return base.OnConnectedAsync();
+            await base.OnConnectedAsync();
         }
 
-        public override async Task<Task> OnDisconnectedAsync(Exception? exception)
+        public override async Task OnDisconnectedAsync(Exception? exception)
         {
             var userIdentifier = Context.UserIdentifier;
             var connectionId = Context.ConnectionId;
@@ -59,8 +64,9 @@ namespace Codeji.CMS.API.ChatHub
                 string companyId = CurrentContext.CompanyId(_httpContextAccessor);
                 if (string.IsNullOrEmpty(companyId))
                 {
-                    Console.WriteLine($"Disconnection processing skipped for User {userIdentifier}: CompanyId is missing.");
-                    return base.OnDisconnectedAsync(exception);
+                    _logger.LogWarning("Disconnection processing skipped for User {UserId}: CompanyId is missing.", userIdentifier);
+                    await base.OnDisconnectedAsync(exception);
+                    return;
                 }
                 var groupName = $"company_{companyId}";
                 await Groups.RemoveFromGroupAsync(connectionId, groupName);
@@ -71,7 +77,7 @@ namespace Codeji.CMS.API.ChatHub
                 // Notify remaining company members that this user went offline
                 await Clients.Group(groupName).SendAsync("employeeOffline", new { userId = userIdentifier });
             }
-            return base.OnDisconnectedAsync(exception);
+            await base.OnDisconnectedAsync(exception);
         }
     }
 }
