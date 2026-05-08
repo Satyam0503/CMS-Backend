@@ -111,7 +111,7 @@
         {
             Invite,
             PasswordReset,
-            // EmailVerification,
+            EmailVerification,
             // TwoFactorAuth,
             // AccountUnlock
         }
