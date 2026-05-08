@@ -244,6 +244,56 @@ public class AccountServices : IAccountServices
         return result;
     }
 
+    public async Task<Result> VerifyEmail(string token)
+    {
+        Result result = new();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            result.StatusCode = CustomStatusCode.InvalidExpiredToken;
+            return result;
+        }
+
+        string tokenHash = TokenHelper.ComputeSha256Hash(token);
+        UserSecurityToken? userSecurityToken = await _userSecurityTokenRepository.FirstOrDefault(
+            t => t.TokenHash == tokenHash
+                 && t.Type == EnumsHelper.SecurityTokenType.EmailVerification
+                 && !t.IsUsed);
+
+        if (userSecurityToken is null)
+        {
+            result.StatusCode = CustomStatusCode.InvalidExpiredToken;
+            return result;
+        }
+
+        if (userSecurityToken.Expiry < DateTime.UtcNow)
+        {
+            result.StatusCode = CustomStatusCode.PasswordResetLinkExpired;
+            return result;
+        }
+
+        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userSecurityToken.UserId && x.Status);
+        if (user is null)
+        {
+            result.StatusCode = CustomStatusCode.EmployeeNotExist;
+            return result;
+        }
+
+        if (!user.IsEmailVerified)
+        {
+            user.IsEmailVerified = true;
+            Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == user.UserId;
+            await _employeeRepository.Update(whereCondition, user);
+        }
+
+        Expression<Func<UserSecurityToken, bool>> userTokenExpression = ut => ut.Id == userSecurityToken.Id;
+        await _userSecurityTokenRepository.UpdateMany(
+            userTokenExpression,
+            Builders<UserSecurityToken>.Update.Set(t => t.IsUsed, true).Set(t => t.UsedAt, DateTime.UtcNow));
+
+        result.Success = true;
+        return result;
+    }
+
     public async Task<Result<TokenResponseDto>> RefreshToken(RefreshTokenRequestDto model)
     {
         Result<TokenResponseDto> result = new()

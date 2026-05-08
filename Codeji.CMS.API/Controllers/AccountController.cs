@@ -195,6 +195,14 @@ namespace Codeji.CMS.API.Controllers
         }
 
         [AllowAnonymous]
+        [HttpGet]
+        [Route("account/verify-email")]
+        public async Task<Result> VerifyEmail([FromQuery] string token)
+        {
+            return await _accountService.VerifyEmail(token);
+        }
+
+        [AllowAnonymous]
         [HttpPost]
         [Route("account/ResetPassword")]
         public async Task<Result> ResetPassword([FromBody] string email)

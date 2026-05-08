@@ -22,6 +22,7 @@ using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Employees
@@ -52,6 +53,7 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<NotificationPreference> _notificationPreferenceRepository;
         readonly INotificationService _notificationService;
         readonly IMongoDbRepository<UserSecurityToken> _userSecurityTokenRepository;
+        readonly ILogger<EmployeeService> _logger;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
@@ -75,7 +77,8 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<CustomAttributeValue> customAttributeValueRepository,
             INotificationService notificationService,
             IMongoDbRepository<NotificationPreference> notificationPreferenceRepository,
-            IMongoDbRepository<UserSecurityToken> userSecurityTokenRepository
+            IMongoDbRepository<UserSecurityToken> userSecurityTokenRepository,
+            ILogger<EmployeeService> logger
             )
         {
             _employeeRepository = employeeRepository;
@@ -102,6 +105,7 @@ namespace Codeji.CMS.Services.Employees
             _notificationService = notificationService;
             _notificationPreferenceRepository = notificationPreferenceRepository;
             _userSecurityTokenRepository = userSecurityTokenRepository;
+            _logger = logger;
         }
 
         public async Task<Result<InviteEmployeeDto>> InviteNewEmployee(InviteEmployeeDto model, string currentUserId)
@@ -121,6 +125,9 @@ namespace Codeji.CMS.Services.Employees
                 LastName = model.LastName,
                 Email = model.Email,
                 EmployeeId = model.EmployeeId,
+                RoleId = model.RoleId ?? string.Empty,
+                Department = model.DepartmentId ?? string.Empty,
+                JobRole = model.JobRoleId ?? string.Empty,
                 IsEmailVerified = false,
                 Status = true
             };
@@ -140,6 +147,227 @@ namespace Codeji.CMS.Services.Employees
             await _notificationPreferenceRepository.AddOne(notificationPreferences);
             await SendInvitationLink(currentUserId, employee);
             return result;
+        }
+
+        public async Task<Result<BulkImportEmployeesResponseDto>> BulkImportEmployees(BulkImportEmployeesRequestDto model, string currentUserId)
+        {
+            Result<BulkImportEmployeesResponseDto> result = new() { Success = false };
+            if (model?.Employees == null || model.Employees.Count == 0 || model.Employees.Count > BulkImportEmployeesRequestDto.MaxBatchSize)
+            {
+                result.Message = $"Employees list must contain 1 to {BulkImportEmployeesRequestDto.MaxBatchSize} records.";
+                return result;
+            }
+
+            result.Success = true;
+            BulkImportEmployeesResponseDto response = new()
+            {
+                Total = model.Employees.Count
+            };
+
+            UserModel? currentUser = await _middlewareService.GetUserById(currentUserId);
+            if (currentUser == null)
+            {
+                result.Success = false;
+                result.Message = "Current user not found.";
+                return result;
+            }
+            string companyId = currentUser.CompanyId;
+            if (string.IsNullOrWhiteSpace(companyId))
+            {
+                result.Success = false;
+                result.Message = "Current user does not have a company assigned.";
+                return result;
+            }
+
+            Company? company = await _companyRepository.FirstOrDefault(c => c.CompanyId == companyId);
+            string defaultLanguage = string.IsNullOrWhiteSpace(company?.DefaultLanguage) ? "en" : company.DefaultLanguage;
+
+            List<Roles> availableRoles = (await _rolesRepository.GetAll(r => r.CompanyId == companyId && !r.IsDeleted)).ToList();
+            List<Department> availableDepartments = (await _departmentRepository.GetAll(d => d.CompanyId == companyId)).ToList();
+            List<JobTitles> availableJobTitles = (await _jobTitlesRepository.GetAll(j => j.CompanyId == companyId)).ToList();
+
+            var seenEmpIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seenEmails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            for (int i = 0; i < model.Employees.Count; i++)
+            {
+                BulkImportEmployeeItemDto item = model.Employees[i];
+                string empId = item.EmpId?.Trim() ?? string.Empty;
+                string firstName = item.FirstName?.Trim() ?? string.Empty;
+                string lastName = item.LastName?.Trim() ?? string.Empty;
+                string email = item.Email?.Trim() ?? string.Empty;
+                string roleName = item.Role?.Trim() ?? string.Empty;
+                string departmentName = item.Department?.Trim() ?? string.Empty;
+                string jobRoleName = item.JobRole?.Trim() ?? string.Empty;
+                int rowNumber = i + 1;
+
+                BulkImportEmployeeRowResultDto rowResult = new()
+                {
+                    RowNumber = rowNumber,
+                    EmpId = empId,
+                    Email = email
+                };
+
+                if (string.IsNullOrWhiteSpace(empId) || string.IsNullOrWhiteSpace(firstName) || string.IsNullOrWhiteSpace(lastName) || string.IsNullOrWhiteSpace(email)
+                    || string.IsNullOrWhiteSpace(roleName) || string.IsNullOrWhiteSpace(departmentName) || string.IsNullOrWhiteSpace(jobRoleName))
+                {
+                    rowResult.Status = "Failed";
+                    rowResult.Message = "Required fields are missing.";
+                    response.Results.Add(rowResult);
+                    continue;
+                }
+
+                if (!System.Net.Mail.MailAddress.TryCreate(email, out _))
+                {
+                    rowResult.Status = "Failed";
+                    rowResult.Message = "Invalid email format.";
+                    response.Results.Add(rowResult);
+                    continue;
+                }
+
+                if (!seenEmpIds.Add(empId))
+                {
+                    rowResult.Status = "Failed";
+                    rowResult.Message = "Duplicate employee ID in request.";
+                    response.Results.Add(rowResult);
+                    continue;
+                }
+
+                if (!seenEmails.Add(email))
+                {
+                    rowResult.Status = "Failed";
+                    rowResult.Message = "Duplicate email in request.";
+                    response.Results.Add(rowResult);
+                    continue;
+                }
+
+                bool existsInDb = await _employeeRepository.Exist(e => e.EmployeeId.Equals(empId, StringComparison.OrdinalIgnoreCase) || e.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+                if (existsInDb)
+                {
+                    rowResult.Status = "Failed";
+                    rowResult.Message = "Employee ID or email already exists.";
+                    response.Results.Add(rowResult);
+                    continue;
+                }
+
+                try
+                {
+                    Roles? role = availableRoles.FirstOrDefault(r =>
+                        string.Equals(NormalizeText(r.Titles), NormalizeText(roleName), StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(r.RolesId, roleName, StringComparison.OrdinalIgnoreCase));
+                    if (role == null)
+                    {
+                        rowResult.Status = "Failed";
+                        rowResult.Message = "Role not found in company.";
+                        response.Results.Add(rowResult);
+                        continue;
+                    }
+
+                    Department? department = availableDepartments.FirstOrDefault(d =>
+                        string.Equals(d.DepartmentId, departmentName, StringComparison.OrdinalIgnoreCase)
+                        || d.Titles.Any(t => string.Equals(NormalizeText(t.Label), NormalizeText(departmentName), StringComparison.OrdinalIgnoreCase)));
+                    if (department == null)
+                    {
+                        _logger.LogWarning(
+                            "Department not found in company. companyId={CompanyId}, requestedDepartment={RequestedDepartment}, availableDepartments={AvailableDepartments}",
+                            companyId,
+                            departmentName,
+                            string.Join(", ",
+                                availableDepartments
+                                    .SelectMany(d => d.Titles ?? [])
+                                    .Select(t => NormalizeText(t.Label))
+                                    .Where(label => !string.IsNullOrWhiteSpace(label))
+                                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                                    .Take(10)));
+
+                        rowResult.Status = "Failed";
+                        rowResult.Message = "Department not found in company.";
+                        response.Results.Add(rowResult);
+                        continue;
+                    }
+
+                    JobTitles? jobTitle = availableJobTitles.FirstOrDefault(j =>
+                        string.Equals(j.JobTitleId, jobRoleName, StringComparison.OrdinalIgnoreCase)
+                        || j.Titles.Any(t => string.Equals(NormalizeText(t.Label), NormalizeText(jobRoleName), StringComparison.OrdinalIgnoreCase)));
+                    if (jobTitle == null)
+                    {
+                        jobTitle = new JobTitles()
+                        {
+                            CompanyId = companyId,
+                            IsActive = true,
+                            CreatedBy = currentUserId,
+                            CreatedDate = DateTime.UtcNow,
+                            Titles =
+                            [
+                                new MultilingualModel
+                                {
+                                    Language = defaultLanguage,
+                                    Label = jobRoleName
+                                }
+                            ]
+                        };
+
+                        Result jobTitleCreateResult = await _jobTitlesRepository.AddOne(jobTitle);
+                        if (!jobTitleCreateResult.Success)
+                        {
+                            rowResult.Status = "Failed";
+                            rowResult.Message = "Unable to create new job role.";
+                            response.Results.Add(rowResult);
+                            continue;
+                        }
+                        availableJobTitles.Add(jobTitle);
+                    }
+
+                    InviteEmployeeDto inviteModel = new()
+                    {
+                        EmployeeId = empId,
+                        FirstName = firstName,
+                        LastName = lastName,
+                        Email = email,
+                        RoleId = role.RolesId,
+                        DepartmentId = department.DepartmentId,
+                        JobRoleId = jobTitle.JobTitleId
+                    };
+
+                    Result<InviteEmployeeDto> inviteResult = await InviteNewEmployee(inviteModel, currentUserId);
+                    if (inviteResult.Success)
+                    {
+                        rowResult.Status = "Created";
+                        rowResult.Message = "Employee invited successfully.";
+                        rowResult.CreatedUserId = inviteResult.MethodResult?.UserId;
+                    }
+                    else
+                    {
+                        rowResult.Status = "Failed";
+                        rowResult.Message = inviteResult.StatusCode == CustomStatusCode.EmployeeIdAlreadyExist
+                            ? "Employee ID or email already exists."
+                            : "Unable to create employee.";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Bulk employee import failed for row {RowNumber}. EmpId: {EmpId}, Email: {Email}", rowNumber, empId, email);
+                    rowResult.Status = "Failed";
+                    rowResult.Message = "Unexpected error while creating employee.";
+                }
+
+                response.Results.Add(rowResult);
+            }
+
+            response.CreatedCount = response.Results.Count(r => r.Status == "Created");
+            response.FailedCount = response.Total - response.CreatedCount;
+            result.MethodResult = response;
+            return result;
+        }
+
+        private static string NormalizeText(string? input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+            {
+                return string.Empty;
+            }
+
+            return string.Join(" ", input.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries));
         }
 
         private async Task SendInvitationLink(string currentUserId, EmpUser employee)
