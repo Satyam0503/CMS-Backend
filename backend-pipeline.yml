@@ -197,7 +197,7 @@ stages:
                           -JwtSecretKey "$(Jwt.SecretKey)"
                           -JwtExpiry "$(Jwt.Expiry)"
                           -EmailHost "$(EmailSettings.Host)"
-                          -EmailPort $(EmailSettings.Port)
+                          -EmailPort "$(EmailSettings.Port)"
                           -EmailFromName "$(EmailSettings.FromName)"
                           -EmailFromEmail "$(EmailSettings.FromEmail)"
                           -EmailSecretKey "$(EmailSettings.SecretKey)"

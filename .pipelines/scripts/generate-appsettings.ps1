@@ -24,11 +24,12 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$JwtExpiry,
 
-    [Parameter(Mandatory=$true)]
-    [string]$EmailHost,
+    [Parameter(Mandatory=$false)]
+    [AllowEmptyString()]
+    [string]$EmailHost = "",
 
-    [Parameter(Mandatory=$true)]
-    [int]$EmailPort,
+    [Parameter(Mandatory=$false)]
+    [string]$EmailPort = "0",
 
     [Parameter(Mandatory=$true)]
     [string]$EmailFromName,
@@ -36,10 +37,12 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$EmailFromEmail,
 
-    [Parameter(Mandatory=$true)]
-    [string]$EmailSecretKey,
+    [Parameter(Mandatory=$false)]
+    [AllowEmptyString()]
+    [string]$EmailSecretKey = "",
 
     [Parameter(Mandatory=$false)]
+    [AllowEmptyString()]
     [string]$SendGridApiKey = "",
 
     [Parameter(Mandatory=$true)]
@@ -78,7 +81,7 @@ $appsettings = @{
     }
     EmailSettings = @{
         Host = $EmailHost
-        Port = $EmailPort
+        Port = if ([string]::IsNullOrWhiteSpace($EmailPort)) { 0 } else { [int]$EmailPort }
         FromName = $EmailFromName
         FromEmail = $EmailFromEmail
         BccEmail = "hello@codeji.in"
