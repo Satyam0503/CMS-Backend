@@ -49,6 +49,21 @@ public class UserController : BaseApiController
         var currentUserId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.InviteNewEmployee(model, currentUserId);
     }
+
+    [Route("BulkImportEmployees")]
+    [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.Create)]
+    public async Task<Result<BulkImportEmployeesResponseDto>> BulkImportEmployees([FromBody] BulkImportEmployeesRequestDto model)
+    {
+        Result<BulkImportEmployeesResponseDto> result = new() { Success = false };
+        if (model is null || !ModelState.IsValid || model.Employees.Count == 0 || model.Employees.Count > BulkImportEmployeesRequestDto.MaxBatchSize)
+        {
+            result.Message = $"Invalid request. Employees list must contain 1 to {BulkImportEmployeesRequestDto.MaxBatchSize} records.";
+            return result;
+        }
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        return await _employeeService.BulkImportEmployees(model, currentUserId);
+    }
     [Route("GetLastEmployeeId")]
     [HttpGet]
     [ModulePermission(AppModule.Employees, Permission.View)]

@@ -14,6 +14,7 @@ namespace Codeji.CMS.Services.Employees.Interface
         public interface IEmployeeService
         {
                 Task<Result<InviteEmployeeDto>> InviteNewEmployee(InviteEmployeeDto model, string currentUserId);
+                Task<Result<BulkImportEmployeesResponseDto>> BulkImportEmployees(BulkImportEmployeesRequestDto model, string currentUserId);
                 Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId);
                 Task<bool> IsUserActive(string userId);
                 Task<UserModel> GetEmployeeById(string userId);

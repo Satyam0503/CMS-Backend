@@ -28,6 +28,7 @@ public class NotificationHub : Hub
                     "Notification hub connection rejected for User {UserId}: CompanyId is missing.",
                     userIdentifier);
                 Context.Abort();
+
                 await base.OnConnectedAsync();
                 return;
             }

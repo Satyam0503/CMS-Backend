@@ -14,6 +14,7 @@ using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Constraints;
+using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -29,6 +30,7 @@ namespace Codeji.CMS.Services
         private readonly IMongoDbRepository<ModulePermission> _modulePermissisonRepo;
         private readonly IMongoDbRepository<RolePermission> _rolePermissionRepo;
         private readonly IMongoDbRepository<NotificationPreference> _notificationPreferenceRepo;
+        private readonly IMongoDbRepository<UserSecurityToken> _userSecurityTokenRepo;
         readonly IMongoDbRepository<Policy> _policyRepo;
         readonly IMongoDbRepository<PolicyVersion> _policyVersionRepo;
         private readonly IMongoDbRepository<Department> _departmentRepo;
@@ -48,6 +50,7 @@ namespace Codeji.CMS.Services
             IMongoDbRepository<ModulePermission> modulePermissisonRepo,
             IMongoDbRepository<RolePermission> rolePermissionRepo,
             IMongoDbRepository<NotificationPreference> notificationPreferenceRepo,
+            IMongoDbRepository<UserSecurityToken> userSecurityTokenRepo,
             IMongoDbRepository<Policy> policyRepo,
             IMongoDbRepository<PolicyVersion> policyVersionRepo,
             IMongoDbRepository<Department> departmentRepo,
@@ -66,6 +69,7 @@ namespace Codeji.CMS.Services
             _rolePermissionRepo = rolePermissionRepo;
             _mapper = mapper;
             _notificationPreferenceRepo = notificationPreferenceRepo;
+            _userSecurityTokenRepo = userSecurityTokenRepo;
             _employeeService = employeeService;
             _middlewareService = middlewareService;
             _policyRepo = policyRepo;
@@ -92,8 +96,7 @@ namespace Codeji.CMS.Services
                 Password = AuthenticationHandler.HashedPassword(companyModel.Password),
                 RoleId = adminRole.FirstOrDefault(x => x.RoleType == 1)?.RolesId ?? "",
                 Status = true,
-                //  change verification logic later
-                IsEmailVerified = true
+                IsEmailVerified = false
             };
             //Company Creation and Addition in DB
             Company company = new Company()
@@ -117,10 +120,50 @@ namespace Codeji.CMS.Services
             {
                 await _userRepo.AddOne(user);
                 await _notificationPreferenceRepo.AddOne(notificationPreferenceSetting);
+                await SendCompanyUserVerificationEmail(user, company);
                 await SeedDefaultDepartmentsAndJobTitles(company, user.UserId);
                 return result;
             }
             return result;
+        }
+
+        private async Task SendCompanyUserVerificationEmail(EmpUser user, Company company)
+        {
+            string token = TokenHelper.GenerateToken();
+            string tokenHash = TokenHelper.ComputeSha256Hash(token);
+            int tokenExpiryHours = 24;
+            UserSecurityToken securityToken = new()
+            {
+                UserId = user.UserId,
+                TokenHash = tokenHash,
+                IsUsed = false,
+                Expiry = DateTime.UtcNow.AddHours(tokenExpiryHours),
+                Type = EnumsHelper.SecurityTokenType.EmailVerification
+            };
+            await _userSecurityTokenRepo.AddOne(securityToken);
+
+            string verifyLink = $"{ConfigManager.AppSettings.AppUrl}account/verify-email?token={Uri.EscapeDataString(token)}";
+            string body = HtmlTemplate.Render(
+                "<h2>Welcome, [EmployeeName]!</h2>" +
+                "<p>Please verify your email address to activate your account.</p>" +
+                "<p><a href=\"[EmailVerificationLink]\">Verify email</a></p>" +
+                "<p>This link will expire in [LinkExpiryTime].</p>",
+                new
+                {
+                    EmployeeName = $"{user.FirstName} {user.LastName}",
+                    EmailVerificationLink = verifyLink,
+                    LinkExpiryTime = $"{tokenExpiryHours} hours"
+                });
+
+            await _middlewareService.EmailSendAndSave(new EmpEmailLogs()
+            {
+                UserTo = user.UserId,
+                Subject = $"Verify your email for {company.CompanyName}",
+                Body = body,
+                EmailLogType = EnumsHelper.MailType.EmployeeWelcomeMail,
+                Email = user.Email,
+                UserFrom = user.UserId,
+            });
         }
 
         // Seeds the generic set of departments and job titles for a freshly created company.

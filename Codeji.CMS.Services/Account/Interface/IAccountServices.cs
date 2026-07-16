@@ -14,4 +14,5 @@ public interface IAccountServices
     Task<Result> LogOut(string refreshToken, string userId);
     Task<Result> GenerateTokenAndSendEmail(string email);
     Task<Result> CreateNewPassword(CreateNewPasswordRequest model);
+    Task<Result> VerifyEmail(string token);
 }
