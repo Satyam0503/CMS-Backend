@@ -57,6 +57,7 @@ public class EmailSettings
     public string BccEmail { get; set; }
     public string SupportEmail { get; set; }
     public string SecretKey { get; set; }
+    public string SendGridApiKey { get; set; }
 }
 
 public class ReCaptchaSettings

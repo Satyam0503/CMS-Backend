@@ -201,6 +201,7 @@ stages:
                           -EmailFromName "$(EmailSettings.FromName)"
                           -EmailFromEmail "$(EmailSettings.FromEmail)"
                           -EmailSecretKey "$(EmailSettings.SecretKey)"
+                          -SendGridApiKey "$(EmailSettings.SendGridApiKey)"
                           -ReCaptchaSecretKey "$(ReCaptcha.SecretKey)"
                           -APIUrl "$(AppSettings.APIUrl)"
                           -AppUrl "$(AppSettings.AppUrl)"

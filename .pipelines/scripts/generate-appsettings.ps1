@@ -39,6 +39,9 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$EmailSecretKey,
 
+    [Parameter(Mandatory=$false)]
+    [string]$SendGridApiKey = "",
+
     [Parameter(Mandatory=$true)]
     [string]$ReCaptchaSecretKey,
 
@@ -81,6 +84,7 @@ $appsettings = @{
         BccEmail = "hello@codeji.in"
         SupportEmail = "hr@codeji.in"
         SecretKey = $EmailSecretKey
+        SendGridApiKey = $SendGridApiKey
     }
     reCaptcha = @{
         SecretKey = $ReCaptchaSecretKey

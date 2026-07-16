@@ -2,6 +2,8 @@
 using System.Text.RegularExpressions;
 using MailKit.Net.Smtp;
 using MimeKit;
+using SendGrid;
+using SendGrid.Helpers.Mail;
 namespace Codeji.CMS.Utility.Helpers
 {
 
@@ -54,6 +56,27 @@ namespace Codeji.CMS.Utility.Helpers
         string[] bcc = null,
         List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
         {
+            var smtpConfigured = !string.IsNullOrWhiteSpace(ConfigManager.EmailSettings.Host)
+                && !string.IsNullOrWhiteSpace(ConfigManager.EmailSettings.SecretKey);
+
+            if (!smtpConfigured)
+            {
+                await SendViaSendGridAsync(to, subject, body, cc, bcc, attachments);
+            }
+            else
+            {
+                await SendViaSmtpAsync(to, subject, body, cc, bcc, attachments);
+            }
+        }
+
+        private static async Task SendViaSmtpAsync(
+        string to,
+        string subject,
+        string body,
+        string[] cc = null,
+        string[] bcc = null,
+        List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
+        {
             var email = new MimeMessage();
             email.From.Add(new MailboxAddress(ConfigManager.EmailSettings.FromName, ConfigManager.EmailSettings.FromEmail));
             email.To.Add(MailboxAddress.Parse(to));
@@ -92,6 +115,45 @@ namespace Codeji.CMS.Utility.Helpers
             await smtp.AuthenticateAsync(ConfigManager.EmailSettings.FromEmail, ConfigManager.EmailSettings.SecretKey);
             await smtp.SendAsync(email);
             await smtp.DisconnectAsync(true);
+        }
+
+        private static async Task SendViaSendGridAsync(
+        string to,
+        string subject,
+        string body,
+        string[] cc = null,
+        string[] bcc = null,
+        List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
+        {
+            var client = new SendGridClient(ConfigManager.EmailSettings.SendGridApiKey);
+            var from = new EmailAddress(ConfigManager.EmailSettings.FromEmail, ConfigManager.EmailSettings.FromName);
+            var to_ = new EmailAddress(to);
+            var msg = MailHelper.CreateSingleEmail(from, to_, subject, null, body);
+
+            if (cc != null)
+            {
+                msg.AddCcs(cc.Select(e => new EmailAddress(e)).ToList());
+            }
+
+            if (bcc != null)
+            {
+                msg.AddBccs(bcc.Select(e => new EmailAddress(e)).ToList());
+            }
+
+            if (attachments != null)
+            {
+                foreach (var (fileName, content, contentType) in attachments)
+                {
+                    await msg.AddAttachmentAsync(fileName, new MemoryStream(content), contentType);
+                }
+            }
+
+            var response = await client.SendEmailAsync(msg);
+            if (!response.IsSuccessStatusCode)
+            {
+                var responseBody = await response.Body.ReadAsStringAsync();
+                throw new Exception($"SendGrid request failed with status {(int)response.StatusCode}: {responseBody}");
+            }
         }
     }
 }
