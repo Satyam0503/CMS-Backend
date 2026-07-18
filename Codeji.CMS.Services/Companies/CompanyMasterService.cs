@@ -3,7 +3,7 @@
 using System.Collections;
 using System.Linq.Expressions;
 using AngleSharp.Common;
-using AutoMapper;
+using MapsterMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.Company.CustomAttribute;

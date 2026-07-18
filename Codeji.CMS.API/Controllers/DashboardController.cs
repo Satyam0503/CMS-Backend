@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using MapsterMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Dashboard;
 using Codeji.CMS.DTO.RolePermissions;

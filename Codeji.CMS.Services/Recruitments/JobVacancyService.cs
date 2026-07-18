@@ -1,5 +1,5 @@
 ﻿using System.Linq.Expressions;
-using AutoMapper;
+using MapsterMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.GenericRepository.Interfaces;

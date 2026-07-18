@@ -1,5 +1,5 @@
 ﻿using System.Linq.Expressions;
-using AutoMapper;
+using MapsterMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.Company.Policy;
@@ -142,7 +142,8 @@ namespace Codeji.CMS.Services
             };
             await _userSecurityTokenRepo.AddOne(securityToken);
 
-            string verifyLink = $"{ConfigManager.AppSettings.AppUrl}account/verify-email?token={Uri.EscapeDataString(token)}";
+            string apiBaseUrl = ConfigManager.AppSettings.APIUrl.TrimEnd('/');
+            string verifyLink = $"{apiBaseUrl}/api/account/verify-email?token={Uri.EscapeDataString(token)}";
             string body = HtmlTemplate.Render(
                 "<h2>Welcome, [EmployeeName]!</h2>" +
                 "<p>Please verify your email address to activate your account.</p>" +

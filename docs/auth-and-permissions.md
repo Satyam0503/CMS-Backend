@@ -354,5 +354,5 @@ The repository already injects `CompanyId` automatically; you only need it in th
 - **Forgetting `[ModulePermission]`** on a new endpoint → it inherits whatever class-level attributes exist (often just `[Authorize]`), which means *any* logged-in user can call it. Always add the attribute even when permission is "obvious."
 - **Mismatched `AppModule` constant** between code and DB → `VerifyUserAccess` returns false, you see 403s for everyone. Check [`ConstraintHelper.cs`](../Codeji.CMS.Utility/Constraints/ConstraintHelper.cs) and the `Module` collection match.
 - **Using `User.Claims` directly** in a service → works until someone changes claim names. Use `CurrentContext`.
-- **Returning the password hash in any DTO** → don't. AutoMapper happily maps `EmpUser.Password` if you map the whole entity. Always project to a DTO that omits it.
+- **Returning the password hash in any DTO** → don't. Mapster happily maps `EmpUser.Password` if you map the whole entity. Always project to a DTO that omits it.
 - **Long token lifetimes** → `Jwt.Expiry > 60` minutes is suspicious. Refresh tokens cover the long-lived case.

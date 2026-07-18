@@ -1,7 +1,7 @@
 ﻿using System.Data;
 using System.Linq.Expressions;
 using System.Reflection;
-using AutoMapper;
+using MapsterMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.RolePermissions;

@@ -183,27 +183,27 @@ Two layers, used together:
 
 ---
 
-## AutoMapper
+## Mapster
 
-Single profile in [`AutoMapperObjects.cs`](../Codeji.CMS.Services/Registration/AutoMapperObjects.cs):
+Single registration class in [`MapsterConfig.cs`](../Codeji.CMS.Services/Registration/MapsterConfig.cs):
 
 ```csharp
-CreateMap<EmpUser, GetAllEmployeeResponseModel>().ReverseMap();
+config.NewConfig<EmpUser, GetAllEmployeeResponseModel>().TwoWays();
 
-CreateMap<Applicant, ApplicantViewModel>()
-    .ForMember(d => d.ApplyDate, opt => opt.MapFrom(s => s.CreatedDate))
-    .ReverseMap();
+config.NewConfig<Applicant, ApplicantViewModel>()
+    .Map(dest => dest.ApplyDate, src => src.CreatedDate)
+    .TwoWays();
 
 // Partial-update DTO → entity, ignoring null source members
-CreateMap<AttendanceUpdateDto, AttendanceModel>()
-    .ForAllMembers(opts => opts.Condition((src, dest, srcMember) => srcMember != null));
+config.NewConfig<AttendanceUpdateDto, AttendanceModel>()
+    .IgnoreNullValues(true);
 ```
 
 Rules:
 
-- **Bidirectional** with `.ReverseMap()` unless one direction is meaningless.
-- **Custom property mapping** with `.ForMember(...)`.
-- **Update DTOs** that allow partial updates — use `.ForAllMembers(opts => opts.Condition((s, d, sm) => sm != null))`.
+- **Bidirectional** with `.TwoWays()` unless one direction is meaningless.
+- **Custom property mapping** with `.Map(...)`.
+- **Update DTOs** that allow partial updates — use `.IgnoreNullValues(true)`.
 - **Never map `EmpUser.Password` into a response DTO.** Always project to a DTO that doesn't have a `Password` field.
 - **Never map a DTO directly to an entity for *update*** when you want partial semantics — use `Builders<T>.Update.Set(...)` against `_repo.UpdateMany(...)` instead. Whole-document replace is destructive.
 

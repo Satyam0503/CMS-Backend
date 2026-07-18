@@ -10,3 +10,9 @@ Codeji.CMS.API/Properties/.DS_Store
 
 Codeji.CMS.API/Uploads/*
 
+# Local build checks
+.build-check/
+**/.build-check/
+
+# Runtime logs
+*.log

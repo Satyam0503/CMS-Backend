@@ -141,7 +141,7 @@ Notable endpoints (all `[ModulePermission(Attendance, ...)]`):
 - `POST api/attendance/GetAttendanceCalendar` — `View` — month grid view
 - `POST api/attendance/GetAllAttendance` — `View` — paginated list
 
-Total hours auto-calculated from in/out times. AutoMapper config does null-coalesce on update DTOs so partial updates work.
+Total hours auto-calculated from in/out times. Mapster config does null-coalesce on update DTOs so partial updates work.
 
 ---
 

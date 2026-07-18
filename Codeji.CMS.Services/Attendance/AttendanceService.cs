@@ -1,4 +1,4 @@
-using AutoMapper;
+using MapsterMapper;
 
 
 namespace Codeji.CMS.Services.Attendance

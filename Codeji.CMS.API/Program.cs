@@ -11,6 +11,8 @@ using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Employees;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Registration;
+using Mapster;
+using MapsterMapper;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -138,9 +140,10 @@ builder.Services.AddHttpClient();
 builder.Services.AddRepositoryServices();
 
 builder.Services.AddSingleton<IAuthorizationHandler, RoleHandler>();
-// AutoMapper 14+ changed the AddAutoMapper signature — assembly scan now goes
-// through an Action<IMapperConfigurationExpression> instead of a Type[] list.
-builder.Services.AddAutoMapper(cfg => cfg.AddMaps(typeof(AutoMapperObjects).Assembly));
+var mapsterConfig = TypeAdapterConfig.GlobalSettings;
+mapsterConfig.Scan(typeof(MapsterConfig).Assembly);
+builder.Services.AddSingleton(mapsterConfig);
+builder.Services.AddScoped<MapsterMapper.IMapper, ServiceMapper>();
 
 
 builder.Services.AddTransient<PdfService>();

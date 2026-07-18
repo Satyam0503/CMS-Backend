@@ -1,5 +1,5 @@
 ﻿using System.Net;
-using AutoMapper;
+using MapsterMapper;
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;

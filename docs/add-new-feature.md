@@ -12,7 +12,7 @@ Ask:
 
 - Is this a **new business domain** (new entity + new endpoints)? → Full module.
 - Is this **another endpoint on an existing controller**? → Skip to step 5 below.
-- Is it **just a new field on an existing entity**? → Add the property + AutoMapper mapping + controller DTO change. No migration needed (Mongo ignores missing fields). No new module.
+- Is it **just a new field on an existing entity**? → Add the property + Mapster mapping + controller DTO change. No migration needed (Mongo ignores missing fields). No new module.
 
 Below assumes "new business domain."
 
@@ -128,20 +128,20 @@ Rules:
 
 ---
 
-## 5. Add AutoMapper config
+## 5. Add Mapster config
 
-Edit [`AutoMapperObjects.cs`](../Codeji.CMS.Services/Registration/AutoMapperObjects.cs), add:
+Edit [`MapsterConfig.cs`](../Codeji.CMS.Services/Registration/MapsterConfig.cs), add:
 
 ```csharp
-CreateMap<AddAssetRequestDto, Asset>().ReverseMap();
+config.NewConfig<AddAssetRequestDto, Asset>().TwoWays();
 
-CreateMap<UpdateAssetRequestDto, Asset>()
-    .ForAllMembers(opts => opts.Condition((src, dest, srcMember) => srcMember != null));
+config.NewConfig<UpdateAssetRequestDto, Asset>()
+    .IgnoreNullValues(true);
 
-CreateMap<Asset, AssetResponseDto>().ReverseMap();
+config.NewConfig<Asset, AssetResponseDto>().TwoWays();
 ```
 
-The `ForAllMembers` null-coalesce on the update mapping is what makes partial updates work — it skips null fields rather than overwriting the entity.
+The `IgnoreNullValues` setting on the update mapping is what makes partial updates work — it skips null fields rather than overwriting the entity.
 
 ---
 
@@ -438,7 +438,7 @@ This step is what keeps the docs trustworthy. Skipping it is how docs decay into
 - [ ] Entity inherits `BaseClass`
 - [ ] `[BsonId(IdGenerator = typeof(UniqueIdGenerator))]` on the public ID property
 - [ ] DTOs separated for Create / Update / Response / Filter
-- [ ] Update DTO uses nullable fields + `ForAllMembers(...Condition(srcMember != null))` AutoMapper config
+- [ ] Update DTO uses nullable fields + `IgnoreNullValues(true)` Mapster config
 - [ ] Service registered in `ServicesRegistration.cs`
 - [ ] `AppModule.<Name>` constant added in `ConstraintHelper.cs`
 - [ ] Controller has `[Authorize]` at class level, `[ModulePermission(...)]` on every action
@@ -462,6 +462,6 @@ This step is what keeps the docs trustworthy. Skipping it is how docs decay into
 | `MongoCollectionNotFoundException` or empty queries | The new entity inherits `BaseClass` but you're querying outside the repo and forgot the `CompanyId` filter | The service or controller code; switch to `_repo.GetAll(...)` |
 | `Save()` succeeds but row never appears | You looked in the wrong collection. `MongoRepository<T>` writes to `typeof(T).Name` | The collection name in your DB explorer |
 | Migration runs every startup | Forgot the `migrations.InsertOneAsync(new Migration { ... })` call at the end | The migration class |
-| AutoMapper throws "missing map" at runtime | Forgot to register the map in `AutoMapperObjects.cs` | [`AutoMapperObjects.cs`](../Codeji.CMS.Services/Registration/AutoMapperObjects.cs) |
+| Mapster throws "missing map" at runtime | Forgot to register the map in `MapsterConfig.cs` | [`MapsterConfig.cs`](../Codeji.CMS.Services/Registration/MapsterConfig.cs) |
 | Permission check passes when it shouldn't | `RolePermission.HasAccess` is true for that role+module — check the migration's back-fill logic | The migration that added the module |
 | Email not sent but no error | The work item silently failed in the priority queue | Check `ILogger<EmailService>` output and the queue's running state |

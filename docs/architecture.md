@@ -15,7 +15,7 @@ A multi-tenant HR / company management API. One deployment serves every customer
 | Realtime | SignalR (`Microsoft.AspNetCore.SignalR` 1.2.0) — chat + notifications |
 | Email | SendGrid (legacy MailKit also referenced) |
 | PDF generation | PuppeteerSharp 20.2.2 (headless Chrome → HTML → PDF) for salary slips |
-| Mapping | AutoMapper 13.0.1 |
+| Mapping | Mapster 13.0.1 |
 | HTML sanitization | HtmlSanitizer (whitelist-based) |
 | API docs | Swashbuckle / Swagger |
 | LINQ helpers | LinqKit |
@@ -29,7 +29,7 @@ The solution at [CodejiCMSCore.sln](../CodejiCMSCore.sln) has 6 projects:
 ```
 CMS-Backend-Core/
 ├── Codeji.CMS.API/             # Web API: controllers, Program.cs, middleware, hubs
-├── Codeji.CMS.Services/        # Business logic — orchestrates repositories, AutoMapper, background tasks
+├── Codeji.CMS.Services/        # Business logic — orchestrates repositories, Mapster, background tasks
 ├── Codeji.CMS.Repository/      # MongoDB data access — generic repo, entities, Result<T>, registration
 ├── Codeji.CMS.DTO/             # Request/response models. Pure data — depends only on Utility
 ├── Codeji.CMS.Migrations/      # CLI executable: runs IMigration implementations against MongoDB
@@ -60,7 +60,7 @@ How a typical authenticated request flows:
    6. `AntiforgeryMiddleware` validates the XSRF token on state-changing verbs.
 3. **Controller action** is matched. The action is decorated with `[ModulePermission("Employees", "View")]` from [`ModulePermissionAttribute.cs`](../Codeji.CMS.API/App_Start/ModulePermissionAttribute.cs). The middleware that enforces it ([`AuthenticateUserRequest.cs`](../Codeji.CMS.API/App_Start/AuthenticateUserRequest.cs)) reads the attribute, calls `IRoleService.VerifyUserAccess(...)`, and returns 403 on failure.
 4. **Controller** validates `ModelState` (data-annotation rules on the DTO), then calls into the service layer. Controllers are thin — no business logic.
-5. **Service** ([Codeji.CMS.Services/](../Codeji.CMS.Services/)) does the work: orchestrates repository calls, runs `Sanitizer.SanitizeProperties()` on rich-text fields, calls `_priorityTaskQueue.QueueBackgroundWorkItem(...)` for async side-effects (emails, notifications), maps via AutoMapper, and returns a `Result<T>`.
+5. **Service** ([Codeji.CMS.Services/](../Codeji.CMS.Services/)) does the work: orchestrates repository calls, runs `Sanitizer.SanitizeProperties()` on rich-text fields, calls `_priorityTaskQueue.QueueBackgroundWorkItem(...)` for async side-effects (emails, notifications), maps via Mapster, and returns a `Result<T>`.
 6. **Repository** ([Codeji.CMS.Repository/](../Codeji.CMS.Repository/)) is the generic `MongoRepository<T>`. It auto-injects `CompanyId`, `CreatedBy/UpdatedBy`, and `CreatedDate/UpdatedDate` via reflection. All reads are scoped to the current `CompanyId` (from JWT) and filter `IsDeleted = true`. See [`data-layer.md`](./data-layer.md).
 7. **MongoDB** returns documents. Service maps to DTO, returns `Result<T>` to controller.
 8. **Controller** returns the `Result<T>` to the client. Default JSON serialization wraps it.
@@ -83,7 +83,7 @@ Controllers, `Program.cs`, middleware, SignalR hubs, mail templates, file upload
 | `Uploads/` | User-uploaded files (profile pics, resumes); served via static-files at `/fs` (gitignored) |
 
 ### Codeji.CMS.Services
-The business-logic layer. One folder per domain (`Account`, `Employees`, `LeaveManagement`, etc.), each with `XxxService.cs` + `Interface/IXxxService.cs`. DI registration is in [`ServicesRegistration.cs`](../Codeji.CMS.Services/Registration/ServicesRegistration.cs) (`AddBusinessServices()`); AutoMapper config is in [`AutoMapperObjects.cs`](../Codeji.CMS.Services/Registration/AutoMapperObjects.cs).
+The business-logic layer. One folder per domain (`Account`, `Employees`, `LeaveManagement`, etc.), each with `XxxService.cs` + `Interface/IXxxService.cs`. DI registration is in [`ServicesRegistration.cs`](../Codeji.CMS.Services/Registration/ServicesRegistration.cs) (`AddBusinessServices()`); Mapster config is in [`MapsterConfig.cs`](../Codeji.CMS.Services/Registration/MapsterConfig.cs).
 
 Notable subfolders: [`BackgroundTasks/`](../Codeji.CMS.Services/BackgroundTasks/) (priority queue + 3 hosted services), [`PayRoll/`](../Codeji.CMS.Services/PayRoll/) (includes `PdfService` and `AutoPayRollServices`), [`Companies/`](../Codeji.CMS.Services/Companies/) (includes `DefaultCompanySeeds`).
 
@@ -172,7 +172,7 @@ Detail in [`auth-and-permissions.md`](./auth-and-permissions.md).
 | Adding a database collection / field | [`Codeji.CMS.Repository/Entities/<Domain>/`](../Codeji.CMS.Repository/Entities/) |
 | Generic repository behavior | [`Codeji.CMS.Repository/Repositories/MongoRepository.cs`](../Codeji.CMS.Repository/Repositories/MongoRepository.cs) |
 | Adding a request / response shape | [`Codeji.CMS.DTO/<Domain>/`](../Codeji.CMS.DTO/) |
-| AutoMapper mapping | [`AutoMapperObjects.cs`](../Codeji.CMS.Services/Registration/AutoMapperObjects.cs) |
+| Mapster mapping | [`MapsterConfig.cs`](../Codeji.CMS.Services/Registration/MapsterConfig.cs) |
 | Service DI registration | [`ServicesRegistration.cs`](../Codeji.CMS.Services/Registration/ServicesRegistration.cs) |
 | Adding an enum | [`EnumsHelper.cs`](../Codeji.CMS.Utility/Enums/EnumsHelper.cs) |
 | Adding a module / permission constant | [`ConstraintHelper.cs`](../Codeji.CMS.Utility/Constraints/ConstraintHelper.cs) |

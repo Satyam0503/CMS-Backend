@@ -1,6 +1,6 @@
 ﻿using System.Threading.Tasks;
 using System.Collections.Concurrent;
-using AutoMapper;
+using MapsterMapper;
 using Codeji.CMS.DTO;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;

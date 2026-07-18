@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Linq.Expressions;
 using AngleSharp.Common;
 using AngleSharp.Text;
-using AutoMapper;
+using MapsterMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.NoticeBoard;
 using Codeji.CMS.DTO.ResponseModel;
