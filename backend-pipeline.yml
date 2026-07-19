@@ -5,6 +5,7 @@ trigger:
     include:
       - main
       - develop
+      - uat
   paths:
     include:
       - "*"
@@ -14,8 +15,11 @@ parameters:
   - name: environments
     type: object
     default:
-      - name: test
+      - name: dep
         branch: develop
+        environment: Development
+      - name: test
+        branch: uat
         environment: Development
       - name: prod
         branch: main
