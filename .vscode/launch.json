@@ -1,7 +1,62 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": []
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch API (.NET 10, http)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-api",
+      "program": "${workspaceFolder}/Codeji.CMS.API/bin/Debug/net10.0/Codeji.CMS.API.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/Codeji.CMS.API",
+      "stopAtEntry": false,
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "\\bNow listening on:\\s+(https?://\\S+)"
+      },
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_URLS": "http://localhost:5036"
+      },
+      "sourceFileMap": {
+        "/Views": "${workspaceFolder}/Codeji.CMS.API/Views"
+      },
+      "console": "internalConsole"
+    },
+    {
+      "name": "Launch API (.NET 10, https)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-api",
+      "program": "${workspaceFolder}/Codeji.CMS.API/bin/Debug/net10.0/Codeji.CMS.API.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/Codeji.CMS.API",
+      "stopAtEntry": false,
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "\\bNow listening on:\\s+(https?://\\S+)"
+      },
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_URLS": "https://localhost:7072;http://localhost:5036"
+      },
+      "console": "internalConsole"
+    },
+    {
+      "name": "Run Migrations (.NET 10)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-migrations",
+      "program": "${workspaceFolder}/Codeji.CMS.Migrations/bin/Debug/net10.0/Codeji.CMS.Migrations.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/Codeji.CMS.Migrations",
+      "stopAtEntry": false,
+      "console": "internalConsole"
+    },
+    {
+      "name": ".NET Core Attach",
+      "type": "coreclr",
+      "request": "attach"
+    }
+  ]
 }

@@ -6,6 +6,7 @@ public class AddUpdatePayRollRequestDto
     public required string EmployeeId { get; set; }
     public required decimal BasicPay { get; set; }
     public required float PaidDays { get; set; }
+    public required DateTime PaidDate { get; set; }
     public decimal? Bonus { get; set; }
     public decimal? HRA { get; set; }
     public decimal? LTA { get; set; }

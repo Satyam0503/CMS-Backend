@@ -58,20 +58,40 @@ public class PayRollController : BaseApiController
         }
     }
 
+    // used by HR/admin to preview or download another employee's payslip (e.g. from the payroll
+    // table); gated by PayRoll.View since, unlike GeneratePaySlip above, the caller isn't limited
+    // to their own payslip here
+    [HttpPost]
+    [Route("GenerateEmployeePaySlip")]
+    [ModulePermission(AppModule.PayRoll, Permission.View)]
+    public async Task<ActionResult> GetEmployeeSalarySlip(EmployeePayslipRequestDto model)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        DateTime currentDate = DateTime.UtcNow;
+        if (model.Month >= currentDate.Month && model.Year >= currentDate.Year) return BadRequest(ModelState);
+        try
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var (pdfByte, pdfName) = await _payRollServices.GenerateEmployeeSalarySlip(model, companyId);
+            Response.Headers.Append("Access-Control-Expose-Headers", "Content-Disposition");
+            return File(pdfByte, "application/pdf", pdfName);
+        }
+        catch (Exception exp)
+        {
+            return StatusCode(500, new { message = "Error generating payslip", status = exp.Message });
+        }
+    }
+
     [HttpPost]
     [Route("UploadPayloadData")]
     [ModulePermission(AppModule.PayRoll, [Permission.Create, Permission.Edit])]
-    public async Task<ActionResult> UploadPayloadData([FromBody] EmplyeePayRollRequestDto model)
+    public async Task<ActionResult<Result<string>>> UploadPayloadData([FromBody] EmplyeePayRollRequestDto model)
     {
         var currentDate = DateTime.UtcNow;
         if (model.PayMonth.Month >= currentDate.Month && model.PayMonth.Year >= currentDate.Year) return BadRequest();
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
         var result = await _payRollServices.UploadPayrollData(model, companyId);
-        if (result.Success)
-        {
-            return Ok(result);
-        }
-        return BadRequest();
+        return Ok(result);
     }
 
     [HttpPost]

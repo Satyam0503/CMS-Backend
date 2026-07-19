@@ -10,6 +10,7 @@ public class EmpPayRoll
     public required string UserId { get; set; }
     public required string EmployeeId { get; set; }
     public required DateTime PayMonth { get; set; }
+    public required DateTime PaidDate { get; set; }
     public required decimal BasicPay { get; set; }
     public decimal Bonus { get; set; }
     public required float PaidDays { get; set; }

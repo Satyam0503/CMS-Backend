@@ -9,6 +9,7 @@ using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.Utility.Helpers;
 using Humanizer;
+using Microsoft.AspNetCore.Http;
 
 namespace Codeji.CMS.Services.PayRoll;
 
@@ -38,22 +39,34 @@ public class PayRollServices : IPayRollServices
     }
 
 
+    private static decimal RoundAmount(decimal? value) => Math.Round(value ?? 0, 2, MidpointRounding.AwayFromZero);
+
     // generate salary slip
 
     public async Task<(byte[] pdfBytes, string pdfName)> GenerateEmpSalarySlip(PayslipRequestDto model, string userId)
     {
+        EmpUser? empUser = await _employeeRepository.FirstOrDefault(emp => emp.UserId == userId) ?? throw new Exception();
+        return await BuildSalarySlipAsync(empUser, model.Month, model.Year);
+    }
+
+    // used when an HR/admin previews or downloads another employee's payslip (e.g. from the payroll
+    // table); scoped to companyId so a caller can't reach into another company's employee records
+    public async Task<(byte[] pdfBytes, string pdfName)> GenerateEmployeeSalarySlip(EmployeePayslipRequestDto model, string companyId)
+    {
+        EmpUser? empUser = await _employeeRepository.FirstOrDefault(e => e.EmployeeId == model.EmployeeId && e.CompanyId == companyId) ?? throw new Exception();
+        return await BuildSalarySlipAsync(empUser, model.Month, model.Year);
+    }
+
+    private async Task<(byte[] pdfBytes, string pdfName)> BuildSalarySlipAsync(EmpUser empUser, int month, int year)
+    {
         try
         {
-            // get month and year 
-            var month = model.Month;
-            var year = model.Year;
             SalarySlipTemplateModel salarySlipModel = new();
-            EmpUser? empUser = await _employeeRepository.FirstOrDefault(emp => emp.UserId == userId);
             Company? company = await _companyRepository.FirstOrDefault(c => c.CompanyId == empUser.CompanyId);
-            if (company == null || empUser == null) throw new Exception();
+            if (company == null) throw new Exception();
 
             // get pay details based on month and year
-            Expression<Func<EmpPayRoll, bool>> expression = p => p.EmployeeId == empUser.EmployeeId && p.UserId == empUser.UserId && p.CompanyId == empUser.CompanyId && p.PayMonth.Month == model.Month && p.PayMonth.Year == model.Year;
+            Expression<Func<EmpPayRoll, bool>> expression = p => p.EmployeeId == empUser.EmployeeId && p.UserId == empUser.UserId && p.CompanyId == empUser.CompanyId && p.PayMonth.Month == month && p.PayMonth.Year == year;
             EmpPayRoll? payRoll = await _empPayRollRepository.FirstOrDefault(expression) ?? throw new Exception(CustomStatusCode.PayRollNotExist.ToString());
 
             // assign payroll data
@@ -67,7 +80,7 @@ public class PayRollServices : IPayRollServices
             salarySlipModel.CompanyAddress = company.Address;
             salarySlipModel.PaySlipMonth = payRoll.PayMonth.ToString("MMM yyyy");
             salarySlipModel.EmployeeId = empUser.EmployeeId;
-            salarySlipModel.PaidDate = payRoll.PayMonth.ToString("ddd, dd MMM yyyy");
+            salarySlipModel.PaidDate = payRoll.PaidDate.ToString("ddd, dd MMM yyyy");
             salarySlipModel.PaidDays = payRoll.PaidDays;
             salarySlipModel.EmployeeType = MapperHelper.GetEmploymentTypeLabel(empUser.EmploymentType);
             salarySlipModel.LossofPayDays = payRoll.Deduction.LossOfPayDays;
@@ -110,22 +123,95 @@ public class PayRollServices : IPayRollServices
         }
     }
 
-    public async Task<Result> UploadPayrollData(EmplyeePayRollRequestDto payLoad, string companyId)
+    // fields required for every payroll row; a field missing on every single row usually means
+    // the uploaded sheet was missing that column entirely, while a field missing on only some
+    // rows means that row's cell was left blank
+    private static readonly (string Label, Func<EmployeePayRollModel, bool> IsMissing)[] RequiredPayRollFields =
+    [
+        ("Basic Pay", m => m.BasicPay == null),
+        ("Paid Days", m => m.PaidDays == null),
+        ("Paid Date", m => m.PaidDate == null),
+        ("Bonus", m => m.Bonus == null),
+        ("HRA", m => m.HRA == null),
+        ("LTA", m => m.LTA == null),
+        ("Other Allowance", m => m.OtherAllowance == null),
+        ("Loss of Pay Days", m => m.LossOfPayDays == null),
+        ("Loss of Pay", m => m.LossOfPay == null),
+        ("Income Tax", m => m.IncomeTax == null),
+        ("Health Insurance", m => m.HealthInsurance == null),
+    ];
+
+    private static List<string> ValidatePayRollData(List<EmployeePayRollModel> payData)
     {
-        Result result = new();
-        // check employee existance
-        List<EmployeePayRollModel> payData = payLoad.PayData;
-        for (int i = payData.Count - 1; i >= 0; i--)
+        List<string> errors = [];
+        if (payData.Count == 0)
         {
-            bool exist = await _employeeRepository.Exist(e => e.EmployeeId == payData[i].EmployeeId && e.CompanyId == companyId);
-            if (!exist)
+            errors.Add("No payroll rows found in the uploaded file.");
+            return errors;
+        }
+
+        List<string> missingColumns = RequiredPayRollFields
+            .Where(field => payData.All(field.IsMissing))
+            .Select(field => field.Label)
+            .ToList();
+
+        if (missingColumns.Count > 0)
+        {
+            errors.Add($"Missing required column(s): {string.Join(", ", missingColumns)}");
+        }
+
+        HashSet<string> missingColumnLabels = [.. missingColumns];
+        for (int i = 0; i < payData.Count; i++)
+        {
+            EmployeePayRollModel row = payData[i];
+            if (string.IsNullOrWhiteSpace(row.EmployeeId))
             {
-                payData.RemoveAt(i);
+                errors.Add($"Row {i + 1}: Employee Id is required.");
+                continue;
+            }
+
+            List<string> rowMissingFields = RequiredPayRollFields
+                .Where(field => !missingColumnLabels.Contains(field.Label) && field.IsMissing(row))
+                .Select(field => field.Label)
+                .ToList();
+
+            if (rowMissingFields.Count > 0)
+            {
+                errors.Add($"Row {i + 1} ({row.EmployeeId}): missing {string.Join(", ", rowMissingFields)}.");
             }
         }
 
-        List<string> employeeIds = payData.Select(m => m.EmployeeId).ToList();
-        IEnumerable<EmpUser> empUsers = await _employeeRepository.GetAll(e => employeeIds.Contains(e.EmployeeId));
+        return errors;
+    }
+
+    public async Task<Result<string>> UploadPayrollData(EmplyeePayRollRequestDto payLoad, string companyId)
+    {
+        Result<string> result = new();
+        List<string> validationErrors = ValidatePayRollData(payLoad.PayData);
+
+        List<EmployeePayRollModel> payData = payLoad.PayData;
+        List<string> employeeIds = [.. payData.Select(m => m.EmployeeId).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct()];
+        IEnumerable<EmpUser> empUsers = await _employeeRepository.GetAll(e => employeeIds.Contains(e.EmployeeId) && e.CompanyId == companyId);
+        HashSet<string> existingEmployeeIds = [.. empUsers.Select(e => e.EmployeeId)];
+
+        for (int i = 0; i < payData.Count; i++)
+        {
+            string employeeId = payData[i].EmployeeId;
+            if (!string.IsNullOrWhiteSpace(employeeId) && !existingEmployeeIds.Contains(employeeId))
+            {
+                validationErrors.Add($"Row {i + 1}: Employee Id '{employeeId}' does not exist or is invalid.");
+            }
+        }
+
+        if (validationErrors.Count > 0)
+        {
+            result.Success = false;
+            result.StatusCode = StatusCodes.Status400BadRequest;
+            result.Message = "Payroll data failed validation.";
+            result.MethodResults = validationErrors;
+            return result;
+        }
+
         var dataList = from emp in empUsers
                        join payItem in payData on emp.EmployeeId equals payItem.EmployeeId
                        select new EmpPayRoll()
@@ -134,22 +220,23 @@ public class PayRollServices : IPayRollServices
                            UserId = emp.UserId,
                            EmployeeId = emp.EmployeeId,
                            PayMonth = payLoad.PayMonth,
-                           BasicPay = payItem.BasicPay ?? 0,
-                           Bonus = payItem.Bonus ?? 0,
+                           PaidDate = payItem.PaidDate!.Value,
+                           BasicPay = RoundAmount(payItem.BasicPay),
+                           Bonus = RoundAmount(payItem.Bonus),
                            PaidDays = payItem.PaidDays ?? 0,
                            CreatedAt = DateTime.UtcNow,
                            Allowance = new Allowance()
                            {
-                               HRA = payItem.HRA ?? 0,
-                               LTA = payItem.LTA ?? 0,
-                               OtherAllowance = payItem.OtherAllowance ?? 0
+                               HRA = RoundAmount(payItem.HRA),
+                               LTA = RoundAmount(payItem.LTA),
+                               OtherAllowance = RoundAmount(payItem.OtherAllowance)
                            },
                            Deduction = new Deduction()
                            {
-                               LossOfPay = payItem.LossOfPay ?? 0,
+                               LossOfPay = RoundAmount(payItem.LossOfPay),
                                LossOfPayDays = payItem.LossOfPayDays ?? 0,
-                               IncomeTax = payItem.IncomeTax ?? 0,
-                               HealthInsurance = payItem.HealthInsurance ?? 0
+                               IncomeTax = RoundAmount(payItem.IncomeTax),
+                               HealthInsurance = RoundAmount(payItem.HealthInsurance)
                            }
                        };
 
@@ -219,6 +306,7 @@ public class PayRollServices : IPayRollServices
                         {
                             PayRollId = payRoll?.Id ?? "",
                             EmployeeId = emp.EmployeeId,
+                            PaidDate = payRoll?.PaidDate,
                             BasicPay = payRoll?.BasicPay ?? null,
                             PaidDays = payRoll?.PaidDays ?? null,
                             Bonus = payRoll?.Bonus ?? null,
@@ -263,6 +351,7 @@ public class PayRollServices : IPayRollServices
                 UserId = empUser.UserId,
                 EmployeeId = empUser.EmployeeId,
                 PayMonth = model.PayMonth,
+                PaidDate = model.PaidDate,
                 BasicPay = model.BasicPay,
                 Bonus = model.Bonus ?? 0,
                 PaidDays = model.PaidDays,
@@ -291,6 +380,7 @@ public class PayRollServices : IPayRollServices
             payRoll.Bonus = model.Bonus ?? 0;
             payRoll.PaidDays = model.PaidDays;
             payRoll.PayMonth = model.PayMonth;
+            payRoll.PaidDate = model.PaidDate;
             payRoll.Allowance.HRA = model.HRA ?? 0;
             payRoll.Allowance.LTA = model.LTA ?? 0;
             payRoll.Allowance.OtherAllowance = model.OtherAllowance ?? 0;

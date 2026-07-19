@@ -4,6 +4,7 @@ public class EmployeePayRollModel
 {
     public string? PayRollId { get; set; }
     public required string EmployeeId { get; set; }
+    public DateTime? PaidDate { get; set; }
     public decimal? BasicPay { get; set; }
     public float? PaidDays { get; set; }
     public decimal? Bonus { get; set; }

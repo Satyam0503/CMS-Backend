@@ -116,6 +116,7 @@ namespace Codeji.CMS.Services.PayRoll
         {
             EmployeeId = emp.EmployeeId,
             PayMonth = payMonth,
+            PaidDate = DateTime.UtcNow,
             BasicPay = finalBasic,
             HRA = hra,
             LTA = lta,
