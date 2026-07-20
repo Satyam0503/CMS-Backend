@@ -131,17 +131,13 @@ public class PayRollServices : IPayRollServices
         ("Basic Pay", m => m.BasicPay == null),
         ("Paid Days", m => m.PaidDays == null),
         ("Paid Date", m => m.PaidDate == null),
-        ("Bonus", m => m.Bonus == null),
         ("HRA", m => m.HRA == null),
-        ("LTA", m => m.LTA == null),
-        ("Other Allowance", m => m.OtherAllowance == null),
         ("Loss of Pay Days", m => m.LossOfPayDays == null),
         ("Loss of Pay", m => m.LossOfPay == null),
         ("Income Tax", m => m.IncomeTax == null),
-        ("Health Insurance", m => m.HealthInsurance == null),
-        ("EPF", m => m.EPF == null),
-        ("ESIC", m => m.ESIC == null),
     ];
+    // optional - default to 0 when the row/column is blank or missing entirely:
+    // Bonus, LTA, Other Allowance, Health Insurance, EPF, ESIC
 
     private static List<string> ValidatePayRollData(List<EmployeePayRollModel> payData)
     {
