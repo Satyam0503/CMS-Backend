@@ -20,6 +20,13 @@ namespace Codeji.CMS.Repository.Repositories
             return await _salaryCollection.Find(filter).FirstOrDefaultAsync();
         }
 
+        public async Task<List<SalaryModel>> GetActiveSalariesAsync(List<Guid> userIds)
+        {
+            var filter = Builders<SalaryModel>.Filter.In(s => s.UserId, userIds) &
+                         Builders<SalaryModel>.Filter.Eq(s => s.Status, true);
+            return await _salaryCollection.Find(filter).ToListAsync();
+        }
+
         public async Task<List<SalaryModel>> GetSalaryHistoryAsync(Guid userId)
         {
             var filter = Builders<SalaryModel>.Filter.Eq(s => s.UserId, userId);

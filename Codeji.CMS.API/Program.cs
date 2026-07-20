@@ -228,7 +228,7 @@ builder.Services.AddScoped<IAdminAttendanceService, AdminAttendanceService>();
 
 // builder.Services.AddScoped<IAttendanceService, IAttendanceService>();
 // Auto Payroll Services
-builder.Services.AddScoped<AutoPayrollServices>();
+builder.Services.AddScoped<IAutoPayRollServices, AutoPayrollServices>();
 
 // Hosted Services
 builder.Services.AddHostedService<PayrollHostedService>();

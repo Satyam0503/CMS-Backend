@@ -40,7 +40,7 @@ public class AddPayrollSettingseAndItsModulePermissions : IMigration
             Module module = new()
             {
                 ModuleId = (int)totalModules + 1,
-                ModuleName = AppModule.PayrollSettings,
+                ModuleName = "Payroll Settings",
                 ModuleConstant = AppModule.PayrollSettings,
                 SortOrder = (int)totalModules + 1,
             };
@@ -65,34 +65,25 @@ public class AddPayrollSettingseAndItsModulePermissions : IMigration
 
             List<RolePermission> payrollSettingsRolePermission = [];
 
+            // Payroll Settings exposes salary data and manual payroll processing, so only
+            // Administrator/HR roles get default access; every other role starts with none
+            // (matches the absence-of-a-row-means-no-access convention used everywhere else).
             foreach (var role in allRoles)
             {
+                if (role.RoleType != (int)EnumsHelper.Roles.Administrator && role.RoleType != (int)EnumsHelper.Roles.HR)
+                    continue;
+
                 foreach (var payrollSettingsPermission in payrollSettingsmodulePermissions)
                 {
-                    if (role.RoleType == (int)EnumsHelper.Roles.Administrator || role.RoleType == (int)EnumsHelper.Roles.HR)
+                    payrollSettingsRolePermission.Add(new()
                     {
-                        payrollSettingsRolePermission.Add(new()
-                        {
-                            RoleId = role.RolesId,
-                            ModulePermissionId = payrollSettingsPermission.ModulePermissionId,
-                            HasAccess = true,
-                            IsAccessible = true,
-                            CompanyId = role.CompanyId,
-                            CreatedDate = DateTime.UtcNow
-                        });
-                    }
-                    else if (payrollSettingsPermission.PermissionId == 2)
-                    {
-                        payrollSettingsRolePermission.Add(new()
-                        {
-                            RoleId = role.RolesId,
-                            ModulePermissionId = payrollSettingsPermission.ModulePermissionId,
-                            HasAccess = true,
-                            IsAccessible = true,
-                            CompanyId = role.CompanyId,
-                            CreatedDate = DateTime.UtcNow,
-                        });
-                    }
+                        RoleId = role.RolesId,
+                        ModulePermissionId = payrollSettingsPermission.ModulePermissionId,
+                        HasAccess = true,
+                        IsAccessible = true,
+                        CompanyId = role.CompanyId,
+                        CreatedDate = DateTime.UtcNow
+                    });
                 }
             }
             // Skip when no roles exist yet — happens on a fresh DB before any company has registered.

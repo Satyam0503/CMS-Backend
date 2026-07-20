@@ -1,4 +1,5 @@
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Services.PayRoll.Interface;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -71,7 +72,7 @@ private async Task RunPayroll(CancellationToken stoppingToken)
 
         using var scope = _scopeFactory.CreateScope();
 
-        var autoPayroll = scope.ServiceProvider.GetRequiredService<AutoPayrollServices>();
+        var autoPayroll = scope.ServiceProvider.GetRequiredService<IAutoPayRollServices>();
         var companyService = scope.ServiceProvider.GetRequiredService<ICompanyService>();
 
         var companies = await companyService.GetAllCompanyList();
@@ -80,7 +81,7 @@ private async Task RunPayroll(CancellationToken stoppingToken)
 
         foreach (var company in companies.Where(c => c.Status && !c.IsDeleted))
         {
-            await autoPayroll.GenerateOrUpdatePayrollForMonthAsync(
+            await autoPayroll.GeneratePayrollForMonthAsync(
                 company.CompanyId,
                 currentMonth
             );

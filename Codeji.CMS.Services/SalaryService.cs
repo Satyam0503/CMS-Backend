@@ -1,4 +1,7 @@
 using Codeji.CMS.DTO.Salary;
+using Codeji.CMS.GenericRepository.Interfaces;
+using Codeji.CMS.Repository.Entities.Company;
+using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Interfaces;
 using Codeji.CMS.Services.Interfaces;
 
@@ -7,10 +10,17 @@ namespace Codeji.CMS.Services
     public class SalaryService : ISalaryService
     {
         private readonly ISalaryRepository _repository;
+        private readonly IMongoDbRepository<EmpUser> _employeeRepository;
+        private readonly IMongoDbRepository<JobTitles> _jobTitlesRepository;
 
-        public SalaryService(ISalaryRepository repository)
+        public SalaryService(
+            ISalaryRepository repository,
+            IMongoDbRepository<EmpUser> employeeRepository,
+            IMongoDbRepository<JobTitles> jobTitlesRepository)
         {
             _repository = repository;
+            _employeeRepository = employeeRepository;
+            _jobTitlesRepository = jobTitlesRepository;
         }
 
         public async Task<SalaryModel> CreateSalaryAsync(CreateSalaryDto dto)
@@ -65,6 +75,41 @@ namespace Codeji.CMS.Services
         {
             var salaries = await _repository.GetSalaryHistoryAsync(userId);
             return salaries.Select(SalaryResponseDto.MapFromModel).ToList();
+        }
+
+        public async Task<List<CompanySalaryResponseDto>> GetCompanySalariesAsync(string companyId, string? employeeName)
+        {
+            var employees = string.IsNullOrEmpty(employeeName)
+                ? await _employeeRepository.GetAll(e => e.CompanyId == companyId)
+                : await _employeeRepository.GetAll(e => e.CompanyId == companyId
+                    && (e.FirstName + " " + e.LastName).Contains(employeeName, StringComparison.CurrentCultureIgnoreCase));
+
+            // SalaryModel.UserId is a Guid while EmpUser.UserId is a string - only employees
+            // whose id parses as a Guid can have a salary structure looked up
+            var employeeGuidIds = employees
+                .Select(e => (Employee: e, Parsed: Guid.TryParse(e.UserId, out var guid), Guid: guid))
+                .ToList();
+
+            var activeSalaries = await _repository.GetActiveSalariesAsync(
+                employeeGuidIds.Where(e => e.Parsed).Select(e => e.Guid).ToList());
+            var activeSalaryByUserId = activeSalaries.ToDictionary(s => s.UserId);
+
+            List<string> jobIds = employees.Select(e => e.JobRole).Distinct().Where(jt => jt != null).ToList();
+            IEnumerable<JobTitles> jobTitles = await _jobTitlesRepository.GetAll(jt => jobIds.Contains(jt.JobTitleId));
+
+            return (from emp in employeeGuidIds
+                    join jobTitle in jobTitles on emp.Employee.JobRole equals jobTitle.JobTitleId into jobTitleGroup
+                    from empJobTitle in jobTitleGroup.DefaultIfEmpty()
+                    select new CompanySalaryResponseDto
+                    {
+                        UserId = emp.Employee.UserId,
+                        EmployeeId = emp.Employee.EmployeeId,
+                        EmployeeName = $"{emp.Employee.FirstName} {emp.Employee.LastName}",
+                        JobTitle = empJobTitle?.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label) ?? null,
+                        ActiveSalary = emp.Parsed && activeSalaryByUserId.TryGetValue(emp.Guid, out var salary)
+                            ? SalaryResponseDto.MapFromModel(salary)
+                            : null
+                    }).ToList();
         }
     }
 }

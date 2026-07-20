@@ -1,3 +1,4 @@
+using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.PayRoll;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.PayRoll.Interface;
@@ -7,7 +8,7 @@ using MongoDB.Driver.Linq;
 
 namespace Codeji.CMS.Services.PayRoll
 {
-    public class AutoPayrollServices
+    public class AutoPayrollServices : IAutoPayRollServices
     {
         private readonly IPayRollServices _payRollServices;
         private readonly IMongoDbRepository<EmpUser> _employeeRepository;
@@ -29,9 +30,13 @@ namespace Codeji.CMS.Services.PayRoll
             _salaryRepository = salaryRepository;
         }
 
-        public async Task GeneratePayrollForMonthAsync(string companyId, DateTime payMonth)
+        public async Task<Result> GeneratePayrollForMonthAsync(string companyId, DateTime payMonth)
 {
     var employees = await _employeeRepository.GetAll(e => e.CompanyId == companyId);
+
+    int processedCount = 0;
+    int skippedNoSalaryCount = 0;
+    int consideredCount = 0;
 
     foreach (var emp in employees)
     {
@@ -47,12 +52,17 @@ namespace Codeji.CMS.Services.PayRoll
         if (joiningDate > monthEnd)
             continue;
 
+        consideredCount++;
+
         var salaryRecords = _salaryRepository
-            .Get(s => s.EmployeeId == emp.EmployeeId)
+            .Get(s => s.EmployeeId == emp.EmployeeId && s.Status)
             .FirstOrDefault();
 
         if (salaryRecords == null)
+        {
+            skippedNoSalaryCount++;
             continue;
+        }
 
         int daysInMonth = DateTime.DaysInMonth(payMonth.Year, payMonth.Month);
 
@@ -145,12 +155,16 @@ if (existingPayroll != null)
 
 // Add or update payroll
 await _payRollServices.AddUpdatePayRoll(payrollDto, companyId);
-}
+processedCount++;
 }
 
-        internal async Task GenerateOrUpdatePayrollForMonthAsync(string companyId, DateTime currentMonth)
-{
-    await GeneratePayrollForMonthAsync(companyId, currentMonth);
+    return new Result
+    {
+        Success = true,
+        Message = skippedNoSalaryCount > 0
+            ? $"Processed payroll for {processedCount} of {consideredCount} employees. {skippedNoSalaryCount} employee(s) have no salary structure defined."
+            : $"Processed payroll for {processedCount} employee(s)."
+    };
 }
 
         private decimal CalculateMonthlyIncomeTax(decimal annualGrossIncome, bool isNewRegime = true)

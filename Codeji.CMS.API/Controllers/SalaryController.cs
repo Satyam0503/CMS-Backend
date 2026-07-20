@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
+using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Salary;
 using Codeji.CMS.Services.Interfaces;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.API.App_Start;
+using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 
 
@@ -14,10 +16,12 @@ namespace Codeji.CMS.API.Controllers
     public class SalaryController : ControllerBase
     {
         private readonly ISalaryService _salaryService;
+        private readonly IHttpContextAccessor _httpContextAccessor;
 
-        public SalaryController(ISalaryService salaryService)
+        public SalaryController(ISalaryService salaryService, IHttpContextAccessor httpContextAccessor)
         {
             _salaryService = salaryService;
+            _httpContextAccessor = httpContextAccessor;
         }
 
         [HttpPost]
@@ -43,6 +47,17 @@ namespace Codeji.CMS.API.Controllers
         {
             var salaries = await _salaryService.GetSalaryHistoryAsync(userId);
             return Ok(new { success = true, data = salaries });
+        }
+
+        [HttpPost]
+        [Route("GetCompanySalaries")]
+        [ModulePermission(AppModule.PayrollSettings, Permission.View)]
+        public async Task<ActionResult<Result<CompanySalaryResponseDto>>> GetCompanySalaries([FromBody] CompanySalaryFilterDto filter)
+        {
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var salaries = await _salaryService.GetCompanySalariesAsync(companyId, filter.EmployeeName);
+            var result = new Result<CompanySalaryResponseDto> { MethodResults = salaries };
+            return Ok(result);
         }
     }
 }

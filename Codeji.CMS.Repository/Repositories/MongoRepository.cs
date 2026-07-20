@@ -10,6 +10,8 @@ using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Utility.middlewares;
 using LinqKit;
 using Microsoft.AspNetCore.Http;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
 using MongoDB.Driver;
 using MongoDB.Driver.Linq;
 using Task = System.Threading.Tasks.Task;
@@ -143,7 +145,25 @@ namespace Codeji.CMS.Repository.Repositories
                 res.StatusCode = StatusCodes.Status200OK;
                 return res;
             }
+            catch (MongoWriteException mwe) when (IsDuplicateKeyOnId(mwe))
+            {
+                // The insert can genuinely succeed on the server while the driver never
+                // receives the acknowledgement (e.g. a dropped connection), causing it to
+                // automatically retry the same insert - which then collides with the
+                // document it just wrote. Confirm our own document actually landed before
+                // trusting this as success, so a real duplicate-key failure still fails.
+                if (await OwnDocumentExists(item))
+                {
+                    res.Success = true;
+                    res.Message = "OK";
+                    res.StatusCode = StatusCodes.Status200OK;
+                    return res;
+                }
 
+                res.StatusCode = StatusCodes.Status500InternalServerError;
+                res.Message = HelperService.NotifyException("AddOne", "Exception adding one " + typeof(TEntity).Name, mwe);
+                return res;
+            }
             catch (Exception ex)
             {
                 res.StatusCode = StatusCodes.Status500InternalServerError;
@@ -151,6 +171,33 @@ namespace Codeji.CMS.Repository.Repositories
                 return res;
             }
         }
+
+        // only trusts a duplicate-key error when it's on the primary key (_id) specifically -
+        // never on any other unique index (e.g. a real duplicate email must still fail normally)
+        private static bool IsDuplicateKeyOnId(MongoWriteException mwe)
+        {
+            return mwe.WriteError?.Category == ServerErrorCategory.DuplicateKey
+                && (mwe.WriteError.Message?.Contains("index: _id_") ?? false);
+        }
+
+        private async Task<bool> OwnDocumentExists(TEntity item)
+        {
+            BsonMemberMap idMemberMap = BsonClassMap.LookupClassMap(typeof(TEntity)).IdMemberMap;
+            if (idMemberMap == null)
+            {
+                return false;
+            }
+
+            object attemptedId = idMemberMap.Getter(item);
+            if (attemptedId == null)
+            {
+                return false;
+            }
+
+            FilterDefinition<TEntity> filter = Builders<TEntity>.Filter.Eq(idMemberMap.ElementName, BsonValue.Create(attemptedId));
+            return await _dbSet.Find(filter).AnyAsync();
+        }
+
         public async Task<Result> AddMany(IEnumerable<TEntity> item)
         {
             Result res = new Result();

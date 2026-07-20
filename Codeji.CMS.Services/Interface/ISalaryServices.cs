@@ -7,5 +7,6 @@ namespace Codeji.CMS.Services.Interfaces
         Task<SalaryModel> CreateSalaryAsync(CreateSalaryDto dto);
         Task<SalaryResponseDto?> GetActiveSalaryAsync(Guid userId);
         Task<List<SalaryResponseDto>> GetSalaryHistoryAsync(Guid userId);
+        Task<List<CompanySalaryResponseDto>> GetCompanySalariesAsync(string companyId, string? employeeName);
     }
 }

@@ -90,6 +90,31 @@ public class UserController : BaseApiController
         return await _employeeService.EditEmployee(user, userId);
     }
 
+    // No [ModulePermission] - any authenticated user may edit their own profile regardless of
+    // their Employees module permission (that permission governs editing *other* employees).
+    // Always targets the caller's own userId from the auth token, never a client-supplied one,
+    // and EmployeeSelfEditDto deliberately omits privileged fields (role, job, bank details, etc).
+    [Route("EditOwnProfile")]
+    [HttpPost]
+    public async Task<Result<UserModel>> EditOwnProfile(EmployeeSelfEditDto user)
+    {
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        EmployeePersonalInfo mapped = new()
+        {
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            RoleId = "",
+            Gender = user.Gender,
+            DateOfBirth = user.DateOfBirth,
+            PhoneNumber = user.PhoneNumber,
+            BloodGroup = user.BloodGroup,
+            PersonalEmail = user.PersonalEmail,
+            EmergencyContact = user.EmergencyContact,
+            Address = user.Address,
+        };
+        return await _employeeService.EditEmployee(mapped, currentUserId);
+    }
+
     [Route("GetAllEmployees")]
     [HttpPost]
     [ModulePermission(AppModule.Employees, Permission.View)]

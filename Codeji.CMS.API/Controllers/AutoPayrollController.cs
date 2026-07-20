@@ -16,36 +16,40 @@ public class AutoPayrollController : BaseApiController
     readonly IAutoPayRollServices _autoPayRollServices;
     readonly IHttpContextAccessor _httpContextAccessor;
 
-public AutoPayrollController(IHttpContextAccessor httpContextAccessor,IAutoPayRollServices autoPayRollServices)
+    public AutoPayrollController(IHttpContextAccessor httpContextAccessor, IAutoPayRollServices autoPayRollServices)
     {
-                _httpContextAccessor = httpContextAccessor;
-
+        _httpContextAccessor = httpContextAccessor;
         _autoPayRollServices = autoPayRollServices;
-}
+    }
 
-[HttpPost]
-[Route("GeneratePayRollMonthly")]
-[ModulePermission(AppModule.PayRoll, [Permission.Create, Permission.Edit])]
-public async Task<Result> GeneratePayRollForMonthly([FromBody] AddUpdatePayRollRequestDto model)
-{
-    var result = new Result();
-    
-    string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-    
-    try
+    [HttpPost]
+    [Route("GeneratePayRollMonthly")]
+    [ModulePermission(AppModule.PayrollSettings, [Permission.Create, Permission.Edit])]
+    public async Task<Result> GeneratePayRollForMonthly([FromBody] ProcessPayrollRequestDto model)
     {
-        await _autoPayRollServices.GeneratePayrollForMonthAsync(companyId, model.PayMonth);
-        
-        result.Success = true;
-        result.Message = $"Payroll generated successfully for {model.PayMonth:MMMM yyyy}.";
-    }
-    catch (Exception ex)
-    {
-        result.Success = false;
-        result.Message = $"Error generating payroll: {ex.Message}";
-    }
+        var result = new Result();
 
-    return result;
+        var currentPeriod = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+        var requestPeriod = new DateTime(model.PayMonth.Year, model.PayMonth.Month, 1);
+        if (requestPeriod > currentPeriod)
+        {
+            result.Success = false;
+            result.Message = "Payroll cannot be processed for a future month.";
+            return result;
+        }
+
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+
+        try
+        {
+            result = await _autoPayRollServices.GeneratePayrollForMonthAsync(companyId, model.PayMonth);
+        }
+        catch (Exception ex)
+        {
+            result.Success = false;
+            result.Message = $"Error processing payroll: {ex.Message}";
+        }
+
+        return result;
+    }
 }
-
-    }
