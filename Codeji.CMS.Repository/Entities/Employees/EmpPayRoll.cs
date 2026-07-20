@@ -32,4 +32,6 @@ public class Deduction
     public decimal LossOfPay { get; set; }
     public decimal IncomeTax { get; set; }
     public decimal HealthInsurance { get; set; }
+    public decimal EPF { get; set; }
+    public decimal ESIC { get; set; }
 }

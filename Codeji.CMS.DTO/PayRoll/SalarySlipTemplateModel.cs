@@ -23,6 +23,8 @@ public class SalarySlipTemplateModel
     public decimal LossOfPays { get; set; } = 0;
     public decimal IncomeTax { get; set; } = 0;
     public decimal HealthInsurance { get; set; } = 0;
+    public decimal EPF { get; set; } = 0;
+    public decimal ESIC { get; set; } = 0;
     public decimal GrossPay { get; set; } = 0;
     public decimal TotalDeduction { get; set; } = 0;
     public decimal NetSalary { get; set; } = 0;

@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Linq.Expressions;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.PayRoll;
@@ -8,7 +7,6 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.Utility.Helpers;
-using Humanizer;
 using Microsoft.AspNetCore.Http;
 
 namespace Codeji.CMS.Services.PayRoll;
@@ -97,10 +95,12 @@ public class PayRollServices : IPayRollServices
             salarySlipModel.LossOfPays = payRoll.Deduction.LossOfPay;
             salarySlipModel.IncomeTax = payRoll.Deduction.IncomeTax;
             salarySlipModel.HealthInsurance = payRoll.Deduction.HealthInsurance;
+            salarySlipModel.EPF = payRoll.Deduction.EPF;
+            salarySlipModel.ESIC = payRoll.Deduction.ESIC;
             salarySlipModel.GrossPay = payRoll.BasicPay + payRoll.Allowance.HRA + payRoll.Allowance.LTA + payRoll.Bonus + payRoll.Allowance.OtherAllowance;
-            salarySlipModel.TotalDeduction = payRoll.Deduction.IncomeTax + payRoll.Deduction.HealthInsurance + payRoll.Deduction.LossOfPay;
+            salarySlipModel.TotalDeduction = payRoll.Deduction.IncomeTax + payRoll.Deduction.HealthInsurance + payRoll.Deduction.LossOfPay + payRoll.Deduction.EPF + payRoll.Deduction.ESIC;
             salarySlipModel.NetSalary = salarySlipModel.GrossPay - salarySlipModel.TotalDeduction;
-            salarySlipModel.NetSalaryInWords = NumberToWordsExtension.ToWords((int)salarySlipModel.NetSalary, CultureInfo.CurrentCulture).Replace("-", " ");
+            salarySlipModel.NetSalaryInWords = IndianCurrencyWords.ToWords(salarySlipModel.NetSalary);
 
             string templateFilePath = Path.Combine(Directory.GetCurrentDirectory(), "Templates", "SalarySlipTemplate.html");
             string fileContent = File.ReadAllText(templateFilePath);
@@ -139,6 +139,8 @@ public class PayRollServices : IPayRollServices
         ("Loss of Pay", m => m.LossOfPay == null),
         ("Income Tax", m => m.IncomeTax == null),
         ("Health Insurance", m => m.HealthInsurance == null),
+        ("EPF", m => m.EPF == null),
+        ("ESIC", m => m.ESIC == null),
     ];
 
     private static List<string> ValidatePayRollData(List<EmployeePayRollModel> payData)
@@ -236,7 +238,9 @@ public class PayRollServices : IPayRollServices
                                LossOfPay = RoundAmount(payItem.LossOfPay),
                                LossOfPayDays = payItem.LossOfPayDays ?? 0,
                                IncomeTax = RoundAmount(payItem.IncomeTax),
-                               HealthInsurance = RoundAmount(payItem.HealthInsurance)
+                               HealthInsurance = RoundAmount(payItem.HealthInsurance),
+                               EPF = RoundAmount(payItem.EPF),
+                               ESIC = RoundAmount(payItem.ESIC)
                            }
                        };
 
@@ -316,7 +320,9 @@ public class PayRollServices : IPayRollServices
                             LossOfPayDays = payRoll?.Deduction.LossOfPayDays ?? null,
                             LossOfPay = payRoll?.Deduction.LossOfPay ?? null,
                             IncomeTax = payRoll?.Deduction.IncomeTax ?? null,
-                            HealthInsurance = payRoll?.Deduction.HealthInsurance ?? null
+                            HealthInsurance = payRoll?.Deduction.HealthInsurance ?? null,
+                            EPF = payRoll?.Deduction.EPF ?? null,
+                            ESIC = payRoll?.Deduction.ESIC ?? null
                         }
                     }).ToList();
         result.MethodResults = data;
@@ -367,7 +373,9 @@ public class PayRollServices : IPayRollServices
                     LossOfPayDays = (float)(model.LossOfPayDays ?? 0m),
                     LossOfPay = model.LossOfPay ?? 0,
                     IncomeTax = model.IncomeTax ?? 0,
-                    HealthInsurance = model.HealthInsurance ?? 0
+                    HealthInsurance = model.HealthInsurance ?? 0,
+                    EPF = model.EPF ?? 0,
+                    ESIC = model.ESIC ?? 0
                 }
             };
             result = await _empPayRollRepository.AddOne(newPayRoll);
@@ -388,6 +396,8 @@ public class PayRollServices : IPayRollServices
             payRoll.Deduction.LossOfPay = model.LossOfPay ?? 0;
             payRoll.Deduction.IncomeTax = model.IncomeTax ?? 0;
             payRoll.Deduction.HealthInsurance = model.HealthInsurance ?? 0;
+            payRoll.Deduction.EPF = model.EPF ?? 0;
+            payRoll.Deduction.ESIC = model.ESIC ?? 0;
             result = await _empPayRollRepository.Update(expression, payRoll);
         }
         return result;

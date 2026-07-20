@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -44,10 +44,8 @@
         font-size: 14px;
         margin-bottom: 2.5rem;
         display: flex;
-
-        & > * {
-          flex-grow: 1;
-        }
+        justify-content: space-between;
+        align-items: flex-start;
 
         & img {
           max-width: 180px;
@@ -68,11 +66,14 @@
 
         & > strong {
           width: 130px;
+          flex-shrink: 0;
         }
 
         & > span {
-          width: 150px;
+          flex-grow: 1;
           text-align: start;
+          border-bottom: 1px dotted #000;
+          padding-bottom: 2px;
         }
       }
 
@@ -136,6 +137,9 @@
       .text-center {
         text-align: center;
       }
+      .text-end {
+        text-align: right;
+      }
       .w-150 {
         width: 150px;
       }
@@ -155,7 +159,7 @@
           <strong style="font-size: 16px">[CompanyName]</strong><br />
           <span style="font-size: 12px">[CompanyAddress]</span>
         </div>
-        <div style="align-self: end; text-align: end">
+        <div style="text-align: end">
           <strong>Payslip For Month:</strong><br />
           <span>[PaySlipMonth]</span>
         </div>
@@ -164,43 +168,43 @@
       <div class="details">
         <div class="details-group">
           <div class="row">
-            <strong>Employee Name :</strong>
-            <span> [EmployeeName]</span>
+            <strong>Employee Name</strong>
+            <span>[EmployeeName]</span>
           </div>
           <div class="row">
-            <strong>Designation :</strong>
-            <span> [Designation]</span>
+            <strong>Designation</strong>
+            <span>[Designation]</span>
           </div>
           <div class="row">
-            <strong>Pan :</strong>
-            <span> [PanNumber]</span>
+            <strong>Pan</strong>
+            <span>[PanNumber]</span>
           </div>
           <div class="row">
-            <strong>Back Ac No :</strong>
-            <span> [BankAccountNo]</span>
+            <strong>Bank AC No</strong>
+            <span>[BankAccountNo]</span>
           </div>
           <div class="row">
-            <strong>Employee Type :</strong>
-            <span> [EmployeeType]</span>
+            <strong>Employee Type</strong>
+            <span>[EmployeeType]</span>
           </div>
         </div>
         <div class="details-group">
           <div class="row">
-            <strong>Employee Id :</strong>
-            <span> [EmployeeId]</span>
+            <strong>Employee ID</strong>
+            <span>[EmployeeId]</span>
           </div>
           <div class="row">
-            <strong>Paid Date :</strong>
-            <span> [PaidDate]</span>
+            <strong>Paid Date</strong>
+            <span>[PaidDate]</span>
           </div>
           <div class="row">
-            <strong>Paid Days :</strong>
-            <span> [PaidDays]</span>
+            <strong>Paid Days</strong>
+            <span>[PaidDays]</span>
           </div>
 
           <div class="row">
-            <strong>Loss of Pay Days :</strong>
-            <span> [LossofPayDays]</span>
+            <strong>Loss of Pay Days</strong>
+            <span>[LossofPayDays]</span>
           </div>
         </div>
       </div>
@@ -208,55 +212,55 @@
       <table>
         <tr>
           <th class="text-center" colspan="2">Income</th>
-          <th colspan="2">Deductions(-)</th>
+          <th class="text-center" colspan="2">Deductions(-)</th>
         </tr>
         <tr>
           <td class="fw-bold">Basic Salary</td>
-          <td class="w-150">₹ [BasicSalary]</td>
-          <td class="fw-bold">Loss Of Pays</td>
-          <td class="w-150">₹ [LossOfPays]</td>
+          <td class="w-150 text-end">₹ [BasicSalary]</td>
+          <td class="fw-bold">Loss Of Pay</td>
+          <td class="w-150 text-end">₹ [LossOfPays]</td>
         </tr>
-        <tr className>
+        <tr>
           <td class="fw-bold">HRA</td>
-          <td>₹ [HRA]</td>
+          <td class="text-end">₹ [HRA]</td>
           <td class="fw-bold">Income Tax</td>
-          <td>₹ [IncomeTax]</td>
+          <td class="text-end">₹ [IncomeTax]</td>
         </tr>
         <tr>
           <td class="fw-bold">LTA Allowance</td>
-          <td>₹ [LtaAllowance]</td>
+          <td class="text-end">₹ [LtaAllowance]</td>
           <td class="fw-bold">Health Insurance</td>
-          <td>₹ [HealthInsurance]</td>
+          <td class="text-end">₹ [HealthInsurance]</td>
         </tr>
         <tr>
           <td class="fw-bold">Other Allowance</td>
-          <td>₹ [OtherAllowance]</td>
-          <td class="fw-bold"></td>
-          <td></td>
+          <td class="text-end">₹ [OtherAllowance]</td>
+          <td class="fw-bold">EPF</td>
+          <td class="text-end">₹ [EPF]</td>
         </tr>
         <tr>
           <td class="fw-bold">Bonus</td>
-          <td>₹ [Bonus]</td>
-          <td class="fw-bold"></td>
-          <td></td>
-        </tr>
-        <tr style="height: 50px">
-          <td colspan="2"></td>
+          <td class="text-end">₹ [Bonus]</td>
+          <td class="fw-bold">ESIC Employee (0.75%)</td>
+          <td class="text-end">₹ [ESIC]</td>
         </tr>
         <tr>
-          <td>Gross Pay</td>
-          <td>₹ [GrossPay]</td>
-          <td>Total Deduction</td>
-          <td>₹ [TotalDeduction]</td>
+          <td colspan="4">-</td>
+        </tr>
+        <tr>
+          <td class="fw-bold">Gross Pay</td>
+          <td class="text-end fw-bold">₹ [GrossPay]</td>
+          <td class="fw-bold">Total Deduction</td>
+          <td class="text-end fw-bold">₹ [TotalDeduction]</td>
         </tr>
         <tr>
           <td></td>
           <td></td>
           <td class="fw-bold">Net Salary</td>
-          <td>₹ [NetSalary]</td>
+          <td class="text-end fw-bold">₹ [NetSalary]</td>
         </tr>
       </table>
-      <p style="margin-block: 20px; text-align: end">[NetSalaryInWords]</p>
+      <p class="text-center" style="margin-block: 20px">[NetSalaryInWords]</p>
     </div>
   </body>
 </html>
