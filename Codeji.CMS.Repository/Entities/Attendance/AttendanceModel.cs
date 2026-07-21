@@ -20,8 +20,8 @@ public string? AttendanceId { get; set; }
 
     public decimal? TotalHours { get; set; }
 
-    [BsonRepresentation(BsonType.Int32)]
-    public AttendanceStatus Status { get; set; } = AttendanceStatus.P;
+    [BsonSerializer(typeof(AttendanceStatusCodeSerializer))]
+    public string Status { get; set; } = "P";
 
     public string?Remarks { get; set; }
 

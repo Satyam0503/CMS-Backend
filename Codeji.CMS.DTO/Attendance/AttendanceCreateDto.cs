@@ -14,7 +14,7 @@ public class AdminAttendanceCreateDto
     public string? CheckOutTime { get; set; }
 
     [Required]
-    public AttendanceStatus Status { get; set; }
+    public string Status { get; set; } = "P";
 
     public string? Remarks { get; set; }
 }

@@ -4,6 +4,7 @@ using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Interfaces;
 using Codeji.CMS.Services.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace Codeji.CMS.Services
 {
@@ -12,15 +13,18 @@ namespace Codeji.CMS.Services
         private readonly ISalaryRepository _repository;
         private readonly IMongoDbRepository<EmpUser> _employeeRepository;
         private readonly IMongoDbRepository<JobTitles> _jobTitlesRepository;
+        private readonly ILogger<SalaryService> _logger;
 
         public SalaryService(
             ISalaryRepository repository,
             IMongoDbRepository<EmpUser> employeeRepository,
-            IMongoDbRepository<JobTitles> jobTitlesRepository)
+            IMongoDbRepository<JobTitles> jobTitlesRepository,
+            ILogger<SalaryService> logger)
         {
             _repository = repository;
             _employeeRepository = employeeRepository;
             _jobTitlesRepository = jobTitlesRepository;
+            _logger = logger;
         }
 
         public async Task<SalaryModel> CreateSalaryAsync(CreateSalaryDto dto)
@@ -90,12 +94,47 @@ namespace Codeji.CMS.Services
                 .Select(e => (Employee: e, Parsed: Guid.TryParse(e.UserId, out var guid), Guid: guid))
                 .ToList();
 
-            var activeSalaries = await _repository.GetActiveSalariesAsync(
-                employeeGuidIds.Where(e => e.Parsed).Select(e => e.Guid).ToList());
-            var activeSalaryByUserId = activeSalaries.ToDictionary(s => s.UserId);
+            List<SalaryModel> activeSalaries = [];
+            try
+            {
+                var validUserIds = employeeGuidIds
+                    .Where(e => e.Parsed)
+                    .Select(e => e.Guid)
+                    .ToList();
+                if (validUserIds.Count > 0)
+                {
+                    activeSalaries = await _repository.GetActiveSalariesAsync(validUserIds);
+                }
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(
+                    exception,
+                    "Unable to load active salary structures for company {CompanyId}; returning employees without salary data.",
+                    companyId);
+            }
+            var activeSalaryByUserId = activeSalaries
+                .GroupBy(s => s.UserId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderByDescending(s => s.EffectiveFrom).First());
 
             List<string> jobIds = employees.Select(e => e.JobRole).Distinct().Where(jt => jt != null).ToList();
-            IEnumerable<JobTitles> jobTitles = await _jobTitlesRepository.GetAll(jt => jobIds.Contains(jt.JobTitleId));
+            IEnumerable<JobTitles> jobTitles = [];
+            try
+            {
+                if (jobIds.Count > 0)
+                {
+                    jobTitles = await _jobTitlesRepository.GetAll(jt => jobIds.Contains(jt.JobTitleId));
+                }
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(
+                    exception,
+                    "Unable to load job titles for company {CompanyId}; returning employees without job titles.",
+                    companyId);
+            }
 
             return (from emp in employeeGuidIds
                     join jobTitle in jobTitles on emp.Employee.JobRole equals jobTitle.JobTitleId into jobTitleGroup
@@ -109,7 +148,9 @@ namespace Codeji.CMS.Services
                         ActiveSalary = emp.Parsed && activeSalaryByUserId.TryGetValue(emp.Guid, out var salary)
                             ? SalaryResponseDto.MapFromModel(salary)
                             : null
-                    }).ToList();
+                    })
+                    .OrderBy(employee => employee.EmployeeName)
+                    .ToList();
         }
     }
 }

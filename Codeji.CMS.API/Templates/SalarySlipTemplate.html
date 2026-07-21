@@ -109,8 +109,19 @@
       }
 
       .amount-in-words {
-        font-size: 14px;
-        margin-top: 5px;
+        font-size: 13px;
+        font-weight: normal;
+        line-height: 1.4;
+        text-align: right;
+      }
+
+      .company-note {
+        margin-top: 48px;
+        padding-top: 10px;
+        border-top: 1px solid #aaa;
+        font-size: 11px;
+        color: #444;
+        text-align: center;
       }
 
       .details {
@@ -155,9 +166,7 @@
 
       <div class="company-info">
         <div>
-          <img alt="company-logo" src="[CompanyLogo]" /><br />
-          <strong style="font-size: 16px">[CompanyName]</strong><br />
-          <span style="font-size: 12px">[CompanyAddress]</span>
+          <img alt="company-logo" src="[CompanyLogo]" />
         </div>
         <div style="text-align: end">
           <strong>Payslip For Month:</strong><br />
@@ -259,8 +268,15 @@
           <td class="fw-bold">Net Salary</td>
           <td class="text-end fw-bold">₹ [NetSalary]</td>
         </tr>
+        <tr>
+          <td colspan="2"></td>
+          <td class="fw-bold">Amount in Words</td>
+          <td class="amount-in-words">[NetSalaryInWords]</td>
+        </tr>
       </table>
-      <p class="text-center" style="margin-block: 20px">[NetSalaryInWords]</p>
+      <div class="company-note">
+        This is a computer-generated payslip issued by [CompanyName] and does not require a signature.
+      </div>
     </div>
   </body>
 </html>

@@ -23,6 +23,7 @@ public class EmpUser : BaseClass
     public string PersonalEmail { get; set; }
     public string EmergencyContact { get; set; }
     public string DateOfJoining { get; set; }
+    public string? ExitDate { get; set; }
     public int? EmploymentType { get; set; } = null;
     public bool Status { get; set; }
     public bool IsEmailVerified { get; set; }

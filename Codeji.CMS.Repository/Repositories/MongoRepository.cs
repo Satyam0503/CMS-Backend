@@ -29,7 +29,13 @@ namespace Codeji.CMS.Repository.Repositories
         public MongoRepository(IMongoDbCacheService _cacheService, IHttpContextAccessor httpContextAccessor)
         {
             MongoDbContext _mongoDbContext = new MongoDbContext(_cacheService, typeof(TEntity).Name);
-            _dbSet = _mongoDbContext.GetCollection<TEntity>();
+            // Attendance was introduced with the physical collection name "Attendance"
+            // while the generic repository normally derives "AttendanceModel" from the
+            // CLR type. Keep every attendance consumer (calendar, validation and payroll)
+            // on the same existing collection so saved records are not reported missing.
+            _dbSet = typeof(TEntity) == typeof(AttendanceModel)
+                ? _mongoDbContext.GetCollection<TEntity>("Attendance")
+                : _mongoDbContext.GetCollection<TEntity>();
             _httpContextAccessor = httpContextAccessor;
         }
 

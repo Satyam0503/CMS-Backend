@@ -6,7 +6,7 @@ public class AttendanceResponseDto
     public DateTime Date { get; set; }
     public DateTime? CheckInTime { get; set; }
     public DateTime? CheckOutTime { get; set; }
-    public AttendanceStatus Status { get; set; }
+    public string Status { get; set; } = "P";
     public string Remarks { get; set; }
     public int LateCount { get; set; }
     public int EarlyExitCount { get; set; }

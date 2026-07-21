@@ -24,15 +24,21 @@ namespace Codeji.CMS.Services.Attendance
     {
         private readonly IAttendanceRepository _attendanceRepository;
         private readonly IMapper _mapper;
+        private readonly IAttendanceEditGuard _editGuard;
 
-        public AdminAttendanceService(IAttendanceRepository attendanceRepository, IMapper mapper)
+        public AdminAttendanceService(IAttendanceRepository attendanceRepository, IMapper mapper, IAttendanceEditGuard editGuard)
         {
             _attendanceRepository = attendanceRepository;
             _mapper = mapper;
+            _editGuard = editGuard;
         }
             private static readonly TimeSpan OFFICE_START = TimeSpan.FromHours(9);
             private static readonly TimeSpan OFFICE_END = TimeSpan.FromHours(18);
             private const decimal REQUIRED_WORKING_HOURS = 8m;
+            private static readonly HashSet<string> NO_TIME_STATUSES =
+            [
+                "A", "L", "SL", "CL", "EL", "COMP-OFF", "CL-HALF", "SL-HALF"
+            ];
 
 
   public async Task<AttendanceResponseDto> AddManualAttendance(AdminAttendanceCreateDto dto)
@@ -41,6 +47,7 @@ namespace Codeji.CMS.Services.Attendance
         throw new ArgumentNullException(nameof(dto));
 
     var attendanceDate = dto.Date.Date;
+    await _editGuard.EnsureEditableWorkingDayAsync(dto.UserId, attendanceDate);
 
     DateTime? checkIn = null;
     DateTime? checkOut = null;
@@ -101,6 +108,7 @@ public async Task<bool> UpdateAttendance(string userId, DateTime date, Attendanc
         throw new ArgumentNullException(nameof(dto));
 
     var attendanceDate = date.Date;
+    await _editGuard.EnsureEditableWorkingDayAsync(userId, attendanceDate);
 
     var existing = await _attendanceRepository
         .GetByUserAndDateAsync(userId, attendanceDate);
@@ -126,7 +134,7 @@ public async Task<bool> UpdateAttendance(string userId, DateTime date, Attendanc
     existing.Status = dto.Status;
     existing.Remarks = dto.Remarks;
 
-    if (dto.Status == AttendanceStatus.A)
+    if (NO_TIME_STATUSES.Contains(dto.Status))
     {
         existing.CheckInTime = null;
         existing.CheckOutTime = null;
@@ -183,12 +191,13 @@ public async Task<IEnumerable<AttendanceResponseDto>> GetAttendanceByDateRange(
 
 private void ApplyHalfDayOrManualTimes(
     AttendanceModel entity,
-    AttendanceStatus status,
+    string status,
     DateTime date,
     DateTime? checkIn,
     DateTime? checkOut)
         {
-            if (status == AttendanceStatus.H && !checkIn.HasValue && !checkOut.HasValue)
+            if ((status == "HD" || status == "LHD" || status == "WFH-HD")
+                && !checkIn.HasValue && !checkOut.HasValue)
             {
                 var defaultCheckIn = date.Date.AddHours(9);
                 entity.CheckInTime = defaultCheckIn;

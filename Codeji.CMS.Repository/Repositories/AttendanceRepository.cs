@@ -17,8 +17,19 @@ public class AttendanceRepository : IAttendanceRepository
     public async Task<AttendanceModel> AddAsync(AttendanceModel attendance)
     {
         attendance.Date = attendance.Date.Date;
-        await _collection.InsertOneAsync(attendance);
-        return attendance;
+        attendance.AttendanceId ??= MongoDB.Bson.ObjectId.GenerateNewId().ToString();
+
+        var filter =
+            Builders<AttendanceModel>.Filter.Eq(a => a.UserId, attendance.UserId) &
+            Builders<AttendanceModel>.Filter.Eq(a => a.Date, attendance.Date);
+
+        // Upsert makes concurrent bulk/manual marking idempotent for one employee/day.
+        await _collection.ReplaceOneAsync(
+            filter,
+            attendance,
+            new ReplaceOptions { IsUpsert = true });
+
+        return await _collection.Find(filter).FirstAsync();
     }
 
     public async Task<AttendanceModel?> GetByUserAndDateAsync(string userId, DateTime date)

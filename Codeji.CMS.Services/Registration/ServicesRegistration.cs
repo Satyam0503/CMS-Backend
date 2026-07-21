@@ -35,6 +35,11 @@ public static class ServicesRegistration
         services.AddScoped<ILeaveManagementService, LeaveManagementService>();
         services.AddScoped<IAccountServices, AccountServices>();
         services.AddScoped<IPayRollServices, PayRollServices>();
+        services.AddScoped<IAttendanceStatusService, AttendanceStatusService>();
+        services.AddScoped<IAttendancePenaltyService, AttendancePenaltyService>();
+        services.AddScoped<IWeeklyOffService, WeeklyOffService>();
+        services.AddScoped<IAttendanceEditGuard, AttendanceEditGuard>();
+        services.AddScoped<IPayrollDivisorPolicyService, PayrollDivisorPolicyService>();
         return services;
     }
 }

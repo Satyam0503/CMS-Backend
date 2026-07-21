@@ -263,7 +263,7 @@ namespace Codeji.CMS.Services
             company.CompanyLogo = model.CompanyLogo == null ? company.CompanyLogo : await UpdateCompanyLogo(model.CompanyLogo, companyId);
 
             Result result1 = await _companyRepo.Update(whereCondition, company);
-            if (!result.Success)
+            if (!result1.Success)
             {
                 result.Message = "Failed To Update Company";
                 return result;

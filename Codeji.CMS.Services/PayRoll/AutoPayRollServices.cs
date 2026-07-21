@@ -5,6 +5,7 @@ using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.DTO.Salary;
 using MongoDB.Driver.Linq;
+using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.PayRoll
 {
@@ -15,24 +16,52 @@ namespace Codeji.CMS.Services.PayRoll
         private readonly IMongoDbRepository<EmpPayRoll> _empPayRollRepository;
         private readonly IMongoDbRepository<AttendanceModel> _attendanceRepository;
         private readonly IMongoDbRepository<SalaryModel> _salaryRepository;
+        private readonly IMongoDbRepository<AttendanceStatusSetting> _attendanceStatusRepository;
+        private readonly IMongoDbRepository<MonthlyAttendanceSummary> _attendanceSummaryRepository;
+        private readonly IMongoDbRepository<AttendancePayrollException> _attendanceExceptionRepository;
 
         public AutoPayrollServices(
             IPayRollServices payRollServices,
             IMongoDbRepository<EmpUser> employeeRepository,
             IMongoDbRepository<EmpPayRoll> empPayRollRepository,
             IMongoDbRepository<AttendanceModel> attendanceRepository,
-            IMongoDbRepository<SalaryModel> salaryRepository)
+            IMongoDbRepository<SalaryModel> salaryRepository,
+            IMongoDbRepository<AttendanceStatusSetting> attendanceStatusRepository,
+            IMongoDbRepository<MonthlyAttendanceSummary> attendanceSummaryRepository,
+            IMongoDbRepository<AttendancePayrollException> attendanceExceptionRepository)
         {
             _payRollServices = payRollServices;
             _employeeRepository = employeeRepository;
             _empPayRollRepository = empPayRollRepository;
             _attendanceRepository = attendanceRepository;
             _salaryRepository = salaryRepository;
+            _attendanceStatusRepository = attendanceStatusRepository;
+            _attendanceSummaryRepository = attendanceSummaryRepository;
+            _attendanceExceptionRepository = attendanceExceptionRepository;
         }
 
         public async Task<Result> GeneratePayrollForMonthAsync(string companyId, DateTime payMonth)
 {
-    var employees = await _employeeRepository.GetAll(e => e.CompanyId == companyId);
+    var employees = (await _employeeRepository.GetAll(e => e.CompanyId == companyId && e.Status && !e.IsDeleted)).ToList();
+    var monthStart = new DateTime(payMonth.Year, payMonth.Month, 1);
+    var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+    const string divisorPolicy = "CALENDAR_DAYS";
+
+    // Validate every eligible employee before the first payroll write. This prevents a
+    // later employee validation failure from leaving an unnoticed partial company run.
+    var validationErrors = new List<string>();
+    foreach (var employee in employees)
+    {
+        if (!DateTime.TryParse(employee.DateOfJoining, out var joining)) { validationErrors.Add($"{employee.EmployeeId}: valid joining date is required."); continue; }
+        if (joining.Date > monthEnd) continue;
+        if (DateTime.TryParse(employee.ExitDate, out var exit) && exit.Date < monthStart) continue;
+        if (DateTime.TryParse(employee.ExitDate, out exit) && exit.Date < joining.Date) { validationErrors.Add($"{employee.EmployeeId}: exit date cannot be before joining date."); continue; }
+        var summary = await _attendanceSummaryRepository.FirstOrDefault(x => x.CompanyId==companyId && x.EmployeeId==employee.EmployeeId && x.PayrollMonth==monthStart && x.IsApproved && x.IsLocked);
+        if (summary==null) validationErrors.Add($"{employee.EmployeeId}: monthly attendance must be approved and locked.");
+        if (!_salaryRepository.Get(x=>x.EmployeeId==employee.EmployeeId && x.Status).Any()) validationErrors.Add($"{employee.EmployeeId}: active salary structure is required.");
+        if (await _attendanceExceptionRepository.Exist(x=>x.CompanyId==companyId && x.EmployeeId==employee.EmployeeId && x.PayrollMonth==monthStart && x.Status=="PENDING_REVIEW")) validationErrors.Add($"{employee.EmployeeId}: unresolved attendance exception requires review.");
+    }
+    if (validationErrors.Count>0) return new Result { Success=false, Message="Payroll validation failed. No payroll records were changed. "+string.Join("; ",validationErrors) };
 
     int processedCount = 0;
     int skippedNoSalaryCount = 0;
@@ -46,11 +75,27 @@ namespace Codeji.CMS.Services.PayRoll
         if (!DateTime.TryParse(emp.DateOfJoining, out DateTime joiningDate))
             continue;
 
-        var monthStart = new DateTime(payMonth.Year, payMonth.Month, 1);
-        var monthEnd = new DateTime(payMonth.Year, payMonth.Month, DateTime.DaysInMonth(payMonth.Year, payMonth.Month));
-
-        if (joiningDate > monthEnd)
+        if (joiningDate.Date > monthEnd)
             continue;
+
+        DateTime? exitDate = DateTime.TryParse(emp.ExitDate, out var parsedExitDate) ? parsedExitDate.Date : null;
+        if (exitDate.HasValue && exitDate.Value < monthStart)
+            continue;
+
+        var eligibleFrom = joiningDate.Date > monthStart ? joiningDate.Date : monthStart;
+        var eligibleTo = exitDate.HasValue && exitDate.Value < monthEnd ? exitDate.Value : monthEnd;
+
+        var attendanceSummary = await _attendanceSummaryRepository.FirstOrDefault(x =>
+            x.CompanyId == companyId && x.EmployeeId == emp.EmployeeId &&
+            x.PayrollMonth == monthStart && x.IsApproved && x.IsLocked);
+        if (attendanceSummary == null)
+            return new Result { Success = false, Message = $"Attendance must be validated and locked before payroll. Missing lock for employee {emp.EmployeeId}." };
+
+        var attendanceException = await _attendanceExceptionRepository.FirstOrDefault(x =>
+            x.CompanyId == companyId && x.EmployeeId == emp.EmployeeId &&
+            x.PayrollMonth == monthStart && x.ExceptionType == "LHD_ED_LIMIT_EXCEEDED" && x.Status != "CANCELLED");
+        if (attendanceException?.Status == "PENDING_REVIEW")
+            return new Result { Success = false, Message = $"Payroll is blocked: the LHD/ED exception for employee {emp.EmployeeId} requires HR/Admin review." };
 
         consideredCount++;
 
@@ -72,39 +117,29 @@ namespace Codeji.CMS.Services.PayRoll
         decimal originalOtherAllowance = salaryRecords.OtherAllowances ?? 0m;
         decimal originalBonus = salaryRecords.Bonus ?? 0m;
 
-        DateTime today = DateTime.UtcNow.Date;
-
-        DateTime calculationEndDate =
-            (payMonth.Month == today.Month && payMonth.Year == today.Year)
-            ? today
-            : monthEnd;
-
+        var eligibleToExclusive = eligibleTo.Date.AddDays(1);
         var attendanceRecords = await _attendanceRepository.GetAll(a =>
             a.EmployeeId == emp.EmployeeId &&
-            a.Date >= monthStart &&
-            a.Date <= calculationEndDate);
+            a.Date >= eligibleFrom &&
+            a.Date < eligibleToExclusive);
 
-        int fullDayLeaves = attendanceRecords.Count(a => a.Status == AttendanceStatus.A);
-        int halfDayLeaves = attendanceRecords.Count(a => a.Status == AttendanceStatus.H);
-        int lateCount = attendanceRecords.Sum(a => a.LateCount);
-        int earlyExitCount = attendanceRecords.Sum(a => a.EarlyExitCount);
+        var statusRules = (await _attendanceStatusRepository.GetAll(s => s.CompanyId == companyId)).ToDictionary(s => s.Code, StringComparer.OrdinalIgnoreCase);
+        decimal resolvedDivisor = daysInMonth;
+        if (resolvedDivisor <= 0) return new Result { Success=false, Message=$"Invalid payroll divisor for employee {emp.EmployeeId}. No payroll was changed." };
+        decimal perDaySalary = originalBasic / resolvedDivisor;
 
-        decimal perDaySalary = originalBasic / daysInMonth;
-
-        int totalLateEarly = lateCount + earlyExitCount;
-        decimal lateHalfDays = (totalLateEarly / 4) * 0.5m;
-
-        decimal lossOfPayDays = fullDayLeaves + (halfDayLeaves * 0.5m) + lateHalfDays;
+        decimal configuredUnpaidDays = attendanceRecords.Sum(a => statusRules.TryGetValue(a.Status, out var rule)
+            ? rule.UnpaidDayFraction
+            : a.Status == "A" ? 1m : (a.Status == "HD" || a.Status == "LHD" || a.Status == "WFH-HD") ? .5m : 0m);
+        decimal approvedPenaltyDays = attendanceException?.Status is "DEDUCTION_APPROVED" or "APPLIED_TO_PAYROLL"
+            ? attendanceException.DeductionDayFraction
+            : 0m;
+        decimal lossOfPayDays = PayrollCalculationRules.TotalLossOfPayDays(configuredUnpaidDays,approvedPenaltyDays);
         decimal lossOfPay = Math.Round(lossOfPayDays * perDaySalary, 2);
 
         // Joining month proration
-        decimal joiningProrationFactor = 1m;
-
-        if (joiningDate.Year == payMonth.Year && joiningDate.Month == payMonth.Month)
-        {
-            int eligibleDays = daysInMonth - joiningDate.Day + 1;
-            joiningProrationFactor = (decimal)eligibleDays / daysInMonth;
-        }
+        int eligibleDays = (eligibleTo - eligibleFrom).Days + 1;
+        decimal joiningProrationFactor = (decimal)eligibleDays / daysInMonth;
 
         decimal basicAfterJoining = Math.Round(originalBasic * joiningProrationFactor, 2);
         decimal hra = Math.Round(originalHRA * joiningProrationFactor, 2);
@@ -115,8 +150,7 @@ namespace Codeji.CMS.Services.PayRoll
         decimal finalBasic = basicAfterJoining - lossOfPay;
         if (finalBasic < 0) finalBasic = 0;
 
-        int paidDays = daysInMonth - (int)Math.Floor(lossOfPayDays);
-        if (paidDays < 0) paidDays = 0;
+        decimal paidDaysValue = Math.Max(0m, eligibleDays - lossOfPayDays);
 
         decimal monthlyGross = finalBasic + hra + lta + otherAllowance + bonus;
         decimal annualGrossIncome = monthlyGross * 12;
@@ -132,11 +166,30 @@ namespace Codeji.CMS.Services.PayRoll
             LTA = lta,
             OtherAllowance = otherAllowance,
             Bonus = bonus,
-            PaidDays = paidDays,
+            PaidDays = (float)paidDaysValue,
             LossOfPayDays = lossOfPayDays,
             LossOfPay = lossOfPay,
             IncomeTax = monthlyIncomeTax,
-            HealthInsurance = salaryRecords.HealthInsurance ?? 0
+            HealthInsurance = salaryRecords.HealthInsurance ?? 0,
+            DeductionLines = approvedPenaltyDays > 0 ? [new PayrollDeductionLineDto
+            {
+                Code = "LHD_ED_POLICY", Description = "Approved LHD/ED monthly policy deduction",
+                DayFraction = approvedPenaltyDays, Amount = Math.Round(approvedPenaltyDays * perDaySalary, 2),
+                SourceId = attendanceException?.Id
+            }] : [],
+            CalculationSnapshot = new PayrollCalculationSnapshotDto
+            {
+                PayrollMonth = monthStart, JoiningDateUsed = joiningDate.Date, ExitDateUsed = exitDate,
+                EligibleFrom = eligibleFrom, EligibleTo = eligibleTo, DivisorPolicy = divisorPolicy, Divisor = resolvedDivisor, DivisorPolicyVersion = 0,
+                LhdCount = attendanceException?.LhdCount ?? attendanceSummary.LhdCount,
+                EdCount = attendanceException?.EdCount ?? attendanceSummary.EdCount,
+                CombinedCount = attendanceException?.CombinedOccurrenceCount ?? attendanceSummary.LhdCount + attendanceSummary.EdCount,
+                AllowedCount = attendanceException?.AllowedOccurrenceCount ?? 0,
+                ExceededCount = attendanceException?.ExceededOccurrenceCount ?? 0,
+                ExceptionDecision = attendanceException?.Decision, PenaltyDayFraction = approvedPenaltyDays,
+                PenaltyAmount = Math.Round(approvedPenaltyDays * perDaySalary, 2), PolicyId = attendanceException?.PolicyId,
+                PolicyVersion = attendanceException?.PolicyVersion ?? 0, AttendanceSummaryVersion = attendanceSummary.Version
+            }
         };
 
         // --- Check for existing payroll ---
@@ -154,7 +207,16 @@ if (existingPayroll != null)
 }
 
 // Add or update payroll
-await _payRollServices.AddUpdatePayRoll(payrollDto, companyId);
+var saveResult = await _payRollServices.AddUpdatePayRoll(payrollDto, companyId);
+if (!saveResult.Success)
+    return saveResult;
+if (attendanceException?.Status == "DEDUCTION_APPROVED")
+{
+    attendanceException.Status = "APPLIED_TO_PAYROLL";
+    attendanceException.UpdatedDate = DateTime.UtcNow;
+    await _attendanceExceptionRepository.Update(
+        Builders<AttendancePayrollException>.Filter.Eq(x => x.Id, attendanceException.Id), attendanceException);
+}
 processedCount++;
 }
 

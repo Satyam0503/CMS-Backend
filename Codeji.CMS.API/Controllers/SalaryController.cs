@@ -55,8 +55,13 @@ namespace Codeji.CMS.API.Controllers
         public async Task<ActionResult<Result<CompanySalaryResponseDto>>> GetCompanySalaries([FromBody] CompanySalaryFilterDto filter)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-            var salaries = await _salaryService.GetCompanySalariesAsync(companyId, filter.EmployeeName);
-            var result = new Result<CompanySalaryResponseDto> { MethodResults = salaries };
+            var salaries = await _salaryService.GetCompanySalariesAsync(companyId, filter?.EmployeeName);
+            var result = new Result<CompanySalaryResponseDto>
+            {
+                Success = true,
+                MethodResults = salaries,
+                TotalRecords = salaries.Count
+            };
             return Ok(result);
         }
     }

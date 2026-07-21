@@ -28,6 +28,10 @@ public class AdminAttendanceController : ControllerBase
             var result = await _service.AddManualAttendance(dto);
             return Ok(result);
         }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { success = false, message = ex.Message });
+        }
         catch (Exception ex)
         {
             return StatusCode(500, new
@@ -63,7 +67,9 @@ public class AdminAttendanceController : ControllerBase
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
-        var success = await _service.UpdateAttendance(userId, date, dto);
+        bool success;
+        try { success = await _service.UpdateAttendance(userId, date, dto); }
+        catch (InvalidOperationException ex) { return Conflict(new { success = false, message = ex.Message }); }
 
         if (!success)
             return NotFound("Attendance not found.");

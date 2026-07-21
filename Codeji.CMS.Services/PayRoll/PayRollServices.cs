@@ -372,7 +372,9 @@ public class PayRollServices : IPayRollServices
                     HealthInsurance = model.HealthInsurance ?? 0,
                     EPF = model.EPF ?? 0,
                     ESIC = model.ESIC ?? 0
-                }
+                },
+                DeductionLines = MapDeductionLines(model.DeductionLines),
+                CalculationSnapshot = MapSnapshot(model.CalculationSnapshot)
             };
             result = await _empPayRollRepository.AddOne(newPayRoll);
         }
@@ -394,8 +396,25 @@ public class PayRollServices : IPayRollServices
             payRoll.Deduction.HealthInsurance = model.HealthInsurance ?? 0;
             payRoll.Deduction.EPF = model.EPF ?? 0;
             payRoll.Deduction.ESIC = model.ESIC ?? 0;
+            payRoll.DeductionLines = MapDeductionLines(model.DeductionLines);
+            payRoll.CalculationSnapshot = MapSnapshot(model.CalculationSnapshot);
             result = await _empPayRollRepository.Update(expression, payRoll);
         }
         return result;
     }
+
+    private static List<PayrollDeductionLine> MapDeductionLines(IEnumerable<PayrollDeductionLineDto> lines) => lines.Select(x => new PayrollDeductionLine
+    {
+        Code = x.Code, Description = x.Description, DayFraction = x.DayFraction, Amount = x.Amount, SourceId = x.SourceId
+    }).ToList();
+
+    private static PayrollCalculationSnapshot? MapSnapshot(PayrollCalculationSnapshotDto? x) => x == null ? null : new PayrollCalculationSnapshot
+    {
+        PayrollMonth=x.PayrollMonth, JoiningDateUsed=x.JoiningDateUsed, ExitDateUsed=x.ExitDateUsed,
+        EligibleFrom=x.EligibleFrom, EligibleTo=x.EligibleTo, DivisorPolicy=x.DivisorPolicy, Divisor=x.Divisor, DivisorPolicyVersion=x.DivisorPolicyVersion,
+        LhdCount=x.LhdCount, EdCount=x.EdCount, CombinedCount=x.CombinedCount, AllowedCount=x.AllowedCount,
+        ExceededCount=x.ExceededCount, ExceptionDecision=x.ExceptionDecision, PenaltyDayFraction=x.PenaltyDayFraction,
+        PenaltyAmount=x.PenaltyAmount, PolicyId=x.PolicyId, PolicyVersion=x.PolicyVersion,
+        AttendanceSummaryVersion=x.AttendanceSummaryVersion
+    };
 }
