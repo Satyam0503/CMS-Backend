@@ -13,4 +13,5 @@ public class InviteEmployeeDto
     public string? RoleId { get; set; }
     public string? DepartmentId { get; set; }
     public string? JobRoleId { get; set; }
+    public string? Gender { get; set; }
 }

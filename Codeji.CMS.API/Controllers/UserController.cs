@@ -64,6 +64,7 @@ public class UserController : BaseApiController
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.BulkImportEmployees(model, currentUserId);
     }
+
     [Route("GetLastEmployeeId")]
     [HttpGet]
     [ModulePermission(AppModule.Employees, Permission.View)]

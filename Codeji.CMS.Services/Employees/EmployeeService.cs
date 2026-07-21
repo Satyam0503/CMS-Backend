@@ -128,6 +128,7 @@ namespace Codeji.CMS.Services.Employees
                 RoleId = model.RoleId ?? string.Empty,
                 Department = model.DepartmentId ?? string.Empty,
                 JobRole = model.JobRoleId ?? string.Empty,
+                Gender = model.Gender ?? string.Empty,
                 IsEmailVerified = false,
                 Status = true
             };
@@ -199,6 +200,7 @@ namespace Codeji.CMS.Services.Employees
                 string roleName = item.Role?.Trim() ?? string.Empty;
                 string departmentName = item.Department?.Trim() ?? string.Empty;
                 string jobRoleName = item.JobRole?.Trim() ?? string.Empty;
+                string gender = item.Gender?.Trim() ?? string.Empty;
                 int rowNumber = i + 1;
 
                 BulkImportEmployeeRowResultDto rowResult = new()
@@ -326,7 +328,8 @@ namespace Codeji.CMS.Services.Employees
                         Email = email,
                         RoleId = role.RolesId,
                         DepartmentId = department.DepartmentId,
-                        JobRoleId = jobTitle.JobTitleId
+                        JobRoleId = jobTitle.JobTitleId,
+                        Gender = gender
                     };
 
                     Result<InviteEmployeeDto> inviteResult = await InviteNewEmployee(inviteModel, currentUserId);
