@@ -183,7 +183,12 @@ namespace Codeji.CMS.Services.Employees
             Company? company = await _companyRepository.FirstOrDefault(c => c.CompanyId == companyId);
             string defaultLanguage = string.IsNullOrWhiteSpace(company?.DefaultLanguage) ? "en" : company.DefaultLanguage;
 
-            List<Roles> availableRoles = (await _rolesRepository.GetAll(r => r.CompanyId == companyId && !r.IsDeleted)).ToList();
+            // Bulk employee import must never create additional company
+            // administrators. Administrator assignment is an explicit account-
+            // ownership operation, not employee master data.
+            List<Roles> availableRoles = (await _rolesRepository.GetAll(r =>
+                r.CompanyId == companyId && !r.IsDeleted &&
+                r.RoleType != (int)EnumsHelper.Roles.Administrator)).ToList();
             List<Department> availableDepartments = (await _departmentRepository.GetAll(d => d.CompanyId == companyId)).ToList();
             List<JobTitles> availableJobTitles = (await _jobTitlesRepository.GetAll(j => j.CompanyId == companyId)).ToList();
 
@@ -600,7 +605,7 @@ namespace Codeji.CMS.Services.Employees
         {
             LoginUserViewModel returnModel = new();
             UserModel? user = await GetEmployeeById(userId);
-            Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == roleId);
+            Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == roleId && x.CompanyId == companyId);
             Company? companyDetails = await _companyRepository.FirstOrDefault(x => x.CompanyId == companyId);
             if (user is null || role is null || companyDetails is null)
             {

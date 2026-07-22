@@ -31,10 +31,10 @@ public class AutoPayrollController : BaseApiController
 
         var currentPeriod = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
         var requestPeriod = new DateTime(model.PayMonth.Year, model.PayMonth.Month, 1);
-        if (requestPeriod > currentPeriod)
+        if (!PayrollPeriodRules.IsClosedPeriod(requestPeriod, DateTime.UtcNow))
         {
             result.Success = false;
-            result.Message = "Payroll cannot be processed for a future month.";
+            result.Message = "Payroll can be processed only for a completed month.";
             return result;
         }
 

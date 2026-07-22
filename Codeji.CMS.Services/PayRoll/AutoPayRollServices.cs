@@ -19,6 +19,8 @@ namespace Codeji.CMS.Services.PayRoll
         private readonly IMongoDbRepository<AttendanceStatusSetting> _attendanceStatusRepository;
         private readonly IMongoDbRepository<MonthlyAttendanceSummary> _attendanceSummaryRepository;
         private readonly IMongoDbRepository<AttendancePayrollException> _attendanceExceptionRepository;
+        private readonly IPayrollDivisorPolicyService _divisorPolicies;
+        private readonly ICompanyWorkingCalendarService _workingCalendar;
 
         public AutoPayrollServices(
             IPayRollServices payRollServices,
@@ -28,7 +30,9 @@ namespace Codeji.CMS.Services.PayRoll
             IMongoDbRepository<SalaryModel> salaryRepository,
             IMongoDbRepository<AttendanceStatusSetting> attendanceStatusRepository,
             IMongoDbRepository<MonthlyAttendanceSummary> attendanceSummaryRepository,
-            IMongoDbRepository<AttendancePayrollException> attendanceExceptionRepository)
+            IMongoDbRepository<AttendancePayrollException> attendanceExceptionRepository,
+            IPayrollDivisorPolicyService divisorPolicies,
+            ICompanyWorkingCalendarService workingCalendar)
         {
             _payRollServices = payRollServices;
             _employeeRepository = employeeRepository;
@@ -38,6 +42,8 @@ namespace Codeji.CMS.Services.PayRoll
             _attendanceStatusRepository = attendanceStatusRepository;
             _attendanceSummaryRepository = attendanceSummaryRepository;
             _attendanceExceptionRepository = attendanceExceptionRepository;
+            _divisorPolicies = divisorPolicies;
+            _workingCalendar = workingCalendar;
         }
 
         public async Task<Result> GeneratePayrollForMonthAsync(string companyId, DateTime payMonth)
@@ -45,7 +51,11 @@ namespace Codeji.CMS.Services.PayRoll
     var employees = (await _employeeRepository.GetAll(e => e.CompanyId == companyId && e.Status && !e.IsDeleted)).ToList();
     var monthStart = new DateTime(payMonth.Year, payMonth.Month, 1);
     var monthEnd = monthStart.AddMonths(1).AddDays(-1);
-    const string divisorPolicy = "CALENDAR_DAYS";
+    if (await _empPayRollRepository.Exist(p => p.CompanyId == companyId &&
+        p.PayMonth.Year == monthStart.Year && p.PayMonth.Month == monthStart.Month && p.IsProcessed))
+        return new Result { Success = false, Message = $"Payroll for {monthStart:MMMM yyyy} is already processed and cannot be regenerated." };
+    var divisorSetting = await _divisorPolicies.GetEffective(companyId, monthStart);
+    var divisorPolicy = divisorSetting.DivisorPolicy;
 
     // Validate every eligible employee before the first payroll write. This prevents a
     // later employee validation failure from leaving an unnoticed partial company run.
@@ -58,7 +68,7 @@ namespace Codeji.CMS.Services.PayRoll
         if (DateTime.TryParse(employee.ExitDate, out exit) && exit.Date < joining.Date) { validationErrors.Add($"{employee.EmployeeId}: exit date cannot be before joining date."); continue; }
         var summary = await _attendanceSummaryRepository.FirstOrDefault(x => x.CompanyId==companyId && x.EmployeeId==employee.EmployeeId && x.PayrollMonth==monthStart && x.IsApproved && x.IsLocked);
         if (summary==null) validationErrors.Add($"{employee.EmployeeId}: monthly attendance must be approved and locked.");
-        if (!_salaryRepository.Get(x=>x.EmployeeId==employee.EmployeeId && x.Status).Any()) validationErrors.Add($"{employee.EmployeeId}: active salary structure is required.");
+        if (!_salaryRepository.Get(x=>x.CompanyId==companyId && x.EmployeeId==employee.EmployeeId && x.EffectiveFrom<=monthEnd && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value>=monthStart)).Any()) validationErrors.Add($"{employee.EmployeeId}: salary structure effective for the payroll month is required.");
         if (await _attendanceExceptionRepository.Exist(x=>x.CompanyId==companyId && x.EmployeeId==employee.EmployeeId && x.PayrollMonth==monthStart && x.Status=="PENDING_REVIEW")) validationErrors.Add($"{employee.EmployeeId}: unresolved attendance exception requires review.");
     }
     if (validationErrors.Count>0) return new Result { Success=false, Message="Payroll validation failed. No payroll records were changed. "+string.Join("; ",validationErrors) };
@@ -100,8 +110,8 @@ namespace Codeji.CMS.Services.PayRoll
         consideredCount++;
 
         var salaryRecords = _salaryRepository
-            .Get(s => s.EmployeeId == emp.EmployeeId && s.Status)
-            .FirstOrDefault();
+            .Get(s => s.CompanyId == companyId && s.EmployeeId == emp.EmployeeId && s.EffectiveFrom <= monthEnd && (!s.EffectiveTo.HasValue || s.EffectiveTo.Value >= monthStart))
+            .OrderByDescending(s => s.EffectiveFrom).FirstOrDefault();
 
         if (salaryRecords == null)
         {
@@ -119,12 +129,13 @@ namespace Codeji.CMS.Services.PayRoll
 
         var eligibleToExclusive = eligibleTo.Date.AddDays(1);
         var attendanceRecords = await _attendanceRepository.GetAll(a =>
-            a.EmployeeId == emp.EmployeeId &&
+            a.CompanyId == companyId && a.UserId == emp.UserId && a.EmployeeId == emp.EmployeeId &&
             a.Date >= eligibleFrom &&
             a.Date < eligibleToExclusive);
 
         var statusRules = (await _attendanceStatusRepository.GetAll(s => s.CompanyId == companyId)).ToDictionary(s => s.Code, StringComparer.OrdinalIgnoreCase);
-        decimal resolvedDivisor = daysInMonth;
+        var workingDays = await _workingCalendar.CountWorkingDaysAsync(companyId, DateOnly.FromDateTime(monthStart), DateOnly.FromDateTime(monthEnd));
+        decimal resolvedDivisor = PayrollCalculationRules.ResolveDivisor(divisorPolicy, daysInMonth, workingDays);
         if (resolvedDivisor <= 0) return new Result { Success=false, Message=$"Invalid payroll divisor for employee {emp.EmployeeId}. No payroll was changed." };
         decimal perDaySalary = originalBasic / resolvedDivisor;
 
@@ -147,8 +158,9 @@ namespace Codeji.CMS.Services.PayRoll
         decimal otherAllowance = Math.Round(originalOtherAllowance * joiningProrationFactor, 2);
         decimal bonus = Math.Round(originalBonus * joiningProrationFactor, 2);
 
-        decimal finalBasic = basicAfterJoining - lossOfPay;
-        if (finalBasic < 0) finalBasic = 0;
+        // Transparent payslip model: keep earned/prorated basic before attendance LOP;
+        // LOP is stored once in the deductions section and subtracted once from net pay.
+        decimal finalBasic = basicAfterJoining;
 
         decimal paidDaysValue = Math.Max(0m, eligibleDays - lossOfPayDays);
 
@@ -180,7 +192,7 @@ namespace Codeji.CMS.Services.PayRoll
             CalculationSnapshot = new PayrollCalculationSnapshotDto
             {
                 PayrollMonth = monthStart, JoiningDateUsed = joiningDate.Date, ExitDateUsed = exitDate,
-                EligibleFrom = eligibleFrom, EligibleTo = eligibleTo, DivisorPolicy = divisorPolicy, Divisor = resolvedDivisor, DivisorPolicyVersion = 0,
+                EligibleFrom = eligibleFrom, EligibleTo = eligibleTo, DivisorPolicy = divisorPolicy, Divisor = resolvedDivisor, DivisorPolicyVersion = divisorSetting.Version,
                 LhdCount = attendanceException?.LhdCount ?? attendanceSummary.LhdCount,
                 EdCount = attendanceException?.EdCount ?? attendanceSummary.EdCount,
                 CombinedCount = attendanceException?.CombinedOccurrenceCount ?? attendanceSummary.LhdCount + attendanceSummary.EdCount,
@@ -224,8 +236,8 @@ processedCount++;
     {
         Success = true,
         Message = skippedNoSalaryCount > 0
-            ? $"Processed payroll for {processedCount} of {consideredCount} employees. {skippedNoSalaryCount} employee(s) have no salary structure defined."
-            : $"Processed payroll for {processedCount} employee(s)."
+            ? $"Generated payroll draft for {processedCount} of {consideredCount} employees. {skippedNoSalaryCount} employee(s) have no salary structure defined."
+            : $"Generated payroll draft for {processedCount} employee(s). Review it and process the month to publish payslips."
     };
 }
 

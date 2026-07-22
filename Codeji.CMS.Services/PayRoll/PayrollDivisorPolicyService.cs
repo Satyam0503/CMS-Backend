@@ -27,6 +27,11 @@ public sealed class PayrollDivisorPolicyService(IMongoDbRepository<PayrollDiviso
         if (!allowed.Contains(dto.DivisorPolicy) || (dto.EffectiveTo.HasValue && dto.EffectiveTo.Value.Date < dto.EffectiveFrom.Date))
             return new Result { Success=false, Message="Invalid payroll divisor policy or effective dates." };
         var versions=(await repository.GetAll(x=>x.CompanyId==companyId)).OrderByDescending(x=>x.Version).ToList();
+        var newStart=dto.EffectiveFrom.Date;var newEnd=dto.EffectiveTo?.Date??DateTime.MaxValue.Date;
+        if(versions.Any(x=>x.EffectiveFrom.Date==newStart||
+            (x.EffectiveTo.HasValue&&x.EffectiveFrom.Date<=newEnd&&x.EffectiveTo.Value.Date>=newStart)||
+            (!x.EffectiveTo.HasValue&&x.EffectiveFrom.Date>newStart)))
+            return new Result{Success=false,Message="The payroll divisor policy overlaps an existing version."};
         var open=versions.FirstOrDefault(x=>!x.EffectiveTo.HasValue&&x.EffectiveFrom<dto.EffectiveFrom.Date);
         if(open!=null){open.EffectiveTo=dto.EffectiveFrom.Date.AddDays(-1);open.UpdatedBy=userId;open.UpdatedDate=DateTime.UtcNow;await repository.Update(Builders<PayrollDivisorPolicy>.Filter.Eq(x=>x.Id,open.Id),open);}
         return await repository.AddOne(new PayrollDivisorPolicy { CompanyId=companyId,DivisorPolicy=dto.DivisorPolicy,EffectiveFrom=dto.EffectiveFrom.Date,EffectiveTo=dto.EffectiveTo?.Date,IsActive=dto.IsActive,Version=(versions.FirstOrDefault()?.Version??0)+1,CreatedBy=userId });

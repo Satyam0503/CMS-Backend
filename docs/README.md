@@ -2,7 +2,7 @@
 
 Architectural reference for the **CMS-Backend-Core** .NET 8 ASP.NET Core API. Written for AI agents and humans who need to ramp up on the codebase without re-exploring it from scratch.
 
-> **Snapshot date:** 2026-05. File paths and conventions reflect the codebase at that time. If a path no longer resolves, prefer reading the actual source over trusting the doc.
+> **Snapshot date:** 2026-07-22. File paths and conventions reflect the codebase at that time. If a path no longer resolves, prefer reading the actual source over trusting the doc.
 
 ## How to use these docs
 
@@ -18,6 +18,13 @@ Recommended reading order for a new contributor (human or AI):
 6. [`cross-cutting.md`](./cross-cutting.md) — middleware, sanitizer, mail, background jobs, SignalR
 7. [`conventions.md`](./conventions.md) — naming, `Result<T>` pattern, error handling, async style
 8. [`add-new-feature.md`](./add-new-feature.md) — playbook for adding a new endpoint / module
+
+### Detailed HR module flows
+
+- [`leave-management-current-flow.md`](./leave-management-current-flow.md)
+- [`attendance-current-flow.md`](./attendance-current-flow.md)
+- [`payroll-current-flow.md`](./payroll-current-flow.md)
+- [`hr-hardening-implementation-report.md`](./hr-hardening-implementation-report.md) - implemented fixes, migration, deployment checks, and remaining risks
 
 ## What this is not
 

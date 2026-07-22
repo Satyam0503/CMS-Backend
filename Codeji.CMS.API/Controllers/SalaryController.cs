@@ -30,14 +30,14 @@ namespace Codeji.CMS.API.Controllers
 
         public async Task<IActionResult> CreateSalary([FromBody] CreateSalaryDto dto)
         {
-            var salary = await _salaryService.CreateSalaryAsync(dto);
+            var salary = await _salaryService.CreateSalaryAsync(CurrentContext.CompanyId(_httpContextAccessor), dto);
             return Ok(new { success = true, data = SalaryResponseDto.MapFromModel(salary) });
         }
 
         [HttpGet("active/{userId}")]
         public async Task<IActionResult> GetActiveSalary(Guid userId)
         {
-            var salary = await _salaryService.GetActiveSalaryAsync(userId);
+            var salary = await _salaryService.GetActiveSalaryAsync(CurrentContext.CompanyId(_httpContextAccessor), userId);
             if (salary == null) return NotFound(new { success = false, message = "No active salary found" });
             return Ok(new { success = true, data = salary });
         }
@@ -45,7 +45,7 @@ namespace Codeji.CMS.API.Controllers
         [HttpGet("history/{userId}")]
         public async Task<IActionResult> GetSalaryHistory(Guid userId)
         {
-            var salaries = await _salaryService.GetSalaryHistoryAsync(userId);
+            var salaries = await _salaryService.GetSalaryHistoryAsync(CurrentContext.CompanyId(_httpContextAccessor), userId);
             return Ok(new { success = true, data = salaries });
         }
 

@@ -23,6 +23,8 @@ using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json;
+using System.ComponentModel.DataAnnotations;
 
 // For more information on enabling Web API for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
 
@@ -187,9 +189,12 @@ namespace Codeji.CMS.API.Controllers
 
         [AllowAnonymous]
         [Route("CreateNewPassword")]
+        [Route("account/CreateNewPassword")]
         [HttpPost]
         public async Task<Result> CreateNewPassword(CreateNewPasswordRequest model)
         {
+            if (!ModelState.IsValid)
+                return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "A valid reset token and password are required." };
             Result result = await _accountService.CreateNewPassword(model);
             return result;
         }
@@ -197,23 +202,32 @@ namespace Codeji.CMS.API.Controllers
         [AllowAnonymous]
         [HttpGet]
         [Route("account/verify-email")]
-        public async Task<Result> VerifyEmail([FromQuery] string token)
+        public async Task<IActionResult> VerifyEmail([FromQuery] string token)
         {
-            return await _accountService.VerifyEmail(token);
+            var result = await _accountService.VerifyEmail(token);
+            if (Request.GetTypedHeaders().Accept?.Any(x => x.MediaType.Value?.Contains("text/html", StringComparison.OrdinalIgnoreCase) == true) == true)
+            {
+                var outcome = result.Success ? "success" : "failed";
+                return Redirect($"{ConfigManager.AppSettings.AppUrl.TrimEnd('/')}/auth/login?emailVerified={outcome}&statusCode={result.StatusCode}");
+            }
+            return Ok(result);
         }
 
         [AllowAnonymous]
         [HttpPost]
         [Route("account/ResetPassword")]
-        public async Task<Result> ResetPassword([FromBody] string email)
+        public async Task<Result> ResetPassword([FromBody] JsonElement body)
         {
             Result result = new();
-            bool exist = await _employeeService.IsEmpExistAndActive(email);
-            if (!exist)
+            var email = body.ValueKind switch
             {
-                result.StatusCode = CustomStatusCode.InvalidCredential;
-                return result;
-            }
+                JsonValueKind.String => body.GetString(),
+                JsonValueKind.Object when body.TryGetProperty("email", out var emailProperty) => emailProperty.GetString(),
+                _ => null
+            };
+            email = email?.Trim();
+            if (string.IsNullOrWhiteSpace(email) || !new EmailAddressAttribute().IsValid(email))
+                return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "A valid email address is required." };
             return await _accountService.GenerateTokenAndSendEmail(email);
         }
 

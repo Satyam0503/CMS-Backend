@@ -11,6 +11,7 @@ namespace Codeji.CMS.DTO.Salary
 
         [BsonRepresentation(BsonType.String)]
         public Guid UserId { get; set; }
+        public string CompanyId { get; set; } = string.Empty;
 
         public string EmployeeId {get; set;}
 

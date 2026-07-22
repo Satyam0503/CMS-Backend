@@ -92,6 +92,39 @@ public class RolePermissionTests
         Assert.Equal(expected, allowed);
     }
 
+    [Theory]
+    [InlineData((int)AuthRole.Employee)]
+    [InlineData(4)]
+    public async Task ModulePermission_AssignedPermissionIsAuthoritativeRegardlessOfRoleType(int roleType)
+    {
+        var fixture = new RoleFixture();
+        fixture.Middleware.Setup(x => x.GetUserById("user-1"))
+            .ReturnsAsync(new UserModel { UserId = "user-1", RoleId = "role-1", CompanyId = "company-1" });
+        fixture.RoleRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Codeji.CMS.Repository.Entities.RolePermissions.Roles, bool>>>(), false))
+            .ReturnsAsync(new Codeji.CMS.Repository.Entities.RolePermissions.Roles
+            {
+                RolesId = "role-1", CompanyId = "company-1", RoleType = roleType,
+                Titles = "Non-HR role", UserRoles = []
+            });
+        fixture.PermissionRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new Permission { PermissionId = 1, PermissionConstant = "View", PermissionName = "View" }]);
+        fixture.ModuleRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new Module { ModuleId = 1, ModuleConstant = "PayRoll", ModuleName = "PayRoll" }]);
+        fixture.ModulePermissionRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new ModulePermission { ModulePermissionId = 10, ModuleId = 1, PermissionId = 1 }]);
+        fixture.RolePermissionRepository
+            .Setup(x => x.Get(It.IsAny<Expression<Func<RolePermission, bool>>>(), null, false))
+            .Returns(new[] { new RolePermission { RoleId = "role-1", ModulePermissionId = 10, IsAccessible = true, HasAccess = true } }.AsQueryable());
+
+        var allowed = await fixture.Service.VerifyUserAccess(
+            Codeji.CMS.Utility.Constraints.AppModule.PayRoll,
+            [Codeji.CMS.Utility.Constraints.Permission.View],
+            "user-1", "company-1");
+
+        Assert.True(allowed);
+    }
+
     private sealed class RoleFixture
     {
         public Mock<IMongoDbRepository<Codeji.CMS.Repository.Entities.RolePermissions.Roles>> RoleRepository { get; } = new();

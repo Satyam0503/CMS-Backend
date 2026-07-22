@@ -121,6 +121,7 @@ public class CompleteJune2026TestCompanyAttendance : IMigration
                 await attendance.InsertOneAsync(new BsonDocument
                 {
                     { "_id", ObjectId.GenerateNewId() },
+                    { "CompanyId", companyId },
                     { "UserId", employee.UserId },
                     { "EmployeeId", employee.EmployeeId },
                     { "Date", DateTime.SpecifyKind(date, DateTimeKind.Utc) },

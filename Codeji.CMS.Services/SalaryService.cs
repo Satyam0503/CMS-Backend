@@ -27,10 +27,13 @@ namespace Codeji.CMS.Services
             _logger = logger;
         }
 
-        public async Task<SalaryModel> CreateSalaryAsync(CreateSalaryDto dto)
+        public async Task<SalaryModel> CreateSalaryAsync(string companyId, CreateSalaryDto dto)
         {
+            var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.Status && !x.IsDeleted && x.UserId == dto.UserId.ToString());
+            if (employee == null) throw new InvalidOperationException("Employee does not belong to the authenticated company.");
+            dto.EmployeeId = employee.EmployeeId;
             // mark previous active salary inactive
-            var activeSalary = await _repository.GetActiveSalaryAsync(dto.UserId);
+            var activeSalary = await _repository.GetActiveSalaryAsync(companyId, dto.UserId);
             if (activeSalary != null)
             {
                 activeSalary.Status = false;
@@ -45,6 +48,7 @@ namespace Codeji.CMS.Services
             {
                 SalaryId = Guid.NewGuid(),
                 UserId = dto.UserId,
+                CompanyId = companyId,
                 EmployeeId = dto.EmployeeId,
                 BasicPay = dto.BasicPay,
                 Hra = dto.Hra,
@@ -69,15 +73,15 @@ namespace Codeji.CMS.Services
             return newSalary;
         }
 
-        public async Task<SalaryResponseDto?> GetActiveSalaryAsync(Guid userId)
+        public async Task<SalaryResponseDto?> GetActiveSalaryAsync(string companyId, Guid userId)
         {
-            var salary = await _repository.GetActiveSalaryAsync(userId);
+            var salary = await _repository.GetActiveSalaryAsync(companyId, userId);
             return salary == null ? null : SalaryResponseDto.MapFromModel(salary);
         }
 
-        public async Task<List<SalaryResponseDto>> GetSalaryHistoryAsync(Guid userId)
+        public async Task<List<SalaryResponseDto>> GetSalaryHistoryAsync(string companyId, Guid userId)
         {
-            var salaries = await _repository.GetSalaryHistoryAsync(userId);
+            var salaries = await _repository.GetSalaryHistoryAsync(companyId, userId);
             return salaries.Select(SalaryResponseDto.MapFromModel).ToList();
         }
 
@@ -103,7 +107,7 @@ namespace Codeji.CMS.Services
                     .ToList();
                 if (validUserIds.Count > 0)
                 {
-                    activeSalaries = await _repository.GetActiveSalariesAsync(validUserIds);
+                    activeSalaries = await _repository.GetActiveSalariesAsync(companyId, validUserIds);
                 }
             }
             catch (Exception exception)

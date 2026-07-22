@@ -48,11 +48,15 @@ namespace Codeji.CMS.Services
         {
             await Common(emailLog);
         }
+        public async Task<(bool IsSent, string Error)> EmailSendAndSaveWithResult(EmpEmailLogs emailLog)
+        {
+            return await Common(emailLog);
+        }
         public async Task EmailSendAndSave(EmpEmailLogs emailLog, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
         {
             await Common(emailLog, attachments);
         }
-        private async Task Common(EmpEmailLogs emailLog, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
+        private async Task<(bool IsSent, string Error)> Common(EmpEmailLogs emailLog, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
         {
             try
             {
@@ -72,14 +76,14 @@ namespace Codeji.CMS.Services
                     if (!string.IsNullOrEmpty(res.log))
                         emailLog.ErrorMessage = res.log;
                     await SaveEmailLog(emailLog);
-
+                    return (res.isSent, res.log);
                 }
             }
             catch (Exception ex)
             {
-                // Handle exception
-                // Log the error or take appropriate action
+                return (false, ex.Message);
             }
+            return (false, "Email details are missing.");
         }
         private async Task SaveEmailLog(EmpEmailLogs empEmailLogs)
         {

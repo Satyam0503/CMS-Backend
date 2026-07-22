@@ -17,6 +17,7 @@ public class EmployeePayRollModel
     public decimal? HealthInsurance { get; set; }
     public decimal? EPF { get; set; }
     public decimal? ESIC { get; set; }
+    public bool IsProcessed { get; set; }
 }
 public class EmplyeePayRollRequestDto
 {

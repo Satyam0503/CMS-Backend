@@ -20,6 +20,7 @@ public class AttendanceRepository : IAttendanceRepository
         attendance.AttendanceId ??= MongoDB.Bson.ObjectId.GenerateNewId().ToString();
 
         var filter =
+            Builders<AttendanceModel>.Filter.Eq(a => a.CompanyId, attendance.CompanyId) &
             Builders<AttendanceModel>.Filter.Eq(a => a.UserId, attendance.UserId) &
             Builders<AttendanceModel>.Filter.Eq(a => a.Date, attendance.Date);
 
@@ -32,27 +33,31 @@ public class AttendanceRepository : IAttendanceRepository
         return await _collection.Find(filter).FirstAsync();
     }
 
-    public async Task<AttendanceModel?> GetByUserAndDateAsync(string userId, DateTime date)
+    public async Task<AttendanceModel?> GetByUserAndDateAsync(string companyId, string userId, DateTime date)
     {
         var filter =
+            Builders<AttendanceModel>.Filter.Eq(a => a.CompanyId, companyId) &
             Builders<AttendanceModel>.Filter.Eq(a => a.UserId, userId) &
             Builders<AttendanceModel>.Filter.Eq(a => a.Date, date.Date);
 
         return await _collection.Find(filter).FirstOrDefaultAsync();
     }
 
-    public async Task<IEnumerable<AttendanceModel>> GetAllByUserAsync(string userId)
+    public async Task<IEnumerable<AttendanceModel>> GetAllByUserAsync(string companyId, string userId)
     {
-        var filter = Builders<AttendanceModel>.Filter.Eq(a => a.UserId, userId);
+        var filter = Builders<AttendanceModel>.Filter.Eq(a => a.CompanyId, companyId) &
+                     Builders<AttendanceModel>.Filter.Eq(a => a.UserId, userId);
         return await _collection.Find(filter).ToListAsync();
     }
 
     public async Task<IEnumerable<AttendanceModel>> GetAllByDateRangeAsync(
+        string companyId,
         DateTime from,
         DateTime to,
         string[]? userIds = null)
     {
         var filter =
+            Builders<AttendanceModel>.Filter.Eq(a => a.CompanyId, companyId) &
             Builders<AttendanceModel>.Filter.Gte(a => a.Date, from.Date) &
             Builders<AttendanceModel>.Filter.Lte(a => a.Date, to.Date);
 
@@ -62,11 +67,12 @@ public class AttendanceRepository : IAttendanceRepository
         return await _collection.Find(filter).ToListAsync();
     }
 
-    public async Task<bool> UpdateAsync(string userId, DateTime date, AttendanceModel updatedModel)
+    public async Task<bool> UpdateAsync(string companyId, string userId, DateTime date, AttendanceModel updatedModel)
     {
         updatedModel.Date = updatedModel.Date.Date;
 
         var filter =
+            Builders<AttendanceModel>.Filter.Eq(a => a.CompanyId, companyId) &
             Builders<AttendanceModel>.Filter.Eq(a => a.UserId, userId) &
             Builders<AttendanceModel>.Filter.Eq(a => a.Date, date.Date);
 

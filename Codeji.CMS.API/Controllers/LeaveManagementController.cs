@@ -115,7 +115,7 @@ public class LeaveManagementController : BaseApiController
     public async Task<Result> CreateLeaveRequest([FromBody] LeaveRequestDto leaveRequest)
     {
         if (!ModelState.IsValid) return new Result();
-        leaveRequest.UserId ??= CurrentContext.UserId(_httpContextAccessor);
+        leaveRequest.UserId = CurrentContext.UserId(_httpContextAccessor);
         return await _leaveManagementService.CreateLeaveRequest(leaveRequest);
     }
 
@@ -125,7 +125,7 @@ public class LeaveManagementController : BaseApiController
     public async Task<Result> UpdateLeaveRequest([FromBody] UpdateLeaveRequestDto leaveRequest)
     {
         if (!ModelState.IsValid) return new Result();
-        leaveRequest.UserId ??= CurrentContext.UserId(_httpContextAccessor);
+        leaveRequest.UserId = CurrentContext.UserId(_httpContextAccessor);
         return await _leaveManagementService.UpdateLeaveRequest(leaveRequest);
     }
 
@@ -143,7 +143,7 @@ public class LeaveManagementController : BaseApiController
     [ModulePermission(AppModule.LeaveManagement, Permission.View)]
     public async Task<Result<MyLeaveRequestResponse>> GetMyLeaveRequests([FromBody] EmpLeaveRequestFilter leaveFilter)
     {
-        leaveFilter.EmployeeId ??= CurrentContext.UserId(_httpContextAccessor);
+        leaveFilter.EmployeeId = CurrentContext.UserId(_httpContextAccessor);
         return await _leaveManagementService.GetMyLeaveRequests(leaveFilter);
     }
 

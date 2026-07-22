@@ -8,6 +8,7 @@ using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
+using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.PayRoll;
 
@@ -66,6 +67,8 @@ public class PayRollServices : IPayRollServices
             // get pay details based on month and year
             Expression<Func<EmpPayRoll, bool>> expression = p => p.EmployeeId == empUser.EmployeeId && p.UserId == empUser.UserId && p.CompanyId == empUser.CompanyId && p.PayMonth.Month == month && p.PayMonth.Year == year;
             EmpPayRoll? payRoll = await _empPayRollRepository.FirstOrDefault(expression) ?? throw new Exception(CustomStatusCode.PayRollNotExist.ToString());
+            if (!payRoll.IsProcessed)
+                throw new InvalidOperationException("Payroll for the selected month has not been processed yet.");
 
             // assign payroll data
             if (empUser.JobRole != null)
@@ -177,7 +180,15 @@ public class PayRollServices : IPayRollServices
             {
                 errors.Add($"Row {i + 1} ({row.EmployeeId}): missing {string.Join(", ", rowMissingFields)}.");
             }
+            if ((row.BasicPay ?? 0) < 0 || (row.HRA ?? 0) < 0 || (row.LTA ?? 0) < 0 || (row.OtherAllowance ?? 0) < 0 ||
+                (row.Bonus ?? 0) < 0 || (row.LossOfPayDays ?? 0) < 0 || (row.LossOfPay ?? 0) < 0 || (row.IncomeTax ?? 0) < 0 ||
+                (row.HealthInsurance ?? 0) < 0 || (row.EPF ?? 0) < 0 || (row.ESIC ?? 0) < 0 || (row.PaidDays ?? 0) < 0)
+                errors.Add($"Row {i + 1} ({row.EmployeeId}): earnings, deductions, and day values cannot be negative.");
         }
+
+        foreach (var duplicate in payData.Select((row, index) => (row, index)).Where(x => !string.IsNullOrWhiteSpace(x.row.EmployeeId))
+            .GroupBy(x => x.row.EmployeeId, StringComparer.OrdinalIgnoreCase).Where(x => x.Count() > 1))
+            errors.Add($"Duplicate Employee Id '{duplicate.Key}' appears on rows {string.Join(", ", duplicate.Select(x => x.index + 1))}.");
 
         return errors;
     }
@@ -185,6 +196,11 @@ public class PayRollServices : IPayRollServices
     public async Task<Result<string>> UploadPayrollData(EmplyeePayRollRequestDto payLoad, string companyId)
     {
         Result<string> result = new();
+        var monthStart = new DateTime(payLoad.PayMonth.Year, payLoad.PayMonth.Month, 1);
+        if (await _empPayRollRepository.Exist(p => p.CompanyId == companyId &&
+            p.PayMonth.Year == monthStart.Year && p.PayMonth.Month == monthStart.Month && p.IsProcessed))
+            return new Result<string> { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "Processed payroll cannot be changed. Select another month." };
+
         List<string> validationErrors = ValidatePayRollData(payLoad.PayData);
 
         List<EmployeePayRollModel> payData = payLoad.PayData;
@@ -243,7 +259,7 @@ public class PayRollServices : IPayRollServices
         var tasks = new List<Task>();
         foreach (var item in dataList)
         {
-            var payRoll = await _empPayRollRepository.FirstOrDefault(p => p.EmployeeId == item.EmployeeId && item.PayMonth.Month == p.PayMonth.Month && item.PayMonth.Year == p.PayMonth.Year);
+            var payRoll = await _empPayRollRepository.FirstOrDefault(p => p.CompanyId == companyId && p.UserId == item.UserId && item.PayMonth.Month == p.PayMonth.Month && item.PayMonth.Year == p.PayMonth.Year);
             if (payRoll == null)
             {
                 tasks.Add(_empPayRollRepository.AddOne(item));
@@ -260,7 +276,7 @@ public class PayRollServices : IPayRollServices
         return result;
     }
 
-    public async Task<Result<GetEmpPayRollResponseDto>> GetEmployeePayRoll(GetEmpPayRollRequestDto payload, string companyId)
+    public async Task<Result<GetEmpPayRollResponseDto>> GetEmployeePayRoll(GetEmpPayRollRequestDto payload, string companyId, string? viewerUserId = null, bool processedOnly = false)
     {
         Result<GetEmpPayRollResponseDto> result = new();
         List<string> matchingEmployeeIds = [];
@@ -271,17 +287,23 @@ public class PayRollServices : IPayRollServices
             matchingEmployeeIds = (await _employeeRepository.GetAll(e => (e.FirstName + " " + e.LastName).Contains(payload.EmployeeName, StringComparison.CurrentCultureIgnoreCase) && e.CompanyId == companyId)).Select(e => e.UserId).ToList();
             Expression<Func<EmpPayRoll, bool>> expression = p => p.CompanyId == companyId
                                         && payload.PayMonth.Month == p.PayMonth.Month && payload.PayMonth.Year == p.PayMonth.Year
+                                        && (!processedOnly || p.IsProcessed)
+                                        && (viewerUserId == null || p.UserId == viewerUserId)
                                         && matchingEmployeeIds.Contains(p.UserId);
             empPayRolls = _empPayRollRepository.Get(expression).ToList();
-            Expression<Func<EmpUser, bool>> empExpression = e => e.CompanyId == companyId && matchingEmployeeIds.Contains(e.UserId);
+            Expression<Func<EmpUser, bool>> empExpression = e => e.CompanyId == companyId &&
+                (viewerUserId == null || e.UserId == viewerUserId) && matchingEmployeeIds.Contains(e.UserId);
             empUsers = await _employeeRepository.GetAll(empExpression);
         }
         else
         {
             Expression<Func<EmpPayRoll, bool>> expression = p => p.CompanyId == companyId
-                                        && payload.PayMonth.Month == p.PayMonth.Month && payload.PayMonth.Year == p.PayMonth.Year;
+                                        && payload.PayMonth.Month == p.PayMonth.Month && payload.PayMonth.Year == p.PayMonth.Year
+                                        && (!processedOnly || p.IsProcessed)
+                                        && (viewerUserId == null || p.UserId == viewerUserId);
             empPayRolls = _empPayRollRepository.Get(expression).ToList();
-            Expression<Func<EmpUser, bool>> empExpression = e => e.CompanyId == companyId;
+            Expression<Func<EmpUser, bool>> empExpression = e => e.CompanyId == companyId &&
+                (viewerUserId == null || e.UserId == viewerUserId);
             empUsers = await _employeeRepository.GetAll(empExpression);
         }
 
@@ -289,6 +311,7 @@ public class PayRollServices : IPayRollServices
         {
             return result;
         }
+
         List<string> jobIds = empUsers.Select(emp => emp.JobRole).Distinct().Where(jt => jt != null).ToList();
         IEnumerable<JobTitles> jobTitles = await _jobTitlesRepository.GetAll(jt => jobIds.Contains(jt.JobTitleId));
 
@@ -318,7 +341,8 @@ public class PayRollServices : IPayRollServices
                             IncomeTax = payRoll?.Deduction.IncomeTax ?? null,
                             HealthInsurance = payRoll?.Deduction.HealthInsurance ?? null,
                             EPF = payRoll?.Deduction.EPF ?? null,
-                            ESIC = payRoll?.Deduction.ESIC ?? null
+                            ESIC = payRoll?.Deduction.ESIC ?? null,
+                            IsProcessed = payRoll?.IsProcessed ?? false
                         }
                     }).ToList();
         result.MethodResults = data;
@@ -328,12 +352,19 @@ public class PayRollServices : IPayRollServices
     public async Task<Result> AddUpdatePayRoll(AddUpdatePayRollRequestDto model, string companyId)
     {
         Result result = new();
+        var monetaryValues = new[] { model.BasicPay, model.Bonus ?? 0, model.HRA ?? 0, model.LTA ?? 0, model.OtherAllowance ?? 0,
+            model.LossOfPay ?? 0, model.IncomeTax ?? 0, model.HealthInsurance ?? 0, model.EPF ?? 0, model.ESIC ?? 0 };
+        if (monetaryValues.Any(x => x < 0) || model.PaidDays < 0 || (model.LossOfPayDays ?? 0) < 0)
+            return new Result { Success=false, StatusCode=StatusCodes.Status400BadRequest, Message="Earnings, deductions, and day values cannot be negative." };
         EmpUser? empUser = await _employeeRepository.FirstOrDefault(e => e.EmployeeId == model.EmployeeId && e.CompanyId == companyId);
         if (empUser == null) return result;
+        if (await _empPayRollRepository.Exist(p => p.CompanyId == companyId &&
+            p.PayMonth.Year == model.PayMonth.Year && p.PayMonth.Month == model.PayMonth.Month && p.IsProcessed))
+            return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "Processed payroll cannot be changed." };
         EmpPayRoll? payRoll = null;
         if (!string.IsNullOrEmpty(model.PayRollId))
         {
-            payRoll = await _empPayRollRepository.FirstOrDefault(p => p.Id == model.PayRollId && p.CompanyId == companyId);
+            payRoll = await _empPayRollRepository.FirstOrDefault(p => p.Id == model.PayRollId && p.CompanyId == companyId && p.UserId == empUser.UserId && p.EmployeeId == empUser.EmployeeId && p.PayMonth.Month == model.PayMonth.Month && p.PayMonth.Year == model.PayMonth.Year);
         }
         if (payRoll == null)
         {
@@ -400,6 +431,34 @@ public class PayRollServices : IPayRollServices
             payRoll.CalculationSnapshot = MapSnapshot(model.CalculationSnapshot);
             result = await _empPayRollRepository.Update(expression, payRoll);
         }
+        return result;
+    }
+
+    public async Task<Result> ProcessPayrollMonth(DateTime payMonth, string companyId, string processedBy)
+    {
+        var monthStart = new DateTime(payMonth.Year, payMonth.Month, 1);
+        var payrollRows = _empPayRollRepository.Get(p => p.CompanyId == companyId &&
+            p.PayMonth.Year == monthStart.Year && p.PayMonth.Month == monthStart.Month).ToList();
+
+        if (payrollRows.Count == 0)
+            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Generate payroll for this month before processing it." };
+
+        if (payrollRows.All(p => p.IsProcessed))
+            return new Result { Success = true, Message = $"Payroll for {monthStart:MMMM yyyy} is already processed." };
+
+        var filter = Builders<EmpPayRoll>.Filter.Eq(p => p.CompanyId, companyId) &
+                     Builders<EmpPayRoll>.Filter.Gte(p => p.PayMonth, monthStart) &
+                     Builders<EmpPayRoll>.Filter.Lt(p => p.PayMonth, monthStart.AddMonths(1)) &
+                     Builders<EmpPayRoll>.Filter.Ne(p => p.IsProcessed, true);
+        var update = Builders<EmpPayRoll>.Update
+            .Set(p => p.IsProcessed, true)
+            .Set(p => p.ProcessedAt, DateTime.UtcNow)
+            .Set(p => p.ProcessedBy, processedBy);
+
+        var result = await _empPayRollRepository.UpdateMany(filter, update);
+        result.Message = result.Success
+            ? $"Payroll for {monthStart:MMMM yyyy} has been processed and is now available to employees."
+            : "Unable to process payroll. No employee payroll was published.";
         return result;
     }
 

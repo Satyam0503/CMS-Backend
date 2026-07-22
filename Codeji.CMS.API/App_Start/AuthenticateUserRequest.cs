@@ -31,6 +31,7 @@ namespace Codeji.CMS.API.App_Start
                  "/api/account/refresh-token",
                  "/api/account/verify-email",
                  "/api/CreateNewPassword",
+                 "/api/account/CreateNewPassword",
                  "/api/account/ResetPassword",
                  "/api/VerificationCaptch",
                  "/api/SendEmail",
@@ -43,7 +44,8 @@ namespace Codeji.CMS.API.App_Start
             string userId = CurrentContext.UserId(_IhttpContextAccessor);
             #region check company id and user id are active
             //  company id not present in request and path not in pathForNOCompanyIdRequired then return unauthorized
-            if (string.IsNullOrEmpty(company_Id) && !pathForNOCompanyIdRequired.Any(x => context.Request.Path.Value.Contains(x)))
+            if (string.IsNullOrEmpty(company_Id) && !pathForNOCompanyIdRequired.Any(x =>
+                context.Request.Path.Value?.Contains(x, StringComparison.OrdinalIgnoreCase) == true))
             {
                 context.Response.StatusCode = (int)System.Net.HttpStatusCode.Unauthorized;
                 await context.Response.WriteAsync("Required Company Id");

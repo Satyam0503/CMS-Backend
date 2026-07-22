@@ -4,6 +4,7 @@ using System.Security.Claims;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.RequestModels;
+using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
@@ -15,6 +16,7 @@ using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.Helpers;
+using Codeji.CMS.Utility.Enums;
 using Moq;
 using MongoDB.Driver;
 
@@ -216,6 +218,44 @@ public class AccountAuthTests
         Assert.NotNull(storedToken.RevokedAt);
     }
 
+    [Fact]
+    public async Task CreateNewPassword_ValidResetToken_UpdatesPasswordAndConsumesToken()
+    {
+        var fixture = new AccountFixture();
+        var user = CreateUser();
+        var token = "one-time-reset-token";
+        var securityToken = new UserSecurityToken
+        {
+            Id = "security-1", UserId = user.UserId,
+            TokenHash = TokenHelper.ComputeSha256Hash(token),
+            Expiry = DateTime.UtcNow.AddMinutes(10), IsUsed = false,
+            Type = EnumsHelper.SecurityTokenType.PasswordReset
+        };
+        fixture.SecurityTokenRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<UserSecurityToken, bool>>>(), false)).ReturnsAsync(securityToken);
+        fixture.EmployeeRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>(), false)).ReturnsAsync(user);
+        fixture.EmployeeRepository.Setup(x => x.Update(It.IsAny<FilterDefinition<EmpUser>>(), user)).ReturnsAsync(new Result { Success=true });
+        fixture.SecurityTokenRepository.Setup(x => x.UpdateMany(It.IsAny<FilterDefinition<UserSecurityToken>>(), It.IsAny<UpdateDefinition<UserSecurityToken>>())).ReturnsAsync(new Result { Success=true });
+
+        var result = await fixture.Service.CreateNewPassword(new CreateNewPasswordRequest { Token=token, NewPassword="NewPassword1!" });
+
+        Assert.True(result.Success);
+        Assert.True(AuthenticationHandler.VerifyPassword("NewPassword1!", user.Password));
+        fixture.SecurityTokenRepository.Verify(x => x.UpdateMany(It.IsAny<FilterDefinition<UserSecurityToken>>(), It.IsAny<UpdateDefinition<UserSecurityToken>>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task CreateNewPassword_EmailVerificationToken_CannotResetPassword()
+    {
+        var fixture = new AccountFixture();
+        fixture.SecurityTokenRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<UserSecurityToken, bool>>>(), false)).ReturnsAsync((UserSecurityToken?)null);
+
+        var result = await fixture.Service.CreateNewPassword(new CreateNewPasswordRequest { Token="verification-token", NewPassword="NewPassword1!" });
+
+        Assert.False(result.Success);
+        Assert.Equal(CustomStatusCode.InvalidExpiredToken, result.StatusCode);
+        fixture.EmployeeRepository.Verify(x => x.Update(It.IsAny<FilterDefinition<EmpUser>>(), It.IsAny<EmpUser>()), Times.Never);
+    }
+
     private static EmpUser CreateUser() => new()
     {
         UserId = "user-1",
@@ -244,10 +284,15 @@ public class AccountAuthTests
         public Mock<IMongoDbRepository<EmpUser>> EmployeeRepository { get; } = new();
         public Mock<IMongoDbRepository<RefreshToken>> RefreshTokenRepository { get; } = new();
         public Mock<IMongoDbRepository<Roles>> RoleRepository { get; } = new();
+        public Mock<IMongoDbRepository<UserSecurityToken>> SecurityTokenRepository { get; } = new();
         public AccountServices Service { get; }
 
         public AccountFixture()
         {
+            var middlewareService = new Mock<IMiddlewareService>();
+            middlewareService
+                .Setup(x => x.EmailSendAndSaveWithResult(It.IsAny<EmpEmailLogs>()))
+                .ReturnsAsync((true, string.Empty));
             Service = new AccountServices(
                 Mock.Of<IEmployeeService>(),
                 EmployeeRepository.Object,
@@ -256,8 +301,8 @@ public class AccountAuthTests
                 Mock.Of<IMongoDbRepository<Company>>(),
                 Mock.Of<IMongoDbRepository<MailTemplate>>(),
                 Mock.Of<IPriorityTaskQueue>(),
-                Mock.Of<IMiddlewareService>(),
-                Mock.Of<IMongoDbRepository<UserSecurityToken>>());
+                middlewareService.Object,
+                SecurityTokenRepository.Object);
         }
     }
 }

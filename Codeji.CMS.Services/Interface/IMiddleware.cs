@@ -10,6 +10,7 @@ namespace Codeji.CMS.Services.Interface
         Task<UserModel?> GetUserById(string userId);
         Task EmailSendAndSave(EmpEmailLogs emailLog);
         Task EmailSendAndSave(EmpEmailLogs emailLog, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null);
+        Task<(bool IsSent, string Error)> EmailSendAndSaveWithResult(EmpEmailLogs emailLog);
 
         Dictionary<NotificationPreferenceType, bool> GetDefaultNotificationPreferences();
         Task<bool> IsUserNotificationPreferenceEnabled(string userId, NotificationPreferenceType preferenceType);

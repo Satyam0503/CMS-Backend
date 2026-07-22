@@ -13,23 +13,26 @@ namespace Codeji.CMS.Repository.Repositories
             _salaryCollection = context.GetCollection<SalaryModel>();
         }
 
-        public async Task<SalaryModel?> GetActiveSalaryAsync(Guid userId)
+        public async Task<SalaryModel?> GetActiveSalaryAsync(string companyId, Guid userId)
         {
-            var filter = Builders<SalaryModel>.Filter.Eq(s => s.UserId, userId) &
+            var filter = Builders<SalaryModel>.Filter.Eq(s => s.CompanyId, companyId) &
+                         Builders<SalaryModel>.Filter.Eq(s => s.UserId, userId) &
                          Builders<SalaryModel>.Filter.Eq(s => s.Status, true);
             return await _salaryCollection.Find(filter).FirstOrDefaultAsync();
         }
 
-        public async Task<List<SalaryModel>> GetActiveSalariesAsync(List<Guid> userIds)
+        public async Task<List<SalaryModel>> GetActiveSalariesAsync(string companyId, List<Guid> userIds)
         {
-            var filter = Builders<SalaryModel>.Filter.In(s => s.UserId, userIds) &
+            var filter = Builders<SalaryModel>.Filter.Eq(s => s.CompanyId, companyId) &
+                         Builders<SalaryModel>.Filter.In(s => s.UserId, userIds) &
                          Builders<SalaryModel>.Filter.Eq(s => s.Status, true);
             return await _salaryCollection.Find(filter).ToListAsync();
         }
 
-        public async Task<List<SalaryModel>> GetSalaryHistoryAsync(Guid userId)
+        public async Task<List<SalaryModel>> GetSalaryHistoryAsync(string companyId, Guid userId)
         {
-            var filter = Builders<SalaryModel>.Filter.Eq(s => s.UserId, userId);
+            var filter = Builders<SalaryModel>.Filter.Eq(s => s.CompanyId, companyId) &
+                         Builders<SalaryModel>.Filter.Eq(s => s.UserId, userId);
             return await _salaryCollection.Find(filter).SortByDescending(s => s.EffectiveFrom).ToListAsync();
         }
 

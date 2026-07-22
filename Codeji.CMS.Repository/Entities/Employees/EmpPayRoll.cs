@@ -17,6 +17,9 @@ public class EmpPayRoll
     public Allowance Allowance { get; set; } = new Allowance();
     public Deduction Deduction { get; set; } = new Deduction();
     public DateTime CreatedAt { get; set; }
+    public bool IsProcessed { get; set; }
+    public DateTime? ProcessedAt { get; set; }
+    public string? ProcessedBy { get; set; }
     public List<PayrollDeductionLine> DeductionLines { get; set; } = [];
     public PayrollCalculationSnapshot? CalculationSnapshot { get; set; }
 }

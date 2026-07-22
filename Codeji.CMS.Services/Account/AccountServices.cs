@@ -147,19 +147,18 @@ public class AccountServices : IAccountServices
     {
         Result result = new();
         // get employee by email
-        var emp = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(email));
-        if (emp is null) return result;
+        email = email.Trim();
+        // Employees who have not created an initial password must still be able
+        // to prove mailbox ownership and create one through this flow.
+        var emp = await _employeeRepository.FirstOrDefault(x => x.Email == email && x.Status && !x.IsDeleted);
+        // Do not reveal whether an address exists, but return the same accepted
+        // response used for a real reset request.
+        if (emp is null)
+            return new Result { Success = true, StatusCode = CustomStatusCode.PasswordResetLinkSent };
 
-        //  check if employee already has a pending valid token / link 
-        Expression<Func<UserSecurityToken, bool>> expression = t => t.UserId == emp.UserId && t.Type == EnumsHelper.SecurityTokenType.PasswordReset && t.IsUsed == false && t.Expiry > DateTime.UtcNow;
-        UserSecurityToken userSecurityToken = await _userSecurityTokenRepository.FirstOrDefault(expression);
-        if (userSecurityToken != null)
-        {
-            result.StatusCode = CustomStatusCode.PasswordResetLinkAlreadySent;
-            return result;
-        }
-
-        // generate fresh token and send mail
+        // Generate a fresh token without cancelling other unexpired links. Email
+        // delivery and browser retries can overlap; all remaining links are
+        // invalidated after the first successful password change.
         var token = TokenHelper.GenerateToken();
         var hashedToken = TokenHelper.ComputeSha256Hash(token);
         int tokenExpiryMinutes = 15;
@@ -171,36 +170,47 @@ public class AccountServices : IAccountServices
             Expiry = DateTime.UtcNow.AddMinutes(tokenExpiryMinutes),
             Type = EnumsHelper.SecurityTokenType.PasswordReset,
         };
-        await _userSecurityTokenRepository.AddOne(securityToken);
+        var tokenResult = await _userSecurityTokenRepository.AddOne(securityToken);
+        if (!tokenResult.Success)
+            return new Result { Success=false, StatusCode=StatusCodes.Status500InternalServerError, Message="Unable to create a password reset request." };
 
         Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == emp.CompanyId);
         MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ResetPassword);
-        string replacedBody = HtmlTemplate.Render(emailContent?.body, new
+        var resetLink = $"{ConfigManager.AppSettings.AppUrl.TrimEnd('/')}/auth/createpassword?token={Uri.EscapeDataString(token)}";
+        var bodyTemplate = emailContent?.body ?? "<p>Hello [EmployeeName],</p><p>Reset your password using this link: <a href=\"[PasswordResetLink]\">Reset password</a>.</p><p>This link expires in [LinkExpiryTime].</p>";
+        string replacedBody = HtmlTemplate.Render(bodyTemplate, new
         {
             EmployeeName = emp.FirstName + " " + emp.LastName,
-            PasswordResetLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}",
+            PasswordResetLink = resetLink,
             CompanyName = company != null ? company.CompanyName : "",
             LinkExpiryTime = $"{tokenExpiryMinutes} Minutes",
-            CompanyLogo = company.CompanyLogo != null ? Common.GetCompanyLogoUrl(company.CompanyLogo) : string.Empty,
+            CompanyLogo = company?.CompanyLogo != null ? Common.GetCompanyLogoUrl(company.CompanyLogo) : string.Empty,
             Year = DateTime.UtcNow.Year,
         });
-        string replacedSubject = HtmlTemplate.Render(emailContent.subject, new
+        string replacedSubject = HtmlTemplate.Render(emailContent?.subject ?? "Reset your password", new
         {
             CompanyName = company != null ? company.CompanyName : ""
         });
 
-        _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
-                {
-                    await _middlewareService.EmailSendAndSave(new EmpEmailLogs()
-                    {
-                        UserTo = emp.UserId,
-                        Subject = replacedSubject,
-                        Body = replacedBody,
-                        EmailLogType = EnumsHelper.MailType.ResetPassword,
-                        Email = emp.Email,
-                        UserFrom = "",
-                    });
-                }, priority: 1);
+        var delivery = await _middlewareService.EmailSendAndSaveWithResult(new EmpEmailLogs()
+        {
+            UserTo = emp.UserId,
+            Subject = replacedSubject,
+            Body = replacedBody,
+            EmailLogType = EnumsHelper.MailType.ResetPassword,
+            Email = emp.Email,
+            UserFrom = "",
+        });
+
+        if (!delivery.IsSent)
+        {
+            return new Result
+            {
+                Success = false,
+                StatusCode = StatusCodes.Status503ServiceUnavailable,
+                Message = "The reset email could not be sent. Please try again later."
+            };
+        }
 
         result.Success = true;
         result.StatusCode = CustomStatusCode.PasswordResetLinkSent;
@@ -210,9 +220,12 @@ public class AccountServices : IAccountServices
     public async Task<Result> CreateNewPassword(CreateNewPasswordRequest model)
     {
         Result result = new();
-        var tokenHash = TokenHelper.ComputeSha256Hash(model.Token);
+        if (model == null || string.IsNullOrWhiteSpace(model.Token) || string.IsNullOrWhiteSpace(model.NewPassword))
+            return new Result { Success=false, StatusCode=StatusCodes.Status400BadRequest, Message="A valid reset token and password are required." };
+        var tokenHash = TokenHelper.ComputeSha256Hash(model.Token.Trim());
         // UserSecurityToken? userSecurityToken = await _userSecurityTokenRepository.FirstOrDefault(t => t.TokenHash == tokenHash && t.Type == EnumsHelper.SecurityTokenType.Invite && !t.IsUsed);
-        UserSecurityToken? userSecurityToken = await _userSecurityTokenRepository.FirstOrDefault(t => t.TokenHash == tokenHash && !t.IsUsed);
+        UserSecurityToken? userSecurityToken = await _userSecurityTokenRepository.FirstOrDefault(t => t.TokenHash == tokenHash &&
+            (t.Type == EnumsHelper.SecurityTokenType.PasswordReset || t.Type == EnumsHelper.SecurityTokenType.Invite) && !t.IsUsed);
         // PasswordResetTokens? token = await _passwordResetTokens.FirstOrDefault(x => x.TokenHash == tokenHash && !x.IsUsed);
         if (userSecurityToken is null)
         {
@@ -225,20 +238,23 @@ public class AccountServices : IAccountServices
             return result;
         }
 
-        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userSecurityToken.UserId);
+        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userSecurityToken.UserId && x.Status && !x.IsDeleted);
         if (user is null) return result;
         user.Password = AuthenticationHandler.HashedPassword(model.NewPassword);
         user.IsEmailVerified = true;
         Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == user.UserId;
-        await _employeeRepository.Update(whereCondition, user);
+        var passwordResult = await _employeeRepository.Update(whereCondition, user);
+        if (!passwordResult.Success) return passwordResult;
 
         // mark current token used
         Expression<Func<UserSecurityToken, bool>> userTokenExpression = ut => ut.Id == userSecurityToken.Id;
         await _userSecurityTokenRepository.UpdateMany(userTokenExpression, Builders<UserSecurityToken>.Update.Set(t => t.IsUsed, true).Set(t => t.UsedAt, DateTime.UtcNow));
 
-        // delete all the used and expired tokens of current user
-        Expression<Func<UserSecurityToken, bool>> expression = x => x.UserId == user.UserId && (x.IsUsed || x.Expiry < DateTime.UtcNow);
-        await _userSecurityTokenRepository.DeleteAll(expression);
+        // Invalidate any other active reset/invite links after a successful password change.
+        Expression<Func<UserSecurityToken, bool>> expression = x => x.UserId == user.UserId &&
+            (x.Type == EnumsHelper.SecurityTokenType.PasswordReset || x.Type == EnumsHelper.SecurityTokenType.Invite) && !x.IsUsed;
+        await _userSecurityTokenRepository.UpdateMany(expression,
+            Builders<UserSecurityToken>.Update.Set(x => x.IsUsed, true).Set(x => x.UsedAt, DateTime.UtcNow));
         result.Success = true;
         result.StatusCode = CustomStatusCode.PasswordResetSuccess;
         return result;
@@ -282,13 +298,15 @@ public class AccountServices : IAccountServices
         {
             user.IsEmailVerified = true;
             Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == user.UserId;
-            await _employeeRepository.Update(whereCondition, user);
+            var verifyResult = await _employeeRepository.Update(whereCondition, user);
+            if (!verifyResult.Success) return verifyResult;
         }
 
         Expression<Func<UserSecurityToken, bool>> userTokenExpression = ut => ut.Id == userSecurityToken.Id;
-        await _userSecurityTokenRepository.UpdateMany(
+        var consumeResult = await _userSecurityTokenRepository.UpdateMany(
             userTokenExpression,
             Builders<UserSecurityToken>.Update.Set(t => t.IsUsed, true).Set(t => t.UsedAt, DateTime.UtcNow));
+        if (!consumeResult.Success) return consumeResult;
 
         result.Success = true;
         return result;
