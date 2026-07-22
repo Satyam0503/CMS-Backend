@@ -21,6 +21,7 @@ Recommended reading order for a new contributor (human or AI):
 
 ### Detailed HR module flows
 
+- [`leave-attendance-payroll-end-to-end-flow.md`](./leave-attendance-payroll-end-to-end-flow.md) - authoritative end-to-end flow, calculations, permissions, dependencies, failure paths, gaps, and tests
 - [`leave-management-current-flow.md`](./leave-management-current-flow.md)
 - [`attendance-current-flow.md`](./attendance-current-flow.md)
 - [`payroll-current-flow.md`](./payroll-current-flow.md)

@@ -109,19 +109,11 @@
       }
 
       .amount-in-words {
+        margin-top: 10px;
         font-size: 13px;
         font-weight: normal;
         line-height: 1.4;
         text-align: right;
-      }
-
-      .company-note {
-        margin-top: 48px;
-        padding-top: 10px;
-        border-top: 1px solid #aaa;
-        font-size: 11px;
-        color: #444;
-        text-align: center;
       }
 
       .details {
@@ -268,15 +260,8 @@
           <td class="fw-bold">Net Salary</td>
           <td class="text-end fw-bold">₹ [NetSalary]</td>
         </tr>
-        <tr>
-          <td colspan="2"></td>
-          <td class="fw-bold">Amount in Words</td>
-          <td class="amount-in-words">[NetSalaryInWords]</td>
-        </tr>
       </table>
-      <div class="company-note">
-        This is a computer-generated payslip issued by [CompanyName] and does not require a signature.
-      </div>
+      <div class="amount-in-words">[NetSalaryInWords]</div>
     </div>
   </body>
 </html>

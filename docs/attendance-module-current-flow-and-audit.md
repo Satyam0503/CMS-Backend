@@ -253,22 +253,11 @@ The attendance calendar fetches approved leave requests for the month and displa
 
 ### Current backend relationship
 
-Leave approval updates the leave request and balance, but it does not create/update an `Attendance` record and does not populate `SourceType`, `SourceId`, or `SourceVersion`.
+Leave acceptance now calls `LeaveAttendanceReconciliationService`. It creates or updates idempotent, source-linked attendance rows using the policy's mapped attendance status and populates `SourceType`, `SourceId`, and `SourceVersion`. A conflicting manual row is preserved and produces a blocking exception instead of being overwritten.
 
 ### Consequence
 
-Payroll and monthly validation read attendance records, not the visual calendar overlay. Therefore:
-
-```text
-Approved leave
-    -> visible in attendance UI
-    -> no guaranteed SL/CL/EL attendance record
-    -> validator can report MISSING_ATTENDANCE
-    -> month cannot lock
-    -> payroll cannot process
-```
-
-This is the most important cross-module logical gap.
+Payroll and monthly validation consume persisted attendance records rather than relying on the visual leave overlay. Existing leave policies must therefore have a valid no-time attendance status mapping. A missing mapping or unresolved conflict can still block the month, but accepted and successfully reconciled leave is no longer treated as missing attendance.
 
 ### Recommended leave synchronization
 
@@ -317,7 +306,7 @@ After an approved attendance penalty is used, its status becomes `APPLIED_TO_PAY
 
 ### Critical/high priority
 
-1. **Approved leave is not synchronized to attendance.** It can display correctly but still block payroll as missing attendance.
+1. **Leave reconciliation is not transactionally atomic.** Request, balance, attendance, summary, and notification changes span multiple Mongo documents without a repository transaction/session abstraction. Partial failure recovery still needs a durable workflow.
 2. **Tenant filter omission in penalty recalculation.** The LHD/ED record query filters by `EmployeeId` and date but does not include `CompanyId`. Duplicate employee IDs across companies can contaminate exception counts.
 3. **Some leave summary/balance queries lack complete company filters.** Attendance UI calls leave APIs, so cross-tenant defects in leave data can affect attendance display and summaries.
 4. **Permission scope is broad.** `Attendance.View` currently allows company attendance views; there is no separate “view own attendance” versus “view all attendance” permission.
