@@ -42,6 +42,9 @@ public class LeaveManagementService : ILeaveManagementService
     private readonly IMongoDbRepository<LeavePolicy> _leavePolicyRepo;
     private readonly IMongoDbRepository<EmployeeLeaveBalance> _employeeLeaveBalanceRepo;
     readonly IMongoDbRepository<CalendarEntity> _calendarRepository;
+    private readonly ICompanyWorkingCalendarService _workingCalendar;
+    private readonly IMongoDbRepository<AttendanceStatusSetting> _attendanceStatusRepo;
+    private readonly ILeaveAttendanceReconciliationService _leaveAttendanceReconciliation;
     public LeaveManagementService(
     IMongoDbRepository<EmpUser> employeeRepository,
     IMongoDbRepository<LeaveRequest> leave,
@@ -55,7 +58,10 @@ public class LeaveManagementService : ILeaveManagementService
     IMiddlewareService middlewareService,
     IMongoDbRepository<LeavePolicy> leavePolicyRepo,
     IMongoDbRepository<EmployeeLeaveBalance> employeeLeaveBalanceRepo,
-    IMongoDbRepository<CalendarEntity> calendarRepository
+    IMongoDbRepository<CalendarEntity> calendarRepository,
+    ICompanyWorkingCalendarService workingCalendar,
+    IMongoDbRepository<AttendanceStatusSetting> attendanceStatusRepo,
+    ILeaveAttendanceReconciliationService leaveAttendanceReconciliation
     )
     {
         _httpContextAccessor = httpContextAccessor;
@@ -72,6 +78,9 @@ public class LeaveManagementService : ILeaveManagementService
         _leavePolicyRepo = leavePolicyRepo;
         _employeeLeaveBalanceRepo = employeeLeaveBalanceRepo;
         _calendarRepository = calendarRepository;
+        _workingCalendar = workingCalendar;
+        _attendanceStatusRepo = attendanceStatusRepo;
+        _leaveAttendanceReconciliation = leaveAttendanceReconciliation;
     }
 
     // updated services
@@ -79,7 +88,12 @@ public class LeaveManagementService : ILeaveManagementService
     {
         Result result = new();
         // check if policy already exist;
-        var exist = await _leavePolicyRepo.Exist(lp => lp.Name.Equals(leavePolicyDto.Name, StringComparison.CurrentCultureIgnoreCase) || lp.Code.Equals(leavePolicyDto.Code, StringComparison.CurrentCultureIgnoreCase));
+        leavePolicyDto.Name = leavePolicyDto.Name.Trim();
+        leavePolicyDto.Code = leavePolicyDto.Code.Trim().ToUpperInvariant();
+        if (!await ValidateAttendanceStatusMapping(company_id, leavePolicyDto.AttendanceStatusCode))
+            return result;
+        var exist = await _leavePolicyRepo.Exist(lp => lp.CompanyId == company_id &&
+            (lp.Name.Equals(leavePolicyDto.Name, StringComparison.CurrentCultureIgnoreCase) || lp.Code == leavePolicyDto.Code));
         if (exist)
         {
             result.StatusCode = CustomStatusCode.LeavePolicyAlreadyExist;
@@ -87,6 +101,10 @@ public class LeaveManagementService : ILeaveManagementService
         }
         LeavePolicy leavePolicy = _mapper.Map<LeavePolicy>(leavePolicyDto);
         leavePolicy.Id = Guid.NewGuid().ToString();
+        leavePolicy.CompanyId = company_id;
+        leavePolicy.NormalizedName = leavePolicyDto.Name.ToUpperInvariant();
+        leavePolicy.NormalizedCode = leavePolicyDto.Code;
+        leavePolicy.AttendanceStatusCode = leavePolicyDto.AttendanceStatusCode?.Trim().ToUpperInvariant();
 
         // insert new leave policy
         result = await _leavePolicyRepo.AddOne(leavePolicy);
@@ -115,6 +133,7 @@ public class LeaveManagementService : ILeaveManagementService
             {
                 EmployeeLeaveBalance employeeLeaveBalance = new()
                 {
+                    CompanyId = company_id,
                     UserId = empId,
                     LeavePolicyId = leavePolicy.Id,
                     Balance = leavePolicyDto.AccrualAmount,
@@ -132,17 +151,27 @@ public class LeaveManagementService : ILeaveManagementService
     {
         Result<UpdateLeavePolicyRequest> result = new() { Success = false };
         // check if leave policy exits or not;
-        Expression<Func<LeavePolicy, bool>> expression = lp => lp.Id == model.Id;
+        var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        Expression<Func<LeavePolicy, bool>> expression = lp => lp.CompanyId == companyId && lp.Id == model.Id;
         var leavePolicy = await _leavePolicyRepo.FirstOrDefault(expression);
         if (leavePolicy == null) return result;
 
-        bool duplicateLeavePolicy = await _leavePolicyRepo.Exist(lp => (lp.Name.Equals(model.Name, StringComparison.CurrentCultureIgnoreCase) || lp.Code.Equals(model.Code, StringComparison.CurrentCultureIgnoreCase)) && lp.Id != model.Id);
+        model.Name = model.Name.Trim();
+        model.Code = model.Code.Trim().ToUpperInvariant();
+        if (!await ValidateAttendanceStatusMapping(companyId, model.AttendanceStatusCode)) return result;
+        bool duplicateLeavePolicy = await _leavePolicyRepo.Exist(lp => lp.CompanyId == companyId && (lp.Name.Equals(model.Name, StringComparison.CurrentCultureIgnoreCase) || lp.Code == model.Code) && lp.Id != model.Id);
         if (duplicateLeavePolicy)
         {
             result.StatusCode = CustomStatusCode.DuplicationLeavePolicy;
             return result;
         }
         LeavePolicy updatedPolicyModel = _mapper.Map<LeavePolicy>(model);
+        updatedPolicyModel.CompanyId = companyId;
+        updatedPolicyModel.NormalizedName = model.Name.ToUpperInvariant();
+        updatedPolicyModel.NormalizedCode = model.Code;
+        updatedPolicyModel.AttendanceStatusCode = model.AttendanceStatusCode?.Trim().ToUpperInvariant();
+        updatedPolicyModel.CreatedBy = leavePolicy.CreatedBy;
+        updatedPolicyModel.CreatedDate = leavePolicy.CreatedDate;
         var updateResult = await _leavePolicyRepo.Update(expression, updatedPolicyModel);
         result.Success = updateResult.Success;
         if (result.Success)
@@ -167,23 +196,29 @@ public class LeaveManagementService : ILeaveManagementService
     public async Task<Result> CreateLeaveRequest(LeaveRequestDto leaveRequest)
     {
         Result result = new();
+        var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        if (leaveRequest.EndDate.Date < leaveRequest.StartDate.Date)
+            return new Result { Success = false, Message = "End date cannot be before start date." };
+        var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == leaveRequest.UserId && x.Status && !x.IsDeleted);
+        if (employee == null) return new Result { Success = false, Message = "Employee does not belong to the authenticated company." };
         // check if employee has balance for requested leave type
-        var employeeLeaveBalance = await _employeeLeaveBalanceRepo.FirstOrDefault(elb => elb.UserId == leaveRequest.UserId && elb.LeavePolicyId == leaveRequest.LeavePolicyId);
+        var employeeLeaveBalance = await _employeeLeaveBalanceRepo.FirstOrDefault(elb => elb.CompanyId == companyId && elb.UserId == leaveRequest.UserId && elb.LeavePolicyId == leaveRequest.LeavePolicyId);
         if (employeeLeaveBalance is null)
         {
             result.StatusCode = CustomStatusCode.LeaveBalanceNotExist;
             return result;
         }
         // check if requested leave type active or not
-        var leavePolicy = await _leavePolicyRepo.FirstOrDefault(lp => lp.Id == leaveRequest.LeavePolicyId && lp.Status);
+        var leavePolicy = await _leavePolicyRepo.FirstOrDefault(lp => lp.CompanyId == companyId && lp.Id == leaveRequest.LeavePolicyId && lp.Status);
         if (leavePolicy is null) return result;
 
-        // check if employee has pending leave
-        int pendingLeaves = await _leave.Count(lr => lr.EmployeeId == leaveRequest.UserId && lr.Status == EnumsHelper.LeaveRequestStatus.Pending);
-        if (pendingLeaves > 0)
+        var activeRequests = await _leave.GetAll(lr => lr.CompanyId == companyId && lr.EmployeeId == leaveRequest.UserId &&
+            (lr.Status == EnumsHelper.LeaveRequestStatus.Pending || lr.Status == EnumsHelper.LeaveRequestStatus.Accepted));
+        if (activeRequests.Any(lr => leaveRequest.StartDate.Date <= lr.EndDate.Date && leaveRequest.EndDate.Date >= lr.StartDate.Date))
         {
             result.Success = false;
-            result.StatusCode = CustomStatusCode.PendingLeaveExist;
+            result.StatusCode = CustomStatusCode.LeaveDateOverlaps;
+            result.Message = "The leave request overlaps an existing pending or accepted request.";
             return result;
         }
 
@@ -209,24 +244,20 @@ public class LeaveManagementService : ILeaveManagementService
 
         // get total requested days
         decimal totalRequestedDays = 0m;
-        IEnumerable<CalendarEntity> calendarEntities = await _calendarRepository.GetAll(cal => cal.Type == EnumsHelper.CalendarItem.Holiday && cal.Date >= leaveRequest.StartDate || cal.Recurring);
-        for (DateTime date = leaveRequest.StartDate; date <= leaveRequest.EndDate; date = date.AddDays(1))
-        {
-            bool isWeekend = IsWeekEnd(date);
-            bool isHoliday = IsHoliday(date, calendarEntities);
+        totalRequestedDays = (await _workingCalendar.GetLeaveDatesAsync(companyId,
+            DateOnly.FromDateTime(leaveRequest.StartDate), DateOnly.FromDateTime(leaveRequest.EndDate),
+            leavePolicy.WeekendInclusive, leavePolicy.HolidayInclusive)).Count;
 
-            if ((!leavePolicy.WeekendInclusive && isWeekend) || (!leavePolicy.HolidayInclusive && isHoliday))
-                continue;
-
-            totalRequestedDays += 1;
-        }
-
-        if (leaveRequest.IsHalfDay && leavePolicy.HalfDayAllowed)
+        if (leaveRequest.IsHalfDay && (!leavePolicy.HalfDayAllowed || leaveRequest.StartDate.Date != leaveRequest.EndDate.Date))
+            return new Result { Success = false, Message = "Half-day leave requires an allowed policy and a single date." };
+        if (leaveRequest.IsHalfDay)
         {
             totalRequestedDays = 0.5m;
         }
 
         // validate requested days
+        if (totalRequestedDays <= 0)
+            return new Result { Success = false, Message = "Leave duration must be greater than zero." };
         if (totalRequestedDays > employeeLeaveBalance.Balance)
         {
             result.Success = false;
@@ -258,20 +289,23 @@ public class LeaveManagementService : ILeaveManagementService
     public async Task<Result> UpdateLeaveRequest(UpdateLeaveRequestDto leaveRequestDto)
     {
         Result result = new();
-        var existingLeaveRequest = await _leave.FirstOrDefault(lr => lr.LeaveRequestId == leaveRequestDto.LeaveRequestId && leaveRequestDto.UserId == lr.EmployeeId);
+        var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        if (leaveRequestDto.EndDate.Date < leaveRequestDto.StartDate.Date)
+            return new Result { Success=false, Message="End date cannot be before start date." };
+        var existingLeaveRequest = await _leave.FirstOrDefault(lr => lr.CompanyId == companyId && lr.LeaveRequestId == leaveRequestDto.LeaveRequestId && leaveRequestDto.UserId == lr.EmployeeId);
         if (existingLeaveRequest is null) return result;
         if (existingLeaveRequest.Status != EnumsHelper.LeaveRequestStatus.Pending) return result;
 
 
         // check if employee has balance for requested leave type
-        var employeeLeaveBalance = await _employeeLeaveBalanceRepo.FirstOrDefault(elb => elb.UserId == leaveRequestDto.UserId && elb.LeavePolicyId == leaveRequestDto.LeavePolicyId);
+        var employeeLeaveBalance = await _employeeLeaveBalanceRepo.FirstOrDefault(elb => elb.CompanyId == companyId && elb.UserId == leaveRequestDto.UserId && elb.LeavePolicyId == leaveRequestDto.LeavePolicyId);
         if (employeeLeaveBalance is null)
         {
             result.StatusCode = CustomStatusCode.LeaveBalanceNotExist;
             return result;
         }
 
-        var leavePolicy = await _leavePolicyRepo.FirstOrDefault(lp => lp.Id == leaveRequestDto.LeavePolicyId && lp.Status);
+        var leavePolicy = await _leavePolicyRepo.FirstOrDefault(lp => lp.CompanyId == companyId && lp.Id == leaveRequestDto.LeavePolicyId && lp.Status);
         if (leavePolicy is null) return result;
 
         // check if emp already has apporoved leave on request date
@@ -467,7 +501,9 @@ public class LeaveManagementService : ILeaveManagementService
     public async Task<Result> DeleteLeaveRequest(string leaveRequestId)
     {
         Result result = new();
-        Expression<Func<LeaveRequest, bool>> whereCondition = lr => lr.LeaveRequestId == leaveRequestId;
+        var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        var userId = CurrentContext.UserId(_httpContextAccessor);
+        Expression<Func<LeaveRequest, bool>> whereCondition = lr => lr.CompanyId == companyId && lr.EmployeeId == userId && lr.LeaveRequestId == leaveRequestId;
         LeaveRequest? existingLeaveRequest = await _leave.FirstOrDefault(whereCondition);
         if (existingLeaveRequest is null) return result;
         // if existing leave status is not pending 
@@ -480,13 +516,14 @@ public class LeaveManagementService : ILeaveManagementService
     public async Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, LeaveRequestUpdateDto model)
     {
         Result result = new();
-        Expression<Func<LeaveRequest, bool>> expression = lr => lr.LeaveRequestId == leaveRequestId;
+        var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        Expression<Func<LeaveRequest, bool>> expression = lr => lr.CompanyId == companyId && lr.LeaveRequestId == leaveRequestId;
         var existingLeaveRequest = await _leave.FirstOrDefault(expression);
 
         if (existingLeaveRequest == null || model.Status == EnumsHelper.LeaveRequestStatus.Pending || model.Status == EnumsHelper.LeaveRequestStatus.WithDrawn || model.Status == existingLeaveRequest.Status) return result;
 
         // get employee current leave balance for requested leave type
-        Expression<Func<EmployeeLeaveBalance, bool>> expression2 = lb => lb.UserId == existingLeaveRequest.EmployeeId && lb.LeavePolicyId == existingLeaveRequest.LeavePolicyId;
+        Expression<Func<EmployeeLeaveBalance, bool>> expression2 = lb => lb.CompanyId == companyId && lb.UserId == existingLeaveRequest.EmployeeId && lb.LeavePolicyId == existingLeaveRequest.LeavePolicyId;
         var leaveBalance = await _employeeLeaveBalanceRepo.FirstOrDefault(expression2);
         if (leaveBalance == null) return result;
 
@@ -494,7 +531,7 @@ public class LeaveManagementService : ILeaveManagementService
 
         if (existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Pending && model.Status != EnumsHelper.LeaveRequestStatus.WithDrawn)
         {
-            if (existingLeaveRequest.TotalDays > leaveBalance.Balance)
+            if (model.Status == EnumsHelper.LeaveRequestStatus.Accepted && existingLeaveRequest.TotalDays > leaveBalance.Balance)
             {
                 result.StatusCode = CustomStatusCode.InsufficientLeaveBalance;
                 return result;
@@ -507,6 +544,8 @@ public class LeaveManagementService : ILeaveManagementService
             existingLeaveRequest.ReviewedBy = reviewedBy;
             existingLeaveRequest.Comment = model.Comment;
             existingLeaveRequest.Status = model.Status;
+            existingLeaveRequest.ReviewedAt = DateTime.UtcNow;
+            existingLeaveRequest.Version++;
         }
         else if (existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted && model.Status == EnumsHelper.LeaveRequestStatus.Rejected)
         {
@@ -515,14 +554,23 @@ public class LeaveManagementService : ILeaveManagementService
             existingLeaveRequest.ReviewedBy = reviewedBy;
             existingLeaveRequest.Comment = model.Comment;
             existingLeaveRequest.Status = model.Status;
+            existingLeaveRequest.ReviewedAt = DateTime.UtcNow;
+            existingLeaveRequest.Version++;
         }
         else if (existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Rejected && model.Status == EnumsHelper.LeaveRequestStatus.Accepted)
         {
+            if (existingLeaveRequest.TotalDays > leaveBalance.Balance)
+            {
+                result.StatusCode = CustomStatusCode.InsufficientLeaveBalance;
+                return result;
+            }
             leaveBalance.Balance -= existingLeaveRequest.TotalDays;
             leaveBalance.UsedBalance += existingLeaveRequest.TotalDays;
             existingLeaveRequest.ReviewedBy = reviewedBy;
             existingLeaveRequest.Comment = model.Comment;
             existingLeaveRequest.Status = model.Status;
+            existingLeaveRequest.ReviewedAt = DateTime.UtcNow;
+            existingLeaveRequest.Version++;
         }
         else
         {
@@ -532,11 +580,28 @@ public class LeaveManagementService : ILeaveManagementService
 
         await _leave.Update(expression, existingLeaveRequest);
         result = await _employeeLeaveBalanceRepo.Update(expression2, leaveBalance);
+        if (result.Success && model.Status == EnumsHelper.LeaveRequestStatus.Accepted)
+        {
+            result = await _leaveAttendanceReconciliation.ReconcileAcceptedLeaveAsync(companyId, leaveRequestId, reviewedBy);
+        }
+        else if (result.Success && model.Status == EnumsHelper.LeaveRequestStatus.Rejected)
+        {
+            result = await _leaveAttendanceReconciliation.ReverseLeaveAttendanceAsync(companyId, leaveRequestId, existingLeaveRequest.Version, reviewedBy);
+        }
         if (result.Success)
         {
             LeaveNotification(existingLeaveRequest, model.Status);
         }
         return result;
+    }
+
+    private async Task<bool> ValidateAttendanceStatusMapping(string companyId, string? code)
+    {
+        // Existing policies without a mapping remain readable/editable. New approvals
+        // cannot reconcile until HR assigns a valid no-time attendance status.
+        if (string.IsNullOrWhiteSpace(code)) return true;
+        var normalized = code.Trim().ToUpperInvariant();
+        return await _attendanceStatusRepo.Exist(x => x.CompanyId == companyId && x.Code == normalized && x.IsActive && !x.RequiresTime);
     }
 
     public async Task<Result<LeaveRequestSummaryResponseDto>> GetLeaveRequestSummary()
@@ -842,6 +907,9 @@ public class LeaveManagementService : ILeaveManagementService
 
     public async Task EmployeeLeaveBalanceAccrual()
     {
+        var now = DateTime.UtcNow;
+        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var yearStart = new DateTime(now.Year, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         // get all active leavePolicy with accrual monthly or yearly
         IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(lp =>
             lp.Status && (lp.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || lp.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly),
@@ -851,39 +919,38 @@ public class LeaveManagementService : ILeaveManagementService
         foreach (var policy in leavePolicies)
         {
             // get all active employees with leave policy
-            IEnumerable<EmployeeLeaveBalance> employeeLeaveBalances = await _employeeLeaveBalanceRepo.GetAll(elb => elb.LeavePolicyId == policy.Id, withDefaultFilter: false);
+            IEnumerable<EmployeeLeaveBalance> employeeLeaveBalances = await _employeeLeaveBalanceRepo.GetAll(elb => elb.CompanyId == policy.CompanyId && elb.LeavePolicyId == policy.Id, withDefaultFilter: false);
             if (policy.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly && employeeLeaveBalances.Any())
             {
                 foreach (EmployeeLeaveBalance empLeave in employeeLeaveBalances)
                 {
                     // check if leave is already credited for this month 
-                    if (empLeave.LastAccrual?.Date != DateTime.UtcNow.Date)
+                    if (!empLeave.LastAccrual.HasValue || empLeave.LastAccrual.Value < monthStart)
                     {
                         var updatedBalance = empLeave.Balance + policy.AccrualAmount;
                         empLeave.Balance = policy.MaxBalance.HasValue ? Math.Min(updatedBalance, policy.MaxBalance.Value) : updatedBalance;
-                        Expression<Func<EmployeeLeaveBalance, bool>> expression = elb => elb.Id == empLeave.Id;
+                        Expression<Func<EmployeeLeaveBalance, bool>> expression = elb => elb.CompanyId == policy.CompanyId && elb.Id == empLeave.Id && (!elb.LastAccrual.HasValue || elb.LastAccrual.Value < monthStart);
                         await _employeeLeaveBalanceRepo.UpdateMany(expression, Builders<EmployeeLeaveBalance>.Update
                         .Set(b => b.Balance, empLeave.Balance)
-                        .Set(b => b.UsedBalance, 0)
-                        .Set(b => b.LastAccrual, DateTime.UtcNow)
-                        .Set(b => b.UpdatedDate, DateTime.UtcNow));
+                        .Set(b => b.LastAccrual, now)
+                        .Set(b => b.UpdatedDate, now));
                     }
                 }
             }
-            if (policy.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly && DateTime.UtcNow.Month == 1)
+            if (policy.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly && now.Month == 1)
             {
                 foreach (EmployeeLeaveBalance empLeave in employeeLeaveBalances)
                 {
-                    if (empLeave.LastAccrual?.Date != DateTime.UtcNow.Date)
+                    if (!empLeave.LastAccrual.HasValue || empLeave.LastAccrual.Value < yearStart)
                     {
-                        var updatedBalance = policy.CarryOverAllowed ? (Math.Min(empLeave.Balance, policy.CarryOverLimit.Value) + policy.AccrualAmount) : policy.AccrualAmount;
+                        var carryOverLimit = policy.CarryOverLimit ?? 0m;
+                        var updatedBalance = policy.CarryOverAllowed ? (Math.Min(empLeave.Balance, carryOverLimit) + policy.AccrualAmount) : policy.AccrualAmount;
                         empLeave.Balance = policy.MaxBalance.HasValue ? Math.Min(updatedBalance, policy.MaxBalance.Value) : updatedBalance;
-                        Expression<Func<EmployeeLeaveBalance, bool>> expression = elb => elb.Id == empLeave.Id;
+                        Expression<Func<EmployeeLeaveBalance, bool>> expression = elb => elb.CompanyId == policy.CompanyId && elb.Id == empLeave.Id && (!elb.LastAccrual.HasValue || elb.LastAccrual.Value < yearStart);
                         await _employeeLeaveBalanceRepo.UpdateMany(expression, Builders<EmployeeLeaveBalance>.Update
                         .Set(b => b.Balance, empLeave.Balance)
-                        .Set(b => b.UsedBalance, 0)
-                        .Set(b => b.LastAccrual, DateTime.UtcNow)
-                        .Set(b => b.UpdatedDate, DateTime.UtcNow));
+                        .Set(b => b.LastAccrual, now)
+                        .Set(b => b.UpdatedDate, now));
                     }
                 }
             }

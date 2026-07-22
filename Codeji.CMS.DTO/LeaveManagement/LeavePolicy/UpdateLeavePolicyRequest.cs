@@ -21,4 +21,5 @@ public class UpdateLeavePolicyRequest
     public required bool HalfDayAllowed { get; set; }
     public required bool WeekendInclusive { get; set; }
     public required bool HolidayInclusive { get; set; }
+    public string? AttendanceStatusCode { get; set; }
 }

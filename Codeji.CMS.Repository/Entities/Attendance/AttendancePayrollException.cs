@@ -28,4 +28,9 @@ public class AttendancePayrollException : BaseClass
     public string PolicyId { get; set; } = "";
     public int PolicyVersion { get; set; }
     public int Version { get; set; } = 1;
+    public string? LeaveRequestId { get; set; }
+    public string? ExistingAttendanceId { get; set; }
+    public string? ExistingStatus { get; set; }
+    public string? RequestedLeaveStatus { get; set; }
+    public int SourceVersion { get; set; }
 }

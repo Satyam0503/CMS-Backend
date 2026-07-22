@@ -22,6 +22,7 @@ public class LeavePolicyRequest
     public bool HalfDayAllowed { get; set; } = false;
     public bool WeekendInclusive { get; set; } = false;
     public bool HolidayInclusive { get; set; } = false;
+    public string? AttendanceStatusCode { get; set; }
     public string[]? ApplicableTo { get; set; } = [];
 
 }

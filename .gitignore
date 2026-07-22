@@ -13,6 +13,8 @@ Codeji.CMS.API/Uploads/*
 # Local build checks
 .build-check/
 **/.build-check/
+.tmp/
+**/.tmp/
 
 # Runtime logs
 *.log

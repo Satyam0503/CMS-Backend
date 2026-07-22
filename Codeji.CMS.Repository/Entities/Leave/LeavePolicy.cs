@@ -8,6 +8,9 @@ public class LeavePolicy : BaseClass
     public string Id { get; set; }
     public required string Name { get; set; }
     public required string Code { get; set; }
+    public string NormalizedName { get; set; } = string.Empty;
+    public string NormalizedCode { get; set; } = string.Empty;
+    public string? AttendanceStatusCode { get; set; }
     public string Description { get; set; } = string.Empty;
     public bool Status { get; set; } = true;
     public bool Paid { get; set; } = true;

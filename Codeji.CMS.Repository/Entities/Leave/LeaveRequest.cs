@@ -17,5 +17,7 @@ public class LeaveRequest : BaseClass
     public string? ReviewedBy { get; set; }
     public string Comment { get; set; } = "";
     public EnumsHelper.LeaveRequestStatus Status { get; set; }
+    public int Version { get; set; }
+    public DateTime? ReviewedAt { get; set; }
 
 }
