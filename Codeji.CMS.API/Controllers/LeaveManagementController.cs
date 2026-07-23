@@ -119,6 +119,22 @@ public class LeaveManagementController : BaseApiController
         return await _leaveManagementService.CreateLeaveRequest(leaveRequest);
     }
 
+    [Route("CreateEmployeeLeaveRequest/{employeeId}")]
+    [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Edit)]
+    public async Task<Result> CreateEmployeeLeaveRequest(
+        string employeeId,
+        [FromBody] LeaveRequestDto leaveRequest)
+    {
+        if (!ModelState.IsValid || string.IsNullOrWhiteSpace(employeeId))
+            return new Result();
+
+        // The target comes from the protected route, never from the request body.
+        // CreateLeaveRequest also verifies that the employee belongs to this company.
+        leaveRequest.UserId = employeeId;
+        return await _leaveManagementService.CreateLeaveRequest(leaveRequest);
+    }
+
     [Route("UpdateLeaveRequest")]
     [HttpPost]
     [ModulePermission(AppModule.LeaveManagement, Permission.Edit)]
