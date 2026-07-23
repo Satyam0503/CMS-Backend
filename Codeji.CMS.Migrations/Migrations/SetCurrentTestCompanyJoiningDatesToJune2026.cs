@@ -25,7 +25,11 @@ public class SetCurrentTestCompanyJoiningDatesToJune2026 : IMigration
             Builders<EmpUser>.Filter.In(x => x.EmployeeId, testEmployeeIds)).ToListAsync();
         var companyIds = testUsers.Select(x => x.CompanyId).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
         if (companyIds.Count != 1)
-            throw new InvalidOperationException("Could not uniquely identify the E2E test company.");
+        {
+            Console.WriteLine(
+                $"Skipping {Id}: expected one E2E test company but found {companyIds.Count}.");
+            return;
+        }
 
         var companyId = companyIds[0];
         var activeEmployees = await employees.Find(x =>
