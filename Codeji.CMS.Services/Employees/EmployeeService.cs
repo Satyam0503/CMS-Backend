@@ -407,7 +407,7 @@ namespace Codeji.CMS.Services.Employees
             string replacedBody = HtmlTemplate.Render(emailContent.body, new
             {
                 EmployeeName = employee.FirstName + " " + employee.LastName,
-                PasswordCreationLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}&uid={employee.UserId}",
+                PasswordCreationLink = $"{ConfigManager.AppSettings.AppUrl.TrimEnd('/')}/auth/createpassword?token={Uri.EscapeDataString(token)}&uid={employee.UserId}",
                 CompanyName = company != null ? company.CompanyName : string.Empty,
                 // CompanyLogo = company.CompanyLogo != null ? _middlewareService.GetCompanyLogoAsDataUrl(Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "CompanyLogo", company.CompanyLogo)) : string.Empty,
                 CompanyLogo = company.CompanyLogo != null ? Common.GetCompanyLogoUrl(company.CompanyLogo) : string.Empty,
