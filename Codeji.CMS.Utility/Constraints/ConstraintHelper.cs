@@ -14,6 +14,7 @@ namespace Codeji.CMS.Utility.Constraints
         public const string PayRoll = "PayRoll";
         public const string Policy = "Policy";
         public const string PayrollSettings = "Payroll_Settings";
+        public const string CareerProfile = "Career_Profile";
     }
 
     public static class Permission

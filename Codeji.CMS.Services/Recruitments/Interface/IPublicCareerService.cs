@@ -8,6 +8,7 @@ public interface IPublicCareerService
 {
     Task<Result<PublicJobSummaryDto>> GetMasterJobs(PublicJobSearchRequest request);
     Task<Result<PublicJobSummaryDto>> GetCompanyJobs(string companyCode, PublicJobSearchRequest request);
+    Task<Result<string>> GetLocations(string? companyCode, string? search);
     Task<Result<PublicJobDetailsDto>> GetJobByPublicId(string publicJobId);
     Task<Result<PublicJobDetailsDto>> GetJobBySlug(string jobSlug);
     Task<Result<PublicJobApplicationResponse>> Apply(string publicJobId, PublicJobApplicationRequest request);

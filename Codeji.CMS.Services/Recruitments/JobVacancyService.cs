@@ -7,6 +7,7 @@ using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
 using MongoDB.Driver;
 using System.Text.RegularExpressions;
+using Codeji.CMS.Services.CareerPortal.Interface;
 
 namespace Codeji.CMS.Services.Recruitments
 {
@@ -15,12 +16,15 @@ namespace Codeji.CMS.Services.Recruitments
         readonly IMongoDbRepository<JobVacancy> _jobVacancyRepo;
         readonly IMongoDbRepository<Applicant> _applicantRepository;
         readonly IMapper _mapper;
+        readonly ICareerNotificationService _careerNotifications;
 
-        public JobVacancyService(IMongoDbRepository<JobVacancy> jobVacancyRepo, IMongoDbRepository<Applicant> applicantRepo, IMapper mapper)
+        public JobVacancyService(IMongoDbRepository<JobVacancy> jobVacancyRepo, IMongoDbRepository<Applicant> applicantRepo, IMapper mapper,
+            ICareerNotificationService careerNotifications)
         {
             _jobVacancyRepo = jobVacancyRepo;
             _mapper = mapper;
             _applicantRepository = applicantRepo;
+            _careerNotifications = careerNotifications;
         }
 
         public async Task<Result<JobVacancyModel>> AddJobVacancy(JobVacancyModel jobVacancy)
@@ -51,9 +55,20 @@ namespace Codeji.CMS.Services.Recruitments
                 PublishedAt = jobVacancy.PublishedAt,
                 ExpiresAt = jobVacancy.ExpiresAt,
                 ApplicationDeadline = jobVacancy.ApplicationDeadline,
+                Summary = jobVacancy.Summary, Department = jobVacancy.Department, FunctionalArea = jobVacancy.FunctionalArea,
+                Industry = jobVacancy.Industry, RoleCategory = jobVacancy.RoleCategory, EducationRequirement = jobVacancy.EducationRequirement,
+                Responsibilities = jobVacancy.Responsibilities, RequiredSkills = jobVacancy.RequiredSkills,
+                PreferredSkills = jobVacancy.PreferredSkills, Benefits = jobVacancy.Benefits, Keywords = jobVacancy.Keywords,
+                ShiftType = jobVacancy.ShiftType, WorkingDays = jobVacancy.WorkingDays, TravelRequirement = jobVacancy.TravelRequirement,
+                IsFeatured = jobVacancy.IsFeatured, IsUrgentHiring = jobVacancy.IsUrgentHiring, IsWalkIn = jobVacancy.IsWalkIn,
+                WalkInStartAt = jobVacancy.WalkInStartAt, WalkInEndAt = jobVacancy.WalkInEndAt, WalkInAddress = jobVacancy.WalkInAddress,
+                RecruiterContactEmail = jobVacancy.RecruiterContactEmail, NoticePeriodMaxDays = jobVacancy.NoticePeriodMaxDays,
+                ShowSalary = jobVacancy.ShowSalary,
             };
 
-            await _jobVacancyRepo.AddOne(vacancy);
+            Result saved = await _jobVacancyRepo.AddOne(vacancy);
+            if (saved.Success)
+                await _careerNotifications.HandleJobSaved(null, vacancy);
 
             return new Result<JobVacancyModel>
             {
@@ -91,9 +106,28 @@ namespace Codeji.CMS.Services.Recruitments
                 PublishedAt = jobVacancy.PublishedAt ?? existing?.PublishedAt,
                 ExpiresAt = jobVacancy.ExpiresAt ?? existing?.ExpiresAt,
                 ApplicationDeadline = jobVacancy.ApplicationDeadline ?? existing?.ApplicationDeadline,
+                Summary = jobVacancy.Summary ?? existing?.Summary, Department = jobVacancy.Department ?? existing?.Department,
+                FunctionalArea = jobVacancy.FunctionalArea ?? existing?.FunctionalArea, Industry = jobVacancy.Industry ?? existing?.Industry,
+                RoleCategory = jobVacancy.RoleCategory ?? existing?.RoleCategory,
+                EducationRequirement = jobVacancy.EducationRequirement ?? existing?.EducationRequirement,
+                Responsibilities = jobVacancy.Responsibilities.Count > 0 ? jobVacancy.Responsibilities : existing?.Responsibilities ?? [],
+                RequiredSkills = jobVacancy.RequiredSkills.Count > 0 ? jobVacancy.RequiredSkills : existing?.RequiredSkills ?? [],
+                PreferredSkills = jobVacancy.PreferredSkills.Count > 0 ? jobVacancy.PreferredSkills : existing?.PreferredSkills ?? [],
+                Benefits = jobVacancy.Benefits.Count > 0 ? jobVacancy.Benefits : existing?.Benefits ?? [],
+                Keywords = jobVacancy.Keywords.Count > 0 ? jobVacancy.Keywords : existing?.Keywords ?? [],
+                ShiftType = jobVacancy.ShiftType ?? existing?.ShiftType, WorkingDays = jobVacancy.WorkingDays ?? existing?.WorkingDays,
+                TravelRequirement = jobVacancy.TravelRequirement ?? existing?.TravelRequirement,
+                IsFeatured = jobVacancy.IsFeatured ?? existing?.IsFeatured, IsUrgentHiring = jobVacancy.IsUrgentHiring ?? existing?.IsUrgentHiring,
+                IsWalkIn = jobVacancy.IsWalkIn ?? existing?.IsWalkIn, WalkInStartAt = jobVacancy.WalkInStartAt ?? existing?.WalkInStartAt,
+                WalkInEndAt = jobVacancy.WalkInEndAt ?? existing?.WalkInEndAt, WalkInAddress = jobVacancy.WalkInAddress ?? existing?.WalkInAddress,
+                RecruiterContactEmail = jobVacancy.RecruiterContactEmail ?? existing?.RecruiterContactEmail,
+                NoticePeriodMaxDays = jobVacancy.NoticePeriodMaxDays ?? existing?.NoticePeriodMaxDays,
+                ShowSalary = jobVacancy.ShowSalary ?? existing?.ShowSalary,
             };
             Expression<Func<JobVacancy, bool>> whereCondition = x => x.JobId == jobId;
-            await _jobVacancyRepo.Update(whereCondition, editedJob);
+            Result saved = await _jobVacancyRepo.Update(whereCondition, editedJob);
+            if (saved.Success)
+                await _careerNotifications.HandleJobSaved(existing, editedJob);
             return new Result<JobVacancyModel>
             {
                 MethodResult = jobVacancy,
@@ -153,6 +187,14 @@ namespace Codeji.CMS.Services.Recruitments
                 PublishedAt = job.PublishedAt,
                 ExpiresAt = job.ExpiresAt,
                 ApplicationDeadline = job.ApplicationDeadline,
+                Summary = job.Summary, Department = job.Department, FunctionalArea = job.FunctionalArea, Industry = job.Industry,
+                RoleCategory = job.RoleCategory, EducationRequirement = job.EducationRequirement,
+                Responsibilities = job.Responsibilities, RequiredSkills = job.RequiredSkills, PreferredSkills = job.PreferredSkills,
+                Benefits = job.Benefits, Keywords = job.Keywords, ShiftType = job.ShiftType, WorkingDays = job.WorkingDays,
+                TravelRequirement = job.TravelRequirement, IsFeatured = job.IsFeatured, IsUrgentHiring = job.IsUrgentHiring,
+                IsWalkIn = job.IsWalkIn, WalkInStartAt = job.WalkInStartAt, WalkInEndAt = job.WalkInEndAt,
+                WalkInAddress = job.WalkInAddress, RecruiterContactEmail = job.RecruiterContactEmail,
+                NoticePeriodMaxDays = job.NoticePeriodMaxDays, ShowSalary = job.ShowSalary,
             });
             Result<GetJobVacancyModel> result = new Result<GetJobVacancyModel>()
             {

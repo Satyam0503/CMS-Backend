@@ -37,6 +37,7 @@ using Codeji.CMS.Services.Interfaces;
 using Codeji.CMS.Services.PayRoll;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.Services.Interface;
+using System.Threading.RateLimiting;
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 BsonSerializer.RegisterSerializer(
@@ -45,6 +46,20 @@ new EnumSerializer<NotificationPreferenceType>(BsonType.String)
 
 // Add services to the container
 builder.Services.AddControllers();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("career-sensitive", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 12,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+});
 // .AddJsonOptions(options =>
 // {
 //     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
@@ -109,6 +124,7 @@ builder.Services.AddSingleton<IPriorityTaskQueue, PriorityTaskQueue>();
 builder.Services.AddHostedService<PriorityQueuedHostedService>();
 builder.Services.AddHostedService<BirthDayAndAnniversaryNotificationHostedServices>();
 builder.Services.AddHostedService<LeaveAccrualHostedService>();
+builder.Services.AddHostedService<Codeji.CMS.Services.CareerPortal.CareerNotificationWorker>();
 builder.Services.AddHttpContextAccessor();
 // Register Attendance Repository
 builder.Services.AddScoped<IAttendanceRepository, AttendanceRepository>();
@@ -298,7 +314,13 @@ app.UseStaticFiles(new StaticFileOptions
         }
     }
 });
-app.UseHttpsRedirection();
+// Local development profiles may intentionally expose HTTP only. Avoid emitting an
+// unusable HTTPS redirect when no development HTTPS endpoint is configured.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 

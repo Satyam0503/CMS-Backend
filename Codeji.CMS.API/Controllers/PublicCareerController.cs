@@ -45,6 +45,13 @@ public class PublicCareerController : ControllerBase
         return StatusCode(result.StatusCode, result);
     }
 
+    [HttpGet("job-locations")]
+    public async Task<IActionResult> GetLocations([FromQuery] string? companyCode, [FromQuery] string? search)
+    {
+        var result = await _publicCareerService.GetLocations(companyCode, search);
+        return StatusCode(result.StatusCode, result);
+    }
+
     [HttpPost("jobs/{publicJobId}/applications")]
     public async Task<IActionResult> Apply(string publicJobId, [FromBody] PublicJobApplicationRequest request)
     {

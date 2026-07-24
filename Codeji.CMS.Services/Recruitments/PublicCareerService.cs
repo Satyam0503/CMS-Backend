@@ -6,6 +6,7 @@ using Codeji.CMS.DTO.PublicCareers;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
+using Codeji.CMS.Repository.Entities.CareerPortal;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Interface;
@@ -28,6 +29,9 @@ public class PublicCareerService : IPublicCareerService
     private readonly IMongoCollection<ApplicantLogs> _applicantLogs;
     private readonly IMongoCollection<PublicApplicationToken> _tokens;
     private readonly IMongoCollection<MailTemplate> _mailTemplates;
+    private readonly IMongoCollection<PublicCompanyProfile> _companyProfiles;
+    private readonly IMongoCollection<SavedJob> _savedJobs;
+    private readonly IMongoCollection<CareerAnalyticsEvent> _analytics;
     private readonly IPriorityTaskQueue _priorityTaskQueue;
     private readonly IMiddlewareService _middlewareService;
 
@@ -38,6 +42,9 @@ public class PublicCareerService : IPublicCareerService
         IMongoDbRepository<ApplicantLogs> applicantLogsRepository,
         IMongoDbRepository<PublicApplicationToken> tokenRepository,
         IMongoDbRepository<MailTemplate> mailTemplateRepository,
+        IMongoDbRepository<PublicCompanyProfile> companyProfileRepository,
+        IMongoDbRepository<SavedJob> savedJobRepository,
+        IMongoDbRepository<CareerAnalyticsEvent> analyticsRepository,
         IPriorityTaskQueue priorityTaskQueue,
         IMiddlewareService middlewareService)
     {
@@ -47,6 +54,9 @@ public class PublicCareerService : IPublicCareerService
         _applicantLogs = applicantLogsRepository.GetCollection();
         _tokens = tokenRepository.GetCollection();
         _mailTemplates = mailTemplateRepository.GetCollection();
+        _companyProfiles = companyProfileRepository.GetCollection();
+        _savedJobs = savedJobRepository.GetCollection();
+        _analytics = analyticsRepository.GetCollection();
         _priorityTaskQueue = priorityTaskQueue;
         _middlewareService = middlewareService;
     }
@@ -67,6 +77,34 @@ public class PublicCareerService : IPublicCareerService
         }
 
         return await SearchJobs(request, [company], masterOnly: false);
+    }
+
+    public async Task<Result<string>> GetLocations(string? companyCode, string? search)
+    {
+        var companies = await _companies.Find(c => c.Status && !c.IsDeleted && c.CareerPortalEnabled &&
+            (string.IsNullOrWhiteSpace(companyCode)
+                ? c.PublishJobsToMasterPortal
+                : c.PublicCompanyCode == companyCode)).Project(c => c.CompanyId).ToListAsync();
+        if (companies.Count == 0)
+            return new Result<string> { Success = true, MethodResults = [] };
+
+        var f = Builders<JobVacancy>.Filter;
+        var filter = f.In(j => j.CompanyId, companies) & f.Eq(j => j.Status, true)
+            & f.Eq(j => j.IsDeleted, false) & f.Eq(j => j.PublishToCareerPortal, true)
+            & f.Ne(j => j.Location, null) & f.Ne(j => j.Location, string.Empty);
+        if (string.IsNullOrWhiteSpace(companyCode)) filter &= f.Eq(j => j.PublishToMasterPortal, true);
+        if (!string.IsNullOrWhiteSpace(search))
+            filter &= f.Regex(j => j.Location,
+                new BsonRegularExpression(Regex.Escape(search.Trim()[..Math.Min(80, search.Trim().Length)]), "i"));
+
+        var locations = await _jobs.Find(filter).Project(j => j.Location).ToListAsync();
+        return new Result<string>
+        {
+            Success = true,
+            MethodResults = locations.Where(x => !string.IsNullOrWhiteSpace(x))
+                .SelectMany(x => x!.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).Take(30).ToList()
+        };
     }
 
     public async Task<Result<PublicJobDetailsDto>> GetJobByPublicId(string publicJobId)
@@ -200,26 +238,117 @@ public class PublicCareerService : IPublicCareerService
 
     private async Task<Result<PublicJobSummaryDto>> SearchJobs(PublicJobSearchRequest request, List<Company> companies, bool masterOnly)
     {
+        if (!string.IsNullOrWhiteSpace(request.Company))
+            companies = companies.Where(c => c.CompanyName.Contains(request.Company.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+        if (!string.IsNullOrWhiteSpace(request.CompanySize) && companies.Count > 0)
+        {
+            var companyIdsBySize = await _companyProfiles.Find(p =>
+                    !p.IsDeleted && p.IsPublished && p.CompanySize == request.CompanySize)
+                .Project(p => p.CompanyId).ToListAsync();
+            companies = companies.Where(c => companyIdsBySize.Contains(c.CompanyId)).ToList();
+        }
         Dictionary<string, Company> companyMap = companies.ToDictionary(c => c.CompanyId, c => c);
         if (companyMap.Count == 0) return new Result<PublicJobSummaryDto> { Success = true, MethodResults = [], TotalRecords = 0 };
 
         var companyIds = companyMap.Keys.ToList();
+        var f = Builders<JobVacancy>.Filter;
         var filter = Builders<JobVacancy>.Filter.In(j => j.CompanyId, companyIds)
-            & Builders<JobVacancy>.Filter.Eq(j => j.Status, true)
-            & Builders<JobVacancy>.Filter.Eq(j => j.IsDeleted, false)
-            & Builders<JobVacancy>.Filter.Eq(j => j.PublishToCareerPortal, true);
-        if (masterOnly) filter &= Builders<JobVacancy>.Filter.Eq(j => j.PublishToMasterPortal, true);
-
-        var jobs = await _jobs.Find(filter).ToListAsync();
-        jobs = ApplyInMemoryFilters(jobs, request);
-        jobs = SortJobs(jobs, request.Sort);
+            & f.Eq(j => j.Status, true) & f.Eq(j => j.IsDeleted, false) & f.Eq(j => j.PublishToCareerPortal, true)
+            & (f.Eq(j => j.ExpiresAt, null) | f.Gte(j => j.ExpiresAt, DateTime.UtcNow))
+            & (f.Eq(j => j.ApplicationDeadline, null) | f.Gte(j => j.ApplicationDeadline, DateTime.UtcNow));
+        if (masterOnly) filter &= f.Eq(j => j.PublishToMasterPortal, true);
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var safeSearch = request.Search.Trim()[..Math.Min(200, request.Search.Trim().Length)];
+            var rx = new BsonRegularExpression(Regex.Escape(safeSearch), "i");
+            var matchingCompanyIds = companies
+                .Where(c => c.CompanyName.Contains(safeSearch, StringComparison.OrdinalIgnoreCase))
+                .Select(c => c.CompanyId).ToList();
+            filter &= f.Or(f.In(j => j.CompanyId, matchingCompanyIds),
+                f.Regex(j => j.Title, rx), f.Regex(j => j.Summary, rx), f.Regex(j => j.Description, rx),
+                f.Regex(j => j.Department, rx), f.Regex(j => j.Industry, rx), f.AnyIn(j => j.Skills, [safeSearch]),
+                f.AnyIn(j => j.RequiredSkills, [safeSearch]), f.AnyIn(j => j.Keywords, [safeSearch]));
+        }
+        if (!string.IsNullOrWhiteSpace(request.Location)) filter &= f.Regex(j => j.Location, new BsonRegularExpression(Regex.Escape(request.Location.Trim()), "i"));
+        if (!string.IsNullOrWhiteSpace(request.EmploymentType)) filter &= f.Eq(j => j.EmploymentType, request.EmploymentType);
+        if (!string.IsNullOrWhiteSpace(request.WorkplaceType)) filter &= f.Eq(j => j.WorkplaceType, request.WorkplaceType);
+        if (request.JobType.HasValue) filter &= f.Eq(j => j.JobType, request.JobType.Value);
+        if (request.ExperienceMin.HasValue) filter &= (f.Eq(j => j.ExperienceMax, null) | f.Gte(j => j.ExperienceMax, request.ExperienceMin));
+        if (request.ExperienceMax.HasValue) filter &= (f.Eq(j => j.ExperienceMin, null) | f.Lte(j => j.ExperienceMin, request.ExperienceMax));
+        if (request.SalaryMin.HasValue) filter &= f.Gte(j => j.SalaryMax, request.SalaryMin);
+        if (request.SalaryMax.HasValue) filter &= f.Lte(j => j.SalaryMin, request.SalaryMax);
+        if (!string.IsNullOrWhiteSpace(request.Currency)) filter &= f.Eq(j => j.Currency, request.Currency.Trim().ToUpperInvariant());
+        if (!string.IsNullOrWhiteSpace(request.Department)) filter &= f.Eq(j => j.Department, request.Department);
+        if (!string.IsNullOrWhiteSpace(request.Industry)) filter &= f.Eq(j => j.Industry, request.Industry);
+        if (!string.IsNullOrWhiteSpace(request.RoleCategory)) filter &= f.Eq(j => j.RoleCategory, request.RoleCategory);
+        if (!string.IsNullOrWhiteSpace(request.Education)) filter &= f.Regex(j => j.EducationRequirement, new BsonRegularExpression(Regex.Escape(request.Education.Trim()), "i"));
+        if (!string.IsNullOrWhiteSpace(request.Skills))
+        {
+            var skills = request.Skills.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Take(30);
+            filter &= f.Or(f.AnyIn(j => j.Skills, skills), f.AnyIn(j => j.RequiredSkills, skills),
+                f.AnyIn(j => j.PreferredSkills, skills));
+        }
+        if (request.DatePostedDays.HasValue) filter &= f.Gte(j => j.PublishedAt, DateTime.UtcNow.AddDays(-Math.Clamp(request.DatePostedDays.Value, 1, 365)));
+        if (request.Featured.HasValue) filter &= f.Eq(j => j.IsFeatured, request.Featured);
+        if (request.UrgentHiring.HasValue) filter &= f.Eq(j => j.IsUrgentHiring, request.UrgentHiring);
+        if (request.WalkIn.HasValue) filter &= f.Eq(j => j.IsWalkIn, request.WalkIn);
+        if (!string.IsNullOrWhiteSpace(request.ApplicationMode)) filter &= f.Eq(j => j.ApplicationMode, request.ApplicationMode);
 
         int pageNo = Math.Max(1, request.PageNo);
         int pageSize = Math.Clamp(request.PageSize, 1, 50);
-        int count = jobs.Count;
-        var page = jobs.Skip((pageNo - 1) * pageSize).Take(pageSize).Select(j => ToSummary(j, companyMap[j.CompanyId])).ToList();
+        long count = await _jobs.CountDocumentsAsync(filter);
+        var sortName = (request.Sort ?? "newest").ToLowerInvariant();
+        var sort = sortName switch
+        {
+            "oldest" => Builders<JobVacancy>.Sort.Ascending(j => j.PublishedAt),
+            "deadline" => Builders<JobVacancy>.Sort.Ascending(j => j.ApplicationDeadline),
+            "salary-high" => Builders<JobVacancy>.Sort.Descending(j => j.SalaryMax),
+            "salary-low" => Builders<JobVacancy>.Sort.Ascending(j => j.SalaryMin),
+            _ => Builders<JobVacancy>.Sort.Descending(j => j.PublishedAt).Descending(j => j.CreatedDate)
+        };
+        List<JobVacancy> jobs;
+        if (sortName is "most-saved" or "most-viewed")
+            jobs = await GetEngagementSortedPage(filter, sortName, pageNo, pageSize);
+        else
+            jobs = await _jobs.Find(filter).Sort(sort).Skip((pageNo - 1) * pageSize).Limit(pageSize).ToListAsync();
+        var page = jobs.Select(j => ToSummary(j, companyMap[j.CompanyId])).ToList();
 
-        return new Result<PublicJobSummaryDto> { Success = true, MethodResults = page, TotalRecords = count };
+        return new Result<PublicJobSummaryDto> { Success = true, MethodResults = page, TotalRecords = (int)Math.Min(count, int.MaxValue) };
+    }
+
+    private async Task<List<JobVacancy>> GetEngagementSortedPage(
+        FilterDefinition<JobVacancy> filter, string sort, int pageNo, int pageSize)
+    {
+        var eligible = await _jobs.Find(filter).Project(j => new { j.JobId, j.PublicJobId, j.PublishedAt }).ToListAsync();
+        if (eligible.Count == 0) return [];
+        var eligibleJobIds = eligible.Select(e => e.JobId).ToList();
+        var eligiblePublicJobIds = eligible.Select(e => e.PublicJobId).ToList();
+        Dictionary<string, long> counts;
+        if (sort == "most-saved")
+        {
+            counts = (await _savedJobs.Aggregate()
+                    .Match(x => x.IsActive && eligibleJobIds.Contains(x.JobId))
+                    .Group(x => x.JobId, group => new { Id = group.Key, Count = group.LongCount() })
+                    .ToListAsync())
+                .ToDictionary(x => x.Id, x => x.Count);
+        }
+        else
+        {
+            counts = (await _analytics.Aggregate()
+                    .Match(x => x.EventType == "JobViewed" && x.PublicJobId != null &&
+                                eligiblePublicJobIds.Contains(x.PublicJobId))
+                    .Group(x => x.PublicJobId!, group => new { Id = group.Key, Count = group.LongCount() })
+                    .ToListAsync())
+                .ToDictionary(x => x.Id, x => x.Count);
+        }
+
+        var pageIds = eligible
+            .OrderByDescending(x => counts.GetValueOrDefault(sort == "most-saved" ? x.JobId : x.PublicJobId))
+            .ThenByDescending(x => x.PublishedAt)
+            .Skip((pageNo - 1) * pageSize).Take(pageSize).Select(x => x.JobId).ToList();
+        var page = await _jobs.Find(x => pageIds.Contains(x.JobId)).ToListAsync();
+        var positions = pageIds.Select((id, index) => (id, index)).ToDictionary(x => x.id, x => x.index);
+        return page.OrderBy(x => positions[x.JobId]).ToList();
     }
 
     private async Task<Result<PublicJobDetailsDto>> GetJobDetails(System.Linq.Expressions.Expression<Func<JobVacancy, bool>> predicate)
@@ -230,26 +359,6 @@ public class PublicCareerService : IPublicCareerService
         if (company is null) return NotFound<PublicJobDetailsDto>("Career portal not found.");
         return new Result<PublicJobDetailsDto> { Success = true, MethodResult = ToDetails(job, company) };
     }
-
-    private static List<JobVacancy> ApplyInMemoryFilters(List<JobVacancy> jobs, PublicJobSearchRequest request)
-    {
-        string search = request.Search?.Trim().ToLowerInvariant() ?? string.Empty;
-        if (!string.IsNullOrEmpty(search)) jobs = jobs.Where(j => j.Title.Contains(search, StringComparison.OrdinalIgnoreCase) || j.Description.Contains(search, StringComparison.OrdinalIgnoreCase)).ToList();
-        if (request.JobType.HasValue) jobs = jobs.Where(j => j.JobType == request.JobType.Value).ToList();
-        if (!string.IsNullOrWhiteSpace(request.Location)) jobs = jobs.Where(j => (j.Location ?? string.Empty).Contains(request.Location, StringComparison.OrdinalIgnoreCase)).ToList();
-        if (!string.IsNullOrWhiteSpace(request.EmploymentType)) jobs = jobs.Where(j => string.Equals(j.EmploymentType, request.EmploymentType, StringComparison.OrdinalIgnoreCase)).ToList();
-        if (!string.IsNullOrWhiteSpace(request.WorkplaceType)) jobs = jobs.Where(j => string.Equals(j.WorkplaceType, request.WorkplaceType, StringComparison.OrdinalIgnoreCase)).ToList();
-        if (request.ExperienceMin.HasValue) jobs = jobs.Where(j => !j.ExperienceMax.HasValue || j.ExperienceMax >= request.ExperienceMin).ToList();
-        if (request.ExperienceMax.HasValue) jobs = jobs.Where(j => !j.ExperienceMin.HasValue || j.ExperienceMin <= request.ExperienceMax).ToList();
-        return jobs.Where(j => !IsClosed(j, out _)).ToList();
-    }
-
-    private static List<JobVacancy> SortJobs(List<JobVacancy> jobs, string? sort) => (sort ?? "newest").ToLowerInvariant() switch
-    {
-        "oldest" => jobs.OrderBy(j => j.PublishedAt ?? j.CreatedDate ?? DateTime.MinValue).ToList(),
-        "deadline" => jobs.OrderBy(j => j.ApplicationDeadline ?? DateTime.MaxValue).ToList(),
-        _ => jobs.OrderByDescending(j => j.PublishedAt ?? j.CreatedDate ?? DateTime.MinValue).ToList()
-    };
 
     private static PublicJobSummaryDto ToSummary(JobVacancy job, Company company)
     {
@@ -281,6 +390,9 @@ public class PublicCareerService : IPublicCareerService
             CompanyName = company.CompanyName,
             CompanySlug = company.CareerSlug,
             CompanyLogo = company.CompanyLogo
+            ,Summary = job.Summary, Department = job.Department, Industry = job.Industry, RoleCategory = job.RoleCategory,
+            EducationRequirement = job.EducationRequirement, IsFeatured = job.IsFeatured == true,
+            IsUrgentHiring = job.IsUrgentHiring == true, IsWalkIn = job.IsWalkIn == true, ShowSalary = job.ShowSalary != false
         };
     }
 
@@ -317,6 +429,10 @@ public class PublicCareerService : IPublicCareerService
             Description = job.Description,
             ReferenceCode = job.ReferenceCode,
             ExpiresAt = job.ExpiresAt
+            ,FunctionalArea = job.FunctionalArea, Responsibilities = job.Responsibilities, RequiredSkills = job.RequiredSkills,
+            PreferredSkills = job.PreferredSkills, Benefits = job.Benefits, ShiftType = job.ShiftType,
+            WorkingDays = job.WorkingDays, TravelRequirement = job.TravelRequirement, WalkInStartAt = job.WalkInStartAt,
+            WalkInEndAt = job.WalkInEndAt, WalkInAddress = job.WalkInAddress, NoticePeriodMaxDays = job.NoticePeriodMaxDays
         };
     }
 
