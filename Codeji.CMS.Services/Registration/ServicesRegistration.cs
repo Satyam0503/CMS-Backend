@@ -24,6 +24,7 @@ public static class ServicesRegistration
         //   services.AddSingleton<IColleagueBusiness, ColleagueBusiness>();
         services.AddScoped<IMiddlewareService, MiddlewareService>();
         services.AddScoped<IApplicantsService, ApplicantServices>();
+        services.AddScoped<IPublicCareerService, PublicCareerService>();
         services.AddScoped<IRoleService, RoleServices>();
         services.AddScoped<ICompanyService, CompanyService>();
         services.AddScoped<IEmployeeService, EmployeeService>();

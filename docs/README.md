@@ -21,6 +21,7 @@ Recommended reading order for a new contributor (human or AI):
 
 ### Detailed HR module flows
 
+- [`recruitment-current-flow-and-working-context.md`](./recruitment-current-flow-and-working-context.md) - current authoritative recruitment and public-careers implementation, including six-digit company routing, APIs, data ownership, tokenized resume upload, frontend routes, operations, and validation
 - [`recruitment-module-current-flow-and-audit.md`](./recruitment-module-current-flow-and-audit.md) - recruitment architecture, vacancy and applicant flows, permissions, data lifecycle, risks, gaps, and remediation priorities
 - [`leave-attendance-payroll-end-to-end-flow.md`](./leave-attendance-payroll-end-to-end-flow.md) - authoritative end-to-end flow, calculations, permissions, dependencies, failure paths, gaps, and tests
 - [`leave-management-current-flow.md`](./leave-management-current-flow.md)

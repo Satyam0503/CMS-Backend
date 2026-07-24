@@ -10,5 +10,5 @@ public interface IPayRollServices
     Task<(byte[] pdfBytes, string pdfName)> GenerateEmployeeSalarySlip(EmployeePayslipRequestDto model, string companyId);
     Task<Result<string>> UploadPayrollData(EmplyeePayRollRequestDto model, string companyId);
     Task<Result> AddUpdatePayRoll(AddUpdatePayRollRequestDto model, string companyId);
-    Task<Result> ProcessPayrollMonth(DateTime payMonth, string companyId, string processedBy);
+    Task<Result> ProcessPayrollMonth(DateTime payMonth, string companyId, string processedBy, IReadOnlyCollection<string>? employeeIds = null);
 }

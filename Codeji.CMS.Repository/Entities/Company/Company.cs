@@ -9,6 +9,11 @@ namespace Codeji.CMS.Repository.Entities.Company
         public string CompanyId { get; set; }
         public bool Status { get; set; }
         public required string CompanyName { get; set; }
+        public string CareerSlug { get; set; } = string.Empty;
+        public bool CareerPortalEnabled { get; set; } = true;
+        public string PublicCompanyCode { get; set; } = string.Empty;
+        public bool PublishJobsToMasterPortal { get; set; } = false;
+        public string? ExternalCareerUrl { get; set; }
         public string? CompanyLogo { get; set; }
         public string PrimaryContact { get; set; }
         public required string DefaultLanguage { get; set; }

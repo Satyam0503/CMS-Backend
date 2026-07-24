@@ -46,6 +46,18 @@ namespace Codeji.CMS.API.Controllers
             return result;
         }
 
+        [HttpGet]
+        [Route("career")]
+        [AllowAnonymous]
+        public Task<Result<PublicCareerCompanyDto>> GetPublicCareerCompany() =>
+            _companyService.GetPublicCareerCompany();
+
+        [HttpGet]
+        [Route("career/{publicCompanyCode}")]
+        [AllowAnonymous]
+        public Task<Result<PublicCareerCompanyDto>> GetPublicCareerCompany(string publicCompanyCode) =>
+            _companyService.GetPublicCareerCompany(publicCompanyCode);
+
         [HttpPost]
         [Route("UpdateCompanyDetails")]
         [Authorize(Policy = "AdminOnly")]

@@ -122,6 +122,8 @@ namespace Codeji.CMS.Services.Recruitments
             Applicant? entity = await _applicantRepository.FirstOrDefault(whereCondition);
             if (entity == null) return result;
 
+            var previousActivityType = entity.ActivityType;
+
             entity.Experience = model.Experience;
             entity.VacancyId = model.VacancyId;
             entity.FirstName = model.FirstName;
@@ -132,7 +134,9 @@ namespace Codeji.CMS.Services.Recruitments
             entity.Status = model.Status;
             entity.State = model.State;
             result = await _applicantRepository.Update(whereCondition, entity);
-            if (result.Success) await SendEmailToApplicant(entity);
+            // A candidate receives one email when HR moves the application to a new stage.
+            // Ordinary edits (phone, state, etc.) must not send duplicate emails.
+            if (result.Success && previousActivityType != entity.ActivityType) await SendEmailToApplicant(entity);
             return result;
         }
         public async Task<Result> ApplyNowService(ApplicantAddEditModel model)
@@ -401,22 +405,35 @@ namespace Codeji.CMS.Services.Recruitments
                 EnumsHelper.ActivityType.Rejected => await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.RejectedMail),
                 _ => null
             };
-            if (emailContent == null) return;
 
-            string emailBody = HtmlTemplate.Render(emailContent.body, new
+            string candidateName = applicant.FirstName + " " + applicant.LastName;
+            string subject = emailContent?.subject ?? $"Update on your application for {vacancy.Title}";
+            string fallbackBody = applicant.ActivityType switch
             {
-                CandidateName = applicant.FirstName + " " + applicant.LastName,
+                EnumsHelper.ActivityType.InProgress => "<p>Hi [CandidateName],</p><p>Your application for <strong>[JobTitle]</strong> is now under review. Our hiring team will contact you when there is an update.</p>",
+                EnumsHelper.ActivityType.OnHold => "<p>Hi [CandidateName],</p><p>Your application for <strong>[JobTitle]</strong> is currently on hold. We will let you know as soon as there is an update.</p>",
+                EnumsHelper.ActivityType.Shortlisted => "<p>Hi [CandidateName],</p><p>Good news — you have been shortlisted for the <strong>[JobTitle]</strong> position. Our hiring team will contact you soon about the next steps.</p>",
+                EnumsHelper.ActivityType.Selected => "<p>Hi [CandidateName],</p><p>Congratulations — you have been selected for the <strong>[JobTitle]</strong> position. Our team will contact you shortly with the next steps.</p>",
+                EnumsHelper.ActivityType.Rejected => "<p>Hi [CandidateName],</p><p>Thank you for applying for <strong>[JobTitle]</strong>. After careful consideration, we will not be moving forward at this time. We wish you the best in your job search.</p>",
+                _ => "<p>Hi [CandidateName],</p><p>There is an update on your application for <strong>[JobTitle]</strong>. Our team will contact you if any action is needed.</p>"
+            };
+
+            string emailBody = HtmlTemplate.Render(emailContent?.body ?? fallbackBody, new
+            {
+                CandidateName = candidateName,
                 JobTitle = vacancy.Title,
             });
+
+            subject = HtmlTemplate.Render(subject, new { CandidateName = candidateName, JobTitle = vacancy.Title });
 
             _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
             {
                 await _middlewareService.EmailSendAndSave(new EmpEmailLogs()
                 {
                     UserTo = applicant.ApplicantId,
-                    Subject = emailContent.subject ?? "",
+                    Subject = subject,
                     Body = emailBody,
-                    EmailLogType = emailContent.mailType,
+                    EmailLogType = emailContent?.mailType ?? EnumsHelper.MailType.ApplyNowMailToApplicant,
                     Email = applicant.Email,
                     UserFrom = currentUser != null ? currentUser.UserId : string.Empty
                 });

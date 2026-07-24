@@ -19,6 +19,8 @@ using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
+using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 
 namespace Codeji.CMS.Services
 {
@@ -104,6 +106,10 @@ namespace Codeji.CMS.Services
                 CompanyId = companyId,
                 PrimaryContact = user.UserId,
                 CompanyName = companyModel.CompanyName,
+                CareerSlug = await BuildUniqueCareerSlug(companyModel.CompanyName, companyId),
+                PublicCompanyCode = await BuildUniquePublicCompanyCode(),
+                CareerPortalEnabled = true,
+                PublishJobsToMasterPortal = true,
                 DefaultLanguage = Languages.English,
                 ApplicationLanguage = [Languages.English],
                 Status = true,
@@ -218,6 +224,96 @@ namespace Codeji.CMS.Services
             return exist;
         }
 
+        public async Task<Result<PublicCareerCompanyDto>> GetPublicCareerCompany()
+        {
+            Company? company = (await _companyRepo.GetAll(x =>
+                    x.Status &&
+                    !x.IsDeleted &&
+                    x.CareerPortalEnabled,
+                    withDefaultFilter: false))
+                .OrderBy(x => x.CreatedDate)
+                .FirstOrDefault();
+
+            if (company is null)
+                return new Result<PublicCareerCompanyDto>
+                {
+                    Success = false,
+                    StatusCode = StatusCodes.Status404NotFound,
+                    Message = "Career portal not found."
+                };
+
+            await EnsureCareerPortal(company);
+            return BuildPublicCareerCompanyResult(company);
+        }
+
+        public async Task<Result<PublicCareerCompanyDto>> GetPublicCareerCompany(string publicCompanyCode)
+        {
+            string normalizedCode = NormalizePublicCompanyCode(publicCompanyCode);
+            Company? company = (await _companyRepo.GetAll(x =>
+                    x.Status &&
+                    !x.IsDeleted &&
+                    x.CareerPortalEnabled,
+                    withDefaultFilter: false))
+                .FirstOrDefault(x => NormalizePublicCompanyCode(x.PublicCompanyCode) == normalizedCode);
+
+            if (company is null)
+                return new Result<PublicCareerCompanyDto>
+                {
+                    Success = false,
+                    StatusCode = StatusCodes.Status404NotFound,
+                    Message = "Career portal not found."
+                };
+
+            await EnsureCareerPortal(company);
+            return BuildPublicCareerCompanyResult(company);
+        }
+
+        private static Result<PublicCareerCompanyDto> BuildPublicCareerCompanyResult(Company company) =>
+            new()
+            {
+                Success = true,
+                MethodResult = new PublicCareerCompanyDto
+                {
+                    CompanyId = company.CompanyId,
+                    CompanyName = company.CompanyName,
+                    CareerSlug = company.CareerSlug,
+                    PublicCompanyCode = company.PublicCompanyCode,
+                    CompanyLogo = company.CompanyLogo
+                }
+            };
+
+        private async Task<string> BuildUniqueCareerSlug(string companyName, string? currentCompanyId = null)
+        {
+            string baseSlug = NormalizeCareerSlug(companyName);
+            if (string.IsNullOrEmpty(baseSlug)) baseSlug = "company";
+
+            string candidate = baseSlug;
+            for (int suffix = 2; await _companyRepo.Exist(x =>
+                x.CareerSlug == candidate &&
+                (string.IsNullOrEmpty(currentCompanyId) || x.CompanyId != currentCompanyId)); suffix++)
+                candidate = $"{baseSlug}-{suffix}";
+
+            return candidate;
+        }
+
+        private static string NormalizeCareerSlug(string? value) =>
+            Regex.Replace((value ?? string.Empty).Trim().ToLowerInvariant(), @"[^a-z0-9]+", "-").Trim('-');
+
+        private async Task<string> BuildUniquePublicCompanyCode()
+        {
+            string code;
+            do
+            {
+                code = RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
+            }
+            while (await _companyRepo.Exist(x => x.PublicCompanyCode == code));
+
+            return code;
+        }
+
+        private static string NormalizePublicCompanyCode(string? value) =>
+            Regex.Replace(value ?? string.Empty, @"\D", string.Empty);
+
         public async Task<Result<Company>> GetCompanyDetails(string companyId)
         {
             Result<Company> result = new();
@@ -228,6 +324,7 @@ namespace Codeji.CMS.Services
             }
             else
             {
+                await EnsureCareerPortal(company);
                 company.CompanyLogo = Common.GetCompanyLogoUrl(company.CompanyLogo);
                 result.MethodResult = company;
             }
@@ -261,6 +358,7 @@ namespace Codeji.CMS.Services
             company.Address = model.Address ?? company.Address;
             company.DefaultLanguage = model.DefaultLanguage ?? company.DefaultLanguage;
             company.CompanyLogo = model.CompanyLogo == null ? company.CompanyLogo : await UpdateCompanyLogo(model.CompanyLogo, companyId);
+            await EnsureCareerPortal(company);
 
             Result result1 = await _companyRepo.Update(whereCondition, company);
             if (!result1.Success)
@@ -272,6 +370,39 @@ namespace Codeji.CMS.Services
             result.MethodResult = company;
             result.Success = true;
             return result;
+        }
+
+        private async Task EnsureCareerPortal(Company company)
+        {
+            bool needsUpdate = false;
+
+            if (string.IsNullOrWhiteSpace(company.CareerSlug))
+            {
+                company.CareerSlug = await BuildUniqueCareerSlug(company.CompanyName, company.CompanyId);
+                needsUpdate = true;
+            }
+
+            if (!Regex.IsMatch(company.PublicCompanyCode ?? string.Empty, @"^\d{6}$"))
+            {
+                company.PublicCompanyCode = await BuildUniquePublicCompanyCode();
+                needsUpdate = true;
+            }
+
+            if (!company.CareerPortalEnabled)
+            {
+                company.CareerPortalEnabled = true;
+                needsUpdate = true;
+            }
+
+            if (!needsUpdate) return;
+
+            await _companyRepo.UpdateMany(
+                Builders<Company>.Filter.Eq(x => x.CompanyId, company.CompanyId),
+                Builders<Company>.Update
+                    .Set(x => x.CareerSlug, company.CareerSlug)
+                    .Set(x => x.PublicCompanyCode, company.PublicCompanyCode)
+                    .Set(x => x.CareerPortalEnabled, company.CareerPortalEnabled)
+                    .Set(x => x.UpdatedDate, DateTime.UtcNow));
         }
 
         public async Task<string> UpdateCompanyLogo(IFormFile companyLogo, string companyId)

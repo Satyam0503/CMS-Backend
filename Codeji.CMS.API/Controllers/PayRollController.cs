@@ -133,6 +133,7 @@ public class PayRollController : BaseApiController
         return await _payRollServices.ProcessPayrollMonth(
             new DateTime(model.PayMonth.Year, model.PayMonth.Month, 1),
             CurrentContext.CompanyId(_httpContextAccessor),
-            CurrentContext.UserId(_httpContextAccessor));
+            CurrentContext.UserId(_httpContextAccessor),
+            model.EmployeeIds);
     }
 }

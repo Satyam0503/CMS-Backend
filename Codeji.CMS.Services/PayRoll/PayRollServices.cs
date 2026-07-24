@@ -434,14 +434,28 @@ public class PayRollServices : IPayRollServices
         return result;
     }
 
-    public async Task<Result> ProcessPayrollMonth(DateTime payMonth, string companyId, string processedBy)
+    public async Task<Result> ProcessPayrollMonth(
+        DateTime payMonth,
+        string companyId,
+        string processedBy,
+        IReadOnlyCollection<string>? employeeIds = null)
     {
         var monthStart = new DateTime(payMonth.Year, payMonth.Month, 1);
+        var selectedEmployeeIds = employeeIds?
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (employeeIds is not null && (selectedEmployeeIds is null || selectedEmployeeIds.Length == 0))
+            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Select at least one employee to process payroll." };
+
         var payrollRows = _empPayRollRepository.Get(p => p.CompanyId == companyId &&
-            p.PayMonth.Year == monthStart.Year && p.PayMonth.Month == monthStart.Month).ToList();
+            p.PayMonth.Year == monthStart.Year && p.PayMonth.Month == monthStart.Month &&
+            (selectedEmployeeIds == null || selectedEmployeeIds.Contains(p.EmployeeId))).ToList();
 
         if (payrollRows.Count == 0)
-            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Generate payroll for this month before processing it." };
+            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "No generated payroll was found for the selected employees." };
 
         if (payrollRows.All(p => p.IsProcessed))
             return new Result { Success = true, Message = $"Payroll for {monthStart:MMMM yyyy} is already processed." };
@@ -450,6 +464,10 @@ public class PayRollServices : IPayRollServices
                      Builders<EmpPayRoll>.Filter.Gte(p => p.PayMonth, monthStart) &
                      Builders<EmpPayRoll>.Filter.Lt(p => p.PayMonth, monthStart.AddMonths(1)) &
                      Builders<EmpPayRoll>.Filter.Ne(p => p.IsProcessed, true);
+        if (selectedEmployeeIds is not null)
+            filter &= Builders<EmpPayRoll>.Filter.In(p => p.EmployeeId, selectedEmployeeIds);
+
+        var pendingCount = payrollRows.Count(p => !p.IsProcessed);
         var update = Builders<EmpPayRoll>.Update
             .Set(p => p.IsProcessed, true)
             .Set(p => p.ProcessedAt, DateTime.UtcNow)
@@ -457,7 +475,7 @@ public class PayRollServices : IPayRollServices
 
         var result = await _empPayRollRepository.UpdateMany(filter, update);
         result.Message = result.Success
-            ? $"Payroll for {monthStart:MMMM yyyy} has been processed and is now available to employees."
+            ? $"Payroll for {pendingCount} employee{(pendingCount == 1 ? "" : "s")} in {monthStart:MMMM yyyy} has been processed."
             : "Unable to process payroll. No employee payroll was published.";
         return result;
     }

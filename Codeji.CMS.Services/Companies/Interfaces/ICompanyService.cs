@@ -13,6 +13,8 @@ namespace Codeji.CMS.Services.Interface
         Task<List<Company>> GetAllCompanyList();
         Task<bool> IsActiveCompanyExist(string companyId);
         Task<Result<Company>> GetCompanyDetails(string companyId);
+        Task<Result<PublicCareerCompanyDto>> GetPublicCareerCompany();
+        Task<Result<PublicCareerCompanyDto>> GetPublicCareerCompany(string publicCompanyCode);
 
         Task<Result<Company>> UpdateCompanyDetails(UpdateCompanyInfoRequestModel model, string companyId);
 
