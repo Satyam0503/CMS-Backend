@@ -28,7 +28,7 @@ builder.Services
           IssuerSigningKey          = new SymmetricSecurityKey(
                                         Encoding.UTF8.GetBytes(ConfigManager.Jwt.SecretKey)),
       };
-      options.Events = new JwtBearerEvents
+      options.Events = new JwtBearerEvents 
       {
           OnMessageReceived = ctx =>
           {

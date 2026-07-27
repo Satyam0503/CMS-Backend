@@ -21,7 +21,7 @@ The runner has no DI, no logging framework, no concurrency control. Console outp
 ## Ordering
 
 `MigrationLoader.LoadMigrations()`:
-
+ 
 ```csharp
 return Assembly.GetExecutingAssembly()
     .GetTypes()

@@ -9,6 +9,7 @@ using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
+using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments.Interface;
@@ -31,6 +32,7 @@ namespace Codeji.CMS.Services.Recruitments
         readonly IMongoDbRepository<Company> _companyRepository;
         readonly IMongoDbRepository<MailTemplate> _mailTemplateRepository;
         readonly IMongoDbRepository<JobVacancy> _jobVacancyRepository;
+        readonly IMongoDbRepository<Roles> _rolesRepository;
         private readonly IPriorityTaskQueue _priorityTaskQueue;
 
         private readonly IMiddlewareService _middlewareService;
@@ -42,6 +44,7 @@ namespace Codeji.CMS.Services.Recruitments
             IMongoDbRepository<Company> companyRepository,
             IMongoDbRepository<MailTemplate> mailTemplateRepository,
             IMongoDbRepository<JobVacancy> jobVacancyRepository,
+            IMongoDbRepository<Roles> rolesRepository,
             IMongoDbRepository<ApplicantLogs> applicantLogsRepository,
             IMongoDbRepository<EmpUser> employeeRepository,
             IPriorityTaskQueue priorityTaskQueue,
@@ -55,6 +58,7 @@ namespace Codeji.CMS.Services.Recruitments
             _companyRepository = companyRepository;
             _mailTemplateRepository = mailTemplateRepository;
             _jobVacancyRepository = jobVacancyRepository;
+            _rolesRepository = rolesRepository;
             _ApplicantLogsRepository = applicantLogsRepository;
             _employeeRepository = employeeRepository;
             _priorityTaskQueue = priorityTaskQueue;
@@ -92,6 +96,7 @@ namespace Codeji.CMS.Services.Recruitments
             if (result.Success)
             {
                 await LogNewApplication(applicant);
+                await SendApplicationAlertToRecruitmentTeam(applicant);
                 await SendEmailToApplicant(applicant);
             }
             return result;
@@ -175,6 +180,7 @@ namespace Codeji.CMS.Services.Recruitments
             result = await _applicantRepository.AddOne(user);
             if (result.Success)
             {
+                await SendApplicationAlertToRecruitmentTeam(user);
                 await SendEmailToApplicant(user);
             }
             return result;
@@ -410,11 +416,13 @@ namespace Codeji.CMS.Services.Recruitments
             string subject = emailContent?.subject ?? $"Update on your application for {vacancy.Title}";
             string fallbackBody = applicant.ActivityType switch
             {
+                EnumsHelper.ActivityType.New => "<p>Hi [CandidateName],</p><p>We received your application for <strong>[JobTitle]</strong>. Our team will review it and get back to you soon.</p>",
                 EnumsHelper.ActivityType.InProgress => "<p>Hi [CandidateName],</p><p>Your application for <strong>[JobTitle]</strong> is now under review. Our hiring team will contact you when there is an update.</p>",
                 EnumsHelper.ActivityType.OnHold => "<p>Hi [CandidateName],</p><p>Your application for <strong>[JobTitle]</strong> is currently on hold. We will let you know as soon as there is an update.</p>",
                 EnumsHelper.ActivityType.Shortlisted => "<p>Hi [CandidateName],</p><p>Good news — you have been shortlisted for the <strong>[JobTitle]</strong> position. Our hiring team will contact you soon about the next steps.</p>",
                 EnumsHelper.ActivityType.Selected => "<p>Hi [CandidateName],</p><p>Congratulations — you have been selected for the <strong>[JobTitle]</strong> position. Our team will contact you shortly with the next steps.</p>",
                 EnumsHelper.ActivityType.Rejected => "<p>Hi [CandidateName],</p><p>Thank you for applying for <strong>[JobTitle]</strong>. After careful consideration, we will not be moving forward at this time. We wish you the best in your job search.</p>",
+                EnumsHelper.ActivityType.ReApply => "<p>Hi [CandidateName],</p><p>We received your new application for <strong>[JobTitle]</strong>. Our team will review it and share updates with you.</p>",
                 _ => "<p>Hi [CandidateName],</p><p>There is an update on your application for <strong>[JobTitle]</strong>. Our team will contact you if any action is needed.</p>"
             };
 
@@ -438,6 +446,71 @@ namespace Codeji.CMS.Services.Recruitments
                     UserFrom = currentUser != null ? currentUser.UserId : string.Empty
                 });
             }, priority: 1);
+        }
+
+        private async Task SendApplicationAlertToRecruitmentTeam(Applicant applicant)
+        {
+            JobVacancy? vacancy = await _jobVacancyRepository.FirstOrDefault(x => x.JobId == applicant.VacancyId);
+            if (vacancy == null || string.IsNullOrWhiteSpace(vacancy.CompanyId)) return;
+
+            Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == vacancy.CompanyId);
+            string candidateName = $"{applicant.FirstName} {applicant.LastName}".Trim();
+            MailTemplate? template = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ApplyNowMailToHR);
+            string subject = HtmlTemplate.Render(
+                template?.subject ?? $"New application received for {vacancy.Title}",
+                new { CandidateName = candidateName, CandidateEmail = applicant.Email, CandidatePhone = applicant.Phone, JobTitle = vacancy.Title, CompanyName = company?.CompanyName ?? string.Empty });
+            string body = HtmlTemplate.Render(
+                template?.body ??
+                "<p>A new application has been submitted.</p><ul><li><strong>Name:</strong> [CandidateName]</li><li><strong>Email:</strong> [CandidateEmail]</li><li><strong>Phone:</strong> [CandidatePhone]</li><li><strong>Job Title:</strong> [JobTitle]</li><li><strong>Company:</strong> [CompanyName]</li></ul>",
+                new { CandidateName = candidateName, CandidateEmail = applicant.Email, CandidatePhone = applicant.Phone, JobTitle = vacancy.Title, CompanyName = company?.CompanyName ?? string.Empty });
+
+            List<(string UserId, string Email)> recipients = await GetRecruitmentRecipients(vacancy.CompanyId, vacancy.RecruiterContactEmail);
+            if (recipients.Count == 0) return;
+
+            _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
+            {
+                foreach (var recipient in recipients)
+                {
+                    await _middlewareService.EmailSendAndSave(new EmpEmailLogs
+                    {
+                        CompanyId = vacancy.CompanyId,
+                        UserTo = recipient.UserId,
+                        UserFrom = CurrentContext.UserId(_httpContextAccessor) ?? "system",
+                        Email = recipient.Email,
+                        Subject = subject,
+                        Body = body,
+                        EmailLogType = EnumsHelper.MailType.ApplyNowMailToHR
+                    });
+                }
+            }, priority: 1);
+        }
+
+        private async Task<List<(string UserId, string Email)>> GetRecruitmentRecipients(string companyId, string? recruiterContactEmail)
+        {
+            Dictionary<string, (string UserId, string Email)> recipientMap = new(StringComparer.OrdinalIgnoreCase);
+
+            if (!string.IsNullOrWhiteSpace(recruiterContactEmail))
+            {
+                string email = recruiterContactEmail.Trim();
+                recipientMap[email] = ("recruiter-contact", email);
+            }
+
+            var roleIds = (await _rolesRepository.GetAll(r => r.CompanyId == companyId && !r.IsDeleted &&
+                (r.RoleType == (int)EnumsHelper.Roles.Administrator || r.RoleType == (int)EnumsHelper.Roles.HR)))
+                .Select(r => r.RolesId)
+                .Distinct()
+                .ToList();
+            if (roleIds.Count == 0) return recipientMap.Values.ToList();
+
+            var users = (await _employeeRepository.GetAll(u => u.CompanyId == companyId && u.Status && u.IsEmailVerified &&
+                roleIds.Contains(u.RoleId) && !string.IsNullOrWhiteSpace(u.Email))).ToList();
+            foreach (var user in users)
+            {
+                string email = user.Email.Trim();
+                recipientMap[email] = (user.UserId, email);
+            }
+
+            return recipientMap.Values.ToList();
         }
     }
 }

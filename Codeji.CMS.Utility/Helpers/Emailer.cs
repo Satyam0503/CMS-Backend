@@ -13,32 +13,13 @@ namespace Codeji.CMS.Utility.Helpers
         {
             try
             {
+                cc = SanitizeEmails(cc);
+                bcc = SanitizeEmails(bcc);
+
                 // Validate email addresses 
                 if (!string.IsNullOrEmpty(to) && !Regex.IsMatch(to, @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
                 {
                     return (false, "Invalid email address format.");
-                }
-                if (cc != null)
-                {
-                    foreach (var email in cc)
-                    {
-                        if (!Regex.IsMatch(email, @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
-                        {
-                            cc = null;
-                            continue;
-                        }
-                    }
-                }
-                if (bcc != null)
-                {
-                    foreach (var email in bcc)
-                    {
-                        if (!Regex.IsMatch(email, @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
-                        {
-                            bcc = null;
-                            continue;
-                        }
-                    }
                 }
                 await SendEmailAsync(to, subject, body, cc, bcc, attachments);
                 return (true, string.Empty);
@@ -154,6 +135,18 @@ namespace Codeji.CMS.Utility.Helpers
                 var responseBody = await response.Body.ReadAsStringAsync();
                 throw new Exception($"SendGrid request failed with status {(int)response.StatusCode}: {responseBody}");
             }
+        }
+
+        private static string[]? SanitizeEmails(IEnumerable<string>? emails)
+        {
+            if (emails == null) return null;
+            var clean = emails
+                .Where(email => !string.IsNullOrWhiteSpace(email))
+                .Select(email => email.Trim())
+                .Where(email => Regex.IsMatch(email, @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            return clean.Length == 0 ? null : clean;
         }
     }
 }

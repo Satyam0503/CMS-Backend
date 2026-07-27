@@ -24,7 +24,7 @@ Attendance calendar entry <--- Status settings
    |                         <--- Weekly-off settings
    |                         <--- Company holidays
    v
-Attendance records (daily source of truth)
+Attendance records (daily source of truth) 
    |
    +--> Monthly validation and exception generation
    |        |

@@ -26,7 +26,7 @@ The solution is API-only. A frontend, identity provider, object store, job sched
 | Area | Implementation |
 |---|---|
 | Runtime | .NET 10 / ASP.NET Core |
-| API style | Attribute-routed REST-like controllers |
+| API style | Attribute-routed REST-like controllers | 
 | Database | MongoDB |
 | Authentication | JWT bearer tokens |
 | Authorization | ASP.NET authorization plus custom role/module-permission checks |

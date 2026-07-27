@@ -22,7 +22,7 @@ A multi-tenant HR / company management API. One deployment serves every customer
 
 Pinning lives in each project's `.csproj`. The most-cited package CVEs (HtmlSanitizer 8.1.870, MailKit 4.11.0) should be bumped on the next maintenance pass.
 
-## Solution layout
+## Solution layout 
 
 The solution at [CodejiCMSCore.sln](../CodejiCMSCore.sln) has 6 projects:
 

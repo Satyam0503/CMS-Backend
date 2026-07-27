@@ -22,7 +22,7 @@ The catalog of every domain in the API. Each entry lists the controller, service
 
 ---
 
-## Account / Auth
+## Account / Auth 
 
 **Purpose.** Login, registration (creates a new company + admin user), refresh-token, password reset, anti-forgery token issuance.
 
@@ -235,9 +235,11 @@ Notable endpoints (`[ModulePermission(Jobs, ...)]`):
 Notable endpoints (`[ModulePermission(Applications, ...)]`):
 - `POST api/applicants/GetAllApplicants` — `View`
 - `POST api/applicants/AddEditApplicant` — `Create` / `Edit`
-- `POST api/applicants/UpdateApplicantStatus` — `Edit` — moves stage; sends `SelectedMail` / `RejectedMail` / `ApplyNowMailToApplicant` based on new status
+- `POST api/applicants/UpdateApplicantStatus` — `Edit` — moves stage; sends one candidate email when `ActivityType` changes, using `SelectedMail` / `RejectedMail` where defined and fallback applicant-stage messaging for the other supported stages
 - `POST api/applicants/DeleteApplicant` — `Delete` (soft)
 - `POST api/applicants/SubmitApplyNow` — `[AllowAnonymous]` — used by public career page
+
+Public and authenticated application creation also notify internal recruitment recipients using `ApplyNowMailToHR`. Recipients are resolved from `JobVacancy.RecruiterContactEmail` plus active verified company users in `Administrator` and `HR` roles.
 
 `ApplicantLogs` records every status change with actor + timestamp + comment — drives the [Process Log](#applicants) view in the frontend.
 

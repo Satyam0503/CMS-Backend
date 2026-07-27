@@ -29,7 +29,7 @@ Company configuration
   `-- Payroll divisor policy
              |
              v
-Employee requests leave
+Employee requests leave 
              |
              v
 HR reviews request

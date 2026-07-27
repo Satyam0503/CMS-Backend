@@ -7,7 +7,9 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.CareerPortal;
+using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
+using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments.Interface;
@@ -29,6 +31,8 @@ public class PublicCareerService : IPublicCareerService
     private readonly IMongoCollection<ApplicantLogs> _applicantLogs;
     private readonly IMongoCollection<PublicApplicationToken> _tokens;
     private readonly IMongoCollection<MailTemplate> _mailTemplates;
+    private readonly IMongoCollection<EmpUser> _employees;
+    private readonly IMongoCollection<Roles> _roles;
     private readonly IMongoCollection<PublicCompanyProfile> _companyProfiles;
     private readonly IMongoCollection<SavedJob> _savedJobs;
     private readonly IMongoCollection<CareerAnalyticsEvent> _analytics;
@@ -42,6 +46,8 @@ public class PublicCareerService : IPublicCareerService
         IMongoDbRepository<ApplicantLogs> applicantLogsRepository,
         IMongoDbRepository<PublicApplicationToken> tokenRepository,
         IMongoDbRepository<MailTemplate> mailTemplateRepository,
+        IMongoDbRepository<EmpUser> employeeRepository,
+        IMongoDbRepository<Roles> roleRepository,
         IMongoDbRepository<PublicCompanyProfile> companyProfileRepository,
         IMongoDbRepository<SavedJob> savedJobRepository,
         IMongoDbRepository<CareerAnalyticsEvent> analyticsRepository,
@@ -54,6 +60,8 @@ public class PublicCareerService : IPublicCareerService
         _applicantLogs = applicantLogsRepository.GetCollection();
         _tokens = tokenRepository.GetCollection();
         _mailTemplates = mailTemplateRepository.GetCollection();
+        _employees = employeeRepository.GetCollection();
+        _roles = roleRepository.GetCollection();
         _companyProfiles = companyProfileRepository.GetCollection();
         _savedJobs = savedJobRepository.GetCollection();
         _analytics = analyticsRepository.GetCollection();
@@ -192,7 +200,7 @@ public class PublicCareerService : IPublicCareerService
             ExpiresAt = tokenExpiry
         });
 
-        await QueueApplicationReceipt(applicant, job, company);
+        await QueueApplicationNotifications(applicant, job, company);
 
         return new Result<PublicJobApplicationResponse>
         {
@@ -458,16 +466,27 @@ public class PublicCareerService : IPublicCareerService
         return uri.Scheme == Uri.UriSchemeHttps && !uri.IsLoopback;
     }
 
-    private async Task QueueApplicationReceipt(Applicant applicant, JobVacancy job, Company company)
+    private async Task QueueApplicationNotifications(Applicant applicant, JobVacancy job, Company company)
     {
-        var template = await _mailTemplates.Find(t => t.mailType == EnumsHelper.MailType.ApplyNowMailToApplicant).FirstOrDefaultAsync();
         string candidateName = $"{applicant.FirstName} {applicant.LastName}".Trim();
-        string subject = template?.subject ?? $"We received your application for {job.Title}";
-        string body = template?.body ??
+        var applicantTemplate = await _mailTemplates.Find(t => t.mailType == EnumsHelper.MailType.ApplyNowMailToApplicant).FirstOrDefaultAsync();
+        string applicantSubject = applicantTemplate?.subject ?? $"We received your application for {job.Title}";
+        string applicantBody = applicantTemplate?.body ??
             $"<p>Hi {System.Net.WebUtility.HtmlEncode(candidateName)},</p><p>Thank you for applying for the <strong>{System.Net.WebUtility.HtmlEncode(job.Title)}</strong> position at {System.Net.WebUtility.HtmlEncode(company.CompanyName)}. Our hiring team will review your application and contact you with an update.</p>";
 
-        subject = HtmlTemplate.Render(subject, new { CandidateName = candidateName, JobTitle = job.Title, CompanyName = company.CompanyName });
-        body = HtmlTemplate.Render(body, new { CandidateName = candidateName, JobTitle = job.Title, CompanyName = company.CompanyName });
+        applicantSubject = HtmlTemplate.Render(applicantSubject, new { CandidateName = candidateName, JobTitle = job.Title, CompanyName = company.CompanyName });
+        applicantBody = HtmlTemplate.Render(applicantBody, new { CandidateName = candidateName, JobTitle = job.Title, CompanyName = company.CompanyName });
+
+        var hrTemplate = await _mailTemplates.Find(t => t.mailType == EnumsHelper.MailType.ApplyNowMailToHR).FirstOrDefaultAsync();
+        string hrSubject = HtmlTemplate.Render(
+            hrTemplate?.subject ?? $"New application received for {job.Title}",
+            new { CandidateName = candidateName, CandidateEmail = applicant.Email, CandidatePhone = applicant.Phone, JobTitle = job.Title, CompanyName = company.CompanyName });
+        string hrBody = HtmlTemplate.Render(
+            hrTemplate?.body ??
+            "<p>A new application has been submitted.</p><ul><li><strong>Name:</strong> [CandidateName]</li><li><strong>Email:</strong> [CandidateEmail]</li><li><strong>Phone:</strong> [CandidatePhone]</li><li><strong>Job Title:</strong> [JobTitle]</li><li><strong>Company:</strong> [CompanyName]</li></ul>",
+            new { CandidateName = candidateName, CandidateEmail = applicant.Email, CandidatePhone = applicant.Phone, JobTitle = job.Title, CompanyName = company.CompanyName });
+
+        var internalRecipients = await GetRecruitmentRecipients(job.CompanyId, job.RecruiterContactEmail);
 
         _priorityTaskQueue.QueueBackgroundWorkItem(async _ =>
         {
@@ -477,10 +496,52 @@ public class PublicCareerService : IPublicCareerService
                 UserTo = applicant.ApplicantId,
                 UserFrom = "public-career",
                 Email = applicant.Email,
-                Subject = subject,
-                Body = body,
+                Subject = applicantSubject,
+                Body = applicantBody,
                 EmailLogType = EnumsHelper.MailType.ApplyNowMailToApplicant
             });
+
+            foreach (var recipient in internalRecipients)
+            {
+                await _middlewareService.EmailSendAndSave(new EmpEmailLogs
+                {
+                    CompanyId = job.CompanyId,
+                    UserTo = recipient.UserId,
+                    UserFrom = "public-career",
+                    Email = recipient.Email,
+                    Subject = hrSubject,
+                    Body = hrBody,
+                    EmailLogType = EnumsHelper.MailType.ApplyNowMailToHR
+                });
+            }
         }, priority: 1);
+    }
+
+    private async Task<List<(string UserId, string Email)>> GetRecruitmentRecipients(string companyId, string? recruiterContactEmail)
+    {
+        var recipientMap = new Dictionary<string, (string UserId, string Email)>(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(recruiterContactEmail))
+        {
+            string email = recruiterContactEmail.Trim();
+            recipientMap[email] = ("recruiter-contact", email);
+        }
+
+        var roleIds = await _roles.Find(r => r.CompanyId == companyId && !r.IsDeleted &&
+            (r.RoleType == (int)EnumsHelper.Roles.Administrator || r.RoleType == (int)EnumsHelper.Roles.HR))
+            .Project(r => r.RolesId)
+            .ToListAsync();
+        if (roleIds.Count == 0) return recipientMap.Values.ToList();
+
+        var users = await _employees.Find(u => u.CompanyId == companyId && u.Status && u.IsEmailVerified &&
+            roleIds.Contains(u.RoleId) && !string.IsNullOrWhiteSpace(u.Email))
+            .ToListAsync();
+        foreach (var user in users)
+        {
+            string email = user.Email.Trim();
+            recipientMap[email] = (user.UserId, email);
+        }
+
+        return recipientMap.Values.ToList();
     }
 }

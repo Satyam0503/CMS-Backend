@@ -23,8 +23,8 @@
 - Existing Payroll Settings and Payroll pages.
 - `Result<T>`, `ModulePermissionAttribute`, and current middleware error/authorization conventions.
 
-## Gaps
-
+## Gaps 
+ 
 - No effective-dated/versioned LHD+ED policy.
 - No idempotent monthly attendance/payroll exception.
 - No HR review decisions or mandatory review reason.

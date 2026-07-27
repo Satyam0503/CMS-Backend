@@ -19,5 +19,3 @@ Codeji.CMS.API/Uploads/*
 # Runtime logs
 *.log
 
-# Local documentation
-docs/
