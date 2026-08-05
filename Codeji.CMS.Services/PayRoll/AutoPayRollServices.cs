@@ -1,6 +1,7 @@
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.PayRoll;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.DTO.Salary;
@@ -15,6 +16,7 @@ namespace Codeji.CMS.Services.PayRoll
         private readonly IMongoDbRepository<EmpUser> _employeeRepository;
         private readonly IMongoDbRepository<EmpPayRoll> _empPayRollRepository;
         private readonly IMongoDbRepository<AttendanceModel> _attendanceRepository;
+        private readonly IMongoDbRepository<AttendanceDaySegment> _attendanceSegmentRepository;
         private readonly IMongoDbRepository<SalaryModel> _salaryRepository;
         private readonly IMongoDbRepository<AttendanceStatusSetting> _attendanceStatusRepository;
         private readonly IMongoDbRepository<MonthlyAttendanceSummary> _attendanceSummaryRepository;
@@ -27,6 +29,7 @@ namespace Codeji.CMS.Services.PayRoll
             IMongoDbRepository<EmpUser> employeeRepository,
             IMongoDbRepository<EmpPayRoll> empPayRollRepository,
             IMongoDbRepository<AttendanceModel> attendanceRepository,
+            IMongoDbRepository<AttendanceDaySegment> attendanceSegmentRepository,
             IMongoDbRepository<SalaryModel> salaryRepository,
             IMongoDbRepository<AttendanceStatusSetting> attendanceStatusRepository,
             IMongoDbRepository<MonthlyAttendanceSummary> attendanceSummaryRepository,
@@ -38,6 +41,7 @@ namespace Codeji.CMS.Services.PayRoll
             _employeeRepository = employeeRepository;
             _empPayRollRepository = empPayRollRepository;
             _attendanceRepository = attendanceRepository;
+            _attendanceSegmentRepository = attendanceSegmentRepository;
             _salaryRepository = salaryRepository;
             _attendanceStatusRepository = attendanceStatusRepository;
             _attendanceSummaryRepository = attendanceSummaryRepository;
@@ -62,7 +66,9 @@ namespace Codeji.CMS.Services.PayRoll
     var validationErrors = new List<string>();
     foreach (var employee in employees)
     {
-        if (!DateTime.TryParse(employee.DateOfJoining, out var joining)) { validationErrors.Add($"{employee.EmployeeId}: valid joining date is required."); continue; }
+        // Payroll cannot be calculated without an effective joining date. Skip this
+        // employee instead of blocking a completed historical month for everyone else.
+        if (!DateTime.TryParse(employee.DateOfJoining, out var joining)) continue;
         if (joining.Date > monthEnd) continue;
         if (DateTime.TryParse(employee.ExitDate, out var exit) && exit.Date < monthStart) continue;
         if (DateTime.TryParse(employee.ExitDate, out exit) && exit.Date < joining.Date) { validationErrors.Add($"{employee.EmployeeId}: exit date cannot be before joining date."); continue; }
@@ -132,6 +138,9 @@ namespace Codeji.CMS.Services.PayRoll
             a.CompanyId == companyId && a.UserId == emp.UserId && a.EmployeeId == emp.EmployeeId &&
             a.Date >= eligibleFrom &&
             a.Date < eligibleToExclusive);
+        var attendanceSegments = await _attendanceSegmentRepository.GetAll(a =>
+            a.CompanyId == companyId && a.UserId == emp.UserId && a.EmployeeId == emp.EmployeeId &&
+            a.Date >= eligibleFrom && a.Date < eligibleToExclusive);
 
         var statusRules = (await _attendanceStatusRepository.GetAll(s => s.CompanyId == companyId)).ToDictionary(s => s.Code, StringComparer.OrdinalIgnoreCase);
         var workingDays = await _workingCalendar.CountWorkingDaysAsync(companyId, DateOnly.FromDateTime(monthStart), DateOnly.FromDateTime(monthEnd));
@@ -139,9 +148,11 @@ namespace Codeji.CMS.Services.PayRoll
         if (resolvedDivisor <= 0) return new Result { Success=false, Message=$"Invalid payroll divisor for employee {emp.EmployeeId}. No payroll was changed." };
         decimal perDaySalary = originalBasic / resolvedDivisor;
 
-        decimal configuredUnpaidDays = attendanceRecords.Sum(a => statusRules.TryGetValue(a.Status, out var rule)
+        var segmentDates = attendanceSegments.Select(x => x.Date.Date).ToHashSet();
+        decimal configuredUnpaidDays = attendanceRecords.Where(a => !segmentDates.Contains(a.Date.Date)).Sum(a => statusRules.TryGetValue(a.Status, out var rule)
             ? rule.UnpaidDayFraction
-            : a.Status == "A" ? 1m : (a.Status == "HD" || a.Status == "LHD" || a.Status == "WFH-HD") ? .5m : 0m);
+            : a.Status == "A" ? 1m : (a.Status == "HD" || a.Status == "LHD" || a.Status == "WFH-HD") ? .5m : 0m)
+            + attendanceSegments.Sum(a => statusRules.TryGetValue(a.Status, out var rule) ? rule.UnpaidDayFraction : 0m);
         decimal approvedPenaltyDays = attendanceException?.Status is "DEDUCTION_APPROVED" or "APPLIED_TO_PAYROLL"
             ? attendanceException.DeductionDayFraction
             : 0m;

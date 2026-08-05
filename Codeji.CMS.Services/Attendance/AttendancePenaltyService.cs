@@ -2,6 +2,7 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Calendar;
+using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Utility.Enums;
 using MongoDB.Driver;
 
@@ -22,18 +23,24 @@ public class AttendancePenaltyService : IAttendancePenaltyService
     private readonly IMongoDbRepository<AttendancePayrollException> _exceptions;
     private readonly IMongoDbRepository<MonthlyAttendanceSummary> _summaries;
     private readonly IMongoDbRepository<AttendanceModel> _attendance;
+    private readonly IMongoDbRepository<AttendanceDaySegment> _segments;
     private readonly IMongoDbRepository<AttendanceStatusSetting> _statusSettings;
     private readonly IMongoDbRepository<EmpUser> _employees;
     private readonly IMongoDbRepository<WeeklyOffSetting> _weeklyOffs;
     private readonly IMongoDbRepository<CalendarEntity> _calendar;
-    public AttendancePenaltyService(IMongoDbRepository<AttendancePenaltyPolicy> policies, IMongoDbRepository<AttendancePayrollException> exceptions, IMongoDbRepository<MonthlyAttendanceSummary> summaries, IMongoDbRepository<AttendanceModel> attendance, IMongoDbRepository<AttendanceStatusSetting> statusSettings, IMongoDbRepository<EmpUser> employees, IMongoDbRepository<WeeklyOffSetting> weeklyOffs, IMongoDbRepository<CalendarEntity> calendar)
-    { _policies=policies; _exceptions=exceptions; _summaries=summaries; _attendance=attendance; _statusSettings=statusSettings; _employees=employees; _weeklyOffs=weeklyOffs; _calendar=calendar; }
+    private readonly IMongoDbRepository<AttendanceNotificationOutbox> _notificationOutbox;
+    public AttendancePenaltyService(IMongoDbRepository<AttendancePenaltyPolicy> policies, IMongoDbRepository<AttendancePayrollException> exceptions, IMongoDbRepository<MonthlyAttendanceSummary> summaries, IMongoDbRepository<AttendanceModel> attendance, IMongoDbRepository<AttendanceDaySegment> segments, IMongoDbRepository<AttendanceStatusSetting> statusSettings, IMongoDbRepository<EmpUser> employees, IMongoDbRepository<WeeklyOffSetting> weeklyOffs, IMongoDbRepository<CalendarEntity> calendar, IMongoDbRepository<AttendanceNotificationOutbox> notificationOutbox)
+    { _policies=policies; _exceptions=exceptions; _summaries=summaries; _attendance=attendance; _segments=segments; _statusSettings=statusSettings; _employees=employees; _weeklyOffs=weeklyOffs; _calendar=calendar; _notificationOutbox=notificationOutbox; }
 
     public async Task<AttendancePenaltyPolicyDto> GetPolicy(string companyId, DateTime? effectiveOn=null)
     {
         var on=(effectiveOn ?? DateTime.UtcNow).Date;
         var policy=(await _policies.GetAll(x=>x.CompanyId==companyId && x.IsEnabled && x.EffectiveFrom<=on && (!x.EffectiveTo.HasValue || x.EffectiveTo>=on))).OrderByDescending(x=>x.Version).FirstOrDefault();
-        if(policy==null){ policy=new AttendancePenaltyPolicy{CompanyId=companyId,EffectiveFrom=new DateTime(on.Year,on.Month,1)}; await _policies.AddOne(policy); }
+        // Loading the settings screen must not write to the database.  Apart from
+        // making a GET unexpectedly fail for a new company, concurrent page loads
+        // could race on the unique company/version index.  The returned defaults
+        // are persisted only when the administrator saves the policy.
+        if(policy==null) policy=new AttendancePenaltyPolicy{CompanyId=companyId,EffectiveFrom=new DateTime(on.Year,on.Month,1)};
         return new AttendancePenaltyPolicyDto{Id=policy.Id,Name=policy.Name,CombinedLhdEdMonthlyLimit=policy.CombinedLhdEdMonthlyLimit,IsEnabled=policy.IsEnabled,RequiresHrApproval=policy.RequiresHrApproval,DefaultDecision=policy.DefaultDecision,EffectiveFrom=policy.EffectiveFrom,EffectiveTo=policy.EffectiveTo,Version=policy.Version};
     }
 
@@ -57,13 +64,30 @@ public class AttendancePenaltyService : IAttendancePenaltyService
         foreach(var emp in employees){if(!AttendancePayrollRules.TryGetEligiblePeriod(emp,start,end,out var from,out var to))continue;var toExclusive=to.Date.AddDays(1);var records=(await _attendance.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<toExclusive)).Where(a=>a.Status is "LHD" or "ED").ToList();var lhd=records.Count(x=>x.Status=="LHD");var ed=records.Count(x=>x.Status=="ED");var combined=lhd+ed;var exceeded=AttendancePayrollRules.ExceededOccurrences(lhd,ed,policy.CombinedLhdEdMonthlyLimit);var existing=await _exceptions.FirstOrDefault(x=>x.CompanyId==companyId&&x.UserId==emp.UserId&&x.EmployeeId==emp.EmployeeId&&x.PayrollMonth==start&&x.ExceptionType=="LHD_ED_LIMIT_EXCEEDED");
             if(exceeded==0){if(existing!=null&&existing.Status=="PENDING_REVIEW"){existing.Status="CANCELLED";existing.UpdatedDate=DateTime.UtcNow;await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x=>x.Id,existing.Id),existing);}continue;}
             var item=existing??new AttendancePayrollException{CompanyId=companyId,UserId=emp.UserId,EmployeeId=emp.EmployeeId,PayrollMonth=start,PolicyId=policy.Id!,PolicyVersion=policy.Version};item.LhdCount=lhd;item.EdCount=ed;item.CombinedOccurrenceCount=combined;item.AllowedOccurrenceCount=policy.CombinedLhdEdMonthlyLimit;item.ExceededOccurrenceCount=exceeded;item.AffectedAttendanceRecordIds=records.Select(x=>x.AttendanceId!).Where(x=>x!=null).ToList();
-            if(existing==null)await _exceptions.AddOne(item);else if(existing.Status=="PENDING_REVIEW"){item.Version++;await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x=>x.Id,item.Id),item);}output.Add(item);
+            if(existing==null)
+            {
+                await _exceptions.AddOne(item);
+                await QueueMonthlyLhdEdWarning(companyId, emp.UserId, start, policy.CombinedLhdEdMonthlyLimit, combined);
+            }
+            else if(existing.Status=="PENDING_REVIEW"){item.Version++;await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x=>x.Id,item.Id),item);}output.Add(item);
         }
         // Recalculate is the single refresh operation used by the Attendance UI.
         // Keep structural validation exceptions in sync as well as LHD/ED penalties,
         // otherwise repaired duplicates/checkouts remain incorrectly pending.
         await RefreshValidationExceptions(companyId, start, end);
         return new Result<AttendancePayrollException>{MethodResults=output,TotalRecords=output.Count};
+    }
+
+    private async Task QueueMonthlyLhdEdWarning(string companyId, string userId, DateTime monthStart, int limit, int occurrences)
+    {
+        var aggregateId = $"LHD_ED_LIMIT:{userId}:{monthStart:yyyy-MM}";
+        if (await _notificationOutbox.Exist(x => x.CompanyId == companyId && x.EventType == "LHD_ED_MONTHLY_LIMIT_EXCEEDED" && x.AggregateId == aggregateId && x.RecipientUserId == userId)) return;
+        await _notificationOutbox.AddOne(new AttendanceNotificationOutbox
+        {
+            CompanyId = companyId, EventType = "LHD_ED_MONTHLY_LIMIT_EXCEEDED", AggregateId = aggregateId, RecipientUserId = userId,
+            Title = "Attendance punctuality warning", Body = $"You have recorded {occurrences} Late Half Day/Early Departure occurrences in {monthStart:MMMM yyyy}, exceeding the monthly limit of {limit}. Please avoid being late or leaving early for the rest of this month.",
+            Status = "Pending", AvailableAtUtc = DateTime.UtcNow
+        });
     }
 
     public async Task<Result<AttendancePayrollException>> GetExceptions(string companyId,AttendanceExceptionFilterDto filter)
@@ -97,30 +121,38 @@ public class AttendancePenaltyService : IAttendancePenaltyService
             if(!AttendancePayrollRules.TryGetEligiblePeriod(emp,start,end,out var from,out var to))continue;
             var toExclusive=to.Date.AddDays(1);
             var records=(await _attendance.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<toExclusive)).ToList();
+            var daySegments=(await _segments.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<toExclusive)).ToList();
+            var segmentDates=daySegments.Select(x=>x.Date.Date).ToHashSet();
+            var effectiveRecords=records.Where(x=>!segmentDates.Contains(x.Date.Date)).ToList();
             var expectedDates=Enumerable.Range(0,(to-from).Days+1).Select(i=>from.AddDays(i).Date).Where(d=>!offDays.Contains((int)d.DayOfWeek)&&!IsHoliday(d)).ToList();
-            var recordedDates=records.Select(x=>x.Date.Date).Distinct().ToHashSet();
+            var recordedDates=records.Select(x=>x.Date.Date).Concat(daySegments.Select(x=>x.Date.Date)).Distinct().ToHashSet();
             var missingDates=expectedDates.Where(x=>!recordedDates.Contains(x)).ToList();
-            var missingCheckoutDates=records.Where(x=>rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date).Distinct().ToList();
+            var missingCheckoutDates=records.Where(x=>rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date)).Distinct().ToList();
             var duplicateDates=records.GroupBy(x=>x.Date.Date).Where(x=>x.Count()>1).Select(x=>x.Key).ToList();
-            var invalidTimeDates=records.Where(x=>x.CheckInTime.HasValue&&x.CheckOutTime.HasValue&&x.CheckOutTime<x.CheckInTime).Select(x=>x.Date.Date).ToList();
-            var invalidStatusDates=records.Where(x=>!rules.TryGetValue(x.Status,out var rule)||!rule.IsActive).Select(x=>x.Date.Date).ToList();
+            var invalidTimeDates=records.Where(x=>x.CheckInTime.HasValue&&x.CheckOutTime.HasValue&&x.CheckOutTime<x.CheckInTime).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>x.CheckInTime.HasValue&&x.CheckOutTime.HasValue&&x.CheckOutTime<x.CheckInTime).Select(x=>x.Date.Date)).Distinct().ToList();
+            var invalidStatusDates=records.Where(x=>!rules.TryGetValue(x.Status,out var rule)||!rule.IsActive).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>!rules.TryGetValue(x.Status,out var rule)||!rule.IsActive).Select(x=>x.Date.Date)).Distinct().ToList();
             if(missingDates.Count+missingCheckoutDates.Count+duplicateDates.Count+invalidTimeDates.Count+invalidStatusDates.Count>0)
                 errors.Add($"{emp.EmployeeId}: missing attendance {missingDates.Count}, missing checkout {missingCheckoutDates.Count}, duplicates {duplicateDates.Count}, invalid time {invalidTimeDates.Count}, invalid status {invalidStatusDates.Count}");
             var existing=await _summaries.FirstOrDefault(x=>x.CompanyId==companyId&&x.EmployeeId==emp.EmployeeId&&x.PayrollMonth==start);
             var summary=existing??new MonthlyAttendanceSummary{CompanyId=companyId,UserId=emp.UserId,EmployeeId=emp.EmployeeId,PayrollMonth=start};
             summary.EligibleFrom=from;summary.EligibleTo=to;summary.ExpectedWorkingDays=expectedDates.Count;summary.EligibleWorkingDays=expectedDates.Count;
             summary.MissingAttendanceDays=missingDates.Count;summary.MissingCheckoutDays=missingCheckoutDates.Count;
-            summary.PaidDays=records.Sum(x=>rules.TryGetValue(x.Status,out var r)?r.PaidDayFraction:0);summary.UnpaidDays=records.Sum(x=>rules.TryGetValue(x.Status,out var r)?r.UnpaidDayFraction:0);
-            summary.PresentDays=records.Count(x=>x.Status=="P");summary.WfhDays=records.Count(x=>x.Status is "WFH" or "WFH+WFO");
-            summary.PaidLeaveDays=records.Where(x=>x.Status is "SL" or "CL" or "EL" or "COMP-OFF").Sum(x=>rules.TryGetValue(x.Status,out var r)?r.PaidDayFraction:0);
-            summary.UnpaidLeaveDays=records.Where(x=>x.Status=="A").Sum(x=>rules.TryGetValue(x.Status,out var r)?r.UnpaidDayFraction:1);
-            summary.HalfDays=records.Count(x=>x.Status is "HD" or "LHD" or "CL-HALF" or "SL-HALF" or "WFH-HD")*.5m;summary.AbsentDays=records.Count(x=>x.Status=="A");
+            summary.PaidDays=effectiveRecords.Sum(x=>rules.TryGetValue(x.Status,out var r)?r.PaidDayFraction:0)+daySegments.Sum(x=>rules.TryGetValue(x.Status,out var r)?r.PaidDayFraction:0);summary.UnpaidDays=effectiveRecords.Sum(x=>rules.TryGetValue(x.Status,out var r)?r.UnpaidDayFraction:0)+daySegments.Sum(x=>rules.TryGetValue(x.Status,out var r)?r.UnpaidDayFraction:0);
+            summary.PresentDays=effectiveRecords.Count(x=>x.Status=="P");summary.WfhDays=effectiveRecords.Count(x=>x.Status is "WFH" or "WFH+WFO")+daySegments.Count(x=>x.SourceType=="WFH_REQUEST")/2m;
+            summary.PaidLeaveDays=effectiveRecords.Where(x=>x.Status is "SL" or "CL" or "EL" or "COMP-OFF").Sum(x=>rules.TryGetValue(x.Status,out var r)?r.PaidDayFraction:0)+daySegments.Where(x=>x.SourceType=="LEAVE").Sum(x=>rules.TryGetValue(x.Status,out var r)?r.PaidDayFraction:0);
+            summary.UnpaidLeaveDays=effectiveRecords.Where(x=>x.Status=="A").Sum(x=>rules.TryGetValue(x.Status,out var r)?r.UnpaidDayFraction:1)+daySegments.Where(x=>x.SourceType=="LEAVE").Sum(x=>rules.TryGetValue(x.Status,out var r)?r.UnpaidDayFraction:0);
+            summary.HalfDays=effectiveRecords.Count(x=>x.Status is "HD" or "LHD" or "CL-HALF" or "SL-HALF" or "WFH-HD")*.5m+daySegments.Count*.5m;summary.AbsentDays=effectiveRecords.Count(x=>x.Status=="A");
             summary.LhdCount=records.Count(x=>x.Status=="LHD");summary.EdCount=records.Count(x=>x.Status=="ED");summary.CombinedLhdEdCount=summary.LhdCount+summary.EdCount;
             summary.BlockingExceptionCount=missingDates.Count+missingCheckoutDates.Count+duplicateDates.Count+invalidTimeDates.Count+invalidStatusDates.Count;
             if(existing==null)await _summaries.AddOne(summary);else if(!existing.IsLocked)await _summaries.Update(Builders<MonthlyAttendanceSummary>.Filter.Eq(x=>x.Id,existing.Id),summary);
             summaries.Add(summary);
         }
-        var unresolved=(await _exceptions.GetAll(x=>x.CompanyId==companyId&&x.PayrollMonth==start&&x.Status=="PENDING_REVIEW"&&x.Severity=="BLOCKING")).ToList();
+        // Only exceptions belonging to employees who were employed during this payroll
+        // month may prevent the month from being locked. Historical/future-joiner rows
+        // remain available for audit but must not block a payroll that cannot include them.
+        var eligibleUserIds=summaries.Select(x=>x.UserId).Where(x=>!string.IsNullOrWhiteSpace(x)).ToHashSet(StringComparer.Ordinal);
+        var unresolved=(await _exceptions.GetAll(x=>x.CompanyId==companyId&&x.PayrollMonth==start&&x.Status=="PENDING_REVIEW"&&x.Severity=="BLOCKING"))
+            .Where(x=>eligibleUserIds.Contains(x.UserId)).ToList();
         if(errors.Count>0||unresolved.Count>0)
         {
             var messageParts=new List<string>{"Attendance month cannot be locked."};
@@ -184,14 +216,15 @@ public class AttendancePenaltyService : IAttendancePenaltyService
             if(!AttendancePayrollRules.TryGetEligiblePeriod(emp,start,end,out var from,out var to))continue;
             var toExclusive=to.Date.AddDays(1);
             var records=(await _attendance.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<toExclusive)).ToList();
+            var daySegments=(await _segments.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<toExclusive)).ToList();
             var expectedDates=Enumerable.Range(0,(to-from).Days+1).Select(i=>from.AddDays(i).Date).Where(d=>!offDays.Contains((int)d.DayOfWeek)&&!IsHoliday(d)).ToList();
-            var recordedDates=records.Select(x=>x.Date.Date).Distinct().ToHashSet();
+            var recordedDates=records.Select(x=>x.Date.Date).Concat(daySegments.Select(x=>x.Date.Date)).Distinct().ToHashSet();
 
             await UpsertValidationException(companyId,emp,start,"MISSING_ATTENDANCE",expectedDates.Where(x=>!recordedDates.Contains(x)).ToList());
-            await UpsertValidationException(companyId,emp,start,"MISSING_CHECKOUT",records.Where(x=>rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date).Distinct().ToList());
+            await UpsertValidationException(companyId,emp,start,"MISSING_CHECKOUT",records.Where(x=>rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date)).Distinct().ToList());
             await UpsertValidationException(companyId,emp,start,"DUPLICATE_ATTENDANCE",records.GroupBy(x=>x.Date.Date).Where(x=>x.Count()>1).Select(x=>x.Key).ToList());
-            await UpsertValidationException(companyId,emp,start,"INVALID_TIME_ORDER",records.Where(x=>x.CheckInTime.HasValue&&x.CheckOutTime.HasValue&&x.CheckOutTime<x.CheckInTime).Select(x=>x.Date.Date).Distinct().ToList());
-            await UpsertValidationException(companyId,emp,start,"UNKNOWN_OR_INACTIVE_STATUS",records.Where(x=>!rules.TryGetValue(x.Status,out var rule)||!rule.IsActive).Select(x=>x.Date.Date).Distinct().ToList());
+            await UpsertValidationException(companyId,emp,start,"INVALID_TIME_ORDER",records.Where(x=>x.CheckInTime.HasValue&&x.CheckOutTime.HasValue&&x.CheckOutTime<x.CheckInTime).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>x.CheckInTime.HasValue&&x.CheckOutTime.HasValue&&x.CheckOutTime<x.CheckInTime).Select(x=>x.Date.Date)).Distinct().ToList());
+            await UpsertValidationException(companyId,emp,start,"UNKNOWN_OR_INACTIVE_STATUS",records.Where(x=>!rules.TryGetValue(x.Status,out var rule)||!rule.IsActive).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>!rules.TryGetValue(x.Status,out var rule)||!rule.IsActive).Select(x=>x.Date.Date)).Distinct().ToList());
         }
     }
 

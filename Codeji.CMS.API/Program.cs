@@ -125,6 +125,8 @@ builder.Services.AddHostedService<PriorityQueuedHostedService>();
 builder.Services.AddHostedService<BirthDayAndAnniversaryNotificationHostedServices>();
 builder.Services.AddHostedService<LeaveAccrualHostedService>();
 builder.Services.AddHostedService<Codeji.CMS.Services.CareerPortal.CareerNotificationWorker>();
+builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceOutboxWorker>();
+builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceReminderHostedService>();
 builder.Services.AddHttpContextAccessor();
 // Register Attendance Repository
 builder.Services.AddScoped<IAttendanceRepository, AttendanceRepository>();

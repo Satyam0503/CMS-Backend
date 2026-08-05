@@ -6,8 +6,9 @@ public class EmployeeLeaveBalanceResponseDto
 
     public string LeaveBalanceId { get; set; }
     public string LeavePolicyId { get; set; }
-    public decimal Balance { get; set; }
-    public decimal UsedBalance { get; set; }
+    public decimal TotalAllocated { get; set; }
+    public decimal Taken { get; set; }
+    public decimal Remaining { get; set; }
     public string Name { get; set; }
     public string Code { get; set; }
     public string Description { get; set; }

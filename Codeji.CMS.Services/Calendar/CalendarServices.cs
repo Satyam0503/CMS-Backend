@@ -9,6 +9,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Calendar.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
+using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
 using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
@@ -70,7 +71,7 @@ public class CalendarServices : ICalendarServices
         }
 
         // get employee birthdays and work anniversaries
-        var today = DateTime.Today;
+        var today = IndiaTime.Today;
         string dateFormat = "yyyy-MM-dd";
         var employeesList = await _employeeRepository.GetAll(e => e.DateOfBirth != null || e.DateOfJoining != null);
         if (employeesList == null || !employeesList.Any())

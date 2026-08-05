@@ -32,7 +32,8 @@
         {
             Administrator = 1,
             HR = 2,
-            Employee = 3
+            Employee = 3,
+            HRExecutive = 4
         }
         public enum MailType
         {
@@ -48,6 +49,7 @@
             ResignationMail = 9,
               ResetPassword = 10,
               CareerPortal = 11,
+              AttendanceReminder = 12,
         }
         public enum NoticeType
         {
@@ -62,7 +64,9 @@
             LeaveRequestApproved = 3,
             LeaveRequestReject = 4,
             BirthDay = 5,
-            WorkAnniversary = 6
+            WorkAnniversary = 6,
+            WorkFromHomeRequest = 7,
+            WorkFromHomeApproved = 8
         }
         public enum NotificationPreferenceType
         {
@@ -107,6 +111,11 @@
             Monthly = 1,
             Yearly,
             None,
+        }
+        public enum LeavePolicyType
+        {
+            Leave = 1,
+            WorkFromHome = 2,
         }
         public enum SecurityTokenType
         {

@@ -1,4 +1,6 @@
 
+using System;
+using System.IO;
 using System.Threading.Tasks;
 using PuppeteerSharp;
 using PuppeteerSharp.Media;
@@ -7,19 +9,29 @@ namespace Codeji.CMS.Services;
 
 public class PdfService
 {
-    public PdfService()
-    {
-    }
-
     public async Task<byte[]> GeneratePdfFormHtml(string htmlContent)
     {
-        await new BrowserFetcher().DownloadAsync();
-        var browser = await Puppeteer.LaunchAsync(new LaunchOptions
+        if (string.IsNullOrWhiteSpace(htmlContent))
+            throw new InvalidOperationException("The payslip content could not be prepared for PDF generation.");
+
+        // Prefer an installed Chrome/Chromium. The previous implementation tried to download a
+        // browser for every payslip request, which made normal payslip previews fail whenever the
+        // server could not reach the download host and also leaked browser processes.
+        var executablePath = FindInstalledChrome();
+        if (executablePath == null)
         {
-            Headless = true
+            var browserFetcher = new BrowserFetcher();
+            await browserFetcher.DownloadAsync();
+        }
+
+        await using var browser = await Puppeteer.LaunchAsync(new LaunchOptions
+        {
+            Headless = true,
+            ExecutablePath = executablePath,
+            Args = ["--disable-gpu"]
         });
 
-        var page = await browser.NewPageAsync();
+        await using var page = await browser.NewPageAsync();
         await page.SetContentAsync(htmlContent);
         // generate pdf 
         byte[] pdfByte = await page.PdfDataAsync(new PdfOptions()
@@ -38,6 +50,28 @@ public class PdfService
             }
         });
         return pdfByte;
+    }
+
+    private static string? FindInstalledChrome()
+    {
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        var candidates = new[]
+        {
+            Path.Combine(programFiles, "Google", "Chrome", "Application", "chrome.exe"),
+            Path.Combine(programFilesX86, "Google", "Chrome", "Application", "chrome.exe"),
+            Path.Combine(localAppData, "Google", "Chrome", "Application", "chrome.exe")
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
     }
 
 }

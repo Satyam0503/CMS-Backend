@@ -5,6 +5,7 @@ using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.middlewares;
+using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -30,8 +31,7 @@ public class PayRollController : BaseApiController
     public async Task<ActionResult<Result<GetEmpPayRollResponseDto>>> GetEmpPayRollData([FromBody] GetEmpPayRollRequestDto payload)
     {
         var requestPeriod = new DateTime(payload.PayMonth.Year, payload.PayMonth.Month, 1);
-        var currentPeriod = new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1);
-        if (!PayrollPeriodRules.IsClosedPeriod(requestPeriod, DateTime.UtcNow))
+        if (!PayrollPeriodRules.IsClosedPeriod(requestPeriod, IndiaTime.Now))
         {
             return BadRequest("Payroll cannot be generated for current or future months");
         }
@@ -86,6 +86,10 @@ public class PayRollController : BaseApiController
             var (pdfByte, pdfName) = await _payRollServices.GenerateEmployeeSalarySlip(model, companyId);
             Response.Headers.Append("Access-Control-Expose-Headers", "Content-Disposition");
             return File(pdfByte, "application/pdf", pdfName);
+        }
+        catch (InvalidOperationException exp)
+        {
+            return Conflict(new { message = exp.Message });
         }
         catch (Exception exp)
         {

@@ -11,6 +11,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Companies;
 using Codeji.CMS.Services.Employees.Interface;
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Constraints;
@@ -42,6 +43,7 @@ namespace Codeji.CMS.Services
         private readonly IEmployeeService _employeeService;
         readonly IMiddlewareService _middlewareService;
         private readonly ILogger<CompanyService> _logger;
+        private readonly IAttendanceStatusService _attendanceStatusService;
 
 
         public CompanyService(
@@ -60,6 +62,7 @@ namespace Codeji.CMS.Services
             IRoleService roleService,
             IEmployeeService employeeService,
             IMiddlewareService middlewareService,
+            IAttendanceStatusService attendanceStatusService,
             ILogger<CompanyService> logger
             )
         {
@@ -74,6 +77,7 @@ namespace Codeji.CMS.Services
             _userSecurityTokenRepo = userSecurityTokenRepo;
             _employeeService = employeeService;
             _middlewareService = middlewareService;
+            _attendanceStatusService = attendanceStatusService;
             _policyRepo = policyRepo;
             _policyVersionRepo = policyVersionRepo;
             _departmentRepo = departmentRepo;
@@ -126,6 +130,7 @@ namespace Codeji.CMS.Services
             {
                 await _userRepo.AddOne(user);
                 await _notificationPreferenceRepo.AddOne(notificationPreferenceSetting);
+                await _attendanceStatusService.EnsureCompanyDefaults(companyId);
                 await SendCompanyUserVerificationEmail(user, company);
                 await SeedDefaultDepartmentsAndJobTitles(company, user.UserId);
                 return result;
@@ -148,8 +153,13 @@ namespace Codeji.CMS.Services
             };
             await _userSecurityTokenRepo.AddOne(securityToken);
 
-            string apiBaseUrl = ConfigManager.AppSettings.APIUrl.TrimEnd('/');
-            string verifyLink = $"{apiBaseUrl}/api/account/verify-email?token={Uri.EscapeDataString(token)}";
+            string apiBaseUrl = ConfigManager.AppSettings.APIUrl.Trim().TrimEnd('/');
+            // Deployments may configure APIUrl as either the host or the host/api.
+            // Normalise both forms so the email never contains //api or /api/api.
+            string verifyEndpoint = apiBaseUrl.EndsWith("/api", StringComparison.OrdinalIgnoreCase)
+                ? "/account/verify-email"
+                : "/api/account/verify-email";
+            string verifyLink = $"{apiBaseUrl}{verifyEndpoint}?token={Uri.EscapeDataString(token)}";
             string body = HtmlTemplate.Render(
                 "<h2>Welcome, [EmployeeName]!</h2>" +
                 "<p>Please verify your email address to activate your account.</p>" +
@@ -314,6 +324,20 @@ namespace Codeji.CMS.Services
         private static string NormalizePublicCompanyCode(string? value) =>
             Regex.Replace(value ?? string.Empty, @"\D", string.Empty);
 
+        private static string NormalizeEmployeeIdPrefix(string? prefix, string companyName)
+        {
+            string value = new string((prefix ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                value = string.Concat((companyName ?? string.Empty)
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(word => word[0]))
+                    .ToUpperInvariant();
+            }
+
+            return value.Length > 6 ? value[..6] : value;
+        }
+
         public async Task<Result<Company>> GetCompanyDetails(string companyId)
         {
             Result<Company> result = new();
@@ -357,6 +381,8 @@ namespace Codeji.CMS.Services
             company.CompanyName = model.CompanyName ?? company.CompanyName;
             company.Address = model.Address ?? company.Address;
             company.DefaultLanguage = model.DefaultLanguage ?? company.DefaultLanguage;
+            company.EmployeeIdPrefix = NormalizeEmployeeIdPrefix(model.EmployeeIdPrefix, company.CompanyName);
+            company.AutoGenerateEmployeeId = model.AutoGenerateEmployeeId;
             company.CompanyLogo = model.CompanyLogo == null ? company.CompanyLogo : await UpdateCompanyLogo(model.CompanyLogo, companyId);
             await EnsureCareerPortal(company);
 

@@ -210,8 +210,9 @@ Detailed flow:
 7. Calculate included leave dates through the company working calendar.
 8. Respect the leave policy's weekend and holiday inclusion settings.
 9. If half-day, use the configured fractional total.
-10. Reject a request whose calculated total exceeds the available balance.
-11. Save the request as Pending.
+10. Reject a zero-day request (for example, a range consisting only of excluded days).
+11. Reject a request whose calculated total exceeds the available balance.
+12. Save the request as Pending.
 
 Balance is checked at request time but deducted at acceptance time. This is necessary because multiple pending requests can exist over time, so acceptance rechecks the balance.
 
@@ -232,6 +233,10 @@ Rejected
 
 The current status service rejects transitions to Pending or Withdrawn through the reviewer endpoint. Employee deletion/withdrawal is allowed only while the request is Pending.
 
+### Pending-request edit rules
+
+Only the requesting employee can edit a Pending request. The edit flow uses the same `CompanyWorkingCalendarService` as creation and approval, so it applies the company’s configured weekly offs, recurring/one-time holidays, and the policy’s inclusion flags. It rechecks active-request overlap while excluding the request being edited, validates the policy and half-day rule, rejects a zero-day range, and rechecks the current balance before saving the recalculated total.
+
 ## 4.6 HR accepts a request
 
 Endpoint: `PATCH /api/LeaveManagement/LeaveRequest/{id}/Status`
@@ -242,15 +247,17 @@ Flow:
 
 1. Load the request using `CompanyId + LeaveRequestId`.
 2. Reject invalid or duplicate status transitions.
-3. Load the employee balance using company, user, and policy.
-4. Recheck available balance.
-5. Subtract `TotalDays` from `Balance`.
-6. Add `TotalDays` to `UsedBalance`.
-7. Store reviewer, comment, timestamp, status, and incremented version.
-8. Save the leave request.
-9. Save the updated balance.
-10. Call `ReconcileAcceptedLeaveAsync`.
-11. Send the leave notification if the full flow succeeds.
+3. For an acceptance, load the active leave policy and require an active no-time `AttendanceStatusCode`. This preflight prevents an approval that cannot be reconciled into attendance.
+4. Load the employee balance using company, user, and policy when the transition changes balance.
+5. Recheck available balance for an acceptance.
+6. Subtract or restore `TotalDays` from `Balance` and apply the inverse change to `UsedBalance`.
+7. Store reviewer, comment, timestamp, status, and incremented version using an optimistic filter containing the previous status and version.
+8. On a replica set or sharded MongoDB deployment, update balance and leave status inside a MongoDB transaction.
+9. For a local standalone MongoDB server, where transactions are unsupported, use conditional balance and leave updates with a compensating balance update if the optimistic leave write loses its race. This fallback makes local development work but is not equivalent to a server transaction.
+10. Call `ReconcileAcceptedLeaveAsync` for Accepted, or reverse source-linked attendance for Rejected.
+11. Send the leave notification only after the state/reconciliation operation reports success.
+
+The status endpoint returns an explicit reason for an invalid transition, missing balance, insufficient balance, inactive policy, missing/invalid attendance mapping, concurrent-review conflict, or database failure. The Leave Requests UI displays that server message instead of replacing it with only “Failed to update.”
 
 ## 4.7 Accepted leave to attendance reconciliation
 
@@ -293,10 +300,25 @@ When Accepted changes to Rejected:
 5. Do not delete unrelated manual attendance.
 6. Invalidate affected unlocked summaries.
 
-## 4.9 Leave gaps and risks
+## 4.9 Leave safeguards, gaps, and risks
 
-- Leave request, balance, attendance, summary, and notification updates are multi-document operations without a Mongo transaction exposed by the repository abstraction. A failure can leave partial state.
-- Some older leave read/balance queries do not consistently include `CompanyId` in every repository predicate. These should be hardened even where IDs are currently obtained from company-scoped employee lists.
+### Implemented safeguards
+
+- Create, edit, review, summary, and monthly-taken leave reads are explicitly scoped to the authenticated `CompanyId` in the leave service; the repository also applies the tenant default filter.
+- Pending leave edit and leave reconciliation share the company working-calendar calculation rather than relying on hard-coded weekend logic.
+- Acceptance preflights the attendance mapping before changing status, preventing an approved leave that cannot produce a valid attendance row.
+- Approval/rejection use status and version predicates to detect a competing reviewer.
+- Replica-set deployments use a MongoDB transaction for the core leave status and balance change.
+- Standalone development MongoDB receives a documented compare-and-set/compensation fallback instead of a generic failed update.
+- Reconciliation returns actionable errors for inactive employee/policy and invalid attendance mapping.
+
+### Remaining production risks
+
+- Attendance reconciliation, summary invalidation, and notification delivery occur after the core status/balance transaction. A durable outbox or retryable reconciliation job is still needed for complete cross-document recovery.
+- The standalone fallback cannot provide the crash atomicity of a replica-set transaction. Production must run MongoDB as a replica set or sharded cluster and monitor transaction failures.
+- Policy updates affecting already accepted future leave need an explicit reconciliation/version policy.
+- A complete audited leave-attendance conflict-resolution and reopen/relock workflow is not yet implemented.
+- Employee self-service Create/Edit permissions are shared with broader module actions; more granular `ApplyOwn`, `ViewOwn`, and `ManageAll` capabilities would be clearer.
 - Policy update effects on already accepted future leave need an explicit reconciliation/version policy.
 - Employee self-service Create/Edit permissions are shared with broader module actions; more granular `ApplyOwn`, `ViewOwn`, and `ManageAll` capabilities would be clearer.
 

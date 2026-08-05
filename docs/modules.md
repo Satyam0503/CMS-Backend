@@ -11,14 +11,33 @@ The catalog of every domain in the API. Each entry lists the controller, service
 | [Roles & Permissions](#roles--permissions) | [RolesController.cs](../Codeji.CMS.API/Controllers/RolesController.cs) | (varies) |
 | [Company](#company) | [CompanyController.cs](../Codeji.CMS.API/Controllers/CompanyController.cs), [CompanyMasterController.cs](../Codeji.CMS.API/Controllers/CompanyMasterController.cs) | mixed (`Policy` for policies, AdminOnly for master) |
 | [Attendance](#attendance) | [AttendanceController.cs](../Codeji.CMS.API/Controllers/AttendanceController.cs) | `Attendance` |
+| [Work From Home (within Leave Management)](#work-from-home) | [WorkFromHomeController.cs](../Codeji.CMS.API/Controllers/WorkFromHomeController.cs) | `WorkFromHome` (employee self-service is ownership guarded) |
 | [Leave Management](#leave-management) | [LeaveManagementController.cs](../Codeji.CMS.API/Controllers/LeaveManagementController.cs) | `Leave_Management` |
 | [Calendar / Holidays](#calendar--holidays) | [CalendarController.cs](../Codeji.CMS.API/Controllers/CalendarController.cs) | `Calendar` |
 | [Notice Board](#notice-board) | [NoticeBoardController.cs](../Codeji.CMS.API/Controllers/NoticeBoardController.cs) | `Notice_Board` |
 | [Job Vacancies](#job-vacancies) | [JobVacancyController.cs](../Codeji.CMS.API/Controllers/JobVacancyController.cs) | `Jobs` |
 | [Applicants](#applicants) | [ApplicantsController.cs](../Codeji.CMS.API/Controllers/ApplicantsController.cs) | `Applications` |
 | [Payroll](#payroll) | [PayRollController.cs](../Codeji.CMS.API/Controllers/PayRollController.cs), [AutoPayrollController.cs](../Codeji.CMS.API/Controllers/AutoPayrollController.cs) | `PayRoll` |
+| [Career Profile](#career-profile) | [CareerProfileController.cs](../Codeji.CMS.API/Controllers/CareerProfileController.cs) | `Career_Profile` |
 | [Salary](#salary) | [SalaryController.cs](../Codeji.CMS.API/Controllers/SalaryController.cs) | `Employees` |
 | [Dashboard](#dashboard) | [DashboardController.cs](../Codeji.CMS.API/Controllers/DashboardController.cs) | (authed only) |
+
+---
+
+## Work From Home
+
+**Purpose.** A Leave Management tab for policy-controlled WFH requests, optional manager approval, source-owned attendance and employee clocking. It has no standalone sidebar entry or standalone frontend route; the UI is `/leavemanagement/work-from-home`.
+
+| What | Where |
+|---|---|
+| Controller | [WorkFromHomeController.cs](../Codeji.CMS.API/Controllers/WorkFromHomeController.cs) — `api/wfh` |
+| Service | [WorkFromHomeService.cs](../Codeji.CMS.Services/Attendance/WorkFromHomeService.cs) |
+| Entities | [WorkFromHomeRequest.cs](../Codeji.CMS.Repository/Entities/Attendance/WorkFromHomeRequest.cs) |
+| DTOs | [WorkFromHomeDto.cs](../Codeji.CMS.DTO/Attendance/WorkFromHomeDto.cs) |
+| Key routes | policy, `requests`, `requests/my`, team/all review, approve/reject/return, check-in/out, timing |
+| Integration | Creates `AttendanceModel` records with `SourceType = WFH_REQUEST`; persists/realtime-pushes HR/Admin and employee notifications |
+
+See [WFH detailed module guide](work-from-home-module.md) for rules and operational testing.
 
 ---
 
@@ -125,7 +144,7 @@ Notable endpoints (departments/job titles/custom attributes use `CompanyMaster`'
 
 ## Attendance
 
-**Purpose.** Daily attendance: mark-in / mark-out, edits, monthly calendar view, attendance summaries used by payroll.
+**Purpose.** Daily attendance: mark-in / mark-out, edits, monthly calendar view, read-only colour-coded monthly employee profile calendar, attendance summaries used by payroll.
 
 | What | Where |
 |---|---|
@@ -140,6 +159,7 @@ Notable endpoints (all `[ModulePermission(Attendance, ...)]`):
 - `POST api/attendance/UpdateAttendance` — `Edit`
 - `POST api/attendance/GetAttendanceCalendar` — `View` — month grid view
 - `POST api/attendance/GetAllAttendance` — `View` — paginated list
+- `GET api/admin/attendance/my-calendar?year={year}&month={month}` — authenticated employee self-service monthly profile calendar; user and company are derived from the token
 
 Total hours auto-calculated from in/out times. Mapster config does null-coalesce on update DTOs so partial updates work.
 
@@ -267,6 +287,15 @@ Notable endpoints (`[ModulePermission(PayRoll, ...)]`):
 
 Payroll Settings (per-company defaults like accrual + tax rules) is gated under `Payroll_Settings` — module added by [AddPayrollSettingseAndItsModulePermissions.cs](../Codeji.CMS.Migrations/Migrations/AddPayrollSettingseAndItsModulePermissions.cs).
 
+Payroll is a downstream consumer of attendance, leave, calendar holidays, weekly-off rules, and penalty exceptions:
+
+- closed attendance months are required before monthly payroll runs;
+- leave reconciliation must already have stamped attendance sources for approved leave;
+- holidays and weekly offs shape expected working days;
+- payroll exceptions are produced from attendance validation and then consumed by monthly processing.
+
+For the full month-close flow, see [`payroll-module-current-flow.md`](./payroll-module-current-flow.md) and [`leave-attendance-payroll-end-to-end-flow.md`](./leave-attendance-payroll-end-to-end-flow.md).
+
 ---
 
 ## Salary
@@ -281,6 +310,37 @@ Payroll Settings (per-company defaults like accrual + tax rules) is gated under 
 | Notable DTOs | `CreateSalaryDto`, `SalaryModel`, `SalaryResponseDto` |
 
 Permissions: `[ModulePermission(Employees, Create | Edit)]` (intentional — salary is part of an employee record).
+
+Salary is not the same thing as monthly payroll:
+
+- salary is the persistent compensation structure for an employee;
+- payroll is the month-specific execution record generated from attendance and salary;
+- salary changes affect future payroll periods, not historical locked months.
+
+## Career Profile
+
+**Purpose.** Public company profile content for the career portal: company branding, descriptions, mission/vision, social links, benefits, and related HTML content.
+
+| What | Where |
+|---|---|
+| Controller | [CareerProfileController.cs](../Codeji.CMS.API/Controllers/CareerProfileController.cs) — route `api/careerprofile` |
+| Service | [PublicCompanyProfileService.cs](../Codeji.CMS.Services/CareerPortal/PublicCompanyProfileService.cs) / [IPublicCompanyProfileService.cs](../Codeji.CMS.Services/CareerPortal/Interface/IPublicCompanyProfileService.cs) |
+| Entities | [PublicCompanyProfile](../Codeji.CMS.Repository/Entities/CareerPortal/CareerPortalEntities.cs), [Company](../Codeji.CMS.Repository/Entities/Company/Company.cs) |
+| Notable DTOs | `UpsertPublicCompanyProfileRequest`, `PublicCompanyProfileDto` |
+
+Notable endpoints (`[ModulePermission(CareerProfile, ...)]`):
+- `GET api/careerprofile` — `View` — loads the editable company career profile for the current tenant
+- `PUT api/careerprofile` — `Edit` — saves the company career profile and related metadata
+
+Connection points:
+
+- reads the current `CompanyId` from the authenticated request context;
+- uses the tenant’s `PublicCompanyCode` to keep public portal routing stable;
+- public career pages reuse the saved profile content when rendering company-branded content;
+- profile HTML is sanitized before persistence;
+- profile URLs must be valid HTTPS and non-loopback.
+
+This module is logically separate from the operational `Company` record so a career-page edit cannot overwrite payroll, attendance, or auth-critical company settings.
 
 ---
 

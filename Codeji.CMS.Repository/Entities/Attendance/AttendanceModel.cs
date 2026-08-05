@@ -28,6 +28,20 @@ public string? AttendanceId { get; set; }
     public string Status { get; set; } = "P";
 
     public string?Remarks { get; set; }
+    // Structured remarks are additive. Remarks remains the compatibility field consumed by
+    // existing calendar, payroll and API clients.
+    public string? RemarkCode { get; set; }
+    public string? RemarkText { get; set; }
+    public string? SystemRemark { get; set; }
+    public string? OperatorRemark { get; set; }
+    public int BreakMinutes { get; set; }
+    public string? ScheduleId { get; set; }
+    public long? ScheduleVersion { get; set; }
+    public string? MarkedByUserId { get; set; }
+    public DateTime? MarkedAtUtc { get; set; }
+    public string? ModifiedByUserId { get; set; }
+    public DateTime? ModifiedAtUtc { get; set; }
+    public long Version { get; set; }
 
     public int LateCount { get; set; } = 0;
 

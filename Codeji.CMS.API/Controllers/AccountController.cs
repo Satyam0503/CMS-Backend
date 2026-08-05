@@ -215,6 +215,17 @@ namespace Codeji.CMS.API.Controllers
 
         [AllowAnonymous]
         [HttpPost]
+        [Route("account/resend-email-verification")]
+        public async Task<Result> ResendEmailVerification([FromBody] EmailVerificationRequest model)
+        {
+            if (!ModelState.IsValid)
+                return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "A valid email address is required." };
+
+            return await _accountService.ResendEmailVerification(model.Email);
+        }
+
+        [AllowAnonymous]
+        [HttpPost]
         [Route("account/ResetPassword")]
         public async Task<Result> ResetPassword([FromBody] JsonElement body)
         {

@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Employees;
@@ -123,6 +124,38 @@ public class RolePermissionTests
             "user-1", "company-1");
 
         Assert.True(allowed);
+    }
+
+    [Fact]
+    public async Task AddDefaultRole_CopiesOnlyOneActiveTemplatePerTypeAndWaitsForDistinctPermissions()
+    {
+        var fixture = new RoleFixture();
+        var templates = new[]
+        {
+            new Roles { RolesId = "admin-old", RoleType = 1, IsDefault = true, Titles = "Admin", CreatedDate = DateTime.UtcNow, UserRoles = [] },
+            new Roles { RolesId = "admin-deleted", RoleType = 1, IsDefault = true, IsDeleted = true, Titles = "Deleted admin", UserRoles = [] },
+            new Roles { RolesId = "hr-old", RoleType = 2, IsDefault = true, Titles = "HR", CreatedDate = DateTime.UtcNow, UserRoles = [] },
+            new Roles { RolesId = "hr-new", RoleType = 2, IsDefault = true, Titles = "HR copy", CreatedDate = DateTime.UtcNow.AddMinutes(1), UserRoles = [] },
+        };
+        fixture.RoleRepository
+            .Setup(x => x.Get(It.IsAny<Expression<Func<Roles, bool>>>(), null, false))
+            .Returns((Expression<Func<Roles, bool>> predicate, object? _, bool _) => templates.Where(predicate.Compile()).AsQueryable());
+        fixture.RolePermissionRepository
+            .Setup(x => x.GetAll(It.IsAny<Expression<Func<RolePermission, bool>>>(), false, true))
+            .ReturnsAsync([
+                new RolePermission { RoleId = "admin-old", ModulePermissionId = 10, HasAccess = true, IsAccessible = true },
+                new RolePermission { RoleId = "admin-old", ModulePermissionId = 10, HasAccess = false, IsAccessible = false },
+                new RolePermission { RoleId = "hr-new", ModulePermissionId = 20, HasAccess = true, IsAccessible = true },
+            ]);
+        fixture.RoleRepository.Setup(x => x.AddMany(It.IsAny<IEnumerable<Roles>>())).ReturnsAsync(new Result { Success = true });
+        fixture.RolePermissionRepository.Setup(x => x.AddMany(It.IsAny<IEnumerable<RolePermission>>())).ReturnsAsync(new Result { Success = true });
+
+        var roles = await fixture.Service.AddDefaultRole("company-1");
+
+        Assert.Equal(new[] { 1, 2 }, roles.Select(x => x.RoleType).Order());
+        fixture.RoleRepository.Verify(x => x.AddMany(It.Is<IEnumerable<Roles>>(saved => saved.Count() == 2)), Times.Once);
+        fixture.RolePermissionRepository.Verify(x => x.AddMany(It.Is<IEnumerable<RolePermission>>(saved =>
+            saved.Count() == 2 && saved.All(x => x.CompanyId == "company-1"))), Times.Once);
     }
 
     private sealed class RoleFixture

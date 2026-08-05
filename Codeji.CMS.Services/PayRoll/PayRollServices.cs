@@ -5,6 +5,7 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
@@ -20,13 +21,15 @@ public class PayRollServices : IPayRollServices
     readonly IMongoDbRepository<Company> _companyRepository;
     readonly IMongoDbRepository<JobTitles> _jobTitlesRepository;
     readonly PdfService _pdfService;
+    readonly IAttendancePayrollReadinessService _attendanceReadiness;
     public PayRollServices(
         IMongoDbRepository<EmpPayRoll> empPayRollRepository,
         IMongoDbRepository<EmpUser> employeeRepository,
         IMongoDbRepository<Company> companyRepository,
         IMongoDbRepository<JobTitles> jobTitlesRepository,
         PdfService pdfService,
-        IMiddlewareService middlewareService
+        IMiddlewareService middlewareService,
+        IAttendancePayrollReadinessService attendanceReadiness
     )
     {
         _empPayRollRepository = empPayRollRepository;
@@ -35,6 +38,7 @@ public class PayRollServices : IPayRollServices
         _jobTitlesRepository = jobTitlesRepository;
         _pdfService = pdfService;
         _middlewareService = middlewareService;
+        _attendanceReadiness = attendanceReadiness;
     }
 
 
@@ -456,6 +460,10 @@ public class PayRollServices : IPayRollServices
 
         if (payrollRows.Count == 0)
             return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "No generated payroll was found for the selected employees." };
+
+        var readiness = await _attendanceReadiness.EvaluateAsync(companyId, monthStart, selectedEmployeeIds);
+        if (!readiness.IsReady)
+            return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "Payroll is blocked until attendance corrections are reviewed: " + string.Join("; ", readiness.BlockingReasons) };
 
         if (payrollRows.All(p => p.IsProcessed))
             return new Result { Success = true, Message = $"Payroll for {monthStart:MMMM yyyy} is already processed." };

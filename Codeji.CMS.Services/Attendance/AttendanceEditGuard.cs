@@ -1,27 +1,33 @@
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Utility.Enums;
 
 public interface IAttendanceEditGuard
 {
-    Task EnsureEditableWorkingDayAsync(string userId, DateTime date);
+    Task EnsureEditableWorkingDayAsync(string companyId, string userId, DateTime date);
 }
 
 public sealed class AttendanceEditGuard(
     IMongoDbRepository<EmpUser> employees,
+    IMongoDbRepository<EmpPayRoll> payrolls,
     IMongoDbRepository<MonthlyAttendanceSummary> summaries,
     IMongoDbRepository<WeeklyOffSetting> weeklyOffs,
     IMongoDbRepository<CalendarEntity> calendar) : IAttendanceEditGuard
 {
-    public async Task EnsureEditableWorkingDayAsync(string userId, DateTime date)
+    public async Task EnsureEditableWorkingDayAsync(string companyId, string userId, DateTime date)
     {
-        var employee = await employees.FirstOrDefault(x => x.UserId == userId && !x.IsDeleted)
+        var employee = await employees.FirstOrDefault(x =>
+            x.CompanyId == companyId && x.UserId == userId && !x.IsDeleted)
             ?? throw new InvalidOperationException("Employee was not found for attendance update.");
         var month = new DateTime(date.Year, date.Month, 1);
-        var summary = await summaries.FirstOrDefault(x => x.CompanyId == employee.CompanyId && x.EmployeeId == employee.EmployeeId && x.PayrollMonth == month);
-        if (summary?.IsLocked == true)
-            throw new InvalidOperationException($"Attendance for employee {employee.EmployeeId} is locked for {month:MMMM yyyy}. Reopen the month through an authorized correction workflow before editing.");
+        // A correction is only valid while the employee's attendance period remains open.
+        // Payroll generation and attendance locking are both finalisation boundaries.
+        if (await payrolls.Exist(x => x.CompanyId == employee.CompanyId && x.EmployeeId == employee.EmployeeId && x.PayMonth == month && x.IsProcessed))
+            throw new InvalidOperationException($"Attendance for employee {employee.EmployeeId} cannot be changed because payroll for {month:MMMM yyyy} has already been generated.");
+        if (await summaries.Exist(x => x.CompanyId == employee.CompanyId && x.UserId == userId && x.PayrollMonth == month && x.IsLocked))
+            throw new InvalidOperationException($"Attendance for employee {employee.EmployeeId} cannot be changed because attendance for {month:MMMM yyyy} is locked.");
 
         var weekly = await weeklyOffs.FirstOrDefault(x => x.CompanyId == employee.CompanyId);
         var offDays = weekly?.OffDays ?? [(int)DayOfWeek.Saturday, (int)DayOfWeek.Sunday];

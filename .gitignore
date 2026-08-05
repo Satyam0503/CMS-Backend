@@ -1,5 +1,6 @@
-*/bin
-*/obj
+# .NET build outputs at every project depth (including tools/)
+**/bin/
+**/obj/
 .vs
 .vscode/*
 */Uploads/*
@@ -19,3 +20,5 @@ Codeji.CMS.API/Uploads/*
 # Runtime logs
 *.log
 
+# Locally generated QA and test documentation
+/docs/test-reports/

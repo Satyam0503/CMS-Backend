@@ -12,5 +12,7 @@ namespace Codeji.CMS.DTO.Company
         public List<string>? ApplicationLanguage { get; set; }
         public IFormFile? CompanyLogo { get; set; }
         public string Address { get; set; }
+        public string? EmployeeIdPrefix { get; set; }
+        public bool AutoGenerateEmployeeId { get; set; } = true;
     }
 }

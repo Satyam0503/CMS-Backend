@@ -13,6 +13,7 @@ using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
@@ -30,7 +31,6 @@ public class PublicCareerService : IPublicCareerService
     private readonly IMongoCollection<Applicant> _applicants;
     private readonly IMongoCollection<ApplicantLogs> _applicantLogs;
     private readonly IMongoCollection<PublicApplicationToken> _tokens;
-    private readonly IMongoCollection<MailTemplate> _mailTemplates;
     private readonly IMongoCollection<EmpUser> _employees;
     private readonly IMongoCollection<Roles> _roles;
     private readonly IMongoCollection<PublicCompanyProfile> _companyProfiles;
@@ -45,7 +45,6 @@ public class PublicCareerService : IPublicCareerService
         IMongoDbRepository<Applicant> applicantRepository,
         IMongoDbRepository<ApplicantLogs> applicantLogsRepository,
         IMongoDbRepository<PublicApplicationToken> tokenRepository,
-        IMongoDbRepository<MailTemplate> mailTemplateRepository,
         IMongoDbRepository<EmpUser> employeeRepository,
         IMongoDbRepository<Roles> roleRepository,
         IMongoDbRepository<PublicCompanyProfile> companyProfileRepository,
@@ -59,7 +58,6 @@ public class PublicCareerService : IPublicCareerService
         _applicants = applicantRepository.GetCollection();
         _applicantLogs = applicantLogsRepository.GetCollection();
         _tokens = tokenRepository.GetCollection();
-        _mailTemplates = mailTemplateRepository.GetCollection();
         _employees = employeeRepository.GetCollection();
         _roles = roleRepository.GetCollection();
         _companyProfiles = companyProfileRepository.GetCollection();
@@ -78,10 +76,29 @@ public class PublicCareerService : IPublicCareerService
     public async Task<Result<PublicJobSummaryDto>> GetCompanyJobs(string companyCode, PublicJobSearchRequest request)
     {
         string code = Regex.Replace(companyCode ?? string.Empty, @"\D", string.Empty);
-        var company = await _companies.Find(c => c.Status && !c.IsDeleted && c.CareerPortalEnabled && c.PublicCompanyCode == code).FirstOrDefaultAsync();
+        var cf = Builders<Company>.Filter;
+        var companyFilter = cf.And(cf.Eq(c => c.Status, true), cf.Eq(c => c.IsDeleted, false),
+            cf.Or(
+                cf.Eq(c => c.PublicCompanyCode, code),
+                cf.Eq(c => c.PublicCompanyCode, companyCode),
+                cf.Regex(c => c.PublicCompanyCode, new MongoDB.Bson.BsonRegularExpression(code))
+            ));
+        var company = await _companies.Find(companyFilter).FirstOrDefaultAsync();
         if (company is null)
         {
             return new Result<PublicJobSummaryDto> { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "Career portal not found." };
+        }
+
+        if (!Regex.IsMatch(company.PublicCompanyCode ?? string.Empty, @"^\d{6}$") || !company.CareerPortalEnabled)
+        {
+            company.PublicCompanyCode = await GenerateUniquePublicCompanyCodeAsync(company.CompanyId);
+            company.CareerPortalEnabled = true;
+            await _companies.UpdateOneAsync(
+                c => c.CompanyId == company.CompanyId,
+                Builders<Company>.Update
+                    .Set(x => x.PublicCompanyCode, company.PublicCompanyCode)
+                    .Set(x => x.CareerPortalEnabled, true)
+                    .Set(x => x.UpdatedDate, DateTime.UtcNow));
         }
 
         return await SearchJobs(request, [company], masterOnly: false);
@@ -89,10 +106,23 @@ public class PublicCareerService : IPublicCareerService
 
     public async Task<Result<string>> GetLocations(string? companyCode, string? search)
     {
-        var companies = await _companies.Find(c => c.Status && !c.IsDeleted && c.CareerPortalEnabled &&
-            (string.IsNullOrWhiteSpace(companyCode)
-                ? c.PublishJobsToMasterPortal
-                : c.PublicCompanyCode == companyCode)).Project(c => c.CompanyId).ToListAsync();
+        var normalizedCompanyCode = Regex.Replace(companyCode ?? string.Empty, @"\D", string.Empty);
+        var cf = Builders<Company>.Filter;
+        FilterDefinition<Company> companyFilter;
+        if (string.IsNullOrWhiteSpace(companyCode))
+        {
+            companyFilter = cf.And(cf.Eq(c => c.Status, true), cf.Eq(c => c.IsDeleted, false), cf.Eq(c => c.PublishJobsToMasterPortal, true));
+        }
+        else
+        {
+            companyFilter = cf.And(cf.Eq(c => c.Status, true), cf.Eq(c => c.IsDeleted, false),
+                cf.Or(
+                    cf.Eq(c => c.PublicCompanyCode, normalizedCompanyCode),
+                    cf.Eq(c => c.PublicCompanyCode, companyCode),
+                    cf.Regex(c => c.PublicCompanyCode, new BsonRegularExpression(normalizedCompanyCode))
+                ));
+        }
+        var companies = await _companies.Find(companyFilter).Project(c => c.CompanyId).ToListAsync();
         if (companies.Count == 0)
             return new Result<string> { Success = true, MethodResults = [] };
 
@@ -397,7 +427,7 @@ public class PublicCareerService : IPublicCareerService
             CompanyPublicCode = company.PublicCompanyCode,
             CompanyName = company.CompanyName,
             CompanySlug = company.CareerSlug,
-            CompanyLogo = company.CompanyLogo
+            CompanyLogo = Common.GetCompanyLogoUrl(company.CompanyLogo)
             ,Summary = job.Summary, Department = job.Department, Industry = job.Industry, RoleCategory = job.RoleCategory,
             EducationRequirement = job.EducationRequirement, IsFeatured = job.IsFeatured == true,
             IsUrgentHiring = job.IsUrgentHiring == true, IsWalkIn = job.IsWalkIn == true, ShowSalary = job.ShowSalary != false
@@ -456,6 +486,17 @@ public class PublicCareerService : IPublicCareerService
     private static bool IsExternal(JobVacancy job) => NormalizeApplicationMode(job.ApplicationMode) == ExternalApplicationMode;
     private static string NormalizeApplicationMode(string? mode) => string.Equals(mode, ExternalApplicationMode, StringComparison.OrdinalIgnoreCase) ? ExternalApplicationMode : InternalApplicationMode;
     private static string NormalizeSlug(string value) => Regex.Replace(value.Trim().ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
+
+    private async Task<string> GenerateUniquePublicCompanyCodeAsync(string companyId)
+    {
+        while (true)
+        {
+            var code = Random.Shared.Next(100000, 1000000).ToString();
+            var exists = await _companies.Find(c => c.CompanyId != companyId && c.PublicCompanyCode == code).AnyAsync();
+            if (!exists) return code;
+        }
+    }
+
     private static string ShortText(string? text) => string.IsNullOrWhiteSpace(text) ? string.Empty : Regex.Replace(text, "<.*?>", string.Empty).Trim() is var clean && clean.Length > 180 ? clean[..180] + "..." : clean;
     private static string HashToken(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
     private static Result<T> NotFound<T>(string message) => new() { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = message };
@@ -469,21 +510,21 @@ public class PublicCareerService : IPublicCareerService
     private async Task QueueApplicationNotifications(Applicant applicant, JobVacancy job, Company company)
     {
         string candidateName = $"{applicant.FirstName} {applicant.LastName}".Trim();
-        var applicantTemplate = await _mailTemplates.Find(t => t.mailType == EnumsHelper.MailType.ApplyNowMailToApplicant).FirstOrDefaultAsync();
-        string applicantSubject = applicantTemplate?.subject ?? $"We received your application for {job.Title}";
-        string applicantBody = applicantTemplate?.body ??
-            $"<p>Hi {System.Net.WebUtility.HtmlEncode(candidateName)},</p><p>Thank you for applying for the <strong>{System.Net.WebUtility.HtmlEncode(job.Title)}</strong> position at {System.Net.WebUtility.HtmlEncode(company.CompanyName)}. Our hiring team will review your application and contact you with an update.</p>";
+        RepositoryEmailTemplate.TryGet(EnumsHelper.MailType.ApplyNowMailToApplicant, out var applicantTemplateSubject, out var applicantTemplateBody);
+        string applicantSubject = string.IsNullOrWhiteSpace(applicantTemplateSubject) ? $"We received your application for {job.Title}" : applicantTemplateSubject;
+        string applicantBody = string.IsNullOrWhiteSpace(applicantTemplateBody) ?
+            $"<p>Hi {System.Net.WebUtility.HtmlEncode(candidateName)},</p><p>Thank you for applying for the <strong>{System.Net.WebUtility.HtmlEncode(job.Title)}</strong> position at {System.Net.WebUtility.HtmlEncode(company.CompanyName)}. Our hiring team will review your application and contact you with an update.</p>" : applicantTemplateBody;
 
         applicantSubject = HtmlTemplate.Render(applicantSubject, new { CandidateName = candidateName, JobTitle = job.Title, CompanyName = company.CompanyName });
         applicantBody = HtmlTemplate.Render(applicantBody, new { CandidateName = candidateName, JobTitle = job.Title, CompanyName = company.CompanyName });
 
-        var hrTemplate = await _mailTemplates.Find(t => t.mailType == EnumsHelper.MailType.ApplyNowMailToHR).FirstOrDefaultAsync();
+        RepositoryEmailTemplate.TryGet(EnumsHelper.MailType.ApplyNowMailToHR, out var hrTemplateSubject, out var hrTemplateBody);
         string hrSubject = HtmlTemplate.Render(
-            hrTemplate?.subject ?? $"New application received for {job.Title}",
+            string.IsNullOrWhiteSpace(hrTemplateSubject) ? $"New application received for {job.Title}" : hrTemplateSubject,
             new { CandidateName = candidateName, CandidateEmail = applicant.Email, CandidatePhone = applicant.Phone, JobTitle = job.Title, CompanyName = company.CompanyName });
         string hrBody = HtmlTemplate.Render(
-            hrTemplate?.body ??
-            "<p>A new application has been submitted.</p><ul><li><strong>Name:</strong> [CandidateName]</li><li><strong>Email:</strong> [CandidateEmail]</li><li><strong>Phone:</strong> [CandidatePhone]</li><li><strong>Job Title:</strong> [JobTitle]</li><li><strong>Company:</strong> [CompanyName]</li></ul>",
+            string.IsNullOrWhiteSpace(hrTemplateBody) ?
+            "<p>A new application has been submitted.</p><ul><li><strong>Name:</strong> [CandidateName]</li><li><strong>Email:</strong> [CandidateEmail]</li><li><strong>Phone:</strong> [CandidatePhone]</li><li><strong>Job Title:</strong> [JobTitle]</li><li><strong>Company:</strong> [CompanyName]</li></ul>" : hrTemplateBody,
             new { CandidateName = candidateName, CandidateEmail = applicant.Email, CandidatePhone = applicant.Phone, JobTitle = job.Title, CompanyName = company.CompanyName });
 
         var internalRecipients = await GetRecruitmentRecipients(job.CompanyId, job.RecruiterContactEmail);
@@ -528,7 +569,7 @@ public class PublicCareerService : IPublicCareerService
         }
 
         var roleIds = await _roles.Find(r => r.CompanyId == companyId && !r.IsDeleted &&
-            (r.RoleType == (int)EnumsHelper.Roles.Administrator || r.RoleType == (int)EnumsHelper.Roles.HR))
+            (r.RoleType == (int)EnumsHelper.Roles.Administrator || r.RoleType == (int)EnumsHelper.Roles.HR || r.RoleType == (int)EnumsHelper.Roles.HRExecutive))
             .Project(r => r.RolesId)
             .ToListAsync();
         if (roleIds.Count == 0) return recipientMap.Values.ToList();

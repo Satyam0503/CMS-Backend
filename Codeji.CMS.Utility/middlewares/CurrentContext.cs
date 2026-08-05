@@ -8,35 +8,48 @@ namespace Codeji.CMS.Utility.middlewares;
 
 public static class CurrentContext
 {
+    private static string? ResolveSingleClaim(IHttpContextAccessor? httpContextAccessor, string claimType)
+    {
+        if (httpContextAccessor?.HttpContext?.User?.Identity is not ClaimsIdentity identity || !identity.IsAuthenticated)
+        {
+            return null;
+        }
+
+        var matches = identity.Claims
+            .Where(a => a.Type == claimType)
+            .Select(a => a.Value)
+            .ToArray();
+
+        return matches.Length == 1 ? matches[0] : null;
+    }
+
     public static string UserId(IHttpContextAccessor httpContextAccessor)
     {
-        if (httpContextAccessor == null || !(httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated ?? false))
-            return string.Empty;
-        ClaimsIdentity? identity = httpContextAccessor?.HttpContext?.User.Identity as ClaimsIdentity;
-        return identity?.Claims.Where(a => a.Type == ClaimTypesEnum.user_id.ToString()).Select(a => a.Value).SingleOrDefault() ?? "";
-
+        return ResolveSingleClaim(httpContextAccessor, ClaimTypesEnum.user_id.ToString()) ?? string.Empty;
     }
 
     public static string UserRoleId(IHttpContextAccessor httpContextAccessor)
     {
-        ClaimsIdentity? identity = httpContextAccessor?.HttpContext?.User.Identity as ClaimsIdentity;
-        return identity?.Claims.Where(a => a.Type == ClaimTypesEnum.role_id.ToString()).Select(a => a.Value).SingleOrDefault() ?? "";
+        return ResolveSingleClaim(httpContextAccessor, ClaimTypesEnum.role_id.ToString()) ?? string.Empty;
     }
 
     public static string CompanyId(IHttpContextAccessor httpContextAccessor)
     {
-        if (httpContextAccessor != null && (httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated ?? false))
+        var authenticatedCompanyId = ResolveSingleClaim(httpContextAccessor, ClaimTypesEnum.company_id.ToString());
+        if (!string.IsNullOrWhiteSpace(authenticatedCompanyId))
         {
-            ClaimsIdentity? identity = httpContextAccessor?.HttpContext?.User.Identity as ClaimsIdentity;
-            return identity?.Claims.Where(a => a.Type == ClaimTypesEnum.company_id.ToString()).Select(a => a.Value).SingleOrDefault() ?? "";
+            return authenticatedCompanyId;
         }
-        else
-            return httpContextAccessor?.HttpContext?.Request.Headers["cId"].ToString() ?? string.Empty;
+
+        // Tenant context is authoritative only when it comes from the authenticated
+        // JWT. Anonymous endpoints must resolve a company from a trusted route value
+        // (for example, a public company code) or an already-owned resource, never a
+        // caller-controlled request header.
+        return string.Empty;
     }
     public static string AdminUserId(IHttpContextAccessor httpContextAccessor)
     {
-        ClaimsIdentity? identity = httpContextAccessor?.HttpContext?.User.Identity as ClaimsIdentity;
-        return identity?.Claims.Where(a => a.Type == ClaimTypesEnum.admin_id.ToString()).Select(a => a.Value).SingleOrDefault() ?? "";
+        return ResolveSingleClaim(httpContextAccessor, ClaimTypesEnum.admin_id.ToString()) ?? string.Empty;
     }
 
     public static string GetLanguage(IHttpContextAccessor httpContextAccessor)

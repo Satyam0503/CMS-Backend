@@ -130,7 +130,13 @@ public class RoleServices : IRoleService
         {
             expression = r => r.CompanyId == companyId && r.RoleType != Convert.ToInt32(EnumsHelper.Roles.Administrator) && r.Titles != "Company Administrator";
         }
-        IEnumerable<Roles> roles = (await _RolesRepository.GetAll(expression)).OrderBy(r => r.RoleType).ToList();
+        // Hide historical duplicate role rows while the data migration removes
+        // them. RoleType is the tenant's stable default-role identity.
+        IEnumerable<Roles> roles = (await _RolesRepository.GetAll(expression))
+            .GroupBy(r => r.RoleType)
+            .Select(group => group.OrderByDescending(r => r.UpdatedDate).ThenByDescending(r => r.CreatedDate).First())
+            .OrderBy(r => r.RoleType)
+            .ToList();
         return _mapper.Map<List<RoleModel>>(roles);
     }
     //Fetch matched role with given Id
@@ -238,10 +244,29 @@ public class RoleServices : IRoleService
     }
     public async Task<List<Roles>> AddDefaultRole(string companyId)
     {
-        List<Roles> roles = _RolesRepository.Get(x => x.IsDefault && string.IsNullOrEmpty(x.CompanyId)).ToList();
-        List<string> roleIds = roles.Select(x => x.RolesId).ToList();
+        // Older databases can contain more than one global template for a role type.
+        // A company must still receive exactly one Administrator, HR Manager, and
+        // Employee role, and deleted templates must never be copied.
+        List<Roles> roles = _RolesRepository.Get(x => x.IsDefault &&
+                                                   string.IsNullOrEmpty(x.CompanyId) &&
+                                                   !x.IsDeleted)
+            .GroupBy(x => x.RoleType)
+            .Select(group => group
+                .OrderByDescending(x => x.UpdatedDate)
+                .ThenByDescending(x => x.CreatedDate)
+                .First())
+            .ToList();
+        var existingCompanyRoles = (await _RolesRepository.GetAll(x => x.CompanyId == companyId && !x.IsDeleted))
+            .GroupBy(x => x.RoleType)
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(x => x.UpdatedDate).ThenByDescending(x => x.CreatedDate).First());
+        List<Roles> rolesToCreate = roles.Where(role => !existingCompanyRoles.ContainsKey(role.RoleType)).ToList();
+        if (rolesToCreate.Count == 0)
+            return existingCompanyRoles.Values.OrderBy(x => x.RoleType).ToList();
+
+        List<string> roleIds = rolesToCreate.Select(x => x.RolesId).ToList();
         IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => roleIds.Contains(x.RoleId));
-        foreach (Roles? role in roles)
+        var companyRolePermissions = new List<RolePermission>();
+        foreach (Roles role in rolesToCreate)
         {
             string oldRoleId = role.RolesId;
             role.RolesId = Guid.NewGuid().ToString();
@@ -250,24 +275,28 @@ public class RoleServices : IRoleService
             role.CreatedDate = DateTime.Now;
             if (role.RoleType == 1)
                 role.HasAppAccess = true;
-            List<RolePermission> permissions = rolePermissions.Where(x => x.RoleId == oldRoleId).ToList();
-            foreach (RolePermission? item in permissions)
+            // A duplicate template may also contain duplicate permissions.  Keep
+            // one row per module permission for the new company role.
+            foreach (RolePermission item in rolePermissions
+                         .Where(x => x.RoleId == oldRoleId)
+                         .GroupBy(x => x.ModulePermissionId)
+                         .Select(group => group.First()))
             {
-                Task<Result> rolePermission = _rolePermissionRepository.AddOne(
-                    new RolePermission
-                    {
-                        ModulePermissionId = item.ModulePermissionId,
-                        RoleId = role.RolesId,
-                        CreatedDate = DateTime.Now,
-                        CompanyId = companyId,
-                        IsAccessible = item.IsAccessible,
-                        HasAccess = item.HasAccess
-                    });
-                //await _rolePermissionRepository.AddOne(item);
+                companyRolePermissions.Add(new RolePermission
+                {
+                    ModulePermissionId = item.ModulePermissionId,
+                    RoleId = role.RolesId,
+                    CreatedDate = DateTime.UtcNow,
+                    CompanyId = companyId,
+                    IsAccessible = item.IsAccessible,
+                    HasAccess = item.HasAccess
+                });
             }
         }
-        await _RolesRepository.AddMany(roles);
-        return roles;
+        await _RolesRepository.AddMany(rolesToCreate);
+        if (companyRolePermissions.Count > 0)
+            await _rolePermissionRepository.AddMany(companyRolePermissions);
+        return existingCompanyRoles.Values.Concat(rolesToCreate).OrderBy(x => x.RoleType).ToList();
     }
 
     //Get default roles with their permission
@@ -397,6 +426,12 @@ public class RoleServices : IRoleService
             if (user is null)
             {
                 return hasPermission;
+            }
+
+            var role = await _RolesRepository.FirstOrDefault(x => x.RolesId == user.RoleId && x.CompanyId == companyId);
+            if (role?.RoleType == (int)EnumsHelper.Roles.Administrator)
+            {
+                return true;
             }
 
             string[] modulePermissions = await GetRolePermissionOfuser(user.RoleId);

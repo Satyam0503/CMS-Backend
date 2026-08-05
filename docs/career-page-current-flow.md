@@ -1,6 +1,6 @@
 # Public Careers: Current Flow and Implementation Details
 
-> **Implementation snapshot:** 24 July 2026  
+> **Implementation snapshot:** 29 July 2026
 > **Status:** Current Career Portal marketplace, company profile, engagement, and durable-notification implementation.  
 > **Important:** The earlier slug + `localStorage.clientId` + `cId` public flow is legacy behavior and is not the canonical architecture documented here.
 
@@ -382,9 +382,12 @@ New browsing and engagement behavior lives under:
 CMS-React/src/app/modules/careerPortal/
   components/
     CareerHeader.tsx
+    CompanyLogo.tsx
     JobCard.tsx
     SaveJobButton.tsx
     SubscribeModal.tsx
+  context/
+    SavedJobsContext.tsx
   hooks/
     useCareerVisitor.ts
   pages/
@@ -422,7 +425,11 @@ Public behavior:
    existing company name and logo. The company career page therefore never breaks
    merely because HR has not completed a profile.
 4. The company page combines the profile hero/story/culture with that company's
-   eligible jobs.
+   eligible jobs. The backend-managed Company Details upload is expanded to the
+   configured static CompanyLogo URL and is the only source for the public logo.
+5. The profile lookup normalizes the incoming code before the MongoDB query and then
+   uses an equality-only database predicate. Custom .NET helpers are never embedded
+   in a Mongo LINQ expression.
 
 Administration behavior:
 
@@ -432,7 +439,11 @@ Administration behavior:
   administrator and HR roles by migration.
 - the React editor supports preview, draft, and publish states;
 - rich HTML is sanitized on the server and again before React renders it;
-- logo, cover, website, and social URLs must be valid absolute HTTPS URLs.
+- the company logo is read-only in the Career Profile editor and always comes from the
+  authenticated Company Details upload; it cannot be overridden by a profile URL;
+- the company name is read-only in the Career Profile editor and always comes from
+  Company Details; profile saves cannot rename the company;
+- cover, website, and social URLs must be valid HTTP/HTTPS URLs.
 
 ## 18. Expanded job presentation and search
 
@@ -537,6 +548,24 @@ Save flow:
 4. Store server-resolved `JobId`, `CompanyId`, and `PublicJobId`.
 5. Repeated saves are idempotent.
 
+### 20.1 Cross-page saved state
+
+`SavedJobsProvider` is mounted around the public routes. It reads the server-owned
+saved-job list once for the current visitor/session and keeps one in-memory set of
+`PublicJobId` values. Every bookmark control reads and writes that shared set only
+after the save/remove API succeeds. As a result, a bookmark changed in a listing,
+job detail, or the Saved Jobs page updates every mounted career view immediately and
+is restored after navigation or browser refresh from `GET /jobs/saved`.
+
+The browser never treats the visual bookmark as the source of truth; anonymous saves
+remain keyed by the first-party visitor token and verified-subscriber saves by the
+career session, as described above.
+
+Company logos use the shared `CompanyLogo` component. Uploaded brand marks are shown
+inside a squared, padded tile with `object-fit: contain`, so a wide or circular logo is
+not cropped into an avatar. If the image cannot load, the tile safely falls back to the
+company initial.
+
 When a visitor verifies an email, the merge endpoint copies active anonymous saves to
 the subscriber using an idempotent upsert, then deactivates the anonymous rows.
 
@@ -628,6 +657,21 @@ uniqueness rules prevent repeat reminders.
 The unique delivery key is `SubscriberId + JobId + NotificationReason`. The worker also
 checks delivery history before sending, and duplicate-key races are handled as already
 delivered.
+
+### 22.1 Application notifications
+
+Creating an internal application first persists the applicant, its audit log, and the
+two-hour resume-upload token. It then queues non-blocking email work through
+`IPriorityTaskQueue`; the HTTP response is not held open for SMTP delivery. The queued
+work sends the candidate acknowledgement and sends the recruiter alert to the optional
+vacancy recruiter-contact address plus active, verified Administrator/HR users in the
+same company, de-duplicated by email. `IMiddlewareService.EmailSendAndSave` delivers
+each message and writes the existing email-log record.
+
+Later applicant-stage emails are separate from the initial acknowledgement:
+`ApplicantServices` sends them only after a successful `ActivityType` change. A mail
+delivery failure is logged and does not undo an already persisted application or stage
+update.
 
 ## 23. Collections and indexes
 

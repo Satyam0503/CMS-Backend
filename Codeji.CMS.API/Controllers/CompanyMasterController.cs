@@ -3,10 +3,12 @@ using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.Company.CustomAttribute;
 using Codeji.CMS.DTO.Company.Department;
 using Codeji.CMS.DTO.Company.JobTitle;
+using Codeji.CMS.DTO.Attendance;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -20,11 +22,25 @@ public class CompanyMasterController : BaseApiController
 {
     readonly ICompanyMasterService _companyMasterService;
     readonly IHttpContextAccessor _httpContextAccessor;
-    public CompanyMasterController(ICompanyMasterService companyService, IHttpContextAccessor httpContextAccessor)
+    readonly IOfficeScheduleSettingsService _officeScheduleSettings;
+    public CompanyMasterController(ICompanyMasterService companyService, IHttpContextAccessor httpContextAccessor, IOfficeScheduleSettingsService officeScheduleSettings)
     {
         _companyMasterService = companyService;
         _httpContextAccessor = httpContextAccessor;
+        _officeScheduleSettings = officeScheduleSettings;
     }
+
+    [HttpGet]
+    [Route("OfficeSchedule")]
+    [Authorize(Policy = "AdminOnly")]
+    public Task<Result<OfficeScheduleSettingsDto>> GetOfficeSchedule(CancellationToken cancellationToken) =>
+        _officeScheduleSettings.GetAsync(CurrentContext.CompanyId(_httpContextAccessor), cancellationToken);
+
+    [HttpPut]
+    [Route("OfficeSchedule")]
+    [Authorize(Policy = "AdminOnly")]
+    public Task<Result<OfficeScheduleSettingsDto>> SaveOfficeSchedule(OfficeScheduleSettingsDto request, CancellationToken cancellationToken) =>
+        _officeScheduleSettings.SaveAsync(CurrentContext.CompanyId(_httpContextAccessor), CurrentContext.UserId(_httpContextAccessor), request, cancellationToken);
 
     // company department actions
 

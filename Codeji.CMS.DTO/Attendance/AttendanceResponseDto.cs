@@ -8,6 +8,8 @@ public class AttendanceResponseDto
     public DateTime? CheckOutTime { get; set; }
     public string Status { get; set; } = "P";
     public string Remarks { get; set; }
+    public string? SourceType { get; set; }
+    public string? SourceId { get; set; }
     public int LateCount { get; set; }
     public int EarlyExitCount { get; set; }
 }

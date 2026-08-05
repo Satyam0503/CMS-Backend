@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using MapsterMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
@@ -111,13 +112,49 @@ namespace Codeji.CMS.Services.Employees
         public async Task<Result<InviteEmployeeDto>> InviteNewEmployee(InviteEmployeeDto model, string currentUserId)
         {
             Result<InviteEmployeeDto> result = new() { Success = false };
-            bool IsEmpIdExist = await _employeeRepository.Exist(e => e.EmployeeId.Equals(model.EmployeeId, StringComparison.OrdinalIgnoreCase) || e.Email == model.Email);
+            UserModel? currentUser = await _middlewareService.GetUserById(currentUserId);
+            if (string.IsNullOrWhiteSpace(currentUser?.CompanyId))
+            {
+                result.Message = "Current user does not have a company assigned.";
+                return result;
+            }
+
+            string companyId = currentUser.CompanyId;
+            Company? company = await _companyRepository.FirstOrDefault(c => c.CompanyId == companyId);
+            if (company?.AutoGenerateEmployeeId != false)
+            {
+                model.EmployeeId = await GenerateNextEmployeeId(companyId);
+            }
+
+            if (string.IsNullOrWhiteSpace(model.EmployeeId))
+            {
+                result.Message = "Employee ID is required when automatic generation is disabled.";
+                return result;
+            }
+
+            bool IsEmpIdExist = await _employeeRepository.Exist(e =>
+                (e.CompanyId == companyId && e.EmployeeId.Equals(model.EmployeeId, StringComparison.OrdinalIgnoreCase))
+                || e.Email == model.Email);
             if (IsEmpIdExist)
             {
                 result.StatusCode = CustomStatusCode.EmployeeIdAlreadyExist;
                 return result;
             }
             var userId = Guid.NewGuid().ToString();
+            if (!string.IsNullOrWhiteSpace(model.ReportingManager))
+            {
+                if (string.Equals(model.ReportingManager, userId, StringComparison.Ordinal))
+                {
+                    result.Message = "An employee cannot be their own reporting manager.";
+                    return result;
+                }
+                var manager = await _employeeRepository.FirstOrDefault(x => x.UserId == model.ReportingManager && x.CompanyId == companyId && x.Status && !x.IsDeleted);
+                if (manager is null)
+                {
+                    result.Message = "Reporting manager must be an active employee in the same company.";
+                    return result;
+                }
+            }
             EmpUser employee = new EmpUser()
             {
                 UserId = userId,
@@ -125,10 +162,12 @@ namespace Codeji.CMS.Services.Employees
                 LastName = model.LastName,
                 Email = model.Email,
                 EmployeeId = model.EmployeeId,
+                CompanyId = companyId,
                 RoleId = model.RoleId ?? string.Empty,
                 Department = model.DepartmentId ?? string.Empty,
                 JobRole = model.JobRoleId ?? string.Empty,
                 Gender = model.Gender ?? string.Empty,
+                ReportingManager = model.ReportingManager ?? string.Empty,
                 IsEmailVerified = false,
                 Status = true
             };
@@ -403,8 +442,8 @@ namespace Codeji.CMS.Services.Employees
             await _userSecurityTokenRepository.AddOne(securityToken);
 
             //Acknowledgement Email Logic 
-            MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.EmployeeWelcomeMail);
-            string replacedBody = HtmlTemplate.Render(emailContent.body, new
+            RepositoryEmailTemplate.TryGet(EnumsHelper.MailType.EmployeeWelcomeMail, out var templateSubject, out var templateBody);
+            string replacedBody = HtmlTemplate.Render(string.IsNullOrWhiteSpace(templateBody) ? "<p>Welcome, [EmployeeName]!</p><p><a href=\"[PasswordCreationLink]\">Create your password</a></p>" : templateBody, new
             {
                 EmployeeName = employee.FirstName + " " + employee.LastName,
                 PasswordCreationLink = $"{ConfigManager.AppSettings.AppUrl.TrimEnd('/')}/auth/createpassword?token={Uri.EscapeDataString(token)}&uid={employee.UserId}",
@@ -420,7 +459,7 @@ namespace Codeji.CMS.Services.Employees
                 await _middlewareService.EmailSendAndSave(new EmpEmailLogs()
                 {
                     UserTo = employee.UserId,
-                    Subject = emailContent.subject,
+                    Subject = HtmlTemplate.Render(string.IsNullOrWhiteSpace(templateSubject) ? "Welcome to [CompanyName]" : templateSubject, new { CompanyName = company?.CompanyName ?? string.Empty }),
                     Body = replacedBody,
                     EmailLogType = EnumsHelper.MailType.EmployeeWelcomeMail,
                     Email = employee.Email,
@@ -431,6 +470,17 @@ namespace Codeji.CMS.Services.Employees
 
         public async Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId)
         {
+            if (!string.IsNullOrWhiteSpace(user.ReportingManager))
+            {
+                if (string.Equals(user.ReportingManager, userId, StringComparison.Ordinal))
+                    return new Result<UserModel> { Success = false, Message = "An employee cannot be their own reporting manager." };
+
+                var employee = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
+                var manager = employee is null ? null : await _employeeRepository.FirstOrDefault(x =>
+                    x.UserId == user.ReportingManager && x.CompanyId == employee.CompanyId && x.Status && !x.IsDeleted);
+                if (manager is null)
+                    return new Result<UserModel> { Success = false, Message = "Reporting manager must be an active employee in the same company." };
+            }
             UpdateDefinitionBuilder<EmpUser> update = Builders<EmpUser>.Update;
             List<UpdateDefinition<EmpUser>> updateDefinition = new();
             foreach (PropertyInfo property in user.GetType().GetProperties().Where(x => x.GetValue(user) != null))
@@ -526,6 +576,12 @@ namespace Codeji.CMS.Services.Employees
         }
         public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters)
         {
+            string currentRoleId = CurrentContext.UserRoleId(_httpContextAccessor);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            bool canViewEmployeePhoneNumbers =
+                await _roleService.IsRoleTypeMatch(currentRoleId, EnumsHelper.Roles.Administrator, companyId)
+                || await _roleService.IsRoleTypeMatch(currentRoleId, EnumsHelper.Roles.HR, companyId)
+                || await _roleService.IsRoleTypeMatch(currentRoleId, EnumsHelper.Roles.HRExecutive, companyId);
             List<EmpUser> employeeList = [];
             int totalRecords = 0;
             if (filters == null)
@@ -553,7 +609,11 @@ namespace Codeji.CMS.Services.Employees
                     TotalRecords = totalRecords,
                 };
             }
-            string[] depId = []; employeeList.Select(x => x.Department).Distinct().ToArray();
+            string[] depId = employeeList
+                .Select(x => x.Department)
+                .Where(departmentId => !string.IsNullOrWhiteSpace(departmentId))
+                .Distinct()
+                .ToArray();
             // Materialize immediately. GetAll returns a cursor-backed IEnumerable;
             // letting the in-memory join below force the enumeration triggers a
             // Mongo LINQ3 + .NET 10 reflection failure inside PartialEvaluator.
@@ -578,7 +638,7 @@ namespace Codeji.CMS.Services.Employees
                             EmployeeId = emp.EmployeeId,
                             JobRole = jobTitle != null ? jobTitle.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label) : null,
                             Department = department?.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label),
-                            PhoneNumber = emp.PhoneNumber,
+                            PhoneNumber = canViewEmployeePhoneNumbers ? emp.PhoneNumber : null,
                             DateOfBirth = emp.DateOfBirth,
                             FullProfileUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl),
                             IsVerified = emp.IsEmailVerified,
@@ -1216,21 +1276,43 @@ namespace Codeji.CMS.Services.Employees
             return result;
         }
 
-        // get last employee id
-        public async Task<Result> GetLastEmployeeId(string companyId)
+        public async Task<Result> GetNextEmployeeId(string companyId)
         {
-            Result result = new();
-            var lastAddedEmployee = (await _employeeRepository.GetAll(e => e.CompanyId == companyId, false)).OrderByDescending(e => e.CreatedDate).FirstOrDefault();
-            if (lastAddedEmployee != null)
+            if (string.IsNullOrWhiteSpace(companyId))
             {
-                result.Success = true;
-                result.Message = lastAddedEmployee.EmployeeId;
+                return new Result { Message = "Company is required." };
             }
-            else
+
+            Company? company = await _companyRepository.FirstOrDefault(c => c.CompanyId == companyId);
+            return new Result
             {
-                result.Message = null;
-            }
-            return result;
+                Success = true,
+                Message = company?.AutoGenerateEmployeeId == false
+                    ? null
+                    : await GenerateNextEmployeeId(companyId)
+            };
+        }
+
+        private async Task<string> GenerateNextEmployeeId(string companyId)
+        {
+            Company? company = await _companyRepository.FirstOrDefault(c => c.CompanyId == companyId);
+            string companyCode = new string((company?.EmployeeIdPrefix ?? string.Empty)
+                .Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(companyCode))
+                companyCode = string.Concat((company?.CompanyName ?? string.Empty)
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(word => word[0])).ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(companyCode)) companyCode = "EMP";
+
+            string prefix = $"{companyCode}-";
+            int nextNumber = (await _employeeRepository.GetAll(e => e.CompanyId == companyId))
+                .Select(e => e.EmployeeId)
+                .Where(employeeId => !string.IsNullOrWhiteSpace(employeeId) && employeeId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                .Select(employeeId => int.TryParse(employeeId[prefix.Length..], out int number) ? number : 0)
+                .DefaultIfEmpty(0)
+                .Max() + 1;
+
+            return $"{prefix}{nextNumber:D4}";
         }
         public async Task<Result> ResendInviteLink(string userId, string currentUserId)
         {

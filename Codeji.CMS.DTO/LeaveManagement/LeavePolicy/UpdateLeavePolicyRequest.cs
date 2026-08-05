@@ -22,4 +22,8 @@ public class UpdateLeavePolicyRequest
     public required bool WeekendInclusive { get; set; }
     public required bool HolidayInclusive { get; set; }
     public string? AttendanceStatusCode { get; set; }
+    public string[]? ApplicableTo { get; set; } = [];
+    [EnumDataType(typeof(LeavePolicyType), ErrorMessage = "Invalid leave policy type value")]
+    public LeavePolicyType PolicyType { get; set; } = LeavePolicyType.Leave;
+    public WorkFromHomePolicySettingsRequest? WorkFromHome { get; set; }
 }

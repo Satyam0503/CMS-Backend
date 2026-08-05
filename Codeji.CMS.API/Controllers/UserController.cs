@@ -65,13 +65,13 @@ public class UserController : BaseApiController
         return await _employeeService.BulkImportEmployees(model, currentUserId);
     }
 
-    [Route("GetLastEmployeeId")]
+    [Route("GetNextEmployeeId")]
     [HttpGet]
     [ModulePermission(AppModule.Employees, Permission.View)]
-    public async Task<Result> GetLastEmployeeId()
+    public async Task<Result> GetNextEmployeeId()
     {
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-        return await _employeeService.GetLastEmployeeId(companyId);
+        return await _employeeService.GetNextEmployeeId(companyId);
     }
 
     [Route("EditEmployees")]
@@ -79,6 +79,13 @@ public class UserController : BaseApiController
     [ModulePermission(AppModule.Employees, Permission.Edit)]
     public async Task<Result<UserModel>> EditEmployees(EmployeePersonalInfo user, string userId)
     {
+        // A user with Employees.Edit (for example HR) must not gain authority to
+        // change their own role, department, employment data or financial credentials.
+        // Route self-edits through the restricted mapping below and discard all
+        // privileged fields supplied by the client.
+        if (string.Equals(userId, CurrentContext.UserId(_httpContextAccessor), StringComparison.Ordinal))
+            return await _employeeService.EditEmployee(ToSelfEditRequest(user), userId);
+
         UserModel isUserExist = await _employeeService.GetEmployeeById(userId);
         if (userId != isUserExist.UserId)
         {
@@ -100,21 +107,36 @@ public class UserController : BaseApiController
     public async Task<Result<UserModel>> EditOwnProfile(EmployeeSelfEditDto user)
     {
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
-        EmployeePersonalInfo mapped = new()
-        {
-            FirstName = user.FirstName,
-            LastName = user.LastName,
-            RoleId = "",
-            Gender = user.Gender,
-            DateOfBirth = user.DateOfBirth,
-            PhoneNumber = user.PhoneNumber,
-            BloodGroup = user.BloodGroup,
-            PersonalEmail = user.PersonalEmail,
-            EmergencyContact = user.EmergencyContact,
-            Address = user.Address,
-        };
-        return await _employeeService.EditEmployee(mapped, currentUserId);
+        return await _employeeService.EditEmployee(ToSelfEditRequest(user), currentUserId);
     }
+
+    private static EmployeePersonalInfo ToSelfEditRequest(EmployeeSelfEditDto user) => new()
+    {
+        FirstName = user.FirstName,
+        LastName = user.LastName,
+        RoleId = "",
+        Gender = user.Gender,
+        DateOfBirth = user.DateOfBirth,
+        PhoneNumber = user.PhoneNumber,
+        BloodGroup = user.BloodGroup,
+        PersonalEmail = user.PersonalEmail,
+        EmergencyContact = user.EmergencyContact,
+        Address = user.Address,
+    };
+
+    private static EmployeePersonalInfo ToSelfEditRequest(EmployeePersonalInfo user) => new()
+    {
+        FirstName = user.FirstName,
+        LastName = user.LastName,
+        RoleId = "",
+        Gender = user.Gender,
+        DateOfBirth = user.DateOfBirth,
+        PhoneNumber = user.PhoneNumber,
+        BloodGroup = user.BloodGroup,
+        PersonalEmail = user.PersonalEmail,
+        EmergencyContact = user.EmergencyContact,
+        Address = user.Address,
+    };
 
     [Route("GetAllEmployees")]
     [HttpPost]

@@ -1,5 +1,6 @@
 ﻿
 using System.Text.RegularExpressions;
+using System.Net;
 using MailKit.Net.Smtp;
 using MimeKit;
 using SendGrid;
@@ -9,6 +10,28 @@ namespace Codeji.CMS.Utility.Helpers
 
     public class Emailer
     {
+        public static string BuildProfessionalHtmlBody(string? body)
+        {
+            var content = string.IsNullOrWhiteSpace(body)
+                ? "<p>No additional details were provided.</p>"
+                : body;
+
+            // Full HTML documents are already responsible for their own outer structure.
+            if (Regex.IsMatch(content, @"<html[\s>]", RegexOptions.IgnoreCase)) return content;
+
+            var brandName = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(ConfigManager.EmailSettings?.FromName)
+                ? "Codeji"
+                : ConfigManager.EmailSettings.FromName.Trim());
+            var year = DateTime.UtcNow.Year;
+            return $"<!doctype html><html><body style=\"margin:0;padding:0;background:#f4f6f8;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">" +
+                   $"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#f4f6f8;padding:32px 12px;\"><tr><td align=\"center\">" +
+                   $"<table role=\"presentation\" width=\"600\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:100%;max-width:600px;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;\">" +
+                   $"<tr><td style=\"padding:22px 32px;background:#132b3a;color:#ffffff;font-size:20px;font-weight:700;\">{brandName}</td></tr>" +
+                   $"<tr><td style=\"padding:32px;font-size:15px;line-height:1.6;\">{content}</td></tr>" +
+                   $"<tr><td style=\"padding:18px 32px;background:#f9fafb;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;line-height:1.5;\">This is an automated message from {brandName}. Please do not reply directly to this email.<br />&copy; {year} {brandName}. All rights reserved.</td></tr>" +
+                   "</table></td></tr></table></body></html>";
+        }
+
         public static async Task<(bool isSent, string log)> SendMail(string to, string subject, string body, string[] cc = null, string[] bcc = null, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
         {
             try
@@ -21,7 +44,7 @@ namespace Codeji.CMS.Utility.Helpers
                 {
                     return (false, "Invalid email address format.");
                 }
-                await SendEmailAsync(to, subject, body, cc, bcc, attachments);
+                await SendEmailAsync(to, subject, BuildProfessionalHtmlBody(body), cc, bcc, attachments);
                 return (true, string.Empty);
             }
             catch (Exception ex)

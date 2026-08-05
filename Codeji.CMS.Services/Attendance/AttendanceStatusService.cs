@@ -5,38 +5,43 @@ using System.Linq.Expressions;
 public interface IAttendanceStatusService
 {
     Task<List<AttendanceStatusSettingDto>> Get(string companyId, bool activeOnly);
+    Task EnsureCompanyDefaults(string companyId);
     Task<Result> Save(string companyId, AttendanceStatusSettingDto dto);
 }
 
 public class AttendanceStatusService : IAttendanceStatusService
 {
     private readonly IMongoDbRepository<AttendanceStatusSetting> _repository;
-    private static readonly (string Code, string Name, bool Time, decimal Paid, decimal Unpaid)[] Defaults =
+    private static readonly (string Code, string Name, bool Time, decimal Paid, decimal Unpaid, bool LeaveEligible, string Color)[] Defaults =
     [
-        ("P","Present",true,1,0), ("A","Absent",false,0,1), ("SL","Sick Leave",false,1,0),
-        ("CL","Casual Leave",false,1,0), ("EL","Earned Leave",false,1,0), ("WFH","Work From Home",true,1,0),
-        ("HD","Half Day",true,.5m,.5m), ("ED","Early Departure",true,1,0), ("LHD","Late Arrival-Half Day",true,.5m,.5m),
-        ("WFH+WFO","Half WFH and Half WFO",true,1,0), ("COMP-OFF","Compensatory Off",false,1,0),
-        ("CL-HALF","Casual Leave (Half Day)",false,.5m,0), ("SL-HALF","Sick Leave (Half Day)",false,.5m,0),
-        ("WFH-HD","WFH with Half Day",true,.5m,.5m)
-        ,("UL","Unpaid Leave",false,0,1)
+        ("P","Present",true,1,0,false,"#2E7D32"), ("A","Absent",false,0,1,false,"#D32F2F"), ("SL","Sick Leave",false,1,0,true,"#7B1FA2"),
+        ("CL","Casual Leave",false,1,0,true,"#1565C0"), ("EL","Earned Leave",false,1,0,true,"#00838F"), ("WFH","Work From Home",true,1,0,false,"#0277BD"),
+        ("HD","Half Day",true,.5m,.5m,false,"#EF6C00"), ("ED","Early Departure",true,1,0,false,"#6D4C41"), ("LHD","Late Arrival-Half Day",true,.5m,.5m,false,"#F57C00"),
+        ("WFH+WFO","Half WFH and Half WFO",true,1,0,false,"#00838F"), ("COMP-OFF","Compensatory Off",false,1,0,true,"#388E3C"),
+        ("CL-HALF","Casual Leave (Half Day)",false,.5m,0,true,"#5C6BC0"), ("SL-HALF","Sick Leave (Half Day)",false,.5m,0,true,"#8E24AA"),
+        ("WFH-HD","WFH with Half Day",true,.5m,.5m,false,"#039BE5"), ("UL","Unpaid Leave",false,0,1,true,"#C62828")
     ];
     public AttendanceStatusService(IMongoDbRepository<AttendanceStatusSetting> repository) => _repository = repository;
 
     public async Task<List<AttendanceStatusSettingDto>> Get(string companyId, bool activeOnly)
     {
+        await EnsureCompanyDefaults(companyId);
         var items = (await _repository.GetAll(x => x.CompanyId == companyId)).ToList();
-        if (items.Count == 0)
+        return items.Where(x => !activeOnly || x.IsActive).OrderBy(x => x.SortOrder).Select(x => new AttendanceStatusSettingDto { Id=x.Id, Code=x.Code, Name=x.Name, IsActive=x.IsActive, IsSystem=x.IsSystem, SortOrder=x.SortOrder, RequiresTime=x.RequiresTime, IsAvailableForLeaveManagement=x.IsAvailableForLeaveManagement, ColorHex=string.IsNullOrWhiteSpace(x.ColorHex) ? "#607D8B" : x.ColorHex, PaidDayFraction=x.PaidDayFraction, UnpaidDayFraction=x.UnpaidDayFraction }).ToList();
+    }
+
+    public async Task EnsureCompanyDefaults(string companyId)
+    {
+        if (string.IsNullOrWhiteSpace(companyId)) throw new ArgumentException("Company id is required.", nameof(companyId));
+        if (await _repository.Exist(x => x.CompanyId == companyId)) return;
+
+        var defaults = Defaults.Select((d, i) => new AttendanceStatusSetting
         {
-            for (var i = 0; i < Defaults.Length; i++)
-            {
-                var d = Defaults[i];
-                var setting = new AttendanceStatusSetting { CompanyId=companyId, Code=d.Code, Name=d.Name, IsSystem=true, SortOrder=i, RequiresTime=d.Time, PaidDayFraction=d.Paid, UnpaidDayFraction=d.Unpaid };
-                items.Add(setting);
-            }
-            await _repository.AddMany(items);
-        }
-        return items.Where(x => !activeOnly || x.IsActive).OrderBy(x => x.SortOrder).Select(x => new AttendanceStatusSettingDto { Id=x.Id, Code=x.Code, Name=x.Name, IsActive=x.IsActive, IsSystem=x.IsSystem, SortOrder=x.SortOrder, RequiresTime=x.RequiresTime, PaidDayFraction=x.PaidDayFraction, UnpaidDayFraction=x.UnpaidDayFraction }).ToList();
+            CompanyId = companyId, Code = d.Code, Name = d.Name, IsSystem = true,
+            SortOrder = i, RequiresTime = d.Time, IsAvailableForLeaveManagement = d.LeaveEligible,
+            ColorHex = d.Color, PaidDayFraction = d.Paid, UnpaidDayFraction = d.Unpaid
+        }).ToList();
+        await _repository.AddMany(defaults);
     }
 
     public async Task<Result> Save(string companyId, AttendanceStatusSettingDto dto)
@@ -45,11 +50,15 @@ public class AttendanceStatusService : IAttendanceStatusService
             return new Result { Success=false, Message="Paid and unpaid fractions must each be between 0 and 1 and their sum cannot exceed 1." };
         if (string.IsNullOrWhiteSpace(dto.Code) || string.IsNullOrWhiteSpace(dto.Name))
             return new Result { Success=false, Message="Attendance status code and name are required." };
+        if (string.IsNullOrWhiteSpace(dto.ColorHex) || !System.Text.RegularExpressions.Regex.IsMatch(dto.ColorHex, "^#[0-9A-Fa-f]{6}$"))
+            return new Result { Success=false, Message="Attendance status color must be a six-digit hexadecimal value." };
+        if (dto.IsAvailableForLeaveManagement && dto.RequiresTime)
+            return new Result { Success=false, Message="A status that requires clock-in/out cannot be available for leave policies." };
         dto.Code = dto.Code.Trim().ToUpperInvariant();
         var existing = await _repository.FirstOrDefault(x => x.CompanyId == companyId && (x.Id == dto.Id || x.Code == dto.Code));
         if (existing == null)
-            return await _repository.AddOne(new AttendanceStatusSetting { CompanyId=companyId, Code=dto.Code, Name=dto.Name.Trim(), IsActive=dto.IsActive, SortOrder=dto.SortOrder, RequiresTime=dto.RequiresTime, PaidDayFraction=dto.PaidDayFraction, UnpaidDayFraction=dto.UnpaidDayFraction });
-        existing.Name=dto.Name.Trim(); existing.IsActive=dto.IsActive; existing.SortOrder=dto.SortOrder; existing.RequiresTime=dto.RequiresTime; existing.PaidDayFraction=dto.PaidDayFraction; existing.UnpaidDayFraction=dto.UnpaidDayFraction;
+            return await _repository.AddOne(new AttendanceStatusSetting { CompanyId=companyId, Code=dto.Code, Name=dto.Name.Trim(), IsActive=dto.IsActive, SortOrder=dto.SortOrder, RequiresTime=dto.RequiresTime, IsAvailableForLeaveManagement=dto.IsAvailableForLeaveManagement, ColorHex=dto.ColorHex.ToUpperInvariant(), PaidDayFraction=dto.PaidDayFraction, UnpaidDayFraction=dto.UnpaidDayFraction });
+        existing.Name=dto.Name.Trim(); existing.IsActive=dto.IsActive; existing.SortOrder=dto.SortOrder; existing.RequiresTime=dto.RequiresTime; existing.IsAvailableForLeaveManagement=dto.IsAvailableForLeaveManagement; existing.ColorHex=dto.ColorHex.ToUpperInvariant(); existing.PaidDayFraction=dto.PaidDayFraction; existing.UnpaidDayFraction=dto.UnpaidDayFraction;
         Expression<Func<AttendanceStatusSetting, bool>> filter = x => x.Id == existing.Id && x.CompanyId == companyId;
         return await _repository.Update(filter, existing);
     }

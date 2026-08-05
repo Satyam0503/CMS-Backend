@@ -147,6 +147,49 @@ public class AccountAuthTests
     }
 
     [Fact]
+    public async Task ResendEmailVerification_UnverifiedUser_ReplacesTokenAndSendsVerificationLink()
+    {
+        var fixture = new AccountFixture();
+        var user = CreateUser();
+        user.IsEmailVerified = false;
+        UserSecurityToken? storedToken = null;
+        EmpEmailLogs? sentEmail = null;
+
+        fixture.EmployeeRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>(), false)).ReturnsAsync(user);
+        fixture.CompanyRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Company, bool>>>(), false)).ReturnsAsync(new Company { CompanyId = user.CompanyId, CompanyName = "Test Company", DefaultLanguage = "English" });
+        fixture.SecurityTokenRepository.Setup(x => x.UpdateMany(It.IsAny<FilterDefinition<UserSecurityToken>>(), It.IsAny<UpdateDefinition<UserSecurityToken>>())).ReturnsAsync(new Result { Success = true });
+        fixture.SecurityTokenRepository.Setup(x => x.AddOne(It.IsAny<UserSecurityToken>())).Callback<UserSecurityToken>(token => storedToken = token).ReturnsAsync(new Result { Success = true });
+        fixture.MiddlewareService.Setup(x => x.EmailSendAndSaveWithResult(It.IsAny<EmpEmailLogs>())).Callback<EmpEmailLogs>(email => sentEmail = email).ReturnsAsync((true, string.Empty));
+
+        var result = await fixture.Service.ResendEmailVerification(user.Email);
+
+        Assert.True(result.Success);
+        Assert.NotNull(storedToken);
+        Assert.Equal(EnumsHelper.SecurityTokenType.EmailVerification, storedToken.Type);
+        Assert.NotNull(sentEmail);
+        Assert.Contains("/api/account/verify-email?token=", sentEmail.Body);
+        fixture.SecurityTokenRepository.Verify(x => x.UpdateMany(It.IsAny<FilterDefinition<UserSecurityToken>>(), It.IsAny<UpdateDefinition<UserSecurityToken>>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ResendEmailVerification_DeliveryFailure_ReturnsRetryableError()
+    {
+        var fixture = new AccountFixture();
+        var user = CreateUser();
+        user.IsEmailVerified = false;
+        fixture.EmployeeRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>(), false)).ReturnsAsync(user);
+        fixture.CompanyRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Company, bool>>>(), false)).ReturnsAsync(new Company { CompanyId = user.CompanyId, CompanyName = "Test Company", DefaultLanguage = "English" });
+        fixture.SecurityTokenRepository.Setup(x => x.UpdateMany(It.IsAny<FilterDefinition<UserSecurityToken>>(), It.IsAny<UpdateDefinition<UserSecurityToken>>())).ReturnsAsync(new Result { Success = true });
+        fixture.SecurityTokenRepository.Setup(x => x.AddOne(It.IsAny<UserSecurityToken>())).ReturnsAsync(new Result { Success = true });
+        fixture.MiddlewareService.Setup(x => x.EmailSendAndSaveWithResult(It.IsAny<EmpEmailLogs>())).ReturnsAsync((false, "SMTP unavailable"));
+
+        var result = await fixture.Service.ResendEmailVerification(user.Email);
+
+        Assert.False(result.Success);
+        Assert.Equal(503, result.StatusCode);
+    }
+
+    [Fact]
     public async Task RefreshToken_ValidToken_RotatesTokenAndRevokesPreviousToken()
     {
         var fixture = new AccountFixture();
@@ -285,12 +328,13 @@ public class AccountAuthTests
         public Mock<IMongoDbRepository<RefreshToken>> RefreshTokenRepository { get; } = new();
         public Mock<IMongoDbRepository<Roles>> RoleRepository { get; } = new();
         public Mock<IMongoDbRepository<UserSecurityToken>> SecurityTokenRepository { get; } = new();
+        public Mock<IMongoDbRepository<Company>> CompanyRepository { get; } = new();
+        public Mock<IMiddlewareService> MiddlewareService { get; } = new();
         public AccountServices Service { get; }
 
         public AccountFixture()
         {
-            var middlewareService = new Mock<IMiddlewareService>();
-            middlewareService
+            MiddlewareService
                 .Setup(x => x.EmailSendAndSaveWithResult(It.IsAny<EmpEmailLogs>()))
                 .ReturnsAsync((true, string.Empty));
             Service = new AccountServices(
@@ -298,10 +342,10 @@ public class AccountAuthTests
                 EmployeeRepository.Object,
                 RefreshTokenRepository.Object,
                 RoleRepository.Object,
-                Mock.Of<IMongoDbRepository<Company>>(),
+                CompanyRepository.Object,
                 Mock.Of<IMongoDbRepository<MailTemplate>>(),
                 Mock.Of<IPriorityTaskQueue>(),
-                middlewareService.Object,
+                MiddlewareService.Object,
                 SecurityTokenRepository.Object);
         }
     }

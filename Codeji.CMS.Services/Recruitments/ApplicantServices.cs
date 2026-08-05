@@ -404,16 +404,19 @@ namespace Codeji.CMS.Services.Recruitments
             var vacancy = await _jobVacancyService.GetVacancyById(applicant.VacancyId);
             if (vacancy is null) return;
             var currentUser = await _middlewareService.GetUserById(CurrentContext.UserId(_httpContextAccessor));
-            MailTemplate? emailContent = applicant.ActivityType switch
+            EnumsHelper.MailType? templateType = applicant.ActivityType switch
             {
-                EnumsHelper.ActivityType.New => await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ApplyNowMailToApplicant),
-                EnumsHelper.ActivityType.Selected => await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.SelectedMail),
-                EnumsHelper.ActivityType.Rejected => await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.RejectedMail),
+                EnumsHelper.ActivityType.New => EnumsHelper.MailType.ApplyNowMailToApplicant,
+                EnumsHelper.ActivityType.Selected => EnumsHelper.MailType.SelectedMail,
+                EnumsHelper.ActivityType.Rejected => EnumsHelper.MailType.RejectedMail,
                 _ => null
             };
+            string templateSubject = string.Empty;
+            string templateBody = string.Empty;
+            if (templateType.HasValue) RepositoryEmailTemplate.TryGet(templateType.Value, out templateSubject, out templateBody);
 
             string candidateName = applicant.FirstName + " " + applicant.LastName;
-            string subject = emailContent?.subject ?? $"Update on your application for {vacancy.Title}";
+            string subject = string.IsNullOrWhiteSpace(templateSubject) ? $"Update on your application for {vacancy.Title}" : templateSubject;
             string fallbackBody = applicant.ActivityType switch
             {
                 EnumsHelper.ActivityType.New => "<p>Hi [CandidateName],</p><p>We received your application for <strong>[JobTitle]</strong>. Our team will review it and get back to you soon.</p>",
@@ -426,7 +429,7 @@ namespace Codeji.CMS.Services.Recruitments
                 _ => "<p>Hi [CandidateName],</p><p>There is an update on your application for <strong>[JobTitle]</strong>. Our team will contact you if any action is needed.</p>"
             };
 
-            string emailBody = HtmlTemplate.Render(emailContent?.body ?? fallbackBody, new
+            string emailBody = HtmlTemplate.Render(string.IsNullOrWhiteSpace(templateBody) ? fallbackBody : templateBody, new
             {
                 CandidateName = candidateName,
                 JobTitle = vacancy.Title,
@@ -441,7 +444,7 @@ namespace Codeji.CMS.Services.Recruitments
                     UserTo = applicant.ApplicantId,
                     Subject = subject,
                     Body = emailBody,
-                    EmailLogType = emailContent?.mailType ?? EnumsHelper.MailType.ApplyNowMailToApplicant,
+                    EmailLogType = templateType ?? EnumsHelper.MailType.ApplyNowMailToApplicant,
                     Email = applicant.Email,
                     UserFrom = currentUser != null ? currentUser.UserId : string.Empty
                 });
@@ -455,13 +458,13 @@ namespace Codeji.CMS.Services.Recruitments
 
             Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == vacancy.CompanyId);
             string candidateName = $"{applicant.FirstName} {applicant.LastName}".Trim();
-            MailTemplate? template = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ApplyNowMailToHR);
+            RepositoryEmailTemplate.TryGet(EnumsHelper.MailType.ApplyNowMailToHR, out var templateSubject, out var templateBody);
             string subject = HtmlTemplate.Render(
-                template?.subject ?? $"New application received for {vacancy.Title}",
+                string.IsNullOrWhiteSpace(templateSubject) ? $"New application received for {vacancy.Title}" : templateSubject,
                 new { CandidateName = candidateName, CandidateEmail = applicant.Email, CandidatePhone = applicant.Phone, JobTitle = vacancy.Title, CompanyName = company?.CompanyName ?? string.Empty });
             string body = HtmlTemplate.Render(
-                template?.body ??
-                "<p>A new application has been submitted.</p><ul><li><strong>Name:</strong> [CandidateName]</li><li><strong>Email:</strong> [CandidateEmail]</li><li><strong>Phone:</strong> [CandidatePhone]</li><li><strong>Job Title:</strong> [JobTitle]</li><li><strong>Company:</strong> [CompanyName]</li></ul>",
+                string.IsNullOrWhiteSpace(templateBody) ?
+                "<p>A new application has been submitted.</p><ul><li><strong>Name:</strong> [CandidateName]</li><li><strong>Email:</strong> [CandidateEmail]</li><li><strong>Phone:</strong> [CandidatePhone]</li><li><strong>Job Title:</strong> [JobTitle]</li><li><strong>Company:</strong> [CompanyName]</li></ul>" : templateBody,
                 new { CandidateName = candidateName, CandidateEmail = applicant.Email, CandidatePhone = applicant.Phone, JobTitle = vacancy.Title, CompanyName = company?.CompanyName ?? string.Empty });
 
             List<(string UserId, string Email)> recipients = await GetRecruitmentRecipients(vacancy.CompanyId, vacancy.RecruiterContactEmail);
@@ -496,7 +499,7 @@ namespace Codeji.CMS.Services.Recruitments
             }
 
             var roleIds = (await _rolesRepository.GetAll(r => r.CompanyId == companyId && !r.IsDeleted &&
-                (r.RoleType == (int)EnumsHelper.Roles.Administrator || r.RoleType == (int)EnumsHelper.Roles.HR)))
+                (r.RoleType == (int)EnumsHelper.Roles.Administrator || r.RoleType == (int)EnumsHelper.Roles.HR || r.RoleType == (int)EnumsHelper.Roles.HRExecutive)))
                 .Select(r => r.RolesId)
                 .Distinct()
                 .ToList();

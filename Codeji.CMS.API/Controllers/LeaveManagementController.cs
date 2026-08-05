@@ -39,7 +39,11 @@ public class LeaveManagementController : BaseApiController
     {
         Result result = new();
         if (!ModelState.IsValid) return result;
-        if ((model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly) && model.AccrualAmount <= 0)
+        // WFH is an attendance policy and never creates a leave balance.  Its
+        // inherited accrual fields must not prevent HR from saving WFH rules.
+        if (model.PolicyType == EnumsHelper.LeavePolicyType.Leave &&
+            (model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly) &&
+            model.AccrualAmount <= 0)
         {
             result.StatusCode = CustomStatusCode.AccrualAmountRequired;
             return result;
@@ -69,7 +73,10 @@ public class LeaveManagementController : BaseApiController
     {
         Result<UpdateLeavePolicyRequest> result = new() { Success = false };
         if (!ModelState.IsValid) return result;
-        if ((model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly) && model.AccrualAmount <= 0)
+        // WFH is an attendance policy and does not accrue a leave balance.
+        if (model.PolicyType == EnumsHelper.LeavePolicyType.Leave &&
+            (model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly || model.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Yearly) &&
+            model.AccrualAmount <= 0)
         {
             result.StatusCode = CustomStatusCode.AccrualAmountRequired;
             return result;
@@ -108,11 +115,30 @@ public class LeaveManagementController : BaseApiController
         return result;
     }
 
+    // Profile self-service is deliberately separate from the Leave Management module.
+    // The employee identity always comes from the authenticated session.
+    [Route("me/balances")]
+    [HttpGet]
+    public async Task<Result<EmployeeLeaveBalanceResponseDto>> GetMyLeaveBalance()
+    {
+        return await _leaveManagementService.GetEmployeeLeaveBalance(
+            CurrentContext.UserId(_httpContextAccessor));
+    }
+
     // leave request services 
     [Route("CreateLeaveRequest")]
     [HttpPost]
     [ModulePermission(AppModule.LeaveManagement, Permission.Create)]
     public async Task<Result> CreateLeaveRequest([FromBody] LeaveRequestDto leaveRequest)
+    {
+        if (!ModelState.IsValid) return new Result();
+        leaveRequest.UserId = CurrentContext.UserId(_httpContextAccessor);
+        return await _leaveManagementService.CreateLeaveRequest(leaveRequest);
+    }
+
+    [Route("me/requests")]
+    [HttpPost]
+    public async Task<Result> CreateMyLeaveRequest([FromBody] LeaveRequestDto leaveRequest)
     {
         if (!ModelState.IsValid) return new Result();
         leaveRequest.UserId = CurrentContext.UserId(_httpContextAccessor);
@@ -145,6 +171,15 @@ public class LeaveManagementController : BaseApiController
         return await _leaveManagementService.UpdateLeaveRequest(leaveRequest);
     }
 
+    [Route("me/requests")]
+    [HttpPatch]
+    public async Task<Result> UpdateMyLeaveRequest([FromBody] UpdateLeaveRequestDto leaveRequest)
+    {
+        if (!ModelState.IsValid) return new Result();
+        leaveRequest.UserId = CurrentContext.UserId(_httpContextAccessor);
+        return await _leaveManagementService.UpdateLeaveRequest(leaveRequest);
+    }
+
 
     [Route("GetLeaveRequests")]
     [HttpPost]
@@ -163,10 +198,25 @@ public class LeaveManagementController : BaseApiController
         return await _leaveManagementService.GetMyLeaveRequests(leaveFilter);
     }
 
+    [Route("me/requests/search")]
+    [HttpPost]
+    public async Task<Result<MyLeaveRequestResponse>> GetMyProfileLeaveRequests([FromBody] EmpLeaveRequestFilter leaveFilter)
+    {
+        leaveFilter.EmployeeId = CurrentContext.UserId(_httpContextAccessor);
+        return await _leaveManagementService.GetMyLeaveRequests(leaveFilter);
+    }
+
     [Route("DeleteLeaveRequest/{leaveRequestId}")]
     [HttpDelete]
     [ModulePermission(AppModule.LeaveManagement, Permission.Delete)]
     public async Task<Result> DeleteLeaveRequest(string leaveRequestId)
+    {
+        return await _leaveManagementService.DeleteLeaveRequest(leaveRequestId);
+    }
+
+    [Route("me/requests/{leaveRequestId}")]
+    [HttpDelete]
+    public async Task<Result> DeleteMyLeaveRequest(string leaveRequestId)
     {
         return await _leaveManagementService.DeleteLeaveRequest(leaveRequestId);
     }
@@ -199,7 +249,7 @@ public class LeaveManagementController : BaseApiController
         return await _leaveManagementService.GetMonthlyTakenLeaveSummary(year);
     }
 
-    // leave Balance
+    // leave allocation
     [Route("UpdateEmployeeLeaveBalance")]
     [HttpPost]
     [ModulePermission(AppModule.LeaveManagement, [Permission.Create, Permission.Edit])]

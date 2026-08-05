@@ -2,6 +2,7 @@ using Codeji.CMS.Services.LeaveManagement;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Codeji.CMS.Utility.Helpers;
 
 namespace Codeji.CMS.Services.BackgroundTasks;
 
@@ -20,22 +21,21 @@ public class LeaveAccrualHostedService : BackgroundService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var now = DateTime.UtcNow;
-            DateTime nextRun;
-            if (now.Day == 1)
+            var indiaNow = IndiaTime.Now;
+            DateTime nextRunIndia;
+            if (indiaNow.Day == 1)
             {
-                _logger.LogInformation("Running leave accrual service on the 1st of the month: {Now}", now);
+                _logger.LogInformation("Running leave accrual service on the 1st of the month in IST: {Now}", indiaNow);
                 await RunJob(stoppingToken);
-                nextRun = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(1);
-                _logger.LogInformation("Leave accrual service Next run scheduled for: {NextRun}", nextRun);
+                nextRunIndia = new DateTime(indiaNow.Year, indiaNow.Month, 1).AddMonths(1);
             }
             else
             {
-                // Schedule for the 1st of next month if todat is not 1st day of month
-                nextRun = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(1);
-                _logger.LogInformation("Leave accrual service Next run scheduled for: {NextRun}", nextRun);
+                nextRunIndia = new DateTime(indiaNow.Year, indiaNow.Month, 1).AddMonths(1);
             }
-            var delay = nextRun - now;
+            var nextRun = IndiaTime.ToUtc(nextRunIndia);
+            _logger.LogInformation("Leave accrual service next run: {NextRunIndia} IST ({NextRunUtc} UTC)", nextRunIndia, nextRun);
+            var delay = nextRun - DateTime.UtcNow;
             if (delay <= TimeSpan.Zero)
             {
                 delay = TimeSpan.FromSeconds(1);

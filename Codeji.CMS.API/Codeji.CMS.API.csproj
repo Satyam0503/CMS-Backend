@@ -15,7 +15,7 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="HtmlSanitizer" Version="9.0.892" />
+    <PackageReference Include="HtmlSanitizer" Version="9.1.982" />
     <!-- Microsoft.AspNetCore.SignalR is bundled in the .NET 10 framework
          (Microsoft.NET.Sdk.Web); the explicit NuGet ref is redundant and trips
          dotnet watch's NU1510 prune check during hot reload. -->

@@ -10,6 +10,7 @@ namespace Codeji.CMS.Domain.Models
         public string Message { get; set; }
         public int StatusCode { get; set; }
         public int TotalRecords { get; set; }
+        public T Data { get; set; }
         public Result()
         {
             Success = true;

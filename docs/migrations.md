@@ -135,6 +135,15 @@ The two `Add…` migrations are the templates to copy when introducing a new mod
 
 ---
 
+### WFH migrations
+
+| Id | File | What it does |
+|---|---|---|
+| `2026-07-29-AddWorkFromHomeWorkflow` | [AddWorkFromHomeWorkflow.cs](../Codeji.CMS.Migrations/Migrations/AddWorkFromHomeWorkflow.cs) | Adds WFH workflow persistence/indexes and the WFH module/permissions required by the feature |
+| `2026-07-30-SeedCodejiWorkFromHomePolicy` | [SeedCodejiWorkFromHomePolicy.cs](../Codeji.CMS.Migrations/Migrations/SeedCodejiWorkFromHomePolicy.cs) | Attempts the Codeji WFH policy seed only when the identified company/user exists; otherwise records a safe skip |
+| `2026-07-31-GrantWorkFromHomeEmployeeSelfServicePermissions` | [GrantWorkFromHomeEmployeeSelfServicePermissions.cs](../Codeji.CMS.Migrations/Migrations/GrantWorkFromHomeEmployeeSelfServicePermissions.cs) | Grants employee roles WFH self-service permissions for the existing workflow |
+| `2026-08-01-BackfillAttendanceStatusPresentationAndLeaveEligibility` | [BackfillAttendanceStatusPresentationAndLeaveEligibility.cs](../Codeji.CMS.Migrations/Migrations/BackfillAttendanceStatusPresentationAndLeaveEligibility.cs) | Adds missing attendance-status color and leave-policy dropdown eligibility fields without overwriting configured values |
+
 ## Writing a new migration
 
 ### 1. Decide what kind it is

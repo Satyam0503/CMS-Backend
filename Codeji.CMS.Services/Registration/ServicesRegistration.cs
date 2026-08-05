@@ -1,6 +1,7 @@
 
 using Codeji.CMS.Services.Account;
 using Codeji.CMS.Services.Account.Interface;
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Services.Calendar;
 using Codeji.CMS.Services.Calendar.Interface;
 using Codeji.CMS.Services.CareerPortal;
@@ -46,8 +47,17 @@ public static class ServicesRegistration
         services.AddScoped<IAttendancePenaltyService, AttendancePenaltyService>();
         services.AddScoped<IWeeklyOffService, WeeklyOffService>();
         services.AddScoped<IAttendanceEditGuard, AttendanceEditGuard>();
+        services.AddScoped<IEffectiveOfficeScheduleService, EffectiveOfficeScheduleService>();
+        services.AddScoped<IOfficeScheduleSettingsService, OfficeScheduleSettingsService>();
+        services.AddScoped<IAttendanceMutationValidator, AttendanceMutationValidator>();
+        services.AddScoped<IAttendanceInitializationService, AttendanceInitializationService>();
+        services.AddScoped<IAttendanceAuditWriter, AttendanceAuditWriter>();
+        services.AddScoped<IAttendanceOutboxProcessor, AttendanceOutboxProcessor>();
+        services.AddScoped<IAttendanceReminderProcessor, AttendanceReminderProcessor>();
+        services.AddScoped<IAttendancePayrollReadinessService, AttendancePayrollReadinessService>();
         services.AddScoped<ICompanyWorkingCalendarService, CompanyWorkingCalendarService>();
         services.AddScoped<ILeaveAttendanceReconciliationService, LeaveAttendanceReconciliationService>();
+        services.AddScoped<IWorkFromHomeService, WorkFromHomeService>();
         services.AddScoped<IPayrollDivisorPolicyService, PayrollDivisorPolicyService>();
         return services;
     }

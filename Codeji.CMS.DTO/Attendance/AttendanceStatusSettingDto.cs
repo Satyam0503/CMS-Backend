@@ -11,6 +11,8 @@ public class AttendanceStatusSettingDto
     public bool IsSystem { get; set; }
     public int SortOrder { get; set; }
     public bool RequiresTime { get; set; }
+    public bool IsAvailableForLeaveManagement { get; set; }
+    [RegularExpression("^#[0-9A-Fa-f]{6}$")] public string ColorHex { get; set; } = "#607D8B";
     [Range(0, 1)] public decimal PaidDayFraction { get; set; } = 1m;
     [Range(0, 1)] public decimal UnpaidDayFraction { get; set; }
 }

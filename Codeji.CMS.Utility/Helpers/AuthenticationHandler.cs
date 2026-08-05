@@ -10,7 +10,24 @@ namespace Codeji.CMS.Utility.Helpers
     public static class AuthenticationHandler
     {
         public static string HashedPassword(string pass) => BCrypt.Net.BCrypt.HashPassword(pass);
-        public static bool VerifyPassword(string toMatch, string forMatch) => BCrypt.Net.BCrypt.Verify(toMatch, forMatch);
+        public static bool VerifyPassword(string? toMatch, string? forMatch)
+        {
+            if (string.IsNullOrWhiteSpace(toMatch) || string.IsNullOrWhiteSpace(forMatch))
+            {
+                return false;
+            }
+
+            try
+            {
+                return BCrypt.Net.BCrypt.Verify(toMatch, forMatch);
+            }
+            catch (BCrypt.Net.SaltParseException)
+            {
+                // A malformed legacy hash must be treated as an invalid password,
+                // not allowed to turn a login request into a server error.
+                return false;
+            }
+        }
         public static string GenerateJwtToken(string userId, string companyId, string roleId, List<string> userRole)
         {
             byte[] key = Encoding.UTF8.GetBytes(ConfigManager.Jwt.SecretKey);

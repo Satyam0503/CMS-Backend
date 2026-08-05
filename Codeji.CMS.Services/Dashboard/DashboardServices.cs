@@ -13,6 +13,7 @@ using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
+using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using LinqKit;
 using Microsoft.AspNetCore.Http;
@@ -159,7 +160,7 @@ namespace Codeji.CMS.Services.Dashboard
             List<string> empJobIds = employeeList.Select(e => e.JobRole).ToList();
             IEnumerable<JobTitles> jobTitles = await _jobTitleRepository.GetAll(jt => empJobIds.Contains(jt.JobTitleId));
 
-            var today = DateTime.Today;
+            var today = IndiaTime.Today;
             string dateFormat = "yyyy-MM-dd";
 
             var empJobTitleJoin = (from emp in employeeList

@@ -14,32 +14,66 @@ public class AttendanceRepository : IAttendanceRepository
         _collection = database.GetCollection<AttendanceModel>("Attendance");
     }
 
+    private static DateTime UtcMidnight(DateTime date) => DateTime.SpecifyKind(date.Date, DateTimeKind.Utc);
+    private static DateTime UtcMidnight(DateOnly date) => DateTime.SpecifyKind(date.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+
+    private static FilterDefinition<AttendanceModel> BuildUserDateFilter(string companyId, string userId, DateTime date)
+    {
+        var dayStart = UtcMidnight(date);
+        var dayEnd = dayStart.AddDays(1);
+        return Builders<AttendanceModel>.Filter.Eq(a => a.CompanyId, companyId)
+            & Builders<AttendanceModel>.Filter.Eq(a => a.UserId, userId)
+            & Builders<AttendanceModel>.Filter.Gte(a => a.Date, dayStart)
+            & Builders<AttendanceModel>.Filter.Lt(a => a.Date, dayEnd);
+    }
+
     public async Task<AttendanceModel> AddAsync(AttendanceModel attendance)
     {
-        attendance.Date = attendance.Date.Date;
-        attendance.AttendanceId ??= MongoDB.Bson.ObjectId.GenerateNewId().ToString();
+        attendance.Date = UtcMidnight(attendance.Date);
+        if (string.IsNullOrWhiteSpace(attendance.AttendanceId)) attendance.AttendanceId = MongoDB.Bson.ObjectId.GenerateNewId().ToString();
 
-        var filter =
-            Builders<AttendanceModel>.Filter.Eq(a => a.CompanyId, attendance.CompanyId) &
-            Builders<AttendanceModel>.Filter.Eq(a => a.UserId, attendance.UserId) &
-            Builders<AttendanceModel>.Filter.Eq(a => a.Date, attendance.Date);
+        var dayFilter = BuildUserDateFilter(attendance.CompanyId, attendance.UserId ?? string.Empty, attendance.Date);
+        var existingDocs = await _collection.Find(dayFilter).ToListAsync();
 
-        // Upsert makes concurrent bulk/manual marking idempotent for one employee/day.
-        await _collection.ReplaceOneAsync(
-            filter,
-            attendance,
-            new ReplaceOptions { IsUpsert = true });
+        if (existingDocs.Count > 0)
+        {
+            var keeper = existingDocs[0];
+            if (!string.IsNullOrWhiteSpace(keeper.AttendanceId)) attendance.AttendanceId = keeper.AttendanceId;
 
-        return await _collection.Find(filter).FirstAsync();
+            await _collection.ReplaceOneAsync(
+                Builders<AttendanceModel>.Filter.Eq(a => a.AttendanceId, attendance.AttendanceId),
+                attendance,
+                new ReplaceOptions { IsUpsert = true });
+
+            if (existingDocs.Count > 1)
+            {
+                var duplicateIds = existingDocs
+                    .Where(x => x.AttendanceId != attendance.AttendanceId)
+                    .Select(x => x.AttendanceId)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .ToList();
+
+                if (duplicateIds.Count > 0)
+                {
+                    await _collection.DeleteManyAsync(
+                        Builders<AttendanceModel>.Filter.In(a => a.AttendanceId, duplicateIds));
+                }
+            }
+        }
+        else
+        {
+            await _collection.ReplaceOneAsync(
+                dayFilter,
+                attendance,
+                new ReplaceOptions { IsUpsert = true });
+        }
+
+        return await _collection.Find(Builders<AttendanceModel>.Filter.Eq(a => a.AttendanceId, attendance.AttendanceId)).FirstAsync();
     }
 
     public async Task<AttendanceModel?> GetByUserAndDateAsync(string companyId, string userId, DateTime date)
     {
-        var filter =
-            Builders<AttendanceModel>.Filter.Eq(a => a.CompanyId, companyId) &
-            Builders<AttendanceModel>.Filter.Eq(a => a.UserId, userId) &
-            Builders<AttendanceModel>.Filter.Eq(a => a.Date, date.Date);
-
+        var filter = BuildUserDateFilter(companyId, userId, date);
         return await _collection.Find(filter).FirstOrDefaultAsync();
     }
 
@@ -58,8 +92,8 @@ public class AttendanceRepository : IAttendanceRepository
     {
         var filter =
             Builders<AttendanceModel>.Filter.Eq(a => a.CompanyId, companyId) &
-            Builders<AttendanceModel>.Filter.Gte(a => a.Date, from.Date) &
-            Builders<AttendanceModel>.Filter.Lte(a => a.Date, to.Date);
+            Builders<AttendanceModel>.Filter.Gte(a => a.Date, UtcMidnight(from)) &
+            Builders<AttendanceModel>.Filter.Lte(a => a.Date, UtcMidnight(to).AddDays(1).AddTicks(-1));
 
         if (userIds != null && userIds.Any())
             filter &= Builders<AttendanceModel>.Filter.In(a => a.UserId, userIds);
@@ -69,12 +103,12 @@ public class AttendanceRepository : IAttendanceRepository
 
     public async Task<bool> UpdateAsync(string companyId, string userId, DateTime date, AttendanceModel updatedModel)
     {
-        updatedModel.Date = updatedModel.Date.Date;
+        updatedModel.Date = UtcMidnight(updatedModel.Date);
 
-        var filter =
-            Builders<AttendanceModel>.Filter.Eq(a => a.CompanyId, companyId) &
-            Builders<AttendanceModel>.Filter.Eq(a => a.UserId, userId) &
-            Builders<AttendanceModel>.Filter.Eq(a => a.Date, date.Date);
+        // Existing historical rows may carry a time component even though attendance is
+        // logically date-only. Reads already use this day-range identity; updates must do the
+        // same so an HR/Admin correction does not fail after the record was successfully found.
+        var filter = BuildUserDateFilter(companyId, userId, date);
 
         var result = await _collection.ReplaceOneAsync(filter, updatedModel);
 

@@ -175,9 +175,9 @@ public class AccountServices : IAccountServices
             return new Result { Success=false, StatusCode=StatusCodes.Status500InternalServerError, Message="Unable to create a password reset request." };
 
         Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == emp.CompanyId);
-        MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ResetPassword);
+        RepositoryEmailTemplate.TryGet(EnumsHelper.MailType.ResetPassword, out var templateSubject, out var templateBody);
         var resetLink = $"{ConfigManager.AppSettings.AppUrl.TrimEnd('/')}/auth/createpassword?token={Uri.EscapeDataString(token)}";
-        var bodyTemplate = emailContent?.body ?? "<p>Hello [EmployeeName],</p><p>Reset your password using this link: <a href=\"[PasswordResetLink]\">Reset password</a>.</p><p>This link expires in [LinkExpiryTime].</p>";
+        var bodyTemplate = string.IsNullOrWhiteSpace(templateBody) ? "<p>Hello [EmployeeName],</p><p>Reset your password using this link: <a href=\"[PasswordResetLink]\">Reset password</a>.</p><p>This link expires in [LinkExpiryTime].</p>" : templateBody;
         string replacedBody = HtmlTemplate.Render(bodyTemplate, new
         {
             EmployeeName = emp.FirstName + " " + emp.LastName,
@@ -187,7 +187,7 @@ public class AccountServices : IAccountServices
             CompanyLogo = company?.CompanyLogo != null ? Common.GetCompanyLogoUrl(company.CompanyLogo) : string.Empty,
             Year = DateTime.UtcNow.Year,
         });
-        string replacedSubject = HtmlTemplate.Render(emailContent?.subject ?? "Reset your password", new
+        string replacedSubject = HtmlTemplate.Render(string.IsNullOrWhiteSpace(templateSubject) ? "Reset your password" : templateSubject, new
         {
             CompanyName = company != null ? company.CompanyName : ""
         });
@@ -310,6 +310,61 @@ public class AccountServices : IAccountServices
 
         result.Success = true;
         return result;
+    }
+
+    public async Task<Result> ResendEmailVerification(string email)
+    {
+        // Keep the response generic so this endpoint cannot be used to enumerate accounts.
+        Result accepted = new() { Success = true, StatusCode = StatusCodes.Status200OK };
+        if (string.IsNullOrWhiteSpace(email))
+            return accepted;
+
+        EmpUser? user = await _employeeRepository.FirstOrDefault(x =>
+            x.Email.Equals(email.Trim(), StringComparison.OrdinalIgnoreCase) && x.Status && !x.IsDeleted);
+        if (user is null || user.IsEmailVerified)
+            return accepted;
+
+        Expression<Func<UserSecurityToken, bool>> activeTokens = token =>
+            token.UserId == user.UserId &&
+            token.Type == EnumsHelper.SecurityTokenType.EmailVerification &&
+            !token.IsUsed;
+        await _userSecurityTokenRepository.UpdateMany(activeTokens,
+            Builders<UserSecurityToken>.Update.Set(token => token.IsUsed, true).Set(token => token.UsedAt, DateTime.UtcNow));
+
+        string token = TokenHelper.GenerateToken();
+        UserSecurityToken verificationToken = new()
+        {
+            UserId = user.UserId,
+            TokenHash = TokenHelper.ComputeSha256Hash(token),
+            IsUsed = false,
+            Expiry = DateTime.UtcNow.AddHours(24),
+            Type = EnumsHelper.SecurityTokenType.EmailVerification
+        };
+        Result tokenResult = await _userSecurityTokenRepository.AddOne(verificationToken);
+        if (!tokenResult.Success)
+            return new Result { Success = false, StatusCode = StatusCodes.Status500InternalServerError, Message = "Unable to create an email verification link." };
+
+        Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == user.CompanyId);
+        string apiBaseUrl = ConfigManager.AppSettings.APIUrl.Trim().TrimEnd('/');
+        string verifyEndpoint = apiBaseUrl.EndsWith("/api", StringComparison.OrdinalIgnoreCase)
+            ? "/account/verify-email"
+            : "/api/account/verify-email";
+        string verifyLink = $"{apiBaseUrl}{verifyEndpoint}?token={Uri.EscapeDataString(token)}";
+        var delivery = await _middlewareService.EmailSendAndSaveWithResult(new EmpEmailLogs
+        {
+            UserTo = user.UserId,
+            UserFrom = user.UserId,
+            Email = user.Email,
+            Subject = $"Verify your email for {company?.CompanyName ?? "CodeJi CMS"}",
+            Body = HtmlTemplate.Render(
+                "<h2>Welcome, [EmployeeName]!</h2><p>Please verify your email address to activate your account.</p><p><a href=\"[EmailVerificationLink]\">Verify email</a></p><p>This link will expire in 24 hours.</p>",
+                new { EmployeeName = $"{user.FirstName} {user.LastName}", EmailVerificationLink = verifyLink }),
+            EmailLogType = EnumsHelper.MailType.EmployeeWelcomeMail
+        });
+
+        return delivery.IsSent
+            ? accepted
+            : new Result { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, Message = "The verification email could not be sent. Please try again later." };
     }
 
     public async Task<Result<TokenResponseDto>> RefreshToken(RefreshTokenRequestDto model)
