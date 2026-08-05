@@ -38,7 +38,21 @@ public sealed class BridgeLegacyAttendanceManagerPermissions : IMigration
             PermissionConst.View, PermissionConst.Create, PermissionConst.Edit,
             PermissionConst.ViewAll, PermissionConst.CreateForEmployee, PermissionConst.Override
         };
-        var permissionList = await permissions.Find(x => permissionConstants.Contains(x.PermissionConstant)).ToListAsync();
+
+        // Ensure each required permission exists; create if missing.
+        var permissionList = new List<PermissionEntity>();
+        foreach (var pc in permissionConstants)
+        {
+            var p = await permissions.Find(x => x.PermissionConstant == pc).FirstOrDefaultAsync();
+            if (p is null)
+            {
+                var nextPid = ((await permissions.Find(FilterDefinition<PermissionEntity>.Empty).SortByDescending(x => x.PermissionId).FirstOrDefaultAsync())?.PermissionId ?? 0) + 1;
+                p = new PermissionEntity { PermissionId = nextPid, PermissionName = pc, PermissionConstant = pc };
+                await permissions.InsertOneAsync(p);
+            }
+            permissionList.Add(p);
+        }
+
         var permissionIds = permissionList.ToDictionary(x => x.PermissionConstant, x => x.PermissionId);
 
         var attendanceLinks = await modulePermissions.Find(x => x.ModuleId == attendance.ModuleId).ToListAsync();
@@ -48,8 +62,19 @@ public sealed class BridgeLegacyAttendanceManagerPermissions : IMigration
 
         var required = new[] { PermissionConst.View, PermissionConst.Create, PermissionConst.Edit, PermissionConst.ViewAll, PermissionConst.CreateForEmployee, PermissionConst.Override };
         var missing = required.Where(x => !linkByPermission.ContainsKey(x)).ToArray();
+
+        // Create any missing ModulePermission links for the attendance module.
         if (missing.Length > 0)
-            throw new InvalidOperationException($"Attendance permission links are missing: {string.Join(", ", missing)}.");
+        {
+            foreach (var miss in missing)
+            {
+                var permId = permissionIds[miss];
+                var nextMpId = ((await modulePermissions.Find(FilterDefinition<ModulePermission>.Empty).SortByDescending(x => x.ModulePermissionId).FirstOrDefaultAsync())?.ModulePermissionId ?? 0) + 1;
+                var newLink = new ModulePermission { ModulePermissionId = nextMpId, ModuleId = attendance.ModuleId, PermissionId = permId, HasModuleAccess = true };
+                await modulePermissions.InsertOneAsync(newLink);
+                linkByPermission[miss] = newLink;
+            }
+        }
 
         var dashboardViewAll = await modulePermissions.Find(x => x.ModuleId == dashboard.ModuleId && x.PermissionId == permissionIds[PermissionConst.ViewAll]).FirstOrDefaultAsync()
             ?? throw new InvalidOperationException("Dashboard ViewAll permission link is missing.");
