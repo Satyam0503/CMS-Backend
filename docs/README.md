@@ -28,6 +28,8 @@ Recommended reading order for a new contributor (human or AI):
 
 ### Detailed HR module flows
 
+- [`api-reference/README.md`](./api-reference/README.md) - endpoint-focused reference for the API surface by business domain
+- [`module-guides/README.md`](./module-guides/README.md) - in-depth module guides with flow, responsibilities, and key APIs
 - [`attendance-leave-profile-tracker-complete-reference.md`](./attendance-leave-profile-tracker-complete-reference.md) - authoritative backend/frontend reference for employee attendance, HR/Admin attendance, correction requests, Leave Management, Profile Leave Tracker, tenant isolation, notifications, email, reconciliation, and payroll dependency
 - [`roles-and-permissions-complete-reference.md`](./roles-and-permissions-complete-reference.md) - complete role, permission, module route, tenant and ownership reference
 - [`authentication-and-authorization-reference.md`](./authentication-and-authorization-reference.md) - in-depth registration, login, JWT, refresh, recovery, role, permission, ownership and tenant-isolation reference

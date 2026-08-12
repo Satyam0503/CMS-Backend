@@ -5,6 +5,7 @@ using System.Linq.Expressions;
 using AngleSharp.Common;
 using MapsterMapper;
 using Codeji.CMS.Domain.Models;
+using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.Company.CustomAttribute;
 using Codeji.CMS.DTO.Company.Department;
@@ -13,6 +14,7 @@ using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
+using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
@@ -38,8 +40,9 @@ public class CompanyMasterService : ICompanyMasterService
     readonly IMongoDbRepository<JobTitles> _jobTitleRepository;
     readonly IMongoDbRepository<CustomAttribute> _customAttributeRepository;
     readonly IMongoDbRepository<CustomAttributeValue> _customAttributeValueRepository;
+    readonly IMongoDbRepository<EmpUser> _employeeRepository;
 
-    public CompanyMasterService(IRoleService roleService, IMongoDbRepository<CustomAttribute> customAttributeRepository, IMongoDbRepository<CustomAttributeValue> customAttributeValueRepository, IMongoDbRepository<Department> departmentRepository, IMapper mapper, IMongoDbRepository<Module> moduleRepository, IMongoDbRepository<ModulePermission> modulePermissionRepository, IMongoDbRepository<Permission> permissionRepository, IMongoDbRepository<RolePermission> rolePermissionRepository, IMongoDbRepository<JobTitles> jobTitleRepository, IHttpContextAccessor httpContextAccessor)
+    public CompanyMasterService(IRoleService roleService, IMongoDbRepository<CustomAttribute> customAttributeRepository, IMongoDbRepository<CustomAttributeValue> customAttributeValueRepository, IMongoDbRepository<Department> departmentRepository, IMapper mapper, IMongoDbRepository<Module> moduleRepository, IMongoDbRepository<ModulePermission> modulePermissionRepository, IMongoDbRepository<Permission> permissionRepository, IMongoDbRepository<RolePermission> rolePermissionRepository, IMongoDbRepository<JobTitles> jobTitleRepository, IMongoDbRepository<EmpUser> employeeRepository, IHttpContextAccessor httpContextAccessor)
     {
         _departmentRepository = departmentRepository;
         _mapper = mapper;
@@ -52,24 +55,27 @@ public class CompanyMasterService : ICompanyMasterService
         _jobTitleRepository = jobTitleRepository;
         _customAttributeRepository = customAttributeRepository;
         _customAttributeValueRepository = customAttributeValueRepository;
+        _employeeRepository = employeeRepository;
     }
 
     public async Task<Result> UpdateDepartments(List<DepartmentRequestDto> departmentList, string userId)
     {
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
         List<Department> departments = new();
         _mapper.Map(departmentList, departments);
-        Result result = new();
+        Result result = new() { Success = true, StatusCode = StatusCodes.Status200OK };
         foreach (Department department in departments)
         {
             if (string.IsNullOrEmpty(department.DepartmentId))
             {
+                department.CompanyId = companyId;
                 department.CreatedBy = userId;
                 department.CreatedDate = DateTime.UtcNow;
                 result = await _departmentRepository.AddOne(department);
             }
             else
             {
-                Expression<Func<Department, bool>> whereCondition = x => x.DepartmentId == department.DepartmentId;
+                Expression<Func<Department, bool>> whereCondition = x => x.DepartmentId == department.DepartmentId && x.CompanyId == companyId && !x.IsDeleted;
                 result = await _departmentRepository.UpdateMany(whereCondition, Builders<Department>.Update.Set(x => x.UpdatedBy, userId).Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.Titles, department.Titles).Set(x => x.IsActive, department.IsActive));
             }
         }
@@ -79,7 +85,8 @@ public class CompanyMasterService : ICompanyMasterService
     public async Task<Result<DepartmentResponseDto>> GetDepartmentList(bool? isActive)
     {
         Result<DepartmentResponseDto> result = new() { Success = false };
-        IEnumerable<Department> departments = await _departmentRepository.GetAll(x => x.IsDeleted == false);
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        IEnumerable<Department> departments = await _departmentRepository.GetAll(x => x.CompanyId == companyId && !x.IsDeleted);
         if (isActive.HasValue)
         {
             departments = departments.Where(x => x.IsActive == isActive.Value);
@@ -99,7 +106,8 @@ public class CompanyMasterService : ICompanyMasterService
     }
     public async Task<bool> DeleteDepartment(string departmentId)
     {
-        Expression<Func<Department, bool>> whereCondition = x => x.DepartmentId == departmentId;
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        Expression<Func<Department, bool>> whereCondition = x => x.DepartmentId == departmentId && x.CompanyId == companyId && !x.IsDeleted;
         Department? department = await _departmentRepository.FirstOrDefault(whereCondition);
         if (department is null)
         {
@@ -134,7 +142,7 @@ public class CompanyMasterService : ICompanyMasterService
         string roleId = CurrentContext.UserRoleId(_httpContextAccessor);
         bool hasAccess = rolePermissions.Take(1).ToList()[0].IsAccessible;
         Result result = await _rolePermissionRepository.UpdateMany(whereCondition, Builders<RolePermission>.Update.Set(x => x.IsAccessible, !hasAccess));
-        string[] updatedPermissions = await _roleService.GetRolePermissionOfuser(roleId);
+        string[] updatedPermissions = await _roleService.GetRolePermissionOfuser(roleId, companyId);
         return new Result<string[]>()
         {
             Success = true,
@@ -164,10 +172,13 @@ public class CompanyMasterService : ICompanyMasterService
     }
 
     // Company Job Titles Services
-    public async Task<Result<JobTitleResponseDto>> GetJobTitles(bool? isActive)
+    public async Task<Result<JobTitleResponseDto>> GetJobTitles(bool? isActive, string? departmentId)
     {
         Result<JobTitleResponseDto> result = new() { Success = false };
-        IEnumerable<JobTitles> jobTitles = await _jobTitleRepository.GetAll(x => x.IsDeleted == false);
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        IEnumerable<JobTitles> jobTitles = await _jobTitleRepository.GetAll(x =>
+            x.CompanyId == companyId && !x.IsDeleted &&
+            (string.IsNullOrWhiteSpace(departmentId) || x.DepartmentId == departmentId));
         if (isActive.HasValue)
         {
             jobTitles = jobTitles.Where(x => x.IsActive == isActive.Value);
@@ -177,6 +188,7 @@ public class CompanyMasterService : ICompanyMasterService
         var data = jobTitles.Select(jt => new JobTitleResponseDto()
         {
             JobTitleId = jt.JobTitleId,
+            DepartmentId = jt.DepartmentId,
             IsActive = jt.IsActive,
             Titles = jt.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label),
         });
@@ -188,37 +200,135 @@ public class CompanyMasterService : ICompanyMasterService
 
     public async Task<Result> AddUpdateJobTitle(List<JobTitleRequestDto> jobTitleList, string userId)
     {
-        List<JobTitles> jobTitles = new();
-        _mapper.Map(jobTitleList, jobTitles);
-        Result result = new();
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        var validationErrors = new List<ValidationError>();
+        var existingIds = jobTitleList.Where(x => !string.IsNullOrWhiteSpace(x.JobTitleId)).Select(x => x.JobTitleId!).ToHashSet();
+        var existing = (await _jobTitleRepository.GetAll(x => x.CompanyId == companyId && existingIds.Contains(x.JobTitleId) && !x.IsDeleted)).ToDictionary(x => x.JobTitleId);
+        foreach (JobTitleRequestDto request in jobTitleList)
+        {
+            // A legacy row that remains unchanged and unmapped must not prevent
+            // administrators from mapping another row in the same bulk request.
+            // New rows, cleared mappings, and changed mappings still require an
+            // active same-company department.
+            bool unchangedLegacyMapping = !string.IsNullOrWhiteSpace(request.JobTitleId)
+                && existing.TryGetValue(request.JobTitleId, out var existingTitle)
+                && string.IsNullOrWhiteSpace(existingTitle.DepartmentId)
+                && string.IsNullOrWhiteSpace(request.DepartmentId);
+            if (!unchangedLegacyMapping && (string.IsNullOrWhiteSpace(request.DepartmentId) || !await _departmentRepository.Exist(x =>
+                x.DepartmentId == request.DepartmentId && x.CompanyId == companyId && x.IsActive && !x.IsDeleted)))
+            {
+                validationErrors.Add(new ValidationError { JobTitleId = request.JobTitleId, JobTitleName = EnglishTitle(request.Titles), Field = "departmentId", Message = "Select an active department." });
+            }
+            if (!string.IsNullOrWhiteSpace(request.JobTitleId) && !existing.ContainsKey(request.JobTitleId))
+            {
+                validationErrors.Add(new ValidationError { JobTitleId = request.JobTitleId, JobTitleName = EnglishTitle(request.Titles), Field = "jobTitleId", Message = "Job title is not available in the current company." });
+            }
+        }
+        if (validationErrors.Count != 0)
+            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Some job titles have invalid department mappings.", Errors = validationErrors };
+
+        var jobTitles = new List<JobTitles>();
+        foreach (JobTitleRequestDto request in jobTitleList)
+        {
+            if (string.IsNullOrWhiteSpace(request.JobTitleId))
+            {
+                jobTitles.Add(new JobTitles
+                {
+                    JobTitleId = string.Empty,
+                    CompanyId = companyId,
+                    DepartmentId = request.DepartmentId,
+                    IsActive = request.IsActive,
+                    Titles = request.Titles ?? [],
+                    CreatedBy = userId,
+                    CreatedDate = DateTime.UtcNow,
+                });
+                continue;
+            }
+
+            if (!existing.TryGetValue(request.JobTitleId, out var current))
+            {
+                continue;
+            }
+
+            var normalizedTitles = request.Titles ?? [];
+            bool unchanged = current.IsActive == request.IsActive
+                && current.DepartmentId == request.DepartmentId
+                && current.Titles.OrderBy(x => x.Language).SequenceEqual(normalizedTitles.OrderBy(x => x.Language), new MultilingualTitleComparer());
+            if (unchanged)
+            {
+                continue;
+            }
+
+            jobTitles.Add(new JobTitles
+            {
+                JobTitleId = request.JobTitleId,
+                CompanyId = companyId,
+                DepartmentId = request.DepartmentId,
+                IsActive = request.IsActive,
+                Titles = normalizedTitles,
+                UpdatedBy = userId,
+                UpdatedDate = DateTime.UtcNow,
+            });
+        }
+
+        if (jobTitles.Count == 0)
+        {
+            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "No valid job title changes were saved." };
+        }
+
+        Result result = new() { Success = true, StatusCode = StatusCodes.Status200OK };
         foreach (JobTitles title in jobTitles)
         {
             if (string.IsNullOrEmpty(title.JobTitleId))
             {
-                title.CreatedBy = userId;
-                title.CreatedDate = DateTime.UtcNow;
                 result = await _jobTitleRepository.AddOne(title);
             }
             else
             {
-                Expression<Func<JobTitles, bool>> whereCondition = x => x.JobTitleId == title.JobTitleId;
-                result = await _jobTitleRepository.UpdateMany(whereCondition, Builders<JobTitles>.Update.Set(x => x.UpdatedBy, userId).Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.Titles, title.Titles).Set(x => x.IsActive, title.IsActive));
+                Expression<Func<JobTitles, bool>> whereCondition = x => x.JobTitleId == title.JobTitleId && x.CompanyId == companyId && !x.IsDeleted;
+                result = await _jobTitleRepository.UpdateMany(whereCondition, Builders<JobTitles>.Update.Set(x => x.UpdatedBy, userId).Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.Titles, title.Titles).Set(x => x.DepartmentId, title.DepartmentId).Set(x => x.IsActive, title.IsActive));
+            }
+
+            if (!result.Success)
+            {
+                return result;
             }
         }
+
         return result;
     }
 
     public async Task<bool> DeleteJobTitle(string jobTitleId)
     {
-        Expression<Func<JobTitles, bool>> whereCondition = jt => jt.JobTitleId == jobTitleId;
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        Expression<Func<JobTitles, bool>> whereCondition = jt => jt.JobTitleId == jobTitleId && jt.CompanyId == companyId && !jt.IsDeleted;
         JobTitles? jobTitle = await _jobTitleRepository.FirstOrDefault(whereCondition);
         if (jobTitle is null)
         {
             return false;
         }
+        // Preserve historical employee references. An unreferenced record can be
+        // removed; a referenced one is safely retired instead.
+        if (await _employeeRepository.Exist(e => e.CompanyId == companyId && e.JobRole == jobTitleId && !e.IsDeleted))
+        {
+            jobTitle.IsActive = false;
+            jobTitle.UpdatedDate = DateTime.UtcNow;
+            var deactivate = await _jobTitleRepository.Update(whereCondition, jobTitle);
+            return deactivate.Success;
+        }
         jobTitle.IsDeleted = true;
         var result = await _jobTitleRepository.Update(whereCondition, jobTitle);
         return result.Success;
+    }
+
+    private static string? EnglishTitle(IEnumerable<MultilingualModel>? titles) =>
+        titles?.FirstOrDefault(x => string.Equals(x.Language, "en", StringComparison.OrdinalIgnoreCase))?.Label
+        ?? titles?.FirstOrDefault()?.Label;
+
+    private sealed class MultilingualTitleComparer : IEqualityComparer<MultilingualModel>
+    {
+        public bool Equals(MultilingualModel? x, MultilingualModel? y) => x?.Language == y?.Language && x?.Label == y?.Label;
+        public int GetHashCode(MultilingualModel obj) => HashCode.Combine(obj.Language, obj.Label);
     }
 
     // Custom Attributes Services

@@ -33,3 +33,9 @@ public class PolicyDocumentResult
     public string FileName { get; set; }
     public string ContentType { get; set; }
 }
+
+public class SetCurrentPolicyVersionRequestModel
+{
+    public required string PolicyId { get; set; }
+    public required string VersionId { get; set; }
+}

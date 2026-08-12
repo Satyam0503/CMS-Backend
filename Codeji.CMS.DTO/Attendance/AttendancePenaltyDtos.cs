@@ -31,6 +31,26 @@ public class AttendanceExceptionReviewDto
     public int Version { get; set; }
 }
 
+/// <summary>Controlled correction payload for a stored monthly attendance validation exception.</summary>
+public class AttendanceExceptionResolutionDto
+{
+    [Required] public DateTime AttendanceDate { get; set; }
+    [Required, MinLength(1)] public string Status { get; set; } = string.Empty;
+    public string? CheckInTime { get; set; }
+    public string? CheckOutTime { get; set; }
+    [Required, MinLength(3)] public string Reason { get; set; } = string.Empty;
+    [Range(1, int.MaxValue)] public int ExceptionVersion { get; set; }
+    public long? AttendanceVersion { get; set; }
+}
+
+public class AttendanceExceptionResolutionResultDto
+{
+    public required string ExceptionId { get; set; }
+    public required string AttendanceAction { get; set; }
+    public bool IsResolved { get; set; }
+    public string? RemainingIssue { get; set; }
+}
+
 public class AttendanceMonthRequestDto
 {
     [Required] public DateTime PayrollMonth { get; set; }
@@ -42,4 +62,24 @@ public class AttendanceMonthLockStatusDto
     public bool IsLocked { get; set; }
     public int EligibleEmployeeCount { get; set; }
     public int LockedEmployeeCount { get; set; }
+}
+
+/// <summary>One actionable attendance cell that prevents an attendance month from being locked.</summary>
+public class AttendanceLockBlockingIssueDto
+{
+    public required string EmployeeId { get; set; }
+    public required string EmployeeCode { get; set; }
+    public required string EmployeeName { get; set; }
+    public required DateTime AttendanceDate { get; set; }
+    public required string ExceptionType { get; set; }
+    public string? CurrentAttendanceStatus { get; set; }
+    public DateTime? CheckInTime { get; set; }
+    public DateTime? CheckOutTime { get; set; }
+    public required string Message { get; set; }
+}
+
+/// <summary>Lock outcome with the same blocking cells shown in Monthly Exceptions.</summary>
+public class AttendanceMonthLockValidationResultDto
+{
+    public List<AttendanceLockBlockingIssueDto> BlockingIssues { get; set; } = [];
 }

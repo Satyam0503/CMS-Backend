@@ -23,7 +23,7 @@ public sealed class MyAttendanceController(IAdminAttendanceService attendance,
     IMongoDbRepository<EmpUser> employees, IMongoDbRepository<AttendanceCorrectionRequest> corrections,
     IMongoDbRepository<Roles> roles, IMongoDbRepository<Notifications> notifications,
     IMongoDbRepository<UserNotifications> userNotifications, INotificationService notificationService,
-    IHttpContextAccessor context) : ControllerBase
+    IHttpContextAccessor context, ICompanyWorkingCalendarService workingCalendar) : ControllerBase
 {
     [HttpGet("grid")]
     public async Task<IActionResult> Grid([FromQuery] int year, [FromQuery] int month)
@@ -53,7 +53,7 @@ public sealed class MyAttendanceController(IAdminAttendanceService attendance,
         if (record is null) return NotFound("ATTENDANCE_RECORD_UNAVAILABLE");
         var duplicate = await corrections.Exist(x => x.CompanyId == companyId && x.UserId == userId && x.AttendanceDate == model.AttendanceDate.Date && x.Status == "Pending");
         if (duplicate) return Conflict("ATTENDANCE_CORRECTION_ALREADY_PENDING");
-        var request = new AttendanceCorrectionRequest { CompanyId = companyId, UserId = userId, AttendanceDate = model.AttendanceDate.Date, Reason = model.Reason.Trim(), ReviewDueAt = AddBusinessDays(DateTime.UtcNow, 5) };
+        var request = new AttendanceCorrectionRequest { CompanyId = companyId, UserId = userId, AttendanceDate = model.AttendanceDate.Date, Reason = model.Reason.Trim(), ReviewDueAt = await AddBusinessDays(companyId, DateTime.UtcNow, 5) };
         var result = await corrections.AddOne(request);
         if (result.Success)
         {
@@ -79,9 +79,13 @@ public sealed class MyAttendanceController(IAdminAttendanceService attendance,
         items = await corrections.GetAll(x => x.CompanyId == CurrentContext.CompanyId(context) && x.UserId == CurrentContext.UserId(context))
     });
 
-    private static DateTime AddBusinessDays(DateTime value, int count)
+    private async Task<DateTime> AddBusinessDays(string companyId, DateTime value, int count)
     {
-        while (count > 0) { value = value.AddDays(1); if (value.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday) count--; }
+        while (count > 0)
+        {
+            value = value.AddDays(1);
+            if (await workingCalendar.IsWorkingDayAsync(companyId, DateOnly.FromDateTime(value))) count--;
+        }
         return value;
     }
 }

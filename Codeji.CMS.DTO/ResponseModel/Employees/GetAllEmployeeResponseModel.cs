@@ -13,6 +13,7 @@ public class GetAllEmployeeResponseModel
     public Dictionary<string, string>? Department { get; set; }
     public string? PhoneNumber { get; set; }
     public string? DateOfBirth { get; set; }
+    public string? DateOfJoining { get; set; }
     public string? FullProfileUrl { get; set; }
     public string Gender { get; set; }
     public bool IsVerified { get; set; }

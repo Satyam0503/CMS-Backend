@@ -13,4 +13,6 @@ public class AttendanceStatusSettingsController : ControllerBase
     public async Task<Result<AttendanceStatusSettingDto>> Get([FromQuery] bool activeOnly=true) => new() { MethodResults=await _service.Get(CurrentContext.CompanyId(_context), activeOnly) };
     [HttpPost, Authorize(Policy="AdminOnly")]
     public Task<Result> Save(AttendanceStatusSettingDto dto) => _service.Save(CurrentContext.CompanyId(_context), dto);
+    [HttpDelete("{statusId}"), Authorize(Policy="AdminOnly")]
+    public Task<Result> Delete(string statusId) => _service.Delete(CurrentContext.CompanyId(_context), statusId);
 }

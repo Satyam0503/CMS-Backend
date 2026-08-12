@@ -116,6 +116,7 @@
         {
             Leave = 1,
             WorkFromHome = 2,
+            UnpaidLeave = 3,
         }
         public enum SecurityTokenType
         {

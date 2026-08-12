@@ -39,8 +39,9 @@ public sealed class MigrateEmployeeLeaveBalanceAllocationFields : IMigration
             catch { failed++; }
         }
 
-        var keys = Builders<BsonDocument>.IndexKeys.Ascending("CompanyId").Ascending("UserId").Ascending("LeavePolicyId");
-        if (!dryRun) await balances.Indexes.CreateOneAsync(new CreateIndexModel<BsonDocument>(keys, new CreateIndexOptions { Name = "ux_leave_balance_company_user_policy", Unique = true }));
+        // The follow-up DeduplicateEmployeeLeaveBalanceRecords migration owns the
+        // unique index. Creating it here can fail before duplicate data is safely
+        // inspected and recorded for manual review.
         Console.WriteLine($"{{\"migration\":\"{Id}\",\"dryRun\":{dryRun.ToString().ToLowerInvariant()},\"updated\":{updated},\"skipped\":{skipped},\"failed\":{failed}}}");
         if (!dryRun) await migrations.InsertOneAsync(new BsonDocument { { "_id", Id }, { "ExecutedAt", DateTime.UtcNow } });
     }

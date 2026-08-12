@@ -51,13 +51,24 @@ public sealed class LeaveAttendanceReconciliationService(
             result.Message = "The leave policy for this request is not active.";
             return result;
         }
-        if (string.IsNullOrWhiteSpace(policy.AttendanceStatusCode))
+        // Unpaid leave has a fixed attendance meaning: a full day is unpaid
+        // absence, while a half day is the configured Half Day (HD) status.
+        // Do not let a legacy UL policy mapping turn an approved half-day UL
+        // request into a full absent attendance segment.
+        var isUnpaidLeave = policy.PolicyType == Codeji.CMS.Utility.Enums.EnumsHelper.LeavePolicyType.UnpaidLeave ||
+            (string.Equals(policy.Code?.Trim(), "UL", StringComparison.OrdinalIgnoreCase) && !policy.Paid);
+        var mappedStatus = request.IsHalfDay && isUnpaidLeave
+            ? "HD"
+            : request.IsHalfDay
+                ? policy.HalfDayAttendanceStatusCode ?? policy.FullDayAttendanceStatusCode ?? policy.AttendanceStatusCode
+                : policy.FullDayAttendanceStatusCode ?? policy.AttendanceStatusCode;
+        if (string.IsNullOrWhiteSpace(mappedStatus))
         {
             result.Message = "The leave policy must have an attendance status code before the request can be approved.";
             return result;
         }
 
-        var statusCode = policy.AttendanceStatusCode.Trim().ToUpperInvariant();
+        var statusCode = mappedStatus.Trim().ToUpperInvariant();
         var status = await statuses.FirstOrDefault(x => x.CompanyId == companyId && x.Code == statusCode && x.IsActive);
         if (status == null || status.RequiresTime)
         {
@@ -89,6 +100,17 @@ public sealed class LeaveAttendanceReconciliationService(
         {
             cancellationToken.ThrowIfCancellationRequested();
             var date = UtcMidnight(day);
+            var existingSegments = await segments.GetAll(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.Date >= date && x.Date < date.AddDays(1));
+            if (existingSegments.Any())
+            {
+                hasConflict = true;
+                var month = new DateTime(date.Year, date.Month, 1);
+                var existingSegment = existingSegments.First();
+                var conflict = await exceptions.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.PayrollMonth == month && x.ExceptionType == "LEAVE_ATTENDANCE_SEGMENT_CONFLICT" && x.AttendanceDate == date && x.LeaveRequestId == request.LeaveRequestId);
+                if (conflict == null)
+                    await exceptions.AddOne(new AttendancePayrollException { CompanyId = companyId, UserId = employee.UserId, EmployeeId = employee.EmployeeId, PayrollMonth = month, AttendanceDate = date, AffectedDates = [date], ExceptionType = "LEAVE_ATTENDANCE_SEGMENT_CONFLICT", Severity = "BLOCKING", Status = "PENDING_REVIEW", LeaveRequestId = request.LeaveRequestId, ExistingAttendanceId = existingSegment.AttendanceDaySegmentId, ExistingStatus = existingSegment.Status, RequestedLeaveStatus = statusCode, SourceVersion = request.Version, Reason = "Approved full-day leave conflicts with existing half-day attendance.", CreatedBy = actorUserId });
+                continue;
+            }
             var existing = await attendance.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.Date >= date && x.Date < date.AddDays(1));
             if (existing != null && !(existing.SourceType == "LEAVE" && existing.SourceId == request.LeaveRequestId) && !AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent(existing.SourceType))
             {

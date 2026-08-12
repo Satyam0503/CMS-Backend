@@ -4,6 +4,7 @@ using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.RolePermissions;
+using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
@@ -29,50 +30,30 @@ public sealed class AttendanceReminderProcessor(
     IAttendanceMutationValidator mutationValidator,
     IAttendanceInitializationService initialization,
     IEffectiveOfficeScheduleService schedules,
+    IMongoDbRepository<Company> companies,
     ILogger<AttendanceReminderProcessor> logger) : IAttendanceReminderProcessor
 {
     public async Task ProcessAutomaticPresentAsync(DateTime? referenceTime = null, CancellationToken cancellationToken = default)
     {
         var reference = referenceTime ?? IndiaTime.Now;
         var today = reference.Date;
-        var allEmployees = (await employees.GetAll(x => x.Status && !x.IsDeleted, WithDeletedObjects: false, withDefaultFilter: false)).ToList();
-        var todayAttendance = (await attendance.GetAll(x => x.Date.Date == today, WithDeletedObjects: false, withDefaultFilter: false)).ToList();
-        var missing = AttendanceReminderEvaluator.FindMissingAttendance(allEmployees, todayAttendance, today);
-        foreach (var employee in missing)
+        // Each tenant is a separate unit of work.  Never read configuration or employee rows
+        // for one company while creating attendance for another.
+        var companyIds = (await companies.GetAll(x => x.Status && !x.IsDeleted, WithDeletedObjects: false, withDefaultFilter: false))
+            .Select(x => x.CompanyId).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        foreach (var companyId in companyIds)
         {
-            if (string.IsNullOrWhiteSpace(employee.CompanyId) || string.IsNullOrWhiteSpace(employee.UserId)) continue;
-            var schedule = await schedules.ResolveAsync(employee.CompanyId, employee, today, cancellationToken);
-            // A company may use department or employee-specific schedules.  Do not create a
-            // default record until this employee's own office day has actually started.
-            if (schedule is null || !AttendanceReminderEvaluator.HasOfficeStarted(reference, schedule.StartTime)) continue;
-
-            var prepared = await mutationValidator.PrepareAsync(new AttendanceMutationRequest
+            try
             {
-                CompanyId = employee.CompanyId,
-                ActorUserId = "system",
-                TargetUserId = employee.UserId,
-                AttendanceDate = DateOnly.FromDateTime(today),
-                StatusCode = await initialization.ResolvePresentStatusCodeAsync(employee.CompanyId, cancellationToken) ?? string.Empty,
-                TimingMode = AttendanceTimingMode.Auto,
-                ExistingRecordPolicy = ExistingAttendancePolicy.CreateMissingOnly,
-                SourceType = AttendanceSourceTransitionPolicy.DefaultPresent,
-                RemarkCode = AttendanceSourceTransitionPolicy.DefaultPresent,
-                OperatorRemark = "Automatically marked present at office start; pending HR review."
-            }, cancellationToken);
-
-            if (!prepared.Success || prepared.MethodResult is null || !prepared.MethodResult.ShouldWrite)
-            {
-                logger.LogDebug("Automatic present skipped for employee {EmployeeId}: {Reason}", employee.EmployeeId, prepared.Message ?? "attendance already exists");
-                continue;
+                var result = await initialization.InitializeMonthAsync(companyId, "system", today, cancellationToken, today);
+                if (!result.Success) logger.LogWarning("Automatic present skipped for company {CompanyId}: {Reason}", companyId, result.Message);
+                else logger.LogInformation("Automatic present completed for company {CompanyId}: {Created} created, {Existing} existing", companyId, result.MethodResult?.Created, result.MethodResult?.AlreadyExisting);
             }
-
-            var saved = await attendance.AddOne(prepared.MethodResult.Attendance);
-            if (!saved.Success)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                logger.LogWarning("Automatic present could not be saved for employee {EmployeeId}", employee.EmployeeId);
-                continue;
+                // One tenant must not prevent another tenant's scheduled run.
+                logger.LogError(ex, "Automatic present failed for company {CompanyId}", companyId);
             }
-
         }
     }
 

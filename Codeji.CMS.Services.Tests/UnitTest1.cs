@@ -263,6 +263,7 @@ public class EmployeeServiceBulkImportTests
             fixture.CertificationRepository.Object,
             fixture.SummaryRepository.Object,
             fixture.EmployeeRepository.Object,
+            fixture.EmployeeIdSequenceRepository.Object,
             fixture.RolesRepository.Object,
             fixture.RoleService.Object,
             fixture.EmployeeSkillsRepository.Object,
@@ -295,6 +296,7 @@ public class EmployeeServiceBulkImportTests
         public Mock<IMongoDbRepository<EmpCertificationDetails>> CertificationRepository { get; } = new();
         public Mock<IMongoDbRepository<EmpSummary>> SummaryRepository { get; } = new();
         public Mock<IMongoDbRepository<EmpUser>> EmployeeRepository { get; } = new();
+        public Mock<IMongoDbRepository<EmployeeIdSequence>> EmployeeIdSequenceRepository { get; } = new();
         public Mock<IMongoDbRepository<Roles>> RolesRepository { get; } = new();
         public Mock<IRoleService> RoleService { get; } = new();
         public Mock<IMongoDbRepository<EmpSkills>> EmployeeSkillsRepository { get; } = new();

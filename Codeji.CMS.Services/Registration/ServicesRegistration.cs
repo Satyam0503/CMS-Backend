@@ -48,6 +48,7 @@ public static class ServicesRegistration
         services.AddScoped<IWeeklyOffService, WeeklyOffService>();
         services.AddScoped<IAttendanceEditGuard, AttendanceEditGuard>();
         services.AddScoped<IEffectiveOfficeScheduleService, EffectiveOfficeScheduleService>();
+        services.AddScoped<IAttendanceStatusCalculationService, AttendanceStatusCalculationService>();
         services.AddScoped<IOfficeScheduleSettingsService, OfficeScheduleSettingsService>();
         services.AddScoped<IAttendanceMutationValidator, AttendanceMutationValidator>();
         services.AddScoped<IAttendanceInitializationService, AttendanceInitializationService>();

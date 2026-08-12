@@ -19,6 +19,12 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         public ActivityStatus Status { get; set; }
         public string State { get; set; }
         public decimal Experience { get; set; }
+        public string? CurrentCompany { get; set; }
+        public string? CurrentJobTitle { get; set; }
+        public int? NoticePeriodDays { get; set; }
+        public string? LinkedInUrl { get; set; }
+        public string? PortfolioUrl { get; set; }
+        public string? CoverLetter { get; set; }
         public string ResumeUrl { get; set; }
     }
 }

@@ -58,7 +58,7 @@ namespace Codeji.CMS.API.Controllers
         {
             Result result = new();
             if (!ModelState.IsValid) return result;
-            result = await _applicantsService.UpdateApplicants(model);
+            result = await _applicantsService.UpdateApplicants(model, CurrentContext.UserId(_httpContextAccessor));
             return result;
         }
 

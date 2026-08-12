@@ -39,11 +39,12 @@ public class AdminAttendanceController : ControllerBase
         {
             return Conflict(new { success = false, message = ex.Message });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return StatusCode(500, new
             {
-                message = ex.Message
+                success = false,
+                message = "ATTENDANCE_OPERATION_FAILED"
             });
         }
     }
@@ -104,6 +105,20 @@ public class AdminAttendanceController : ControllerBase
             dto.UserIds);
 
         return Ok(new { items = allData });
+    }
+
+    [HttpGet("export/monthly")]
+    [ModulePermission(AppModule.Attendance, Permission.ViewAll)]
+    public async Task<IActionResult> ExportMonthly([FromQuery] int year, [FromQuery] int month)
+    {
+        if (year is < 2000 or > 2100 || month is < 1 or > 12)
+            return BadRequest("A valid report month is required.");
+
+        var export = await _service.ExportMonthlyAttendanceAsync(CurrentContext.CompanyId(_context), year, month);
+        return File(
+            export.Content,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            export.FileName);
     }
 
     [HttpPost("initialize-month")]

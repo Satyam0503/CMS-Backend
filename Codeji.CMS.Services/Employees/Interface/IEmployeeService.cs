@@ -1,5 +1,6 @@
 ﻿using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
+using Codeji.CMS.DTO.Dashboard;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
@@ -21,6 +22,7 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<string> GetEmployeeNameById(string employeeId);
                 Task<List<EmployeeSearchResponseDTO>> SearchEmployeeByName(string name);
                 Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters);
+                Task<Result<DepartmentEmpResponseDto>> GetDirectoryDepartments();
                 Task<bool> IsEmailExist(string email);
                 Task<bool> IsEmpExistAndActive(string email);
                 Task<LoginUserViewModel?> GetSignedUserDetails(string userId, string roleId, string companyId);
@@ -55,6 +57,11 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<Dictionary<EnumsHelper.NotificationPreferenceType, bool>> GetNotificationPreferences(string userId);
                 Task<Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>>> UpdateNotificationPreferences(string userId, Dictionary<EnumsHelper.NotificationPreferenceType, bool> preferences);
                 Task<Result> GetNextEmployeeId(string companyId);
+                Task<string> ReserveNextEmployeeId(string companyId);
+                Task<Result<EmployeeIdSequenceResponseDto>> GetEmployeeIdSequence(string companyId);
+                Task<Result<EmployeeIdSequenceResponseDto>> SkipEmployeeIds(string companyId, string actorUserId, int skipCount);
+                Task<Result<EmployeeIdSequenceResponseDto>> StartEmployeeIdSequence(string companyId, string actorUserId, string employeeId);
+                Task<Result<AssignMissingEmployeeIdResponseDto>> AssignMissingEmployeeId(string companyId, string actorUserId, string employeeUserId, string? manualEmployeeId);
                 Task<Result> ResendInviteLink(string userId, string currentUserId);
         }
 }

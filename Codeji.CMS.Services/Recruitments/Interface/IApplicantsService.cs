@@ -11,7 +11,7 @@ namespace Codeji.CMS.Services.Recruitments.Interface
     {
         Task<Result> RegisterApplicants(ApplicantAddEditModel applicantRegisterModel);
         Task<Result> ApplyNowService(ApplicantAddEditModel model);
-        Task<Result> UpdateApplicants(ApplicantAddEditModel model);
+        Task<Result> UpdateApplicants(ApplicantAddEditModel model, string actorUserId);
         Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters? filters);
         Task<Result<ApplicantViewModel>> ApplicantById(string applicantId);
         Task<Result<ApplicantLogResponseModel>> GetAllComment(string applicantId, int pageNo, int pageSize);

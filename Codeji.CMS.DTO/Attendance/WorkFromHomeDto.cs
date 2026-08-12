@@ -64,13 +64,16 @@ public class EmployeeWfhContextDto
     public bool IsFeatureEnabled { get; set; }
     public bool IsEligible { get; set; }
     public int WeeklyLimit { get; set; } = 1;
-    public int UsedThisWeek { get; set; }
-    public int RemainingThisWeek { get; set; }
+    public decimal UsedThisWeek { get; set; }
+    public decimal RemainingThisWeek { get; set; }
     public bool CanSchedule { get; set; }
     public string? DisabledReasonCode { get; set; }
     public DateTime? NextAvailableDate { get; set; }
     public bool ManagerApprovalRequired { get; set; }
     public int MinimumAdvanceNoticeHours { get; set; }
+    public DateTime BusinessDate { get; set; }
+    public bool IsSameDayRequestCutoffPassed { get; set; }
+    public TimeSpan? EffectiveOfficeStartTime { get; set; }
     public TimeSpan? OfficeStartTime { get; set; }
     public TimeSpan? OfficeEndTime { get; set; }
     public TimeSpan? CheckInAvailableFrom { get; set; }
@@ -121,6 +124,10 @@ public class WorkFromHomeEmployeeAllocationDto
 {
     [Required] public string EmployeeId { get; set; } = string.Empty;
     [Range(0, 31)] public int WeeklyLimit { get; set; }
+    // Returned for HR allocation screens. This is calculated from the same
+    // policy rules used by employee WFH requests, rather than inferred from a
+    // missing override record.
+    public bool IsEligible { get; set; }
 }
 
 public class WorkFromHomeResponseDto : WorkFromHomeRequestDto
@@ -132,4 +139,7 @@ public class WorkFromHomeResponseDto : WorkFromHomeRequestDto
     public string ApproverUserId { get; set; } = string.Empty;
     public int Version { get; set; }
     public string? ReviewRemarksText { get; set; }
+    public DateTime? CreatedDate { get; set; }
+    public string? ReviewedByUserId { get; set; }
+    public DateTime? ReviewedAt { get; set; }
 }

@@ -19,7 +19,7 @@ public interface ICompanyMasterService
 
     // Company Job Titles 
     Task<Result> AddUpdateJobTitle(List<JobTitleRequestDto> data, string userId);
-    Task<Result<JobTitleResponseDto>> GetJobTitles(bool? isActive);
+    Task<Result<JobTitleResponseDto>> GetJobTitles(bool? isActive, string? departmentId);
     Task<bool> DeleteJobTitle(string jobTitleId);
 
     // custom attributes

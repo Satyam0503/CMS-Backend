@@ -14,7 +14,7 @@ public interface
     Task<RoleModel> GetRoleById(string roleId);
     //Task<RoleWithModuleAndPermissions> SaveRoleAndPermissions(RoleWithModuleAndPermissions roleWithModuleAndPermissions);
     Task<List<ModuleWithPermissionsModel>> GetRoleWithPermissions(string roleId, string companyId);
-    Task<string[]> GetRolePermissionOfuser(string roleId);
+    Task<string[]> GetRolePermissionOfuser(string roleId, string companyId);
     Task<List<Roles>> AddDefaultRole(string companyId);
     Task<List<ModuleWithPermissionsModel>> GetDefaultRoleWithPermissions(bool isEditableUserRole, string companyId);
     Task<List<RoleModel>> GetRolesWithPagination(int pageNo, int pageSize);

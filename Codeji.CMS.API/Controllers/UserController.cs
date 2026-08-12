@@ -4,6 +4,7 @@ using Codeji.CMS.API.App_Start;
 using Codeji.CMS.API.Notification;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
+using Codeji.CMS.DTO.Dashboard;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
@@ -110,6 +111,30 @@ public class UserController : BaseApiController
         return await _employeeService.EditEmployee(ToSelfEditRequest(user), currentUserId);
     }
 
+    [Route("EmployeeIdSequence")]
+    [HttpGet]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public Task<Result<EmployeeIdSequenceResponseDto>> GetEmployeeIdSequence() =>
+        _employeeService.GetEmployeeIdSequence(CurrentContext.CompanyId(_httpContextAccessor));
+
+    [Route("EmployeeIdSequence/Skip")]
+    [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public Task<Result<EmployeeIdSequenceResponseDto>> SkipEmployeeIds([FromBody] SkipEmployeeIdsRequestDto model) =>
+        _employeeService.SkipEmployeeIds(CurrentContext.CompanyId(_httpContextAccessor), CurrentContext.UserId(_httpContextAccessor), model.SkipCount);
+
+    [Route("EmployeeIdSequence/StartFrom")]
+    [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public Task<Result<EmployeeIdSequenceResponseDto>> StartEmployeeIdSequence([FromBody] StartEmployeeIdSequenceRequestDto model) =>
+        _employeeService.StartEmployeeIdSequence(CurrentContext.CompanyId(_httpContextAccessor), CurrentContext.UserId(_httpContextAccessor), model.EmployeeId);
+
+    [Route("Employees/{userId}/AssignEmployeeId")]
+    [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public Task<Result<AssignMissingEmployeeIdResponseDto>> AssignMissingEmployeeId(string userId, [FromBody] AssignMissingEmployeeIdRequestDto model) =>
+        _employeeService.AssignMissingEmployeeId(CurrentContext.CompanyId(_httpContextAccessor), CurrentContext.UserId(_httpContextAccessor), userId, model?.EmployeeId);
+
     private static EmployeePersonalInfo ToSelfEditRequest(EmployeeSelfEditDto user) => new()
     {
         FirstName = user.FirstName,
@@ -146,6 +171,14 @@ public class UserController : BaseApiController
         Result<GetAllEmployeeResponseModel> data = await _employeeService.GetAllEmployees(filters);
         return data;
     }
+
+    // Department options are part of the Employee Directory.  Do not route this through
+    // Dashboard.ViewAll: callers only need the same Employees.View permission as the grid.
+    [Route("GetDirectoryDepartments")]
+    [HttpGet]
+    [ModulePermission(AppModule.Employees, Permission.View)]
+    public Task<Result<DepartmentEmpResponseDto>> GetDirectoryDepartments() =>
+        _employeeService.GetDirectoryDepartments();
 
     [Route("ChangePassword")]
     [HttpPost]

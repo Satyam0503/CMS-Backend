@@ -11,6 +11,9 @@ public class LeavePolicy : BaseClass
     public string NormalizedName { get; set; } = string.Empty;
     public string NormalizedCode { get; set; } = string.Empty;
     public string? AttendanceStatusCode { get; set; }
+    // AttendanceStatusCode is retained as the legacy full-day mapping.
+    public string? FullDayAttendanceStatusCode { get; set; }
+    public string? HalfDayAttendanceStatusCode { get; set; }
     // Existing documents deserialize to Leave, preserving all historic leave behaviour.
     public LeavePolicyType PolicyType { get; set; } = LeavePolicyType.Leave;
     public WorkFromHomePolicySettings? WorkFromHome { get; set; }

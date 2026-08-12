@@ -1,37 +1,41 @@
-# Attendance Module: Architecture, Workflows, Dependencies, and Operations
+﻿# Attendance Module: Architecture, Workflows, Dependencies, and Operations
 
 ## 1. Purpose and scope
 
 Attendance is the company-scoped daily record used to establish an employee's paid or unpaid time for a payroll month. It is not an isolated screen: it depends on employee identity, company work-calendar rules, configured attendance statuses, approved leave, monthly exception review, payroll locking, and workflow-owned WFH rows.
 
-This guide documents the current backend and React implementation, including the source-linked approved-leave behavior added to the attendance grid. It also explains how attendance is created by leave and WFH workflows, how manual edits are blocked for source-owned rows, and how payroll and month validation depend on the persisted daily source of truth.
+This guide documents the current backend and React implementation, including source-linked approved-leave rows, HR/Admin bulk and import behavior, employee self-service calendar, WFH attendance, and payroll-dependent locking.
 
 ### Implementation summary
 
 At a code level, attendance works as a controlled write model:
 
-1. The API receives a request with authenticated company context and an employee target.
-2. Services resolve the employee inside the current company and validate the request against tenant settings.
-3. The write path uses a shared validator so the same business rules apply to manual edits, bulk operations, reminder-based auto-present rows, and workflow-generated rows.
-4. Once a row is written, it becomes part of the monthly summary and payroll dependency chain.
+1. The API receives a request with authenticated company context and a user target.
+2. Services resolve the employee inside the current company and validate the request against tenant rules.
+3. The write path uses shared validation so the same rules apply to manual edits, bulk operations, reminder-based default rows, and workflow-generated rows.
+4. Once a row is written, it becomes part of the monthly summary, exception workflow, and payroll dependency chain.
 
-This makes attendance a downstream dependency of employee identity, work calendar, leave approval, WFH approval, and monthly exception review.
+This makes Attendance a downstream dependency of employee identity, work calendar, leave approval, WFH approval, and monthly exception review.
 
-## 1.1 Production hardening additions (2026-08)
+## 1.1 Current hardening and design principles
 
-The attendance write path now has one validation authority: `IAttendanceMutationValidator`. Both the single-record API and `POST api/admin/attendance/bulk` use it. The validator scopes the target employee to `CompanyId`, enforces joining/exit dates, edit guards, configured status semantics, source ownership, and optional optimistic versions. It resolves effective office schedules in this order: employee assignment, department assignment, then company default; each assignment is date-effective and tenant scoped.
+The current implementation emphasizes:
 
-Bulk requests are prevalidated in full before any attendance row is written. The current bulk service persists the prepared rows by the company/user/day identity; the MongoDB unique index remains the final duplicate safeguard. Leave- and WFH-owned records are reported as protected skips rather than overwritten.
+- tenant isolation through `CompanyId` in every attendance query and persistence path
+- source provenance via `SourceType`, `SourceId`, and `SourceVersion`
+- explicit protection of leave/WFH-owned rows rather than silent overwrite
+- shared validation through `IAttendanceMutationValidator`
+- monthly locking as the payroll stability boundary
+- UI rendering of persisted attendance codes rather than inferred absence status
 
-On each working day, `AttendanceReminderHostedService` evaluates active employees once per minute in India Standard Time. It creates a missing record only after that employee's effective office schedule has started, using the company-configured active `Present` status and `SYSTEM_DEFAULT_PRESENT` source. Legacy `SYSTEM_OFFICE_START_PRESENT` rows remain replaceable defaults. At or after **4:00 PM IST**, the service sends one deduplicated in-app attendance-review notification to active Administrator, HR, and HR Executive users. HR/Admin can overwrite a default row through the normal authorized attendance APIs; approved Leave and WFH replace a default row but remain protected from ordinary edits.
+### Production hardening highlights
 
-The HR/Admin bulk screen also accepts `.xlsx`, `.xls`, and `.csv` imports through `AttendanceImportModal.tsx`. It offers matching Excel and CSV templates. Before submission it requires `User Id`, `Date`, and `Status`; validates optional `Check In Time`, `Check Out Time`, and `Remarks`; rejects duplicate employee/date rows and files over 500 rows; then shows API validation messages exactly. The server remains authoritative for tenant membership, working days, join/exit dates, active status configuration, source-owned leave/WFH, payroll locks, and transactions. See `attendance-bulk-marking-flow.md` for its precise contract.
-
-Attendance roles are least-privilege: the role migration grants employees `Attendance.ViewOwn` and HR/Admin `Attendance.ViewAll`, `Attendance.CreateForEmployee`, and `Attendance.Override`. The self-service route does not depend on the `ViewOwn` row at runtime; authentication plus token-derived ownership is its enforcement boundary. `HardenAttendanceRolePermissions` grants/revokes the role records idempotently. The employee route is `api/attendance/me`; employee grid cells are read-only and correction requests are separate records.
-
-Correction requests have a review target (five business days), reviewer, outcome and resolution note. HR/Admin use `GET/PUT api/admin/attendance/correction-requests`; employees use `POST/GET api/attendance/me/correction-requests`. Pending requests for a payroll month block `ProcessPayrollMonth` until reviewed.
-
-`AttendanceOutboxWorker` claims and retries live in-app delivery. It records attempts, errors, exponential backoff and a `DeadLetter` terminal state after ten failed attempts. It does not itself prove SMTP/email delivery; email delivery remains the existing mail pipeline responsibility and needs an end-to-end SMTP test before operational sign-off.
+- `IAttendanceMutationValidator` is the shared validation authority for `POST api/admin/attendance` and `POST api/admin/attendance/bulk`.
+- effective office schedules resolve in this order: employee assignment, department assignment, company default.
+- bulk requests are fully prevalidated before any database write begins.
+- leave and WFH source-owned rows are reported as protected skips and are not overwritten by bulk or manual updates.
+- employee self-service uses the token-derived user and is not governed by arbitrary employee IDs.
+- the UI and backend both reflect source ownership so HR/Admin and employees see the same persisted status.
 
 ## 2. System map
 
@@ -56,46 +60,45 @@ The tenant boundary is `CompanyId`. Daily attendance is identified by `CompanyId
 
 | Layer | Key files / route | Responsibility |
 |---|---|---|
-| HR/Admin attendance API | `Codeji.CMS.API/Controllers/AttendanceController.cs`, route `api/admin/attendance` | Company-grid reads, manual management, correction review, and transactional bulk marking |
-| Employee self-service API | `Codeji.CMS.API/Controllers/MyAttendanceController.cs`, route `api/attendance/me` | Token-derived own-month grid/calendar and correction requests; it never accepts a target employee ID |
-| Daily service | `Codeji.CMS.Services/Attendance/AttendanceService.cs` | Employee validation, status/time normalization, source protection, persistence |
-| Bulk mutation service | `Codeji.CMS.Services/Attendance/AttendanceBulkMutationService.cs`, `AttendanceMutationValidator.cs` | Prevalidates a command, protects workflow-owned rows, then writes attendance by company/user/day identity |
-| Office-start automation | `AttendanceReminderHostedService.cs`, `AttendanceReminderProcessor.cs` | Marks missing eligible employees Present at their effective office start and delivers the 10:52 AM IST HR/Admin review notification |
-| Edit guard | `Codeji.CMS.Services/Attendance/AttendanceEditGuard.cs` | Blocks edits to locked months, weekly offs, and company holidays |
-| Repository | `Codeji.CMS.Repository/Repositories/AttendanceRepository.cs` | Company/user/date upsert and date-range queries |
-| Status configuration | `AttendanceStatusSettingsController.cs`, `AttendanceStatusService.cs` | Company-specific status code rules |
-| Work calendar | `WeeklyOffService.cs`, `CompanyWorkingCalendarService.cs`, Calendar module | Weekly offs and recurring/one-time holidays |
-| Monthly controls | `AttendancePenaltyController.cs`, `AttendancePenaltyService.cs` | Policy, exceptions, review, validation, and locking |
-| Leave reconciliation | `LeaveAttendanceReconciliationService.cs` | Converts approved leave to source-linked attendance or records a conflict |
-| Frontend grid and import | `CMS-React/src/app/modules/attendance/component/AttendanceCalendar.tsx`, `BulkAttendance.tsx`, `components/AttendanceImportModal.tsx` | Monthly employee matrix, bulk marking, Excel/CSV template download and import, and lock/source display |
+| HR/Admin attendance API | `Codeji.CMS.API/Controllers/AttendanceController.cs`, route `api/admin/attendance` | Company-grid reads, manual attendance writes, correction review, and bulk marking |
+| Employee self-service API | `Codeji.CMS.API/Controllers/MyAttendanceController.cs`, route `api/attendance/me` | Token-derived own monthly grid/calendar and correction requests |
+| Attendance service | `Codeji.CMS.Services/Attendance/AttendanceService.cs` | validation, normalization, and persistence |
+| Bulk mutation service | `Codeji.CMS.Services/Attendance/AttendanceBulkMutationService.cs`, `AttendanceMutationValidator.cs` | prepare and persist bulk rows and validate ownership |
+| Edit guard | `Codeji.CMS.Services/Attendance/AttendanceEditGuard.cs` | protects locked months, holidays, weekly offs, and source-owned rows |
+| Repository | `Codeji.CMS.Repository/Repositories/AttendanceRepository.cs` | company/user/date upsert and range queries |
+| Status config | `AttendanceStatusSettingsController.cs`, `AttendanceStatusService.cs` | tenant-specific attendance code definitions |
+| Leave reconciliation | `LeaveAttendanceReconciliationService.cs` | convert accepted leave to source-linked attendance rows |
+| WFH workflow | `WorkFromHomeService.cs`, `Codeji.CMS.API/Controllers/WorkFromHomeController.cs` | WFH request approval, check-in/out, and source-owned attendance |
+| Monthly controls | `AttendancePenaltyController.cs`, `AttendancePenaltyService.cs` | rule validation, exceptions, and month locking |
+| Frontend | `CMS-React/src/app/modules/attendance/*` | attendance UI, company grid, employee self-service, bulk/import, status settings |
 
-## 4. Data model and ownership
+## 4. Core data model and ownership
 
 ### 4.1 `AttendanceModel`
 
 `Codeji.CMS.Repository/Entities/Attendance/AttendanceModel.cs` is the daily source of truth.
 
-| Field | Meaning | Owner / update rule |
+| Field | Meaning | Owner/update rule |
 |---|---|---|
 | `AttendanceId` | Mongo identifier | Created by repository |
-| `CompanyId` | Tenant boundary | Required in every repository filter |
-| `UserId` | Immutable application identity | Resolved from the selected employee |
-| `EmployeeId` | Business/payroll code | Resolved from the selected employee; not trusted from client alone |
-| `Date` | Date-only work date | Normalized before persistence |
-| `Status` | Company attendance code, e.g. `P`, `CL`, `SL-HALF` | Validated against active status settings |
-| `CheckInTime`, `CheckOutTime` | Times for statuses that require them | Normalized by the service |
-| `TotalHours` | Working duration after current break rule | Calculated by service |
-| `LateCount`, `EarlyExitCount` | Inputs to monthly penalty review | Derived during attendance/month processing |
-| `Remarks` | Operator note or system explanation | Manual or system-supplied |
-| `SourceType`, `SourceId`, `SourceVersion` | Provenance and reconciliation reference | `LEAVE` rows are owned by leave reconciliation |
+| `CompanyId` | Tenant boundary | required in every filter |
+| `UserId` | application identity | resolved from the target employee |
+| `EmployeeId` | business/payroll code | resolved from the target employee; not trusted from client |
+| `Date` | date-only business date | normalized before persistence |
+| `Status` | attendance code | validated against tenant status settings |
+| `CheckInTime`, `CheckOutTime` | optional times | normalized by service |
+| `TotalHours` | derived working duration | calculated by service |
+| `LateCount`, `EarlyExitCount` | penalty inputs | derived during attendance processing |
+| `Remarks` | operator or system note | manual or generated |
+| `SourceType`, `SourceId`, `SourceVersion` | provenance metadata | used to protect source-owned rows |
 
-The repository performs a replace-upsert using `CompanyId + UserId + Date`. A production deployment should also enforce a Mongo unique index over that logical key; an application-side upsert alone cannot prove database-level uniqueness under every failure mode.
+The repository upserts by `CompanyId + UserId + Date`. A production deployment should enforce the Mongo unique index over that key.
 
-### 4.2 Attendance response contract
+### 4.2 Response contract
 
-`AttendanceResponseDto` returns the normal daily fields plus `SourceType` and `SourceId`. The frontend uses this provenance rather than inferring leave from a separate visual overlay.
+`AttendanceResponseDto` includes the standard attendance fields plus `SourceType` and `SourceId`. The frontend uses this metadata rather than inferring leave from a separate overlay.
 
-For a leave-generated record, a typical response conceptually contains:
+Example:
 
 ```json
 {
@@ -111,429 +114,373 @@ For a leave-generated record, a typical response conceptually contains:
 
 ### 4.3 Status definitions
 
-`AttendanceStatusSetting` is company-owned. A setting controls code, display name, active state, whether times are required, paid-day fraction, unpaid-day fraction, and display order.
+`AttendanceStatusSetting` is tenant-scoped and controls:
+- `Code`
+- display `Name`
+- `ColorHex`
+- active state
+- `RequiresTime`
+- paid/unpaid fractions
+- `IsAvailableForLeaveManagement`
+- display order
 
-Default examples:
+Typical codes include:
+- `P`, `A`, `UL`, `CL`, `SL`, `EL`, `COMP-OFF`, `CL-HALF`, `SL-HALF`, `HD`, `LHD`, `WFH`, `WFH+WFO`, `WFH-HD`, `ED`
 
-| Code | Typical meaning | Time required | Typical fraction |
-|---|---|---:|---:|
-| `P` | Present | Yes | paid 1 |
-| `A` / `UL` | Absent or unpaid leave | No | unpaid 1 |
-| `CL`, `SL`, `EL`, `COMP-OFF` | Approved full-day leave | No | paid 1 when policy/configuration permits |
-| `CL-HALF`, `SL-HALF` | Approved half-day leave | No | paid 0.5 |
-| `HD`, `LHD`, `WFH-HD` | Time-based half-day status | Yes | paid/unpaid 0.5 as configured |
-| `WFH`, `WFH+WFO`, `ED` | Work pattern/status | Usually yes | defined by company configuration |
+Status settings that require time include `P`, `WFH`, `HD`, `ED`, `LHD`, `WFH+WFO`, `WFH-HD`.
 
-### Status presentation and leave-policy availability
+A status that requires clock times cannot be enabled for leave policy mapping. The leave service validates this rule when saving and approving policies.
 
-Each tenant attendance status now stores a six-digit display color and `IsAvailableForLeaveManagement`. Attendance Settings exposes both controls. A status that requires clock-in/out cannot be enabled for leave policies. The Leave Policy form loads only active, no-time statuses with this toggle enabled; the leave service enforces the same rule before saving or approving a mapped policy. Existing records are backfilled by `2026-08-01-BackfillAttendanceStatusPresentationAndLeaveEligibility` without overwriting an existing configured color or toggle.
+## 5. Access model and permissions
 
-## Employee profile attendance calendar
+### 5.1 Authorization model
 
-Every employee profile contains a month navigator that reads attendance for the displayed month. A recorded day uses the tenant-configured attendance-status colour. Hovering or keyboard-focusing a day displays its status code, status name, date and recorded clock-in/out values. The legend below the calendar shows the codes that occur in that month.
+Attendance APIs require authenticated tenant context and module permissions. Key permissions include:
+- `Attendance.ViewAll` — company attendance grid access
+- `Attendance.CreateForEmployee` — manual attendance create/update for employees
+- `Attendance.Override` — overwrite protected rows when permitted
+- `Attendance.View` / `Attendance.ViewOwn` — employee self-service access
 
-- The signed-in employee reads only their own month through `GET /api/attendance/me/calendar?year={year}&month={month}` (the grid uses `GET /api/attendance/me/grid`). The API derives the user and company from the authenticated request; the browser does not supply a user ID and cannot use this route to read another employee.
-- An authorized HR/Admin viewer opening another employee profile uses the company-grid attendance query restricted to that employee ID. That route requires `Attendance.ViewAll`.
-- The calendar is read-only. Attendance marking, workflow-owned WFH/leave protection and month-lock rules remain enforced in their existing workflows.
-- Status names and colours come from `GET /api/attendance-status-settings?activeOnly=true`, so an admin change in Attendance Settings is reflected in every profile month.
+### 5.2 Self-service boundary
 
-## Work from home workflow
+Employee self-service routes derive company and user from JWT. They do not trust client-supplied employee IDs.
 
-WFH is additive to manual attendance. A request is company-scoped and resolves the employee from the authenticated user; callers cannot select a company or another employee. The configured policy currently enforces a maximum of **one approved WFH day per employee per Monday–Sunday week**.
-
-1. HR/Admin configures `GET/PUT /api/wfh/policy`, selects active attendance status codes, and assigns the policy company-wide or to matching department names and/or employee IDs.
-2. The employee submits `POST /api/wfh/requests`. The service validates company membership, eligibility, date range, weekly quota, policy dates, weekly offs, holidays, locked summaries, and overlapping WFH requests.
-3. When `ManagerApprovalRequired` is enabled, the assigned reporting manager reviews the pending request through `/api/wfh/requests/team`; when it is disabled, the valid request is approved directly and HR/Admin is notified for review. Every created, decision, attendance-generation, conflict, check-in, and check-out action is written to `WorkFromHomeRequestLog`.
-4. Approval (including direct approval) creates only source-owned `Attendance` rows: `SourceType=WFH_REQUEST`, `SourceId=RequestId`, and the approval source version. Existing manual or LEAVE rows are never overwritten; a blocking `AttendancePayrollException` is created instead.
-5. The employee checks in/out through the WFH endpoints. Server UTC time is stored; checkout calculates actual hours and creates a blocking insufficient-hours exception when needed.
-
-Normal attendance editing rejects WFH-owned rows. This retains the existing leave ownership, weekly-off/holiday, locking, summary invalidation, and payroll safety rules.
-
-### Safe rollout and validation
-
-Before enabling the policy in a payroll-active company, confirm weekly offs, holidays, attendance status codes, monthly locks, HR/Admin recipients and mail configuration. Use an authorized test employee/date, then remove or complete only the records created for that validation according to company retention rules.
-
-The configured setting—not the display label—must be used by payroll calculation. Do not use a hard-coded list as the authoritative rule set.
-
-## 5. Superseded authorization note
-
-All attendance API routes require authenticated company context and module permissions.
-
-| Capability | API permission | Notes |
+| Capability | Route | Boundary |
 |---|---|---|
-| Read grid, statuses, exceptions, lock state | `Attendance.View` | Current implementation is company-level; it does not yet split own vs all-employee access |
-| Create manual attendance | `Attendance.Create` | Also subject to edit guard and status/time validation |
-| Update daily attendance, review exceptions, validate/lock month, save penalty policy | `Attendance.Edit` | “Edit” does not override an approved-leave source record or a locked month |
+| Employee own calendar | `GET api/attendance/me/grid`, `GET api/attendance/me/calendar` | active employee only |
+| Correction request | `POST api/attendance/me/correction-requests` | active employee only |
+| HR/Admin company grid | `POST api/admin/attendance/GetAllAttendanceItems` | `Attendance.ViewAll` required |
+| Manual create/update | `POST api/admin/attendance` | `Attendance.CreateForEmployee` / `Attendance.Override` |
 
-The current `AdminAttendanceController` name and `api/admin/attendance` route do not mean only the Administrator role may use it. Access is controlled by the assigned module permission. Role names such as HR Manager, HR Executive, and HR Generalist must therefore receive explicit, appropriately scoped permissions.
+A user with only `Attendance.View` cannot access the company grid or modify arbitrary employees.
 
-> This section describes the prior company-grid model. The following current model supersedes its statement that `Attendance.View` is company-wide.
+### 5.3 React UI gating
 
-## 5A. Current authorization, self-service, and access boundaries
+`EmployeeAttendance.tsx` controls display logic:
+- `canViewAllAttendance` is true for Administrators or users with `Attendance.ViewAll`
+- `canManageAttendance` is true for Administrators or users with `Attendance.CreateForEmployee` / `Attendance.Override`
+- employee-only mode renders a single row labeled `My attendance`
+- bulk actions, search, and edit controls are hidden or disabled for self-service mode
 
-All attendance APIs require authenticated company context. Employee review is intentionally separate from HR/Admin attendance operations. The own-attendance route requires authentication and an active `EmpUser`, not a tenant `ViewOwn` permission record: this prevents an incomplete role-permission migration from hiding a valid employee's own records. It remains safe because the route obtains both tenant and user identity exclusively from JWT claims.
+## 6. Frontend attendance surfaces
 
-| Capability | API / permission | Boundary |
-|---|---|---|
-| Employee reads own monthly grid/calendar | `GET api/attendance/me/grid`, `GET api/attendance/me/calendar` | Authenticated active employee only; server derives company and user; one employee only |
-| Employee submits/reads correction requests | `api/attendance/me/correction-requests` | Authenticated active employee only; own persisted record only; one pending request per date |
-| HR/Admin reads company grid | `POST api/admin/attendance/GetAllAttendanceItems`, `Attendance.ViewAll` | Same-company employees only |
-| HR/Admin manual create | Attendance Create | Edit guard and status/time validation apply |
-| HR/Admin edit, exception review, validate/lock, policy | Attendance Edit | Cannot overwrite source-owned or locked attendance |
+### 6.1 Main attendance page
 
-`AddAttendanceViewAllPermission` grants `Attendance.ViewAll` to Admin/HR roles. A user with only `Attendance.View` cannot load the company grid or submit arbitrary employee IDs.
+File: `CMS-React/src/app/modules/attendance/EmployeeAttendance.tsx`
 
-### Employee attendance review and correction
+Responsibilities:
+- determine company vs employee mode
+- load employee list for company grid
+- compute and apply selected date range
+- display summary stats cards
+- show correction request UI for employees
+- pass `readOnly` into the attendance grid
 
-The employee page contains exactly one **My attendance** row and loads `api/attendance/me/grid`. Search, employee selection, bulk marking, day-cell edit modal, write actions, and Monthly Exceptions are hidden or disabled. The employee can change month and inspect their records; an empty day means no persisted record, not an automatically inferred absence.
+### 6.2 Attendance calendar grid
 
-```text
-Employee identifies an incorrect persisted day
-  -> enters date, issue type and reason in Report incorrect attendance
-  -> POST api/attendance/me/correction-requests
-  -> API verifies token company/user, actual attendance row, valid reason and no duplicate pending request
-  -> AttendanceCorrectionRequest is stored as Pending
-  -> active same-company HR/Admin receive persistent in-app notifications
-  -> HR/Admin investigate and correct through the authorized owning workflow
-```
+File: `CMS-React/src/app/modules/attendance/component/AttendanceCalendar.tsx`
 
-A correction request never changes attendance by itself. It cannot bypass a monthly lock, leave/WFH source ownership, or normal attendance authorization. Current correction-request delivery is in-app HR notification; leave request email delivery is a separate flow.
+This component renders the monthly grid, including:
+- status selection
+- optional check-in/out inputs
+- source ownership markers
+- leave/WFH tooltip enrichment
+- pagination and load state handling
 
-| Persona | Attendance grid | Monthly exceptions | Correction responsibility |
-|---|---|---|---|
-| Employee with `Attendance.ViewOwn` (when role migration is applied) | Own month, read-only | Not displayed | Submit own correction request; cannot edit |
-| HR/Admin with ViewAll and Create/Edit as appropriate | Company employee grid and authorized edits | Authorized operators only | Receive/review request and apply authorized correction |
-| Authenticated active employee | Own month, read-only | Not displayed | Submit own correction request; cannot edit |
+It loads tenant-specific data:
+- active attendance status settings
+- weekly offs
+- holidays/events
+- company attendance rows or own attendance rows
 
-## 6. Daily attendance workflow
+`readOnly` mode disables writes and hides bulk/batch editing.
 
-### 6.1 Grid load
+### 6.3 Status settings UI
 
-For an HR/Admin company-grid session, the React calendar:
+File: `CMS-React/src/app/modules/attendance/AttendanceStatusSettings.tsx`
 
-1. loads active attendance status settings;
-2. loads configured weekly offs;
-3. reads company holidays for the month;
-4. requests approved leave information to enrich source-linked tooltips;
-5. calls `POST api/admin/attendance/GetAllAttendanceItems` with the month range and displayed user IDs;
-6. keys returned records by `UserId + YYYY-MM-DD` and renders the persisted status.
+This screen allows configuration of attendance codes, display colors, required time flags, and leave-management eligibility.
 
-The employee self-service session follows the separate `GET api/attendance/me/grid` path described in section 5A. It does not load the company employee list or the leave-request overlay, because those calls would either broaden data access or depend on Leave Management permissions that are unrelated to employee attendance review.
+### 6.4 Exceptions review UI
 
-Approved leave is **not** converted into a frontend-only `L`/`H` badge. A source-linked daily record is displayed with its persisted code—such as `CL`, `SL`, `EL`, `CL-HALF`, `SL-HALF`, or `COMP-OFF`—and a lock indicator.
+File: `CMS-React/src/app/modules/attendance/component/MonthlyAttendanceExceptions.tsx`
 
-### 6.2 Manual create/update
+It supports:
+- exception list loading
+- recalculation of monthly exceptions
+- reviewing individual exceptions
+- resolving attendance issues via status/time corrections
+- bulk decisions for LHD/ED exceptions
 
-`AdminAttendanceService` applies the following sequence:
+### 6.5 Profile attendance calendar
 
-1. resolve the employee within the authenticated company;
-2. verify a submitted employee code matches that employee when supplied;
-3. call `AttendanceEditGuard`;
-4. load and validate the selected company status;
-5. parse and validate times if the status requires times;
-6. load any existing company/user/date record;
-7. reject edits when `SourceType == LEAVE`;
-8. calculate hours and persist by company/user/date.
+File: `CMS-React/src/app/modules/users/components/LeaveCalendar.tsx`
 
-The guard rejects a locked monthly summary, configured weekly offs, and holidays. The leave-source check rejects normal manual overwrite even if the record is otherwise on an editable working day.
+This is a read-only calendar used in employee profiles. It shows status colors and tooltips for each day, but it does not allow edits.
 
-### 6.3 Frontend presentation and accessibility
+## 7. Employee self-service flow
 
-Leave-generated cells:
+### 7.1 Load own attendance
 
-- show the exact persisted status code, centered in the cell;
-- show a lock icon indicating that the source is approved leave;
-- expose an `aria-label` containing the code, status meaning, leave type where available, duration, approval/source state, and date;
-- provide the same details in a tooltip;
-- open an explanatory conflict-resolution message instead of the normal attendance editor;
-- are excluded from bulk marking before the client makes write calls.
+Flow:
+1. Employee opens Attendance page.
+2. the page enters employee mode.
+3. it creates a single row for the current user.
+4. the grid calls `GET api/attendance/me/grid`.
+5. backend derives company and user from JWT.
+6. only persisted attendance rows are shown; missing dates remain empty.
 
-The service remains authoritative: direct API requests to create/update a record that already has `SourceType = LEAVE` return a conflict response. Client-side prevention is usability protection, not the security boundary.
+### 7.2 Correction request
 
-### 6.4 Bulk marking
+Flow:
+1. employee selects a date and enters a reason.
+2. `POST api/attendance/me/correction-requests` is sent.
+3. backend validates active employee, existing attendance row, and duplicate pending request.
+4. it stores `AttendanceCorrectionRequest` with `Pending` status.
+5. HR/Admin recipients receive a notification.
 
-Bulk marking is a single, server-side command:
+A correction request is audit/workflow-only. It does not change attendance directly or bypass locks/source ownership.
 
-`POST /api/admin/attendance/bulk`
+## 8. HR/Admin attendance flow
 
-The caller must hold both `Attendance.CreateForEmployee` and `Attendance.Override`. An employee's own calendar never invokes this route.
+### 8.1 Grid load and editing
 
-#### Request contract and UI modes
+Flow:
+1. HR/Admin opens Attendance page.
+2. the page loads eligible employees.
+3. the grid loads statuses, weekly offs, holidays, and attendance rows.
+4. each cell shows persisted status and source metadata.
+5. HR/Admin can click a cell to open an edit modal.
 
-`AttendanceBulkMutationDto` contains 1 to 500 `rows` and the `skipExisting` option. Each row supplies the target `userId`, work `date`, status code, optional clock times, operator remarks, and optional `expectedVersion`.
+### 8.2 Manual create/update
 
-```json
-{
-  "rows": [
-    {
-      "userId": "employee-user-id",
-      "date": "2026-07-30",
-      "status": "P",
-      "checkInTime": "09:00",
-      "checkOutTime": "18:00",
-      "remarks": "HR bulk correction",
-      "expectedVersion": 3
-    }
-  ],
-  "skipExisting": false
-}
-```
+The backend applies:
+1. resolve employee within the authenticated company
+2. verify employee code when supplied
+3. run `AttendanceEditGuard`
+4. validate status and times
+5. load any existing row
+6. reject leave/WFH-owned rows
+7. calculate derived fields
+8. upsert by `CompanyId + UserId + Date`
 
-`AttendanceCalendar.tsx` exposes two operator actions for one chosen date/status:
+### 8.3 Bulk marking
 
-- **Bulk Apply** builds a row for every employee currently loaded in the grid.
-- **Selected Employees** builds a row only for checked employees.
+Route: `POST /api/admin/attendance/bulk`
 
-The current UI sends `skipExisting: false` by default. Therefore a writable manual or `SYSTEM_OFFICE_START_PRESENT` record on the same employee/date is updated; it is not inserted again. Setting `skipExisting: true` preserves existing rows and creates only missing rows. The browser does not impose `09:00`/`18:00`; when a selected status needs times, the server resolves the effective schedule for each employee.
+Key behavior:
+- accepts up to 500 rows
+- requires `Attendance.CreateForEmployee` and `Attendance.Override`
+- supports `skipExisting`
+- rejects duplicate rows in the request
+- protects leave/WFH-owned rows and returns them as `protectedSkipped`
+- resolves effective schedule times where needed
 
-#### Prevalidation and ownership rules
+### 8.4 Import preview and commit
 
-Before any database transaction starts, the service rejects duplicate logical keys inside the request (`UserId + calendar date`). It then prepares every row through `IAttendanceMutationValidator`:
+Routes:
+- `POST /api/admin/attendance/bulk-import/validate`
+- `POST /api/admin/attendance/bulk-import/commit`
 
-1. Tenant and actor come from the authenticated request; they are never supplied by the browser.
-2. The target employee must be active, not deleted, and belong to that tenant.
-3. The date cannot be future-dated, before joining, or after exit.
-4. The attendance edit guard checks the month lock, weekly off, and company holiday.
-5. The status must be active in the tenant. Time-required statuses receive either validated custom times or the effective schedule; non-time statuses reject submitted clock times.
-6. A supplied `expectedVersion` must match the persisted row version, otherwise the command fails with `ATTENDANCE_VERSION_CONFLICT` instead of silently overwriting a concurrent update.
-7. A row owned by approved leave (`SourceType=LEAVE`) or WFH (`SourceType=WFH_REQUEST`) is never overwritten. It is counted as `protectedSkipped`, while other valid rows can continue.
+Import validation:
+- accepts `.xlsx`, `.xls`, `.csv`
+- validates sheet headers and row data
+- rejects formula cells and invalid rows
+- resolves employee codes in the authenticated company
+- returns per-row outcomes: `READY_CREATE`, `READY_UPDATE`, `UNCHANGED`, `PROTECTED`, `INVALID`
 
-Any other invalid row causes the command to fail before the write transaction. This avoids a partly validated import. The protected Leave/WFH exception is deliberate: those rows belong to their source workflow and are reported rather than treated as an operator error.
+Commit:
+- requires an idempotency key
+- re-resolves employee codes
+- re-runs shared validation
+- returns created/updated/skipped/protected counts
 
-#### Persisted result, overwrite behavior, and duplicate safety
+### 8.5 Default present row automation
 
-The logical attendance identity is `CompanyId + UserId + Date`. The write uses a `ReplaceOne` upsert filtered by that exact key:
+Behavior:
+- `AttendanceReminderHostedService` runs every minute IST
+- it creates a missing `P` row after an employee's effective schedule start
+- it uses `SYSTEM_DEFAULT_PRESENT` source and `CreateMissingOnly`
+- it never overwrites manual, leave, WFH, or existing system rows
 
-- no matching row: creates one and returns it in `created`;
-- matching ordinary/manual row with `skipExisting: false`: replaces that same row and returns it in `updated`;
-- matching row with `skipExisting: true`: makes no write and returns it in `skipped`;
-- matching Leave/WFH row: makes no write and returns it in `protectedSkipped`.
+Review notification:
+- at or after 10:52 AM IST, `AttendanceReminderProcessor` sends one deduplicated in-app notification per company
+- recipients are active Administrator, HR, and HR Executive users
+- the notification encourages HR/Admin review and correction
 
-The application must retain the MongoDB unique index for `CompanyId + UserId + Date`; it is the final invariant against duplicate records during races or recovery. Do not retry a failed historical import blindly: first reconcile actual records by tenant, user, and date range, then retry only the missing or intended rows.
+## 9. Leave reconciliation flow
 
-A successful command returns:
+### 9.1 Business-date contract
 
-```json
-{ "created": 12, "updated": 3, "skipped": 1, "protectedSkipped": 2 }
-```
+Attendance and leave share a UTC-midnight business date. Approved leave and generated attendance use the same normalized date value.
 
-The React grid reloads after success, and the employee's token-scoped calendar subsequently reads the same persisted rows through `api/attendance/me/calendar` or `api/attendance/me/grid`.
+Legacy local-midnight rows are corrected by `NormalizeLegacyLeaveBusinessDates` only when safe.
 
-### 6.5 Office-start Present and 10:52 review
+### 9.2 Leave policy mapping
 
-```text
-Every minute (IST)
-  -> find active employees without today's attendance
-  -> resolve each employee's effective schedule
-  -> only after that schedule's StartTime, validate and create missing P rows
-  -> tag rows SYSTEM_OFFICE_START_PRESENT; never replace an existing row
-At/after 10:52 AM IST
-  -> find today's SYSTEM_OFFICE_START_PRESENT rows by company
-  -> create one persisted, deduplicated notification per company/day
-  -> deliver it to active Administrator, HR, and HR Executive recipients
-  -> HR/Admin review and bulk-overwrite ordinary rows as needed
-```
+Leave policies map to attendance via `AttendanceStatusCode`. The mapped code must be active, tenant-scoped, and no-time.
 
-The schedule is safe to retry after a service restart: automatic creation uses `CreateMissingOnly`, and the review notification target is `attendance-review-YYYY-MM-DD`. It does not create records before an employee's scheduled start, on a weekly off/holiday/locked date, before joining, after exit, or without an active valid `P` status and effective schedule, because the shared mutation validator rejects those cases. It intentionally does not send the prior 6 PM notification or create rows at 6 PM.
+### 9.3 Approved leave reconciliation
 
-## 7. Leave-to-attendance dependency
+When leave is accepted, `LeaveAttendanceReconciliationService`:
+1. reloads the current company, employee, policy, and status
+2. calculates included dates using holidays, weekly offs, and policy inclusion flags
+3. writes or updates source-owned attendance rows with the mapped status
+4. sets `SourceType = LEAVE`, `SourceId = LeaveRequestId`, `SourceVersion = LeaveRequest.Version`
+5. writes a generated remark
+6. invalidates affected unlocked monthly summaries
 
-### 7.0 Canonical business date
+Reconciliation is idempotent for the same source identity.
 
-Attendance and leave share a UTC-midnight business-date contract. A leave request's approved `DateOnly` value is stored as UTC midnight and reconciliation stores generated `Attendance.Date` at that identical value. This prevents a local-midnight MongoDB conversion from putting an Aug 5 leave into an earlier attendance column. Historical `18:30 UTC` rows are handled by `NormalizeLegacyLeaveBusinessDates`; it changes only safe source-owned single-day rows and never overwrites an occupied target day.
+### 9.4 Conflict handling
 
-### 7.1 Policy mapping
+If an existing row is manual or has a non-matching source, reconciliation does not overwrite it. It creates a blocking `LEAVE_ATTENDANCE_CONFLICT` exception instead.
 
-Leave policy configuration contains `AttendanceStatusCode`. It must reference an active, no-time attendance status in the same company. Examples include `CL`, `SL`, `EL`, `UL`, `COMP-OFF`, `CL-HALF`, and `SL-HALF`.
+If approved leave is reversed, the service removes only matching source-owned rows. It does not delete manual attendance.
 
-Policies without a mapping remain readable for backward compatibility but cannot produce correct attendance on approval. HR must supply a valid mapping before relying on the leave-to-attendance flow.
+## 10. WFH attendance flow
 
-### 7.2 Approval reconciliation
+WFH is source-owned attendance:
+- WFH policy is tenant-scoped
+- employee submits `POST /api/wfh/requests`
+- requests validate eligibility, quota, holidays, weekly offs, and locked dates
+- approval creates `WFH_REQUEST` source-owned attendance rows
+- employee check-in/out uses server UTC time
+- insufficient hours create a reviewable payroll exception
 
-When a leave request is accepted, `LeaveAttendanceReconciliationService`:
+Manual attendance editing rejects WFH-owned rows.
 
-1. reloads the request, employee, policy, and status in the current company;
-2. calculates included dates using company weekly offs and holidays plus the policy’s inclusion flags;
-3. creates or updates the attendance record with the mapped status;
-   its date is the exact approved UTC business date;
-4. sets `SourceType = LEAVE`, `SourceId = LeaveRequestId`, and `SourceVersion = LeaveRequest.Version`;
-5. writes a system remark identifying the source;
-6. invalidates affected unlocked monthly summaries so the month is rebuilt from daily data.
+## 11. Work calendar dependency
 
-The update is idempotent for the same source: repeating reconciliation updates the same source-linked record rather than creating a duplicate.
+Attendance uses shared calendar rules:
+- tenant weekly offs
+- company holidays
+- employee join/exit dates
+- leave policy inclusion flags
 
-### 7.3 Manual-attendance conflict
+The edit guard rejects manual changes on weekly offs and holidays. Leave reconciliation may still include them if the policy permits.
 
-If an existing row is manual or has another source, reconciliation does not overwrite it. It creates a blocking `LEAVE_ATTENDANCE_CONFLICT` exception with the existing and requested statuses. The conflict must be reviewed through the authorized exception/correction process before the month can be safely locked.
+## 12. Monthly validation and payroll lock
 
-When a previously approved request is reversed, reconciliation removes only rows whose source matches that leave request/version. It must never delete a manual attendance row.
-
-### 7.4 Correction responsibility
-
-Changing source-linked attendance directly would make leave balances, approval history, and payroll disagree. A correction must originate from the leave workflow or an explicitly implemented, audited leave-attendance conflict-resolution workflow. The current user-facing message accurately states this requirement; it is not a general manual-edit path.
-
-## 8. Work calendar dependency
-
-Attendance uses the same company work-calendar concepts as Leave and Payroll:
-
-- **Weekly offs**: stored company configuration, defaulting to Saturday/Sunday when absent;
-- **Holidays**: company calendar items, including recurring annual holidays;
-- **Employee employment period**: joining/exit dates define eligibility for monthly summary and payroll;
-- **Policy inclusion flags**: a leave policy can separately decide whether holidays/weekends inside an approved leave range consume leave and generate attendance.
-
-The attendance edit guard rejects manual changes on a weekly off or holiday. Leave reconciliation can still process dates when the leave policy explicitly includes them. This distinction is intentional and should not be replaced with frontend-only date checks.
-
-## 9. Monthly validation, exceptions, and locking
-
-### 9.1 Endpoints
+### 12.1 Endpoints
 
 | Endpoint | Permission | Purpose |
 |---|---|---|
-| `GET api/attendance/penalty/policy` | View | Read effective penalty rules |
-| `POST api/attendance/penalty/policy` | Edit | Save policy |
-| `POST api/attendance/penalty/exceptions/recalculate` | Edit | Rebuild month exceptions |
-| `POST api/attendance/penalty/exceptions/search` | View | List/filter exceptions |
-| `PATCH api/attendance/penalty/exceptions/{id}/review` | Edit | Review a specific exception |
-| `GET api/attendance/penalty/month/lock-status` | View | Read employee/month lock state |
-| `POST api/attendance/penalty/month/validate-lock` | Edit | Validate eligible records and lock the month when valid |
+| `GET api/attendance/penalty/policy` | View | read penalty rules |
+| `POST api/attendance/penalty/policy` | Edit | save policy |
+| `POST api/attendance/penalty/exceptions/recalculate` | Edit | rebuild month exceptions |
+| `POST api/attendance/penalty/exceptions/search` | View | list exceptions |
+| `PATCH api/attendance/penalty/exceptions/{id}/review` | Edit | review exception |
+| `GET api/attendance/penalty/month/lock-status` | View | read month lock state |
+| `POST api/attendance/penalty/month/validate-lock` | Edit | validate and lock month |
 
-### 9.2 Summary lifecycle
+### 12.2 Summary lifecycle
 
-`MonthlyAttendanceSummary` is the payroll-facing representation for one employee/month. It contains expected and eligible working days, status totals, paid/unpaid days, missing data, penalty counts, blocking exception state, approval/lock metadata, and version information.
-
-Practical lifecycle:
+`MonthlyAttendanceSummary` is the payroll-facing employee/month view. It includes expected days, totals, penalties, and lock metadata.
 
 ```text
 Daily attendance + source-linked leave
-        -> validation / exception generation
-        -> exception review
-        -> approved monthly summary
-        -> locked summary
-        -> payroll eligibility
+  -> exception generation
+  -> review and correction
+  -> approved summary
+  -> locked summary
+  -> payroll eligibility
 ```
 
-Once locked, `AttendanceEditGuard` blocks normal daily attendance changes. The current application does not yet provide a complete audited reopen/relock correction workflow. Do not instruct users to bypass the lock by database modification.
+Locked months block normal daily edits. The current system does not provide a full audited reopen/relock workflow.
 
-## 10. Payroll dependency
+## 13. Payroll dependency
 
-Payroll consumes attendance as a controlled prerequisite:
+Payroll requires attendance as a stable input:
+1. the month is validated and eligible
+2. the employee has an active salary structure
+3. the monthly attendance summary is approved and locked
+4. blocking exceptions are resolved
+5. paid/unpaid status fractions and penalties are applied
+6. the locked summary is used to compute pay
 
-1. the payroll month must be eligible for processing;
-2. the employee must have an effective salary structure;
-3. a monthly attendance summary must exist, be approved, and be locked;
-4. blocking attendance exceptions must be resolved;
-5. attendance status paid/unpaid fractions and approved penalties determine loss-of-pay days;
-6. company work-calendar and employment eligibility determine expected days and proration;
-7. payroll creates the payroll record/payslip from that locked state.
+Changing attendance after payroll invalidates the result.
 
-```text
-Daily statuses + approved leave mappings
-   -> paid/unpaid day fractions
-   + approved attendance penalties
-   -> loss-of-pay days and amount
-   -> prorated earnings, deductions, net pay
-```
+## 14. Notifications and reporting
 
-Changing daily attendance after payroll would invalidate the payroll result. That is why locking and a future payroll revision workflow are required controls.
+Attendance is a read model for payroll, reports, and dashboards. Leave approval notifications, HR/Admin alerts, and employee correction alerts are persisted independently.
 
-## 11. Notifications and reporting dependency
+Reports should use persisted attendance records and locked summaries, not browser-inferred calendar status.
 
-Leave approval may also send notifications and update employee leave balance. Attendance reconciliation runs after the core leave status/balance change. The attendance grid is therefore a read model of persisted attendance, while the leave module remains the source for leave policy, approval, balance, and reason.
+## 15. Safeguards and limitations
 
-Reports and dashboard metrics should use persisted attendance records and locked monthly summaries, not derive payroll time solely from the frontend calendar display.
+### Safeguards
+- company-scoped writes and queries
+- shared validation for all attendance writes
+- leave/WFH source provenance and protection
+- holiday/weekly-off/monthly-lock edit guard
+- bulk validation and protected-skip behavior
+- source-coded attendance rendering with lock/tooltips
+- JWT-derived self-service ownership enforcement
 
-## 12. Current safeguards and remaining limitations
+### Limitations
+1. leave workflow spans multiple documents and needs end-to-end failure/retry validation
+2. bulk writes require replica-set transaction support in production
+3. no audited reopen/relock workflow is fully implemented
+4. role/permission migration must be verified per tenant
+5. the unique `CompanyId + UserId + Date` index must be monitored
+6. payroll revision/control workflow remains a future requirement
 
-### Implemented safeguards
+## 16. Operational runbook
 
-- Company-scoped attendance lookup and write filters.
-- Employee identity resolution before writes.
-- Date normalization and company status validation.
-- Time validation and derived hour calculation.
-- Weekly-off, holiday, and locked-month edit guard.
-- Leave reconciliation using source-linked, idempotent attendance records.
-- Blocking exception instead of silent manual-attendance overwrite.
-- UI and API protection against manual or bulk overwrite of leave-generated records.
-- Exact persisted leave status, source indicator, tooltip, and accessible text in the attendance grid.
+### New company checklist
+1. configure weekly offs
+2. add company holidays
+3. review attendance status definitions
+4. configure leave policies with valid attendance mappings
+5. grant Attendance permissions to HR roles
+6. validate manual, leave, and half-day flows in non-production
 
-### Limitations to address before describing the entire process as fully production-hardened
-
-1. **Multi-document leave workflow:** leave status, balance, attendance reconciliation, monthly-summary invalidation, and notifications span multiple MongoDB documents. The leave service has transaction handling for the core leave/balance transition, but attendance reconciliation and downstream effects require an end-to-end failure/retry strategy and production replica-set validation.
-2. **Bulk attendance infrastructure:** bulk writes are transactional, but require MongoDB replica-set support. A standalone deployment fails safely and must not be treated as a successful import.
-3. **Correction lifecycle:** no complete audited reopen/relock and leave-attendance conflict-resolution UI is implemented yet.
-4. **Permission rollout:** verify the granular role-permission migrations in every tenant. Self-service attendance remains available to active authenticated employees during a migration gap, but HR/company-grid capability still requires its explicit `ViewAll` permission.
-5. **Database invariant:** confirm and monitor the unique index for `CompanyId + UserId + Date` in every deployed tenant database.
-6. **Payroll revisions:** an explicit audited payroll recalculation/revision process is still needed after a permitted correction.
-
-## 13. Operational runbook
-
-### Configure a new company
-
-1. Configure weekly offs.
-2. Create company holidays, including recurring holidays where applicable.
-3. Review active attendance status definitions and paid/unpaid fractions.
-4. Configure each leave policy with a compatible no-time attendance status code.
-5. Grant Attendance permissions to the intended HR roles.
-6. Verify an employee, a manual day, an approved full-day leave, and an approved half-day leave in a non-production tenant before payroll use.
-
-### Month-end procedure
-
-1. Confirm daily attendance is complete.
-2. Resolve or review attendance exceptions, including `LEAVE_ATTENDANCE_CONFLICT`.
-3. Validate the month.
-4. Confirm calculated paid/unpaid days and penalties.
-5. Lock the month only after approval.
-6. Process payroll from the locked summary.
+### Month-end checklist
+1. verify attendance completeness
+2. resolve exceptions and leave conflicts
+3. validate the month
+4. confirm paid/unpaid totals
+5. lock the month
+6. process payroll
 
 ### Incident triage
-
-| Symptom | First check |
+| Symptom | Check |
 |---|---|
-| Leave code is missing in grid | Confirm attendance response contains the source-linked row and policy has `AttendanceStatusCode` |
-| Cell says it cannot be edited | Check for `SourceType = LEAVE`, locked summary, weekly off, or holiday |
-| Approved leave did not reconcile | Check leave policy mapping, work-calendar inclusion, and any `LEAVE_ATTENDANCE_CONFLICT` exception |
-| Payroll cannot run | Check approved/locked summary, blocking exceptions, salary structure, and payroll month rules |
-| Wrong tenant data appears | Stop processing and inspect authenticated company claims and repository filters; do not use client-supplied tenant selection |
-| WFH day cannot be edited | Check for `SourceType = WFH_REQUEST`; use the WFH workflow, not manual attendance editing |
-| WFH clock action is unavailable | Confirm the request is approved, covers today, policy is enabled and the user owns the request |
-| Employee profile says “No attendance this month” while HR can see rows | Confirm the running backend includes `MyAttendanceController` self-service route, the employee is active in `EmpUser`, then inspect `GET api/attendance/me/calendar`; the route must derive the token user and must not call the HR company-grid endpoint |
-| Bulk Apply reports a conflict | Check duplicate request dates, status/timing, join/exit range, calendar/lock rule, and `expectedVersion`; do not retry until the returned error and existing records are reconciled |
-| Bulk Apply skips a row | Check `skipExisting` for a manual row, or `SourceType` for `LEAVE`/`WFH_REQUEST`; use the owning Leave/WFH workflow rather than replacing source-owned attendance |
+| leave code missing in grid | confirm source-linked attendance row and leave policy mapping |
+| cell not editable | inspect `SourceType`, month lock, weekly off, or holiday |
+| leave did not reconcile | verify leave policy mapping and conflict exceptions |
+| payroll blocked | check locked summary and exceptions |
+| tenant mismatch | inspect authenticated company claims and repository filters |
+| WFH row protected | confirm `SourceType = WFH_REQUEST` |
+| profile calendar empty | confirm `GET api/attendance/me/calendar` path and user/token ownership |
+| bulk conflict | validate duplicate rows, expectedVersion, and calendar rules |
+| protected skip | check for leave/WFH source ownership or `skipExisting=true` |
 
-### WFH source-owned attendance
+## 17. Verification checklist
 
-Approved WFH requests create attendance rows with `SourceType = WFH_REQUEST`, request ID and source version. The employee clocks in/out through the WFH module; server time produces check-in, check-out and total hours. Insufficient duration creates a blocking payroll exception for review. Manual attendance administration must reject WFH-owned rows, just as it rejects leave-owned rows. WFH also respects weekly offs, holidays and the monthly attendance lock before a row is generated.
+### API checks
+- company grid requires `Attendance.ViewAll`
+- employee self-service uses token-derived user only
+- manual create/update rejects `SourceType = LEAVE` / `WFH_REQUEST`
+- approved leave persists configured status code
+- approved half-day leave persists configured half-day code
+- reconciliation is idempotent for the same source
+- manual attendance creates `LEAVE_ATTENDANCE_CONFLICT` instead of overwrite
+- locked months reject daily edits
+- WFH insufficient checkout creates a review exception
+- duplicate bulk rows fail before writes
+- protected skip preserves leave/WFH rows
+- non-replica-set Mongo returns transaction-required error for bulk writes
 
-See [Work From Home module](work-from-home-module.md) for policy, request, notification and clocking behavior.
+### UI checks
+- grid shows exact persisted codes and lock indicators
+- tooltips and `aria-label`s communicate source and date
+- source-owned rows do not open normal editor
+- normal rows are editable only when permitted
+- HR bulk writes appear in employee own calendar after refresh
 
-## 14. Verification checklist
-
-### Automated and API checks
-
-- A company cannot query or change another company’s attendance.
-- A manual create/update returns a conflict for an existing `SourceType = LEAVE` record.
-- A manual create/update returns a conflict for an existing `SourceType = WFH_REQUEST` record.
-- An approved full-day leave persists its configured code (for example `CL`), not `L`.
-- An approved half-day leave persists its configured half-day code (for example `CL-HALF`), not `H`.
-- Reconciliation rerun does not create another row for the same company/user/date/source.
-- Existing manual attendance produces `LEAVE_ATTENDANCE_CONFLICT` instead of replacement.
-- Locked months reject create and update.
-- WFH check-out below configured minimum hours creates a reviewable exception rather than changing the source row manually.
-- A bulk command with the same employee/date twice returns `ATTENDANCE_BULK_DUPLICATE_ROW` before it writes anything.
-- Bulk Apply creates a missing manual row, updates one existing manual row when `skipExisting=false`, and preserves it when `skipExisting=true`.
-- Bulk Apply preserves Leave/WFH-owned rows and reports them as `protectedSkipped`.
-- A non-replica-set MongoDB returns `ATTENDANCE_BULK_TRANSACTION_REQUIRED` and does not commit bulk rows.
-
-### Browser checks
-
-- The grid shows exact leave codes plus a lock icon.
-- Tooltip and `aria-label` communicate status, source, date, duration, and approval state.
-- Light and dark themes retain readable status contrast.
-- Clicking or bulk-selecting a leave-generated record shows a correction-workflow message rather than an edit dialog.
-- Normal manual attendance remains editable only when the date is an eligible, unlocked working day and the user has permission.
-- After HR marks a date in bulk, the affected employee's own `/profile/about` calendar shows that same persisted status after refresh; another employee's rows never appear there.
-
-## 15. Related documentation
+## 18. Related documentation
 
 - [Leave, Attendance, and Payroll End-to-End Flow](leave-attendance-payroll-end-to-end-flow.md)
 - [Payroll Module Current Flow](payroll-module-current-flow.md)

@@ -51,8 +51,8 @@ public class WorkFromHomePolicy : BaseClass
     public List<string> ApplicableEmployeeIds { get; set; } = [];
     public List<string> ExcludedEmployeeIds { get; set; } = [];
     public List<int> ApplicableEmploymentTypes { get; set; } = [];
-    // Explicit HR/Admin exceptions to the company weekly default. A zero value
-    // disables WFH for that employee; a positive value replaces the default.
+    // Explicit HR/Admin employee WFH assignments. A zero value is a persisted
+    // deallocation; a positive value grants WFH and replaces the weekly default.
     public List<WorkFromHomeEmployeeAllocation> EmployeeAllocations { get; set; } = [];
     public DateTime? EffectiveFrom { get; set; }
     public DateTime? EffectiveTo { get; set; }

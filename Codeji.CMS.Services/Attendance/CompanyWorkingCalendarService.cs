@@ -1,6 +1,7 @@
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Utility.Enums;
 
 public interface ICompanyWorkingCalendarService
@@ -36,9 +37,7 @@ public sealed class CompanyWorkingCalendarService(
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (offDays.Contains((int)current.DayOfWeek)) continue;
-            if (holidays.Any(x => x.Recurring
-                    ? x.Date.Month == current.Month && x.Date.Day == current.Day
-                    : DateOnly.FromDateTime(x.Date) == current)) continue;
+            if (holidays.Any(x => CalendarDateHelpers.MatchesDate(x, current))) continue;
             result.Add(current);
         }
         return result;
@@ -61,7 +60,7 @@ public sealed class CompanyWorkingCalendarService(
         {
             cancellationToken.ThrowIfCancellationRequested();
             var isWeekend = offDays.Contains((int)current.DayOfWeek);
-            var isHoliday = holidays.Any(x => x.Recurring ? x.Date.Month == current.Month && x.Date.Day == current.Day : DateOnly.FromDateTime(x.Date) == current);
+            var isHoliday = holidays.Any(x => CalendarDateHelpers.MatchesDate(x, current));
             if ((!weekendInclusive && isWeekend) || (!holidayInclusive && isHoliday)) continue;
             result.Add(current);
         }

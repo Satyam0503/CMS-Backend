@@ -106,6 +106,14 @@ public class LeaveManagementController : BaseApiController
         return await _leaveManagementService.GetAllLeavePolicies(company_id, status);
     }
 
+    // Employee self-service must not depend on the HR-only policy-view permission.
+    // The service resolves both user and company from the authenticated context and
+    // returns only active policies that are applicable to that employee.
+    [Route("me/policies")]
+    [HttpGet]
+    public Task<Result<UpdateLeavePolicyRequest>> GetMySelfServicePolicies() =>
+        _leaveManagementService.GetMySelfServicePolicies();
+
     [Route("GetEmployeeLeaveBalance/{employeeId}")]
     [HttpGet]
     [ModulePermission(AppModule.LeaveManagement, Permission.View)]

@@ -111,18 +111,18 @@ public class CompanyMasterController : BaseApiController
     [HttpPost]
     [Route("AddUpdateJobTitle")]
     [Authorize(Policy = "AdminOnly")]
-    public async Task<Result> AddUpdateJobTitle(List<JobTitleRequestDto> data)
+    public async Task<IActionResult> AddUpdateJobTitle(List<JobTitleRequestDto> data)
     {
         string userId = CurrentContext.UserId(_httpContextAccessor);
         var result = await _companyMasterService.AddUpdateJobTitle(data, userId);
-        return result;
+        return StatusCode(result.StatusCode, result);
     }
 
     [HttpGet]
     [Route("GetJobTitles")]
-    public async Task<Result<JobTitleResponseDto>> GetAllJobTitles([FromQuery] bool? isActive)
+    public async Task<Result<JobTitleResponseDto>> GetAllJobTitles([FromQuery] bool? isActive, [FromQuery] string? departmentId)
     {
-        var result = await _companyMasterService.GetJobTitles(isActive);
+        var result = await _companyMasterService.GetJobTitles(isActive, departmentId);
         return result;
     }
 

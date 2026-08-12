@@ -44,6 +44,7 @@ namespace Codeji.CMS.Services
         readonly IMiddlewareService _middlewareService;
         private readonly ILogger<CompanyService> _logger;
         private readonly IAttendanceStatusService _attendanceStatusService;
+        private readonly IMongoClient _mongoClient;
 
 
         public CompanyService(
@@ -63,6 +64,7 @@ namespace Codeji.CMS.Services
             IEmployeeService employeeService,
             IMiddlewareService middlewareService,
             IAttendanceStatusService attendanceStatusService,
+            IMongoClient mongoClient,
             ILogger<CompanyService> logger
             )
         {
@@ -82,6 +84,7 @@ namespace Codeji.CMS.Services
             _policyVersionRepo = policyVersionRepo;
             _departmentRepo = departmentRepo;
             _jobTitleRepo = jobTitleRepo;
+            _mongoClient = mongoClient;
             _logger = logger;
         }
 
@@ -128,6 +131,10 @@ namespace Codeji.CMS.Services
             result = await _companyRepo.AddOne(company);
             if (result.Success)
             {
+                // The registering administrator is also the first employee in the
+                // company. Use the same company-owned atomic sequence as every
+                // subsequent employee instead of bypassing EmployeeService.
+                user.EmployeeId = await _employeeService.ReserveNextEmployeeId(companyId);
                 await _userRepo.AddOne(user);
                 await _notificationPreferenceRepo.AddOne(notificationPreferenceSetting);
                 await _attendanceStatusService.EnsureCompanyDefaults(companyId);
@@ -153,13 +160,7 @@ namespace Codeji.CMS.Services
             };
             await _userSecurityTokenRepo.AddOne(securityToken);
 
-            string apiBaseUrl = ConfigManager.AppSettings.APIUrl.Trim().TrimEnd('/');
-            // Deployments may configure APIUrl as either the host or the host/api.
-            // Normalise both forms so the email never contains //api or /api/api.
-            string verifyEndpoint = apiBaseUrl.EndsWith("/api", StringComparison.OrdinalIgnoreCase)
-                ? "/account/verify-email"
-                : "/api/account/verify-email";
-            string verifyLink = $"{apiBaseUrl}{verifyEndpoint}?token={Uri.EscapeDataString(token)}";
+            string verifyLink = EmailVerificationUrlBuilder.Build(ConfigManager.AppSettings.APIUrl, token);
             string body = HtmlTemplate.Render(
                 "<h2>Welcome, [EmployeeName]!</h2>" +
                 "<p>Please verify your email address to activate your account.</p>" +
@@ -204,10 +205,18 @@ namespace Codeji.CMS.Services
                     }
                 }
 
+                var companyDepartments = (await _departmentRepo.GetAll(d => d.CompanyId == company.CompanyId && !d.IsDeleted)).ToList();
+                var departmentIds = companyDepartments
+                    .Select(d => new { Name = d.Titles.FirstOrDefault(t => t.Language == Languages.English)?.Label ?? d.Titles.FirstOrDefault()?.Label, d.DepartmentId })
+                    .Where(x => !string.IsNullOrWhiteSpace(x.Name))
+                    .GroupBy(x => x.Name!, StringComparer.OrdinalIgnoreCase)
+                    .Where(x => x.Count() == 1)
+                    .ToDictionary(x => x.Key, x => x.Single().DepartmentId, StringComparer.OrdinalIgnoreCase);
+
                 bool hasJobTitles = await _jobTitleRepo.Exist(j => j.CompanyId == company.CompanyId);
                 if (!hasJobTitles)
                 {
-                    var jobTitles = DefaultCompanySeeds.BuildJobTitles(company.CompanyId, languages, createdBy);
+                    var jobTitles = DefaultCompanySeeds.BuildJobTitles(company.CompanyId, languages, departmentIds, createdBy);
                     foreach (var jt in jobTitles)
                     {
                         await _jobTitleRepo.AddOne(jt);
@@ -493,7 +502,9 @@ namespace Codeji.CMS.Services
                 Description = model.Description,
                 Departments = model.Departments,
                 Roles = model.Roles,
-                IsActive = model.IsActive,
+                // A policy cannot be published before a document version exists.
+                IsActive = false,
+                CompanyId = companyId,
             };
             result = await _policyRepo.AddOne(policy);
             if (!result.Success) return result;
@@ -515,6 +526,11 @@ namespace Codeji.CMS.Services
             existingPolicy.Description = model.Description;
             existingPolicy.Departments = model.Departments;
             existingPolicy.Roles = model.Roles;
+            if (model.IsActive && !await HasCurrentVersionAsync(existingPolicy.PolicyId, companyId))
+            {
+                result.StatusCode = CustomStatusCode.PolicyDontHaveCurrentVersion;
+                return result;
+            }
             existingPolicy.IsActive = model.IsActive;
 
             result = await _policyRepo.Update(whereCondition, existingPolicy);
@@ -528,7 +544,7 @@ namespace Codeji.CMS.Services
             bool canViewAllPolicies = await _roleService.VerifyUserAccess(AppModule.Policy, [Utility.Constraints.Permission.Create, Utility.Constraints.Permission.Edit], userId, companyId);
             if (canViewAllPolicies)
             {
-                Expression<Func<Policy, bool>> expression = pl => pl.CompanyId == companyId;
+                Expression<Func<Policy, bool>> expression = pl => pl.CompanyId == companyId && !pl.IsDeleted;
                 var policies = (await _policyRepo.GetAll(expression)).OrderBy(k => k.CreatedDate);
                 policyResponse = _mapper.Map<List<PolicyResponseModel>>(policies);
             }
@@ -538,9 +554,13 @@ namespace Codeji.CMS.Services
                 if (empUser is null) return result;
                 var userRole = empUser.RoleId;
                 var userDepartment = empUser.Department ?? string.Empty;
-                Expression<Func<Policy, bool>> expression = pl => (pl.Departments.Count == 0 || pl.Departments.Contains(userDepartment)) && (pl.Roles.Count == 0 || pl.Roles.Contains(userRole)) && pl.IsActive && pl.CompanyId == companyId;
+                Expression<Func<Policy, bool>> expression = pl => (pl.Departments.Count == 0 || pl.Departments.Contains(userDepartment)) && (pl.Roles.Count == 0 || pl.Roles.Contains(userRole)) && pl.IsActive && !pl.IsDeleted && pl.CompanyId == companyId;
                 var policies = await _policyRepo.GetAll(expression);
-                policyResponse = _mapper.Map<List<PolicyResponseModel>>(policies);
+                // Do not disclose drafts or malformed active policies to employees.
+                var visiblePolicies = new List<Policy>();
+                foreach (var policy in policies)
+                    if (await HasCurrentVersionAsync(policy.PolicyId, companyId)) visiblePolicies.Add(policy);
+                policyResponse = _mapper.Map<List<PolicyResponseModel>>(visiblePolicies);
             }
             result.Success = true;
             result.MethodResults = policyResponse;
@@ -550,41 +570,38 @@ namespace Codeji.CMS.Services
         {
             Result result = new();
             // check policy exist or not
-            var policy = await _policyRepo.FirstOrDefault(p => p.PolicyId == policyId && p.CompanyId == companyId);
+            var policy = await _policyRepo.FirstOrDefault(p => p.PolicyId == policyId && p.CompanyId == companyId && !p.IsDeleted);
             if (policy == null)
             {
                 result.StatusCode = CustomStatusCode.PolicyNotFound;
                 return result;
             }
-            if (policy.IsActive)
-            {
-                // check if policy has current active version 
-                bool hasActiveVersion = await _policyVersionRepo.Exist(pv => pv.PolicyId == policyId && pv.CompanyId == companyId && pv.IsCurrent);
-                if (hasActiveVersion)
-                {
-                    result.Success = false;
-                    result.StatusCode = CustomStatusCode.PolicyHasActiveVersion;
-                    return result;
-                }
-            }
-
             policy.IsActive = false;
             policy.IsDeleted = true;
 
-            Expression<Func<Policy, bool>> expression = p => p.PolicyId == policy.PolicyId;
-            result = await _policyRepo.Update(expression, policy);
-
-
-            Expression<Func<PolicyVersion, bool>> expression2 = pv => pv.PolicyId == policy.PolicyId;
-            // 6. Deactivate all versions
-            await _policyVersionRepo.UpdateMany(expression2, Builders<PolicyVersion>.Update.Set(pv => pv.IsDeleted, true).Set(pv => pv.IsCurrent, false));
-            return result;
+            try
+            {
+                var policyFilter = Builders<Policy>.Filter.Where(p => p.PolicyId == policy.PolicyId && p.CompanyId == companyId && !p.IsDeleted);
+                var policyUpdate = Builders<Policy>.Update.Set(p => p.IsActive, false).Set(p => p.IsDeleted, true).Set(p => p.UpdatedDate, DateTime.UtcNow);
+                var policyUpdateResult = await _policyRepo.GetCollection().UpdateOneAsync(policyFilter, policyUpdate);
+                if (policyUpdateResult.ModifiedCount != 1) { result.StatusCode = CustomStatusCode.PolicyNotFound; return result; }
+                var versionsFilter = Builders<PolicyVersion>.Filter.Where(pv => pv.PolicyId == policy.PolicyId && pv.CompanyId == companyId && !pv.IsDeleted);
+                await _policyVersionRepo.GetCollection().UpdateManyAsync(versionsFilter, Builders<PolicyVersion>.Update.Set(pv => pv.IsDeleted, true).Set(pv => pv.IsCurrent, false).Set(pv => pv.UpdatedDate, DateTime.UtcNow));
+                result.Success = true;
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to delete policy {PolicyId} for company {CompanyId}", policyId, companyId);
+                result.Message = "The policy could not be deleted. Please try again.";
+                return result;
+            }
         }
-        public async Task<Result<PolicyVersionResponseModel>> AddPolicyVersion(PolicyVersionRequestModel model)
+        public async Task<Result<PolicyVersionResponseModel>> AddPolicyVersion(PolicyVersionRequestModel model, string companyId)
         {
             Result<PolicyVersionResponseModel> response = new() { Success = false };
-            bool isPolicyExist = await _policyRepo.Exist(p => p.PolicyId == model.PolicyId && p.IsActive);
-            if (!isPolicyExist) return response;
+            var policy = await _policyRepo.FirstOrDefault(p => p.PolicyId == model.PolicyId && p.CompanyId == companyId && !p.IsDeleted);
+            if (policy is null) { response.StatusCode = CustomStatusCode.PolicyNotFound; return response; }
 
             Result result = await AddUpdatePolicyDocument(model.PolicyDoc);
             if (!result.Success)
@@ -593,24 +610,70 @@ namespace Codeji.CMS.Services
                 return response;
             }
 
-            // Ensure only one current version
-            if (model.IsCurrent)
-            {
-                Expression<Func<PolicyVersion, bool>> expression = pv => pv.PolicyId == model.PolicyId;
-                await _policyVersionRepo.UpdateMany(expression, Builders<PolicyVersion>.Update.Set(pv => pv.IsCurrent, false));
-            }
-
+            bool hasCurrentVersion = await HasCurrentVersionAsync(model.PolicyId, companyId);
             PolicyVersion policyVersion = new()
             {
                 Id = Guid.NewGuid().ToString(),
+                CompanyId = companyId,
                 PolicyId = model.PolicyId,
                 VersionName = model.VersionName,
                 DocUrl = result.Message,
-                IsCurrent = model.IsCurrent,
+                IsCurrent = model.IsCurrent || (!hasCurrentVersion && policy.IsActive),
             };
 
-            var addResult = await _policyVersionRepo.AddOne(policyVersion);
-            if (!addResult.Success) return response;
+            IClientSessionHandle? session = null;
+            bool usedSession = false;
+            try
+            {
+                try
+                {
+                    session = await _mongoClient.StartSessionAsync();
+                    session.StartTransaction();
+                    usedSession = true;
+                }
+                catch (Exception exStart)
+                {
+                    _logger.LogWarning(exStart, "MongoDB transactions not available, proceeding without a transaction for policy {PolicyId}", model.PolicyId);
+                    usedSession = false;
+                    session?.Dispose();
+                    session = null;
+                }
+
+                if (usedSession)
+                {
+                    if (model.IsCurrent)
+                    {
+                        var otherVersions = Builders<PolicyVersion>.Filter.Where(pv => pv.PolicyId == model.PolicyId && pv.CompanyId == companyId && !pv.IsDeleted);
+                        await _policyVersionRepo.GetCollection().UpdateManyAsync(session, otherVersions, Builders<PolicyVersion>.Update.Set(pv => pv.IsCurrent, false).Set(pv => pv.UpdatedDate, DateTime.UtcNow));
+                    }
+                    await _policyVersionRepo.GetCollection().InsertOneAsync(session, policyVersion);
+                    await session.CommitTransactionAsync();
+                }
+                else
+                {
+                    if (model.IsCurrent)
+                    {
+                        var otherVersions = Builders<PolicyVersion>.Filter.Where(pv => pv.PolicyId == model.PolicyId && pv.CompanyId == companyId && !pv.IsDeleted);
+                        await _policyVersionRepo.GetCollection().UpdateManyAsync(otherVersions, Builders<PolicyVersion>.Update.Set(pv => pv.IsCurrent, false).Set(pv => pv.UpdatedDate, DateTime.UtcNow));
+                    }
+                    await _policyVersionRepo.GetCollection().InsertOneAsync(policyVersion);
+                }
+            }
+            catch (Exception ex)
+            {
+                try { DeletePolicyDocument(result.Message); } catch { }
+                _logger.LogError(ex, "Failed to create policy version for policy {PolicyId}", model.PolicyId);
+                response.Message = "The policy version could not be created. Please try again.";
+                if (usedSession && session != null)
+                {
+                    try { await session.AbortTransactionAsync(); } catch { }
+                }
+                return response;
+            }
+            finally
+            {
+                session?.Dispose();
+            }
             response.Success = true;
             response.MethodResult = new PolicyVersionResponseModel()
             {
@@ -622,23 +685,16 @@ namespace Codeji.CMS.Services
             return response;
         }
 
-        public async Task<Result<PolicyVersionResponseModel>> EditPolicyVersion(PolicyVersionUpdateModel model)
+        public async Task<Result<PolicyVersionResponseModel>> EditPolicyVersion(PolicyVersionUpdateModel model, string companyId)
         {
             Result<PolicyVersionResponseModel> response = new() { Success = false };
             Result result = new();
 
-            PolicyVersion? existingPolicyVersion = await _policyVersionRepo.FirstOrDefault(pr => pr.Id == model.Id);
+            PolicyVersion? existingPolicyVersion = await _policyVersionRepo.FirstOrDefault(pr => pr.Id == model.Id && pr.CompanyId == companyId && !pr.IsDeleted);
             if (existingPolicyVersion is null) return response;
 
-            bool isPolicyExist = await _policyRepo.Exist(p => p.PolicyId == model.PolicyId && p.IsActive);
-            if (!isPolicyExist) return response;
-
-            if (existingPolicyVersion.IsCurrent && !model.IsCurrent)
-            {
-                response.StatusCode = CustomStatusCode.PolicyDontHaveCurrentVersion;
-                response.Success = false;
-                return response;
-            }
+            var policy = await _policyRepo.FirstOrDefault(p => p.PolicyId == model.PolicyId && p.CompanyId == companyId && !p.IsDeleted);
+            if (policy is null || existingPolicyVersion.PolicyId != model.PolicyId) { response.StatusCode = CustomStatusCode.PolicyNotFound; return response; }
 
             string? newDocFileName = existingPolicyVersion.DocUrl;
 
@@ -652,20 +708,29 @@ namespace Codeji.CMS.Services
                 }
                 newDocFileName = result.Message;
             }
+            try
+            {
+                if (model.IsCurrent && !existingPolicyVersion.IsCurrent)
+                {
+                    var otherVersions = Builders<PolicyVersion>.Filter.Where(pv => pv.PolicyId == existingPolicyVersion.PolicyId && pv.CompanyId == companyId && !pv.IsDeleted && pv.Id != existingPolicyVersion.Id);
+                    await _policyVersionRepo.GetCollection().UpdateManyAsync(otherVersions, Builders<PolicyVersion>.Update.Set(pv => pv.IsCurrent, false).Set(pv => pv.UpdatedDate, DateTime.UtcNow));
+                }
+                var versionFilter = Builders<PolicyVersion>.Filter.Where(pv => pv.Id == existingPolicyVersion.Id && pv.PolicyId == model.PolicyId && pv.CompanyId == companyId && !pv.IsDeleted);
+                var versionUpdate = Builders<PolicyVersion>.Update.Set(pv => pv.VersionName, model.VersionName).Set(pv => pv.DocUrl, newDocFileName).Set(pv => pv.IsCurrent, model.IsCurrent).Set(pv => pv.UpdatedDate, DateTime.UtcNow);
+                var updateResult = await _policyVersionRepo.GetCollection().UpdateOneAsync(versionFilter, versionUpdate);
+                if (updateResult.ModifiedCount != 1) { DeletePolicyDocument(newDocFileName == existingPolicyVersion.DocUrl ? null : newDocFileName); return response; }
+            }
+            catch (Exception ex)
+            {
+                DeletePolicyDocument(newDocFileName == existingPolicyVersion.DocUrl ? null : newDocFileName);
+                _logger.LogError(ex, "Failed to edit policy version {PolicyVersionId}", model.Id);
+                response.Message = "The policy version could not be updated. Please try again.";
+                return response;
+            }
+            if (newDocFileName != existingPolicyVersion.DocUrl) DeletePolicyDocument(existingPolicyVersion.DocUrl);
             existingPolicyVersion.VersionName = model.VersionName;
             existingPolicyVersion.DocUrl = newDocFileName;
             existingPolicyVersion.IsCurrent = model.IsCurrent;
-
-            // Ensure only one current version
-            if (model.IsCurrent)
-            {
-                Expression<Func<PolicyVersion, bool>> whereCondition = pv => pv.PolicyId == existingPolicyVersion.PolicyId;
-                await _policyVersionRepo.UpdateMany(whereCondition, Builders<PolicyVersion>.Update.Set(pv => pv.IsCurrent, false));
-            }
-            Expression<Func<PolicyVersion, bool>> expression = pv => pv.Id == existingPolicyVersion.Id;
-            var updateResult = await _policyVersionRepo.Update(expression, existingPolicyVersion);
-
-            if (!updateResult.Success) return response;
             response.Success = true;
             response.MethodResult = new PolicyVersionResponseModel()
             {
@@ -677,18 +742,24 @@ namespace Codeji.CMS.Services
             return response;
         }
 
-        private static async Task<Result> AddUpdatePolicyDocument(IFormFile policyDoc, string? oldPolicyDocUrl = null)
+        private static async Task<Result> AddUpdatePolicyDocument(IFormFile? policyDoc, string? oldPolicyDocUrl = null)
         {
             Result result = new();
             string[] supportedFileFormat = [".doc", ".pdf", ".docx"];
             long maxAllowedFileSizeInMB = 5 * 1024 * 1024;
 
-            string fileExtension = Path.GetExtension(policyDoc.FileName);
+            if (policyDoc is null || policyDoc.Length == 0)
+            {
+                result.StatusCode = CustomStatusCode.InvalidFileFormat;
+                return result;
+            }
+
+            string fileExtension = Path.GetExtension(policyDoc.FileName).ToLowerInvariant();
             long fileSize = policyDoc.Length;
 
             // validate file attribute
 
-            if (!supportedFileFormat.Contains(fileExtension))
+            if (!supportedFileFormat.Contains(fileExtension, StringComparer.OrdinalIgnoreCase))
             {
                 result.StatusCode = CustomStatusCode.InvalidFileFormat;
                 return result;
@@ -714,14 +785,6 @@ namespace Codeji.CMS.Services
                     await policyDoc.CopyToAsync(stream);
                 }
 
-                // delete old file only after successful upload
-                if (!string.IsNullOrEmpty(oldPolicyDocUrl))
-                {
-                    string oldFilePath = Path.Combine(uploadFolder, oldPolicyDocUrl);
-                    if (File.Exists(oldFilePath))
-                        File.Delete(oldFilePath);
-                }
-
                 result.Success = true;
                 result.Message = fileName;
                 return result;
@@ -733,20 +796,33 @@ namespace Codeji.CMS.Services
             }
         }
 
+        private static void DeletePolicyDocument(string? fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName) || !string.Equals(fileName, Path.GetFileName(fileName), StringComparison.Ordinal)) return;
+            var path = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Policy", fileName);
+            if (File.Exists(path)) File.Delete(path);
+        }
+
+        private Task<bool> HasCurrentVersionAsync(string policyId, string companyId) =>
+            _policyVersionRepo.Exist(pv => pv.PolicyId == policyId && pv.CompanyId == companyId && pv.IsCurrent && !pv.IsDeleted);
+
         public async Task<Result<PolicyVersionResponseModel>> GetAllPolicyVersion(string policyId, string userId, string companyId)
         {
             var response = new Result<PolicyVersionResponseModel>();
             bool canViewAllPolicyVersion = await _roleService.VerifyUserAccess(AppModule.Policy, [Utility.Constraints.Permission.Create, Utility.Constraints.Permission.Edit], userId, companyId);
 
+            var policy = await _policyRepo.FirstOrDefault(p => p.PolicyId == policyId && p.CompanyId == companyId && !p.IsDeleted);
+            if (policy is null) { response.StatusCode = CustomStatusCode.PolicyNotFound; return response; }
+
             List<PolicyVersion> policyVersions = [];
             if (canViewAllPolicyVersion)
             {
-                policyVersions = (await _policyVersionRepo.GetAll(pv => pv.PolicyId == policyId)).ToList();
+                policyVersions = (await _policyVersionRepo.GetAll(pv => pv.PolicyId == policyId && pv.CompanyId == companyId && !pv.IsDeleted)).ToList();
             }
             else
             {
-                var policyVersion = await _policyVersionRepo.FirstOrDefault(pv => pv.PolicyId == policyId && pv.CompanyId == companyId && pv.IsCurrent);
-                if (policyVersion != null)
+                var policyVersion = await _policyVersionRepo.FirstOrDefault(pv => pv.PolicyId == policyId && pv.CompanyId == companyId && pv.IsCurrent && !pv.IsDeleted);
+                if (policy.IsActive && policyVersion != null)
                 {
                     policyVersions.Add(policyVersion);
                 }
@@ -767,27 +843,46 @@ namespace Codeji.CMS.Services
         {
             Result result = new();
             // check if version exist or not
-            var policyVersion = await _policyVersionRepo.FirstOrDefault(pv => pv.Id == policyVersionId && pv.CompanyId == companyId);
+            var policyVersion = await _policyVersionRepo.FirstOrDefault(pv => pv.Id == policyVersionId && pv.CompanyId == companyId && !pv.IsDeleted);
             if (policyVersion is null)
             {
                 result.StatusCode = CustomStatusCode.PolicyVersionNotFound;
                 return result;
             }
-            //check if policy version is current version 
-            if (policyVersion.IsCurrent)
-            {
-                result.StatusCode = CustomStatusCode.CannotDeleteCurrentPolicyVersion;
-                return result;
-            }
             // check if parent policy exist or not deleted
-            var policy = await _policyRepo.FirstOrDefault(p => p.PolicyId == policyVersion.PolicyId);
+            var policy = await _policyRepo.FirstOrDefault(p => p.PolicyId == policyVersion.PolicyId && p.CompanyId == companyId && !p.IsDeleted);
             if (policy == null)
             {
                 result.StatusCode = CustomStatusCode.PolicyNotFound;
                 return result;
             }
-            Expression<Func<PolicyVersion, bool>> expression = pv => pv.Id == policyVersion.Id;
+            Expression<Func<PolicyVersion, bool>> expression = pv => pv.Id == policyVersion.Id && pv.CompanyId == companyId && !pv.IsDeleted;
             return await _policyVersionRepo.UpdateMany(expression, Builders<PolicyVersion>.Update.Set(pv => pv.IsDeleted, true));
+        }
+
+        public async Task<Result<PolicyVersionResponseModel>> SetCurrentPolicyVersion(SetCurrentPolicyVersionRequestModel model, string companyId)
+        {
+            var response = new Result<PolicyVersionResponseModel> { Success = false };
+            var policy = await _policyRepo.FirstOrDefault(p => p.PolicyId == model.PolicyId && p.CompanyId == companyId && !p.IsDeleted);
+            var version = await _policyVersionRepo.FirstOrDefault(v => v.Id == model.VersionId && v.PolicyId == model.PolicyId && v.CompanyId == companyId && !v.IsDeleted);
+            if (policy is null || version is null) { response.StatusCode = policy is null ? CustomStatusCode.PolicyNotFound : CustomStatusCode.PolicyVersionNotFound; return response; }
+            try
+            {
+                var allVersions = Builders<PolicyVersion>.Filter.Where(v => v.PolicyId == model.PolicyId && v.CompanyId == companyId && !v.IsDeleted);
+                await _policyVersionRepo.GetCollection().UpdateManyAsync(allVersions, Builders<PolicyVersion>.Update.Set(v => v.IsCurrent, false).Set(v => v.UpdatedDate, DateTime.UtcNow));
+                var target = Builders<PolicyVersion>.Filter.Where(v => v.Id == model.VersionId && v.PolicyId == model.PolicyId && v.CompanyId == companyId && !v.IsDeleted);
+                var targetResult = await _policyVersionRepo.GetCollection().UpdateOneAsync(target, Builders<PolicyVersion>.Update.Set(v => v.IsCurrent, true).Set(v => v.UpdatedDate, DateTime.UtcNow));
+                if (targetResult.ModifiedCount != 1 && targetResult.MatchedCount != 1) { response.StatusCode = CustomStatusCode.PolicyVersionNotFound; return response; }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to set policy version {VersionId} current", model.VersionId);
+                response.Message = "The current version could not be changed. Refresh and try again.";
+                return response;
+            }
+            response.Success = true;
+            response.MethodResult = new PolicyVersionResponseModel { Id = version.Id, VersionName = version.VersionName, PolicyDocUrl = Common.GetPolicyDocumentPath(version.DocUrl), IsCurrent = true };
+            return response;
         }
 
         public async Task<Result<PolicyDocumentResult>> GetPolicyDocument(
@@ -802,10 +897,10 @@ namespace Codeji.CMS.Services
                     [Utility.Constraints.Permission.Create, Utility.Constraints.Permission.Edit],
                     userId,
                     companyId);
-            PolicyVersion policyVersion;
+            PolicyVersion? policyVersion;
             if (canViewAllPolicyVersion)
             {
-                policyVersion = await _policyVersionRepo.FirstOrDefault(pv => pv.Id == policyVersionId);
+                policyVersion = await _policyVersionRepo.FirstOrDefault(pv => pv.Id == policyVersionId && pv.CompanyId == companyId && !pv.IsDeleted);
             }
             else
             {
@@ -813,7 +908,7 @@ namespace Codeji.CMS.Services
                     .FirstOrDefault(pv =>
                         pv.Id == policyVersionId &&
                         pv.CompanyId == companyId &&
-                        pv.IsCurrent);
+                        pv.IsCurrent && !pv.IsDeleted);
             }
             if (policyVersion == null)
             {
@@ -821,10 +916,31 @@ namespace Codeji.CMS.Services
                 response.Message = "Unauthorized or document not found";
                 return response;
             }
+            var policy = await _policyRepo.FirstOrDefault(p => p.PolicyId == policyVersion.PolicyId && p.CompanyId == companyId && !p.IsDeleted);
+            if (policy is null || (!canViewAllPolicyVersion && !policy.IsActive))
+            {
+                response.Success = false;
+                response.Message = "Unauthorized or document not found";
+                return response;
+            }
+            if (!canViewAllPolicyVersion)
+            {
+                var employee = await _userRepo.FirstOrDefault(e => e.UserId == userId && e.CompanyId == companyId && e.Status && e.IsEmailVerified);
+                if (employee is null || (policy.Departments.Count != 0 && !policy.Departments.Contains(employee.Department ?? string.Empty)) || (policy.Roles.Count != 0 && !policy.Roles.Contains(employee.RoleId)))
+                {
+                    response.Message = "Unauthorized or document not found";
+                    return response;
+                }
+            }
             string uploadFolder = Path.Combine(
                 Directory.GetCurrentDirectory(),
                 "Uploads",
                 "Policy");
+            if (string.IsNullOrWhiteSpace(policyVersion.DocUrl) || !string.Equals(policyVersion.DocUrl, Path.GetFileName(policyVersion.DocUrl), StringComparison.Ordinal))
+            {
+                response.Message = "Document file not found";
+                return response;
+            }
             string filePath = Path.Combine(uploadFolder, policyVersion.DocUrl);
             if (!File.Exists(filePath))
             {

@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using MapsterMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
+using Codeji.CMS.DTO.Dashboard;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.EmployeeData;
@@ -30,12 +31,14 @@ namespace Codeji.CMS.Services.Employees
 {
     public class EmployeeService : IEmployeeService
     {
+        private static readonly Regex EmployeeNamePattern = new(@"^[A-Za-z]+(?:[-'][A-Za-z]+)*(?: [A-Za-z]+(?:[-'][A-Za-z]+)*)*$", RegexOptions.CultureInvariant);
         readonly IMongoDbRepository<EmpEducationDetails> _educationDetailsRepo;
         readonly IMongoDbRepository<EmpCertificationDetails> _certificationDetailsRepo;
         readonly IMongoDbRepository<EmpSummary> _employeeSummaryRepo;
         readonly IMapper _mapper;
         readonly IPriorityTaskQueue _priorityTaskQueue;
         readonly IMongoDbRepository<EmpUser> _employeeRepository;
+        readonly IMongoDbRepository<EmployeeIdSequence> _employeeIdSequenceRepository;
         readonly IMongoDbRepository<Roles> _rolesRepository;
         readonly IRoleService _roleService;
         readonly IMongoDbRepository<EmpSkills> _employeeSkillsRepository;
@@ -60,6 +63,7 @@ namespace Codeji.CMS.Services.Employees
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
             IMongoDbRepository<EmpSummary> userSummary,
             IMongoDbRepository<EmpUser> employeeRepository,
+            IMongoDbRepository<EmployeeIdSequence> employeeIdSequenceRepository,
             IMongoDbRepository<Roles> rolesRepository,
             IRoleService roleService,
             IMongoDbRepository<EmpSkills> employeeSkillsRepository,
@@ -83,6 +87,7 @@ namespace Codeji.CMS.Services.Employees
             )
         {
             _employeeRepository = employeeRepository;
+            _employeeIdSequenceRepository = employeeIdSequenceRepository;
             _rolesRepository = rolesRepository;
             _roleService = roleService;
             _educationDetailsRepo = educationDetailsRepo;
@@ -120,10 +125,65 @@ namespace Codeji.CMS.Services.Employees
             }
 
             string companyId = currentUser.CompanyId;
+            if (!TryNormalizeEmployeeName(model.FirstName, "First name", out string firstName, out string firstNameError))
+            {
+                result.Message = firstNameError;
+                return result;
+            }
+            if (!TryNormalizeEmployeeName(model.LastName, "Last name", out string lastName, out string lastNameError))
+            {
+                result.Message = lastNameError;
+                return result;
+            }
+            model.FirstName = firstName;
+            model.LastName = lastName;
+            model.Email = model.Email.Trim();
+
+            // Email is globally unique in the existing employee identity model.
+            // Check it before reserving an automatically generated employee ID so a
+            // predictable email conflict neither consumes an ID nor reports as an ID conflict.
+            bool emailExists = await _employeeRepository.Exist(e =>
+                e.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase));
+            if (emailExists)
+            {
+                result.StatusCode = CustomStatusCode.EmployeeAlreadyExist;
+                result.Message = "An employee/user with this email address already exists.";
+                return result;
+            }
+
+            if (!string.IsNullOrWhiteSpace(model.RoleId) && !await _rolesRepository.Exist(x =>
+                x.RolesId == model.RoleId && x.CompanyId == companyId && !x.IsDeleted))
+            {
+                result.Message = "Selected access role is not available in the current company.";
+                return result;
+            }
+            if (!string.IsNullOrWhiteSpace(model.DepartmentId) && !await _departmentRepository.Exist(x =>
+                x.DepartmentId == model.DepartmentId && x.CompanyId == companyId && !x.IsDeleted))
+            {
+                result.Message = "Selected department is not available in the current company.";
+                return result;
+            }
+            if (!string.IsNullOrWhiteSpace(model.JobRoleId))
+            {
+                JobTitles? jobRole = await _jobTitlesRepository.FirstOrDefault(x =>
+                    x.JobTitleId == model.JobRoleId && x.CompanyId == companyId && x.IsActive && !x.IsDeleted);
+                if (jobRole is null)
+                {
+                    result.Message = "Selected job role is not available in the current company.";
+                    return result;
+                }
+
+                if (string.IsNullOrWhiteSpace(model.DepartmentId) || jobRole.DepartmentId != model.DepartmentId)
+                {
+                    result.Message = "Selected job role does not belong to the selected department.";
+                    return result;
+                }
+            }
+
             Company? company = await _companyRepository.FirstOrDefault(c => c.CompanyId == companyId);
             if (company?.AutoGenerateEmployeeId != false)
             {
-                model.EmployeeId = await GenerateNextEmployeeId(companyId);
+                model.EmployeeId = await ReserveNextEmployeeId(companyId);
             }
 
             if (string.IsNullOrWhiteSpace(model.EmployeeId))
@@ -132,12 +192,12 @@ namespace Codeji.CMS.Services.Employees
                 return result;
             }
 
-            bool IsEmpIdExist = await _employeeRepository.Exist(e =>
-                (e.CompanyId == companyId && e.EmployeeId.Equals(model.EmployeeId, StringComparison.OrdinalIgnoreCase))
-                || e.Email == model.Email);
-            if (IsEmpIdExist)
+            bool employeeIdExists = await _employeeRepository.Exist(e =>
+                e.CompanyId == companyId && e.EmployeeId.Equals(model.EmployeeId, StringComparison.OrdinalIgnoreCase));
+            if (employeeIdExists)
             {
                 result.StatusCode = CustomStatusCode.EmployeeIdAlreadyExist;
+                result.Message = $"Employee ID {model.EmployeeId} is already assigned.";
                 return result;
             }
             var userId = Guid.NewGuid().ToString();
@@ -172,6 +232,26 @@ namespace Codeji.CMS.Services.Employees
                 Status = true
             };
             var res = await _employeeRepository.AddOne(employee);
+            if (!res.Success)
+            {
+                // A concurrent insert can pass the pre-check. Re-check each identity
+                // independently so the response remains accurate for unique indexes.
+                if (await _employeeRepository.Exist(e => e.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase)))
+                {
+                    result.StatusCode = CustomStatusCode.EmployeeAlreadyExist;
+                    result.Message = "An employee/user with this email address already exists.";
+                    return result;
+                }
+                if (await _employeeRepository.Exist(e => e.CompanyId == companyId && e.EmployeeId.Equals(model.EmployeeId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    result.StatusCode = CustomStatusCode.EmployeeIdAlreadyExist;
+                    result.Message = $"Employee ID {model.EmployeeId} is already assigned.";
+                    return result;
+                }
+                result.Message = "Unable to create employee.";
+                return result;
+            }
+
             if (res.Success)
             {
                 model.UserId = employee.UserId;
@@ -229,7 +309,8 @@ namespace Codeji.CMS.Services.Employees
                 r.CompanyId == companyId && !r.IsDeleted &&
                 r.RoleType != (int)EnumsHelper.Roles.Administrator)).ToList();
             List<Department> availableDepartments = (await _departmentRepository.GetAll(d => d.CompanyId == companyId)).ToList();
-            List<JobTitles> availableJobTitles = (await _jobTitlesRepository.GetAll(j => j.CompanyId == companyId)).ToList();
+            List<JobTitles> availableJobTitles = (await _jobTitlesRepository.GetAll(j =>
+                j.CompanyId == companyId && j.IsActive && !j.IsDeleted)).ToList();
 
             var seenEmpIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var seenEmails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -238,8 +319,8 @@ namespace Codeji.CMS.Services.Employees
             {
                 BulkImportEmployeeItemDto item = model.Employees[i];
                 string empId = item.EmpId?.Trim() ?? string.Empty;
-                string firstName = item.FirstName?.Trim() ?? string.Empty;
-                string lastName = item.LastName?.Trim() ?? string.Empty;
+                string firstName = NormalizeEmployeeName(item.FirstName);
+                string lastName = NormalizeEmployeeName(item.LastName);
                 string email = item.Email?.Trim() ?? string.Empty;
                 string roleName = item.Role?.Trim() ?? string.Empty;
                 string departmentName = item.Department?.Trim() ?? string.Empty;
@@ -259,6 +340,14 @@ namespace Codeji.CMS.Services.Employees
                 {
                     rowResult.Status = "Failed";
                     rowResult.Message = "Required fields are missing.";
+                    response.Results.Add(rowResult);
+                    continue;
+                }
+
+                if (!EmployeeNamePattern.IsMatch(firstName) || !EmployeeNamePattern.IsMatch(lastName))
+                {
+                    rowResult.Status = "Failed";
+                    rowResult.Message = "First name and last name may contain letters, spaces, hyphens, and apostrophes only.";
                     response.Results.Add(rowResult);
                     continue;
                 }
@@ -287,11 +376,22 @@ namespace Codeji.CMS.Services.Employees
                     continue;
                 }
 
-                bool existsInDb = await _employeeRepository.Exist(e => e.EmployeeId.Equals(empId, StringComparison.OrdinalIgnoreCase) || e.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
-                if (existsInDb)
+                bool emailExistsInDb = await _employeeRepository.Exist(e =>
+                    e.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+                if (emailExistsInDb)
                 {
                     rowResult.Status = "Failed";
-                    rowResult.Message = "Employee ID or email already exists.";
+                    rowResult.Message = "Duplicate email.";
+                    response.Results.Add(rowResult);
+                    continue;
+                }
+
+                bool employeeIdExistsInDb = await _employeeRepository.Exist(e =>
+                    e.CompanyId == companyId && e.EmployeeId.Equals(empId, StringComparison.OrdinalIgnoreCase));
+                if (employeeIdExistsInDb)
+                {
+                    rowResult.Status = "Failed";
+                    rowResult.Message = "Duplicate employee ID.";
                     response.Results.Add(rowResult);
                     continue;
                 }
@@ -340,6 +440,7 @@ namespace Codeji.CMS.Services.Employees
                         jobTitle = new JobTitles()
                         {
                             CompanyId = companyId,
+                            DepartmentId = department.DepartmentId,
                             IsActive = true,
                             CreatedBy = currentUserId,
                             CreatedDate = DateTime.UtcNow,
@@ -362,6 +463,13 @@ namespace Codeji.CMS.Services.Employees
                             continue;
                         }
                         availableJobTitles.Add(jobTitle);
+                    }
+                    else if (jobTitle.DepartmentId != department.DepartmentId)
+                    {
+                        rowResult.Status = "Failed";
+                        rowResult.Message = "Job role does not belong to the selected department.";
+                        response.Results.Add(rowResult);
+                        continue;
                     }
 
                     InviteEmployeeDto inviteModel = new()
@@ -386,9 +494,12 @@ namespace Codeji.CMS.Services.Employees
                     else
                     {
                         rowResult.Status = "Failed";
-                        rowResult.Message = inviteResult.StatusCode == CustomStatusCode.EmployeeIdAlreadyExist
-                            ? "Employee ID or email already exists."
-                            : "Unable to create employee.";
+                        rowResult.Message = inviteResult.StatusCode switch
+                        {
+                            CustomStatusCode.EmployeeAlreadyExist => "Duplicate email.",
+                            CustomStatusCode.EmployeeIdAlreadyExist => "Duplicate employee ID.",
+                            _ => inviteResult.Message ?? "Unable to create employee."
+                        };
                     }
                 }
                 catch (Exception ex)
@@ -415,6 +526,26 @@ namespace Codeji.CMS.Services.Employees
             }
 
             return string.Join(" ", input.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        }
+
+        private static string NormalizeEmployeeName(string? input) =>
+            Regex.Replace(input?.Trim() ?? string.Empty, @"\s+", " ");
+
+        private static bool TryNormalizeEmployeeName(string? input, string fieldName, out string normalized, out string error)
+        {
+            normalized = NormalizeEmployeeName(input);
+            error = string.Empty;
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                error = $"{fieldName} is required.";
+                return false;
+            }
+            if (!EmployeeNamePattern.IsMatch(normalized))
+            {
+                error = $"{fieldName} contains unsupported characters.";
+                return false;
+            }
+            return true;
         }
 
         private async Task SendInvitationLink(string currentUserId, EmpUser employee)
@@ -470,14 +601,83 @@ namespace Codeji.CMS.Services.Employees
 
         public async Task<Result<UserModel>> EditEmployee(EmployeePersonalInfo user, string userId)
         {
+            if (!TryNormalizeEmployeeName(user.FirstName, "First name", out string firstName, out string firstNameError))
+                return new Result<UserModel> { Success = false, Message = firstNameError };
+            if (!TryNormalizeEmployeeName(user.LastName, "Last name", out string lastName, out string lastNameError))
+                return new Result<UserModel> { Success = false, Message = lastNameError };
+            user.FirstName = firstName;
+            user.LastName = lastName;
+
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            EmpUser? employeeToUpdate = await _employeeRepository.FirstOrDefault(x =>
+                x.UserId == userId && x.CompanyId == companyId && !x.IsDeleted);
+            if (employeeToUpdate is null)
+            {
+                return new Result<UserModel>
+                {
+                    Success = false,
+                    Message = "Employee does not exist in the current company."
+                };
+            }
+
+            if (!string.IsNullOrWhiteSpace(user.RoleId))
+            {
+                Roles? assignedRole = await _rolesRepository.FirstOrDefault(x =>
+                    x.RolesId == user.RoleId && x.CompanyId == companyId && !x.IsDeleted);
+                if (assignedRole is null)
+                {
+                    return new Result<UserModel>
+                    {
+                        Success = false,
+                        Message = "Selected system role is not available in the current company."
+                    };
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(user.Department) && !await _departmentRepository.Exist(x =>
+                x.DepartmentId == user.Department && x.CompanyId == companyId && !x.IsDeleted))
+            {
+                return new Result<UserModel>
+                {
+                    Success = false,
+                    Message = "Selected department is not available in the current company."
+                };
+            }
+
+            if (!string.IsNullOrWhiteSpace(user.JobRole))
+            {
+                JobTitles? jobRole = await _jobTitlesRepository.FirstOrDefault(x =>
+                    x.JobTitleId == user.JobRole && x.CompanyId == companyId && x.IsActive && !x.IsDeleted);
+                if (jobRole is null)
+                {
+                    return new Result<UserModel>
+                    {
+                        Success = false,
+                        Message = "Selected job role is not available in the current company."
+                    };
+                }
+
+                bool isUnchangedLegacyRole = string.IsNullOrWhiteSpace(jobRole.DepartmentId)
+                    && employeeToUpdate.JobRole == user.JobRole
+                    && employeeToUpdate.Department == user.Department;
+                if (!isUnchangedLegacyRole &&
+                    (string.IsNullOrWhiteSpace(user.Department) || jobRole.DepartmentId != user.Department))
+                {
+                    return new Result<UserModel>
+                    {
+                        Success = false,
+                        Message = "Selected job role does not belong to the selected department."
+                    };
+                }
+            }
+
             if (!string.IsNullOrWhiteSpace(user.ReportingManager))
             {
                 if (string.Equals(user.ReportingManager, userId, StringComparison.Ordinal))
                     return new Result<UserModel> { Success = false, Message = "An employee cannot be their own reporting manager." };
 
-                var employee = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
-                var manager = employee is null ? null : await _employeeRepository.FirstOrDefault(x =>
-                    x.UserId == user.ReportingManager && x.CompanyId == employee.CompanyId && x.Status && !x.IsDeleted);
+                var manager = await _employeeRepository.FirstOrDefault(x =>
+                    x.UserId == user.ReportingManager && x.CompanyId == companyId && x.Status && !x.IsDeleted);
                 if (manager is null)
                     return new Result<UserModel> { Success = false, Message = "Reporting manager must be an active employee in the same company." };
             }
@@ -494,7 +694,7 @@ namespace Codeji.CMS.Services.Employees
 
             updateDefinition.Add(update.Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.UpdatedBy, userId));
             UpdateDefinition<EmpUser> data = update.Combine(updateDefinition);
-            Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == userId;
+            Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == userId && x.CompanyId == companyId && !x.IsDeleted;
             Result result = await _employeeRepository.UpdateMany(whereCondition, data, true);
             UserModel updatedUser = await GetEmployeeById(userId);
             return new Result<UserModel>()
@@ -576,8 +776,11 @@ namespace Codeji.CMS.Services.Employees
         }
         public async Task<Result<GetAllEmployeeResponseModel>> GetAllEmployees(GetAllEmployeeRequestModel? filters)
         {
-            string currentRoleId = CurrentContext.UserRoleId(_httpContextAccessor);
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+            EmpUser? currentUser = await _employeeRepository.FirstOrDefault(x =>
+                x.UserId == currentUserId && x.CompanyId == companyId && !x.IsDeleted);
+            string currentRoleId = currentUser?.RoleId ?? string.Empty;
             bool canViewEmployeePhoneNumbers =
                 await _roleService.IsRoleTypeMatch(currentRoleId, EnumsHelper.Roles.Administrator, companyId)
                 || await _roleService.IsRoleTypeMatch(currentRoleId, EnumsHelper.Roles.HR, companyId)
@@ -586,14 +789,15 @@ namespace Codeji.CMS.Services.Employees
             int totalRecords = 0;
             if (filters == null)
             {
-                employeeList = (await _employeeRepository.GetAll()).ToList();
+                employeeList = (await _employeeRepository.GetAll(x => x.CompanyId == companyId)).ToList();
                 totalRecords = employeeList.Count;
             }
             else
             {
                 Expression<Func<EmpUser, bool>> whereCondition = x =>
-                ((filters.DepartmentId.Count == 0) || filters.DepartmentId.Contains(x.Department)) &&
-                ((filters.Gender.Count == 0) || filters.Gender.Contains(x.Gender)) &&
+                x.CompanyId == companyId &&
+                ((filters.DepartmentId == null || filters.DepartmentId.Count == 0) || filters.DepartmentId.Contains(x.Department)) &&
+                ((filters.Gender == null || filters.Gender.Count == 0) || filters.Gender.Contains(x.Gender)) &&
                 (string.IsNullOrEmpty(filters.Name)
                 || (x.FirstName + " " + x.LastName).Contains(filters.Name, StringComparison.CurrentCultureIgnoreCase));
 
@@ -640,6 +844,7 @@ namespace Codeji.CMS.Services.Employees
                             Department = department?.Titles.ToDictionary(keySelector: d => d.Language, elementSelector: d => d.Label),
                             PhoneNumber = canViewEmployeePhoneNumbers ? emp.PhoneNumber : null,
                             DateOfBirth = emp.DateOfBirth,
+                            DateOfJoining = emp.DateOfJoining,
                             FullProfileUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl),
                             IsVerified = emp.IsEmailVerified,
                         }).ToList();
@@ -648,6 +853,49 @@ namespace Codeji.CMS.Services.Employees
                 Success = true,
                 MethodResults = data,
                 TotalRecords = totalRecords
+            };
+        }
+
+        public async Task<Result<DepartmentEmpResponseDto>> GetDirectoryDepartments()
+        {
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+
+            // Keep these options aligned with the directory rows: both are resolved from
+            // the authenticated tenant, never from a request-provided CompanyId.
+            var employees = (await _employeeRepository.GetAll(x => x.CompanyId == companyId)).ToList();
+            var employeeCountsByDepartment = employees
+                .Where(x => !string.IsNullOrWhiteSpace(x.Department))
+                .GroupBy(x => x.Department)
+                .ToDictionary(x => x.Key, x => x.Count());
+
+            var departmentIds = employeeCountsByDepartment.Keys.ToArray();
+            if (departmentIds.Length == 0)
+            {
+                return new Result<DepartmentEmpResponseDto>
+                {
+                    Success = true,
+                    MethodResults = []
+                };
+            }
+
+            var departments = (await _departmentRepository.GetAll(x =>
+                x.CompanyId == companyId &&
+                !x.IsDeleted &&
+                x.IsActive &&
+                departmentIds.Contains(x.DepartmentId))).ToList();
+
+            return new Result<DepartmentEmpResponseDto>
+            {
+                Success = true,
+                MethodResults = departments
+                    .OrderBy(x => x.Titles.FirstOrDefault(t => t.Language == "en")?.Label ?? x.DepartmentId)
+                    .Select(x => new DepartmentEmpResponseDto
+                    {
+                        DepartmentId = x.DepartmentId,
+                        Label = x.Titles.ToDictionary(t => t.Language, t => t.Label),
+                        EmployeeCount = employeeCountsByDepartment[x.DepartmentId]
+                    })
+                    .ToList()
             };
         }
         public async Task<bool> IsEmailExist(string email)
@@ -665,14 +913,22 @@ namespace Codeji.CMS.Services.Employees
         {
             LoginUserViewModel returnModel = new();
             UserModel? user = await GetEmployeeById(userId);
-            Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == roleId && x.CompanyId == companyId);
-            Company? companyDetails = await _companyRepository.FirstOrDefault(x => x.CompanyId == companyId);
-            if (user is null || role is null || companyDetails is null)
+            if (user is null)
             {
                 return null;
             }
 
-            string[] allowedModulePermission = await _roleService.GetRolePermissionOfuser(role.RolesId);
+            // The JWT role claim can be stale after an administrator changes an
+            // employee's system role. The employee record is the canonical
+            // assignment; JobRole remains a separate designation field.
+            Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == user.RoleId && x.CompanyId == companyId && !x.IsDeleted);
+            Company? companyDetails = await _companyRepository.FirstOrDefault(x => x.CompanyId == companyId);
+            if (role is null || companyDetails is null)
+            {
+                return null;
+            }
+
+            string[] allowedModulePermission = await _roleService.GetRolePermissionOfuser(role.RolesId, companyId);
             returnModel.UserId = user.UserId;
             returnModel.RoleType = role.RoleType;
             returnModel.FirstName = user.FirstName;
@@ -1295,25 +1551,145 @@ namespace Codeji.CMS.Services.Employees
 
         private async Task<string> GenerateNextEmployeeId(string companyId)
         {
-            Company? company = await _companyRepository.FirstOrDefault(c => c.CompanyId == companyId);
-            string companyCode = new string((company?.EmployeeIdPrefix ?? string.Empty)
-                .Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
-            if (string.IsNullOrWhiteSpace(companyCode))
-                companyCode = string.Concat((company?.CompanyName ?? string.Empty)
-                    .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                    .Select(word => word[0])).ToUpperInvariant();
-            if (string.IsNullOrWhiteSpace(companyCode)) companyCode = "EMP";
-
-            string prefix = $"{companyCode}-";
-            int nextNumber = (await _employeeRepository.GetAll(e => e.CompanyId == companyId))
-                .Select(e => e.EmployeeId)
-                .Where(employeeId => !string.IsNullOrWhiteSpace(employeeId) && employeeId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                .Select(employeeId => int.TryParse(employeeId[prefix.Length..], out int number) ? number : 0)
-                .DefaultIfEmpty(0)
-                .Max() + 1;
-
-            return $"{prefix}{nextNumber:D4}";
+            var sequence = await EnsureEmployeeIdSequence(companyId);
+            return FormatEmployeeId(sequence.Prefix, sequence.NextNumber);
         }
+
+        public async Task<Result<EmployeeIdSequenceResponseDto>> GetEmployeeIdSequence(string companyId)
+        {
+            if (string.IsNullOrWhiteSpace(companyId)) return new() { Message = "Company is required." };
+            var sequence = await EnsureEmployeeIdSequence(companyId);
+            return SequenceResult(sequence);
+        }
+
+        public async Task<Result<EmployeeIdSequenceResponseDto>> SkipEmployeeIds(string companyId, string actorUserId, int skipCount)
+        {
+            if (skipCount <= 0) return new() { Message = "Skip count must be greater than 0." };
+            var sequence = await EnsureEmployeeIdSequence(companyId);
+            var filter = Builders<EmployeeIdSequence>.Filter.Eq(x => x.SequenceId, sequence.SequenceId);
+            var update = Builders<EmployeeIdSequence>.Update.Inc(x => x.NextNumber, skipCount)
+                .Set(x => x.UpdatedBy, actorUserId).Set(x => x.UpdatedDate, DateTime.UtcNow);
+            sequence = await _employeeIdSequenceRepository.GetCollection().FindOneAndUpdateAsync(filter, update,
+                new FindOneAndUpdateOptions<EmployeeIdSequence> { ReturnDocument = ReturnDocument.After });
+            var result = SequenceResult(sequence);
+            result.Message = $"{skipCount} Employee IDs skipped successfully. Next Employee ID is {result.MethodResult!.CurrentNextEmployeeId}.";
+            return result;
+        }
+
+        public async Task<Result<EmployeeIdSequenceResponseDto>> StartEmployeeIdSequence(string companyId, string actorUserId, string employeeId)
+        {
+            if (string.IsNullOrWhiteSpace(employeeId)) return new() { Message = "Employee ID is required." };
+            var sequence = await EnsureEmployeeIdSequence(companyId);
+            var candidate = employeeId.Trim().ToUpperInvariant();
+            var expression = new Regex($"^{Regex.Escape(sequence.Prefix)}(?<number>\\d{{4}})$", RegexOptions.CultureInvariant);
+            var match = expression.Match(candidate);
+            if (!match.Success) return new() { Message = $"Employee ID must follow the format {FormatEmployeeId(sequence.Prefix, 0)}." };
+            var number = int.Parse(match.Groups["number"].Value, CultureInfo.InvariantCulture);
+            if (number <= 0) return new() { Message = "Employee ID number must be greater than 0." };
+            if (await _employeeRepository.Exist(x => x.CompanyId == companyId && x.EmployeeId.Equals(candidate, StringComparison.OrdinalIgnoreCase)))
+                return new() { Message = $"Employee ID {candidate} is already assigned. Please enter another starting ID." };
+
+            var filter = Builders<EmployeeIdSequence>.Filter.Eq(x => x.SequenceId, sequence.SequenceId);
+            var update = Builders<EmployeeIdSequence>.Update.Set(x => x.NextNumber, number)
+                .Set(x => x.UpdatedBy, actorUserId).Set(x => x.UpdatedDate, DateTime.UtcNow);
+            sequence = await _employeeIdSequenceRepository.GetCollection().FindOneAndUpdateAsync(filter, update,
+                new FindOneAndUpdateOptions<EmployeeIdSequence> { ReturnDocument = ReturnDocument.After });
+            var result = SequenceResult(sequence);
+            result.Message = $"Employee ID sequence updated. Automatic generation will continue from {candidate}.";
+            return result;
+        }
+
+        public async Task<Result<AssignMissingEmployeeIdResponseDto>> AssignMissingEmployeeId(string companyId, string actorUserId, string employeeUserId, string? manualEmployeeId)
+        {
+            if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(employeeUserId))
+                return new() { Message = "Employee and company are required." };
+
+            var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == employeeUserId && !x.IsDeleted);
+            if (employee is null) return new() { Message = "Employee was not found in your company." };
+            if (!string.IsNullOrWhiteSpace(employee.EmployeeId)) return new() { Message = "This employee already has an Employee ID assigned." };
+
+            var company = await _companyRepository.FirstOrDefault(x => x.CompanyId == companyId);
+            var automatic = company?.AutoGenerateEmployeeId != false;
+            var sequence = await EnsureEmployeeIdSequence(companyId);
+            string employeeId;
+
+            if (automatic)
+            {
+                if (!string.IsNullOrWhiteSpace(manualEmployeeId))
+                    return new() { Message = "Manual Employee ID assignment is not enabled for this company." };
+                employeeId = await ReserveNextEmployeeId(companyId);
+            }
+            else
+            {
+                employeeId = manualEmployeeId?.Trim().ToUpperInvariant() ?? string.Empty;
+                var expression = new Regex($"^{Regex.Escape(sequence.Prefix)}\\d{{4}}$", RegexOptions.CultureInvariant);
+                if (!expression.IsMatch(employeeId)) return new() { Message = $"Employee ID must follow the format {FormatEmployeeId(sequence.Prefix, 0)}." };
+                if (await _employeeRepository.Exist(x => x.CompanyId == companyId && x.EmployeeId.Equals(employeeId, StringComparison.OrdinalIgnoreCase)))
+                    return new() { Message = $"Employee ID {employeeId} is already assigned." };
+            }
+
+            var filter = Builders<EmpUser>.Filter.Eq(x => x.CompanyId, companyId)
+                & Builders<EmpUser>.Filter.Eq(x => x.UserId, employeeUserId)
+                & Builders<EmpUser>.Filter.Or(Builders<EmpUser>.Filter.Eq(x => x.EmployeeId, ""), Builders<EmpUser>.Filter.Eq(x => x.EmployeeId, null));
+            var update = Builders<EmpUser>.Update.Set(x => x.EmployeeId, employeeId).Set(x => x.UpdatedBy, actorUserId).Set(x => x.UpdatedDate, DateTime.UtcNow);
+
+            try
+            {
+                var assigned = await _employeeRepository.GetCollection().FindOneAndUpdateAsync(filter, update, new FindOneAndUpdateOptions<EmpUser> { ReturnDocument = ReturnDocument.After });
+                if (assigned is null) return new() { Message = "This employee already has an Employee ID assigned." };
+            }
+            catch (MongoWriteException exception) when (exception.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+            {
+                return new() { Message = $"Employee ID {employeeId} is already assigned." };
+            }
+
+            _logger.LogInformation("Employee ID assigned. CompanyId: {CompanyId}; EmployeeUserId: {EmployeeUserId}; EmployeeId: {EmployeeId}; AssignedBy: {ActorUserId}", companyId, employeeUserId, employeeId, actorUserId);
+            return new()
+            {
+                Success = true,
+                Message = "Employee ID assigned successfully.",
+                MethodResult = new AssignMissingEmployeeIdResponseDto { EmployeeId = employeeId, ManualEntryAllowed = !automatic, Format = FormatEmployeeId(sequence.Prefix, 0) }
+            };
+        }
+
+        public async Task<string> ReserveNextEmployeeId(string companyId)
+        {
+            var sequence = await EnsureEmployeeIdSequence(companyId);
+            var updated = await _employeeIdSequenceRepository.GetCollection().FindOneAndUpdateAsync(
+                Builders<EmployeeIdSequence>.Filter.Eq(x => x.SequenceId, sequence.SequenceId),
+                Builders<EmployeeIdSequence>.Update.Inc(x => x.NextNumber, 1).Set(x => x.UpdatedDate, DateTime.UtcNow),
+                new FindOneAndUpdateOptions<EmployeeIdSequence> { ReturnDocument = ReturnDocument.Before });
+            return FormatEmployeeId(updated.Prefix, updated.NextNumber);
+        }
+
+        private async Task<EmployeeIdSequence> EnsureEmployeeIdSequence(string companyId)
+        {
+            var existing = await _employeeIdSequenceRepository.FirstOrDefault(x => x.CompanyId == companyId);
+            if (existing != null) return existing;
+            var company = await _companyRepository.FirstOrDefault(c => c.CompanyId == companyId);
+            var prefix = BuildEmployeeIdPrefix(company);
+            var highest = (await _employeeRepository.GetAll(x => x.CompanyId == companyId)).Select(x => x.EmployeeId)
+                .Where(x => !string.IsNullOrWhiteSpace(x) && x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                .Select(x => int.TryParse(x[prefix.Length..], out var number) ? number : 0).DefaultIfEmpty(0).Max();
+            var sequence = new EmployeeIdSequence { SequenceId = companyId, CompanyId = companyId, Prefix = prefix, NextNumber = highest + 1 };
+            try { await _employeeIdSequenceRepository.AddOne(sequence); }
+            catch (MongoWriteException) { }
+            return await _employeeIdSequenceRepository.FirstOrDefault(x => x.CompanyId == companyId) ?? sequence;
+        }
+
+        private static string BuildEmployeeIdPrefix(Company? company)
+        {
+            var code = new string((company?.EmployeeIdPrefix ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(code)) code = string.Concat((company?.CompanyName ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(word => word[0])).ToUpperInvariant();
+            return $"{(string.IsNullOrWhiteSpace(code) ? "EMP" : code)}-";
+        }
+
+        private static string FormatEmployeeId(string prefix, int number) => $"{prefix}{number:D4}";
+        private static Result<EmployeeIdSequenceResponseDto> SequenceResult(EmployeeIdSequence sequence) => new()
+        {
+            Success = true,
+            MethodResult = new EmployeeIdSequenceResponseDto { CurrentNextEmployeeId = FormatEmployeeId(sequence.Prefix, sequence.NextNumber), Format = FormatEmployeeId(sequence.Prefix, 0) }
+        };
         public async Task<Result> ResendInviteLink(string userId, string currentUserId)
         {
             Result result = new();

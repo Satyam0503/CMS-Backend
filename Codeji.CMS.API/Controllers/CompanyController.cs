@@ -114,7 +114,7 @@ namespace Codeji.CMS.API.Controllers
         [ModulePermission(AppModule.Policy, Permission.Create)]
         public async Task<Result<PolicyVersionResponseModel>> AddPolicyVersion([FromForm] PolicyVersionRequestModel model)
         {
-            return await _companyService.AddPolicyVersion(model);
+            return await _companyService.AddPolicyVersion(model, CurrentContext.CompanyId(_httpContextAccessor));
         }
 
         [HttpPost]
@@ -122,7 +122,15 @@ namespace Codeji.CMS.API.Controllers
         [ModulePermission(AppModule.Policy, Permission.Edit)]
         public async Task<Result<PolicyVersionResponseModel>> EditPolicyVersion([FromForm] PolicyVersionUpdateModel model)
         {
-            return await _companyService.EditPolicyVersion(model);
+            return await _companyService.EditPolicyVersion(model, CurrentContext.CompanyId(_httpContextAccessor));
+        }
+
+        [HttpPost]
+        [Route("SetCurrentPolicyVersion")]
+        [ModulePermission(AppModule.Policy, Permission.Edit)]
+        public Task<Result<PolicyVersionResponseModel>> SetCurrentPolicyVersion([FromBody] SetCurrentPolicyVersionRequestModel model)
+        {
+            return _companyService.SetCurrentPolicyVersion(model, CurrentContext.CompanyId(_httpContextAccessor));
         }
 
         [HttpGet]
@@ -155,7 +163,7 @@ namespace Codeji.CMS.API.Controllers
             var result = await _companyService.GetPolicyDocument(policyVersionId, userId, companyId);
 
             if (!result.Success || result.MethodResult == null)
-                return Unauthorized(result.Message);
+                return NotFound(result.Message);
 
             var document = result.MethodResult;
 

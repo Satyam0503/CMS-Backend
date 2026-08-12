@@ -73,7 +73,8 @@ namespace Codeji.CMS.Services.Recruitments
         public async Task<Result> RegisterApplicants(ApplicantAddEditModel applicantRegisterModel)
         {
             Result result = new();
-            bool isApplicantExist = await _applicantRepository.Exist(ap => ap.Email == applicantRegisterModel.Email);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            bool isApplicantExist = await _applicantRepository.Exist(ap => ap.CompanyId == companyId && ap.Email == applicantRegisterModel.Email);
             if (isApplicantExist)
             {
                 result.StatusCode = CustomStatusCode.ApplicantAlreadyExist;
@@ -83,6 +84,7 @@ namespace Codeji.CMS.Services.Recruitments
             Applicant applicant = new Applicant()
             {
                 ApplicantId = Guid.NewGuid().ToString(),
+                CompanyId = companyId,
                 FirstName = applicantRegisterModel.FirstName,
                 LastName = applicantRegisterModel.LastName,
                 Experience = applicantRegisterModel.Experience,
@@ -105,29 +107,51 @@ namespace Codeji.CMS.Services.Recruitments
         private async Task LogNewApplication(Applicant applicant)
         {
             var vacancy = await _jobVacancyService.GetVacancyById(applicant.VacancyId);
-            string actorUserId = CurrentContext.UserId(_httpContextAccessor) ?? string.Empty;
             ApplicantLogs log = new()
             {
+                CompanyId = applicant.CompanyId,
                 ApplicantId = applicant.ApplicantId,
-                UserId = actorUserId,
+                // This is a candidate-submission event, not a staff action.
+                UserId = applicant.ApplicantId,
                 ActivityCategory = 0, // CommentAction.Process — initial application submission
                 Description = "New application submitted",
                 JobRole = vacancy?.Title ?? string.Empty,
                 ApplicantName = $"{applicant.FirstName} {applicant.LastName}",
                 CreatedDate = DateTime.UtcNow,
-                CreatedBy = string.IsNullOrEmpty(actorUserId) ? applicant.ApplicantId : actorUserId,
+                CreatedBy = applicant.ApplicantId,
             };
             await _ApplicantLogsRepository.AddOne(log);
         }
 
-        public async Task<Result> UpdateApplicants(ApplicantAddEditModel model)
+        public async Task<Result> UpdateApplicants(ApplicantAddEditModel model, string actorUserId)
         {
             Result result = new();
-            Expression<Func<Applicant, bool>> whereCondition = x => x.ApplicantId == model.ApplicantId && x.Email == model.Email;
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (string.IsNullOrWhiteSpace(actorUserId))
+            {
+                result.Message = "An authenticated user is required to update an applicant.";
+                return result;
+            }
+
+            // The actor and tenant always come from authentication, never from the request payload.
+            var actor = await _employeeRepository.FirstOrDefault(x => x.UserId == actorUserId && x.CompanyId == companyId && !x.IsDeleted);
+            if (actor is null)
+            {
+                result.Message = "The authenticated user is not available in this company.";
+                return result;
+            }
+
+            Expression<Func<Applicant, bool>> whereCondition = x =>
+                x.CompanyId == companyId && x.ApplicantId == model.ApplicantId && x.Email == model.Email;
             Applicant? entity = await _applicantRepository.FirstOrDefault(whereCondition);
             if (entity == null) return result;
 
             var previousActivityType = entity.ActivityType;
+            if (!IsAllowedActivityTransition(previousActivityType, model.ActivityType, out var transitionError))
+            {
+                result.Message = transitionError;
+                return result;
+            }
 
             entity.Experience = model.Experience;
             entity.VacancyId = model.VacancyId;
@@ -138,11 +162,82 @@ namespace Codeji.CMS.Services.Recruitments
             entity.ActivityType = model.ActivityType;
             entity.Status = model.Status;
             entity.State = model.State;
-            result = await _applicantRepository.Update(whereCondition, entity);
+            entity.UpdatedBy = actorUserId;
+            entity.UpdatedDate = DateTime.UtcNow;
+            // Compare the persisted status while writing. A second HR user working from a
+            // stale screen cannot overwrite a newer workflow stage.
+            Expression<Func<Applicant, bool>> updateCondition = x =>
+                x.CompanyId == companyId &&
+                x.ApplicantId == model.ApplicantId &&
+                x.Email == model.Email &&
+                x.ActivityType == previousActivityType;
+            result = await _applicantRepository.Update(updateCondition, entity);
+            if (!result.Success)
+            {
+                result.Message = "This application was updated by another user. Refresh it and try again.";
+                return result;
+            }
+            if (result.Success && previousActivityType != entity.ActivityType)
+            {
+                await AddStatusHistory(entity, previousActivityType, actorUserId);
+            }
             // A candidate receives one email when HR moves the application to a new stage.
             // Ordinary edits (phone, state, etc.) must not send duplicate emails.
             if (result.Success && previousActivityType != entity.ActivityType) await SendEmailToApplicant(entity);
             return result;
+        }
+
+        private async Task<Result> AddStatusHistory(Applicant applicant, EnumsHelper.ActivityType previousActivityType, string actorUserId)
+        {
+            var vacancy = await _jobVacancyRepository.FirstOrDefault(x =>
+                x.CompanyId == applicant.CompanyId && x.JobId == applicant.VacancyId);
+            return await _ApplicantLogsRepository.AddOne(new ApplicantLogs
+            {
+                CompanyId = applicant.CompanyId,
+                ApplicantId = applicant.ApplicantId,
+                UserId = actorUserId,
+                CreatedBy = actorUserId,
+                CreatedDate = DateTime.UtcNow,
+                ActivityCategory = 0,
+                Description = $"{FormatApplicantName(applicant)} status changed from {previousActivityType} to {applicant.ActivityType}.",
+                JobRole = vacancy?.Title ?? string.Empty,
+                ApplicantName = $"{applicant.FirstName} {applicant.LastName}"
+            });
+        }
+
+        private static string FormatApplicantName(Applicant applicant)
+        {
+            var name = $"{applicant.FirstName} {applicant.LastName}".Trim();
+            return string.IsNullOrWhiteSpace(name) ? "Applicant" : name;
+        }
+
+        private static bool IsAllowedActivityTransition(
+            EnumsHelper.ActivityType current,
+            EnumsHelper.ActivityType target,
+            out string error)
+        {
+            error = string.Empty;
+            if (current == target) return true;
+
+            if (current is EnumsHelper.ActivityType.Selected or EnumsHelper.ActivityType.Rejected or EnumsHelper.ActivityType.ReApply)
+            {
+                error = $"Applicant status cannot be changed after it is {current}.";
+                return false;
+            }
+
+            // Rejection is the existing terminal side path and remains available from
+            // any non-terminal hiring stage. ReApply is a public-application flow only.
+            if (target == EnumsHelper.ActivityType.Rejected) return true;
+            if (target is EnumsHelper.ActivityType.New or EnumsHelper.ActivityType.ReApply)
+            {
+                error = $"Applicant status cannot be changed from {current} to {target}.";
+                return false;
+            }
+
+            if ((int)target > (int)current) return true; // preserve existing forward skipping
+
+            error = $"Applicant status cannot be changed from {current} back to {target}.";
+            return false;
         }
         public async Task<Result> ApplyNowService(ApplicantAddEditModel model)
         {
@@ -224,16 +319,18 @@ namespace Codeji.CMS.Services.Recruitments
         //Get Applicant List Using Filter Change this logic in Future
         public async Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters? filters)
         {
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
             List<Applicant> applicantList = [];
             int count = 0;
             if (filters is null)
             {
-                applicantList = (await _applicantRepository.GetAll()).ToList();
+                applicantList = (await _applicantRepository.GetAll(x => x.CompanyId == companyId)).ToList();
                 count = applicantList.Count;
             }
             else
             {
                 Expression<Func<Applicant, bool>> whereCondition = x =>
+                x.CompanyId == companyId &&
                 ((!filters.FilterFrom.HasValue || filters.FilterFrom.Value <= x.CreatedDate) && (!filters.FilterTo.HasValue || filters.FilterTo >= x.CreatedDate))
                 && (!filters.ActivityTypes.Any() || filters.ActivityTypes.Contains(x.ActivityType))
                 && (!filters.Status.Any() || filters.Status.Contains(x.Status))
@@ -279,8 +376,9 @@ namespace Codeji.CMS.Services.Recruitments
         public async Task<Result<ApplicantViewModel>> ApplicantById(string applicantId)
         {
             Result<ApplicantViewModel> result = new Result<ApplicantViewModel>();
-            Applicant? applicant = await _applicantRepository.FirstOrDefault(x => x.ApplicantId == applicantId);
-            JobVacancy? vacancy = await _jobVacancyRepository.FirstOrDefault(x => applicant != null && applicant.VacancyId == x.JobId);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            Applicant? applicant = await _applicantRepository.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicantId);
+            JobVacancy? vacancy = await _jobVacancyRepository.FirstOrDefault(x => applicant != null && x.CompanyId == companyId && applicant.VacancyId == x.JobId);
             if (applicant is not null)
             {
                 ApplicantViewModel data = new ApplicantViewModel
@@ -309,9 +407,13 @@ namespace Codeji.CMS.Services.Recruitments
 
         public async Task<Result> AddComment(string userId, CommentRequestModel model)
         {
-            var applicant = await _applicantRepository.FirstOrDefault(x => x.ApplicantId == model.ApplicantId);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var applicant = await _applicantRepository.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == model.ApplicantId);
+            if (applicant is null) return new Result { Message = "Applicant was not found." };
+
             ApplicantLogs comments = new()
             {
+                CompanyId = companyId,
                 UserId = userId,
                 ApplicantId = model.ApplicantId,
                 ActivityCategory = model.ActivityCategory,
@@ -319,7 +421,7 @@ namespace Codeji.CMS.Services.Recruitments
                 CreatedDate = DateTime.UtcNow,
                 CreatedBy = userId,
                 JobRole = model.JobTitle,
-                ApplicantName = applicant == null ? "" : $"{applicant.FirstName} {applicant.LastName}"
+                ApplicantName = $"{applicant.FirstName} {applicant.LastName}"
             };
             await _ApplicantLogsRepository.AddOne(comments);
             Result result = new()
@@ -331,10 +433,14 @@ namespace Codeji.CMS.Services.Recruitments
         }
         public async Task<Result<ApplicantLogResponseModel>> GetAllComment(string applicantId, int pageNo, int pageSize)
         {
-            var logCount = await _ApplicantLogsRepository.Count(x => x.ApplicantId == applicantId);
-            var logList = (await _ApplicantLogsRepository.GetAggregateDataAsync<ApplicantLogs>(x => x.ApplicantId == applicantId, pageNo: pageNo, pageSize: pageSize)).ToList();
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var applicantExists = await _applicantRepository.Exist(x => x.CompanyId == companyId && x.ApplicantId == applicantId);
+            if (!applicantExists) return new Result<ApplicantLogResponseModel> { Success = false, Message = "Applicant was not found." };
+
+            var logCount = await _ApplicantLogsRepository.Count(x => x.CompanyId == companyId && x.ApplicantId == applicantId);
+            var logList = (await _ApplicantLogsRepository.GetAggregateDataAsync<ApplicantLogs>(x => x.CompanyId == companyId && x.ApplicantId == applicantId, pageNo: pageNo, pageSize: pageSize)).ToList();
             string[] userIds = logList.Select(x => x.UserId).Distinct().ToArray();
-            var users = (await _employeeRepository.GetAll(x => userIds.Contains(x.UserId))).ToList();
+            var users = (await _employeeRepository.GetAll(x => x.CompanyId == companyId && userIds.Contains(x.UserId))).ToList();
             var data = (from log in logList
                         join user in users on log.UserId equals user.UserId into joined
                         from user in joined.DefaultIfEmpty()
@@ -346,7 +452,9 @@ namespace Codeji.CMS.Services.Recruitments
                             ActivityCategory = log.ActivityCategory,
                             JobRole = log.JobRole,
                             UserId = log.UserId,
-                            UserName = user != null ? $"{user.FirstName} {user.LastName}" : log.ApplicantName,
+                            // Applicant-name fallback is only legitimate for the original candidate submission.
+                            // Staff status/comment events persist the authenticated user id and cannot become the applicant.
+                            UserName = user != null ? $"{user.FirstName} {user.LastName}" : log.UserId == log.ApplicantId ? log.ApplicantName : "System",
                             CreatedDate = log.CreatedDate,
                             CreatedBy = log.CreatedBy,
                         }).OrderByDescending(x => x.CreatedDate).ToList();
@@ -361,7 +469,9 @@ namespace Codeji.CMS.Services.Recruitments
         }
         public async Task<Result<ApplicantLogResponseModel>> GetProcessLogData(ApplicantLogFilterModel filters)
         {
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
             Expression<Func<ApplicantLogs, bool>> whereCondition = x =>
+            x.CompanyId == companyId &&
             (!filters.FilterFrom.HasValue || (x.CreatedDate >= filters.FilterFrom))
             && (!filters.FilterTo.HasValue || (x.CreatedDate <= filters.FilterTo))
             && (filters.ActivityCategory.Length == 0 || filters.ActivityCategory.Contains(x.ActivityCategory))
@@ -371,7 +481,7 @@ namespace Codeji.CMS.Services.Recruitments
             var logCount = await _ApplicantLogsRepository.Count(whereCondition);
             var logList = (await _ApplicantLogsRepository.GetAggregateDataAsync<ApplicantLogs>(whereCondition, pageNo: filters.PageNo, pageSize: filters.PageSize)).ToList();
             string[] empId = logList.Select(x => x.UserId).Distinct().ToArray();
-            var users = await _employeeRepository.GetAll(x => empId.Contains(x.UserId));
+            var users = await _employeeRepository.GetAll(x => x.CompanyId == companyId && empId.Contains(x.UserId));
             var data = (from log in logList
                         join user in users on log.UserId equals user.UserId into joined
                         from user in joined.DefaultIfEmpty()
@@ -383,7 +493,7 @@ namespace Codeji.CMS.Services.Recruitments
                             ActivityCategory = log.ActivityCategory,
                             JobRole = log.JobRole,
                             UserId = log.UserId,
-                            UserName = user != null ? $"{user.FirstName} {user.LastName}" : log.ApplicantName,
+                            UserName = user != null ? $"{user.FirstName} {user.LastName}" : log.UserId == log.ApplicantId ? log.ApplicantName : "System",
                             ApplicantName = log.ApplicantName,
                             CompanyId = log.CompanyId,
                             CreatedBy = log.CreatedBy,

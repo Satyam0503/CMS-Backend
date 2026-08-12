@@ -6,6 +6,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Constraints;
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Utility.middlewares;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.BackgroundTasks;
@@ -85,20 +86,24 @@ public sealed class WorkFromHomeService(
         if (employee is null || policy is null || !policy.IsEnabled)
             return Ok(new EmployeeWfhContextDto { DisabledReasonCode = employee is null ? "WFH_EMPLOYEE_NOT_ELIGIBLE" : "WFH_POLICY_DISABLED" });
 
-        var today = CompanyNow(policy).Date;
+        var schedule = await effectiveSchedules.ResolveAsync(CompanyId, employee, DateTime.UtcNow);
+        var companyNow = CompanyNow(schedule?.TimeZoneId ?? policy.TimeZoneId);
+        var today = companyNow.Date;
+        var officeStart = schedule?.StartTime ?? policy.OfficeStartTime;
         var week = StartOfWeek(today);
         var eligible = IsEligible(policy, employee) && IsEffectiveFor(policy, today);
-        var used = (await requests.GetAll(x => x.CompanyId == CompanyId && x.UserId == UserId && (x.Status == "Pending" || x.Status == "Approved" || x.Status == "Returned") && x.FromDate < week.AddDays(7) && x.ToDate >= week))
-            .SelectMany(x => Days(x.FromDate, x.ToDate)).Where(x => x >= week && x < week.AddDays(7)).Distinct().Count();
+        var used = WeeklyUsage(await requests.GetAll(x => x.CompanyId == CompanyId && x.UserId == UserId && (x.Status == "Pending" || x.Status == "Approved" || x.Status == "Returned") && x.FromDate < week.AddDays(7) && x.ToDate >= week), week);
         var weeklyLimit = WeeklyLimitFor(policy, employee);
-        var remaining = Math.Max(0, weeklyLimit - used);
+        var remaining = Math.Max(0m, weeklyLimit - used);
         var reason = !eligible || weeklyLimit == 0 ? "WFH_POLICY_NOT_ASSIGNED" : remaining == 0 ? "WFH_WEEKLY_LIMIT_USED" : null;
         return Ok(new EmployeeWfhContextDto
         {
             IsFeatureEnabled = true, IsEligible = eligible && weeklyLimit > 0, WeeklyLimit = weeklyLimit, UsedThisWeek = used,
             RemainingThisWeek = remaining, CanSchedule = reason is null, DisabledReasonCode = reason,
             NextAvailableDate = remaining == 0 ? week.AddDays(7) : null, ManagerApprovalRequired = policy.ManagerApprovalRequired,
-            MinimumAdvanceNoticeHours = policy.MinimumAdvanceNoticeHours, OfficeStartTime = policy.OfficeStartTime,
+            MinimumAdvanceNoticeHours = policy.MinimumAdvanceNoticeHours, BusinessDate = today,
+            IsSameDayRequestCutoffPassed = officeStart.HasValue && companyNow.TimeOfDay >= officeStart.Value,
+            EffectiveOfficeStartTime = officeStart, OfficeStartTime = policy.OfficeStartTime,
             OfficeEndTime = policy.OfficeEndTime, CheckInAvailableFrom = policy.AllowedCheckInFrom,
             CheckInAvailableUntil = policy.AllowedCheckInUntil, CheckOutAvailableFrom = policy.AllowedCheckOutFrom,
             CheckOutAvailableUntil = policy.AllowedCheckOutUntil
@@ -111,7 +116,7 @@ public sealed class WorkFromHomeService(
             return Fail("WFH_INVALID_ATTENDANCE_STATUS", "WFH status codes must be active company attendance statuses.");
         if (dto.MinimumAdvanceNoticeHours < 0 || dto.FullDayMinimumHours < 0 || dto.HalfDayMinimumHours < 0 || dto.MaxDaysPerWeek < 1 || (dto.EffectiveFrom.HasValue && dto.EffectiveTo.HasValue && dto.EffectiveFrom > dto.EffectiveTo))
             return Fail("WFH_INVALID_POLICY", "WFH policy values cannot be negative.");
-        var policy = await policies.FirstOrDefault(x => x.CompanyId == CompanyId) ?? new WorkFromHomePolicy();
+        var policy = await policies.FirstOrDefault(x => x.CompanyId == CompanyId) ?? new WorkFromHomePolicy { CompanyId = CompanyId };
         Apply(policy, dto);
         return string.IsNullOrEmpty(policy.PolicyId)
             ? await policies.AddOne(policy)
@@ -121,7 +126,23 @@ public sealed class WorkFromHomeService(
     public async Task<Result<IEnumerable<WorkFromHomeEmployeeAllocationDto>>> GetEmployeeAllocations()
     {
         var policy = await policies.FirstOrDefault(x => x.CompanyId == CompanyId);
-        return Ok<IEnumerable<WorkFromHomeEmployeeAllocationDto>>((policy?.EmployeeAllocations ?? []).Select(x => new WorkFromHomeEmployeeAllocationDto { EmployeeId = x.EmployeeId, WeeklyLimit = x.WeeklyLimit }).OrderBy(x => x.EmployeeId));
+        if (policy is null)
+            return Ok<IEnumerable<WorkFromHomeEmployeeAllocationDto>>([]);
+
+        var today = CompanyNow(policy).Date;
+        var activeEmployees = await employees.GetAll(x => x.CompanyId == CompanyId && x.Status && !x.IsDeleted);
+        return Ok<IEnumerable<WorkFromHomeEmployeeAllocationDto>>(activeEmployees
+            .Select(employee =>
+            {
+                var weeklyLimit = WeeklyLimitFor(policy, employee);
+                return new WorkFromHomeEmployeeAllocationDto
+                {
+                    EmployeeId = employee.EmployeeId,
+                    WeeklyLimit = weeklyLimit,
+                    IsEligible = policy.IsEnabled && IsEffectiveFor(policy, today) && IsEligible(policy, employee) && weeklyLimit > 0
+                };
+            })
+            .OrderBy(x => x.EmployeeId));
     }
 
     public async Task<Result> SaveEmployeeAllocation(WorkFromHomeEmployeeAllocationDto dto)
@@ -131,8 +152,24 @@ public sealed class WorkFromHomeService(
         if (!await employees.Exist(x => x.CompanyId == CompanyId && x.EmployeeId == employeeId && x.Status && !x.IsDeleted)) return Fail("WFH_EMPLOYEE_NOT_FOUND", "The employee is not active in this company.");
         var policy = await policies.FirstOrDefault(x => x.CompanyId == CompanyId);
         if (policy is null) return Fail("WFH_POLICY_DISABLED", "Configure the company WFH policy before allocating WFH.");
+        policy.EmployeeAllocations ??= [];
+        policy.ExcludedEmployeeIds ??= [];
+        policy.ApplicableEmployeeIds ??= [];
+
+        // EmployeeAllocations are not only quota overrides: they are the explicit
+        // per-employee allocation record. Keep a zero allocation so the UI can
+        // distinguish an HR deallocation from an employee inheriting the company
+        // default, and mirror it in the exclusion list used by every request path.
         policy.EmployeeAllocations.RemoveAll(x => string.Equals(x.EmployeeId, employeeId, StringComparison.Ordinal));
         policy.EmployeeAllocations.Add(new WorkFromHomeEmployeeAllocation { EmployeeId = employeeId, WeeklyLimit = dto.WeeklyLimit });
+        policy.ExcludedEmployeeIds ??= [];
+        policy.ApplicableEmployeeIds ??= [];
+        policy.ExcludedEmployeeIds.RemoveAll(x => string.Equals(x, employeeId, StringComparison.Ordinal));
+        policy.ApplicableEmployeeIds.RemoveAll(x => string.Equals(x, employeeId, StringComparison.Ordinal));
+        if (dto.WeeklyLimit == 0)
+            policy.ExcludedEmployeeIds.Add(employeeId);
+        else
+            policy.ApplicableEmployeeIds.Add(employeeId);
         policy.UpdatedDate = DateTime.UtcNow;
         return await policies.Update(Builders<WorkFromHomePolicy>.Filter.Where(x => x.CompanyId == CompanyId && x.PolicyId == policy.PolicyId), policy);
     }
@@ -151,7 +188,7 @@ public sealed class WorkFromHomeService(
         if (policy.ManagerApprovalRequired && string.IsNullOrWhiteSpace(approver)) return Fail<WorkFromHomeResponseDto>("WFH_APPROVER_NOT_CONFIGURED", "No eligible approver is configured.");
         var request = new WorkFromHomeRequest
         {
-            UserId = employee.UserId, EmployeeId = employee.EmployeeId, FromDate = BusinessDateUtc(dto.FromDate), ToDate = BusinessDateUtc(dto.ToDate),
+            CompanyId = CompanyId, UserId = employee.UserId, EmployeeId = employee.EmployeeId, FromDate = BusinessDateUtc(dto.FromDate), ToDate = BusinessDateUtc(dto.ToDate),
             DurationType = dto.DurationType, ReasonCode = dto.ReasonCode.Trim(), ReasonText = Clean(dto.ReasonText), Status = policy.ManagerApprovalRequired ? "Pending" : "Approved", ApproverUserId = approver
         };
         var saved = await requests.AddOne(request);
@@ -193,35 +230,66 @@ public sealed class WorkFromHomeService(
         var isCompanyReviewer = await roles.VerifyUserAccess(AppModule.WorkFromHome, [Codeji.CMS.Utility.Constraints.Permission.ViewAll], UserId, CompanyId);
         if (!string.Equals(request.ApproverUserId, UserId, StringComparison.Ordinal) && !isCompanyReviewer) return Fail("WFH_APPROVER_NOT_AUTHORIZED", "You are not the assigned approver.");
 
-        if (status == "Approved")
-        {
-            var policy = await ActivePolicy();
-            var employee = await ActiveEmployee(request.UserId);
-            if (policy is null) return Fail("WFH_POLICY_DISABLED", "WFH policy is disabled.");
-            if (employee is null) return Fail("WFH_EMPLOYEE_NOT_ELIGIBLE", "Employee is no longer active.");
-            var reconcile = await ReconcileApproved(request, employee, policy, request.Version + 1);
-            if (!reconcile.Success) return reconcile;
-        }
-
         var previous = request.Status;
         request.Status = status; request.Version++; request.ReviewedByUserId = UserId; request.ReviewedAt = DateTime.UtcNow;
         request.ReviewRemarksCode = dto.RemarksCode; request.ReviewRemarksText = Clean(dto.RemarksText);
         var update = await requests.Update(Builders<WorkFromHomeRequest>.Filter.Where(x => x.CompanyId == CompanyId && x.RequestId == requestId && x.Status == previous && x.Version == dto.Version), request);
-        if (update.Success) await Log(request, previous, status, status, dto.RemarksCode, dto.RemarksText);
-        if (update.Success && status == "Approved") QueueEmployeeNotification(request, "Your WFH request was approved.");
-        return update.Success ? update : Fail("WFH_REQUEST_CHANGED", "The request was changed by another action.");
+        if (!update.Success) return Fail("WFH_REQUEST_CHANGED", "The request was changed by another action.");
+
+        if (status == "Approved")
+        {
+            var policy = await ActivePolicy();
+            var employee = await ActiveEmployee(request.UserId);
+            var reconcile = policy is null
+                ? Fail("WFH_POLICY_DISABLED", "WFH policy is disabled.")
+                : employee is null
+                    ? Fail("WFH_EMPLOYEE_NOT_ELIGIBLE", "Employee is no longer active.")
+                    : await ReconcileApproved(request, employee, policy, request.Version);
+            if (!reconcile.Success)
+            {
+                // The request is claimed before attendance is touched. If reconciliation
+                // cannot proceed, restore Pending only when this exact approval is still
+                // current; this prevents attendance from being generated for a failed
+                // optimistic request update.
+                request.Status = previous;
+                request.Version++;
+                request.ReviewedByUserId = null;
+                request.ReviewedAt = null;
+                request.ReviewRemarksCode = null;
+                request.ReviewRemarksText = null;
+                await requests.Update(Builders<WorkFromHomeRequest>.Filter.Where(x => x.CompanyId == CompanyId && x.RequestId == requestId && x.Status == status && x.Version == request.Version - 1), request);
+                return reconcile;
+            }
+        }
+
+        await Log(request, previous, status, status, dto.RemarksCode, dto.RemarksText);
+        if (status == "Approved") QueueEmployeeNotification(request, "Your WFH request was approved.");
+        return update;
     }
 
     public async Task<Result> Cancel(string requestId, WorkFromHomeCancelDto dto)
     {
         var request = await requests.FirstOrDefault(x => x.CompanyId == CompanyId && x.RequestId == requestId && x.UserId == UserId);
         if (request is null || request.Version != dto.Version) return Fail("WFH_REQUEST_CHANGED", "The request was changed by another action.");
+        if (request.Status is not ("Draft" or "Pending" or "Returned" or "Approved"))
+            return Fail("WFH_CANNOT_CANCEL", "Only a pending, returned, or approved WFH request may be cancelled.");
+
+        var employee = await ActiveEmployee(request.UserId);
+        if (employee is null) return Fail("WFH_EMPLOYEE_NOT_ELIGIBLE", "The employee is no longer active in this company.");
+        var policy = await policies.FirstOrDefault(x => x.CompanyId == CompanyId);
+        var schedule = await effectiveSchedules.ResolveAsync(CompanyId, employee, request.FromDate);
+        var companyNow = CompanyNow(schedule?.TimeZoneId ?? policy?.TimeZoneId);
+        var officeStart = schedule?.StartTime ?? policy?.OfficeStartTime;
+        if (request.FromDate.Date < companyNow.Date)
+            return Fail("WFH_CANNOT_CANCEL_AFTER_START", "A WFH request can only be withdrawn before its first WFH day.");
+        if (request.FromDate.Date == companyNow.Date && (!officeStart.HasValue || companyNow.TimeOfDay >= officeStart.Value))
+        {
+            var label = officeStart.HasValue ? DateTime.Today.Add(officeStart.Value).ToString("hh:mm tt", System.Globalization.CultureInfo.InvariantCulture) : "the office start time";
+            return Fail("WFH_CANNOT_CANCEL_AFTER_START", $"Today's Work From Home request can only be withdrawn before your office start time of {label}.");
+        }
+
         if (request.Status == "Approved")
         {
-            var employee = await ActiveEmployee(request.UserId);
-            if (employee is null) return Fail("WFH_EMPLOYEE_NOT_ELIGIBLE", "The employee is no longer active in this company.");
-            var today = CompanyNow(await ActivePolicy() ?? new WorkFromHomePolicy()).Date;
-            if (request.FromDate.Date <= today) return Fail("WFH_CANNOT_CANCEL_AFTER_START", "An approved WFH request can only be cancelled before its first WFH day. Use the attendance correction workflow after that point.");
             for (var day = request.FromDate.Date; day <= request.ToDate.Date; day = day.AddDays(1))
             {
                 try { await attendanceEditGuard.EnsureEditableWorkingDayAsync(CompanyId, employee.UserId, day); }
@@ -245,7 +313,6 @@ public sealed class WorkFromHomeService(
             foreach (var month in Days(request.FromDate, request.ToDate).Select(day => new DateTime(day.Year, day.Month, 1)).Distinct())
                 await attendanceInitialization.InitializeMonthAsync(CompanyId, UserId, month);
         }
-        else if (request.Status is not ("Draft" or "Pending" or "Returned")) return Fail("WFH_CANNOT_CANCEL", "Only a pending, returned, or future approved request may be cancelled.");
         var previous = request.Status; request.Status = "Cancelled"; request.Version++; request.CancelledAt = DateTime.UtcNow; request.CancelledByUserId = UserId;
         var result = await requests.Update(Builders<WorkFromHomeRequest>.Filter.Where(x => x.CompanyId == CompanyId && x.RequestId == requestId && x.Status == previous && x.Version == dto.Version), request);
         if (result.Success) await Log(request, previous, "Cancelled", "Cancelled", dto.RemarksCode, dto.RemarksText);
@@ -394,8 +461,8 @@ public sealed class WorkFromHomeService(
         if (string.IsNullOrWhiteSpace(dto.Code) || string.IsNullOrWhiteSpace(dto.DisplayName)) return Fail("ATTENDANCE_REMARK_INVALID", "Code and display name are required.");
         if (dto.ApplicableStatusCodes.Any(x => string.IsNullOrWhiteSpace(x) || !statuses.Exist(s => s.CompanyId == CompanyId && s.Code == x && s.IsActive).GetAwaiter().GetResult())) return Fail("ATTENDANCE_REMARK_STATUS_INVALID", "One or more applicable statuses are inactive.");
         var option = string.IsNullOrWhiteSpace(dto.RemarkOptionId) ? null : await remarkOptions.FirstOrDefault(x => x.CompanyId == CompanyId && x.RemarkOptionId == dto.RemarkOptionId);
-        option ??= new AttendanceRemarkOption(); option.Code = dto.Code.Trim().ToUpperInvariant(); option.DisplayName = Clean(dto.DisplayName)!; option.Category = Clean(dto.Category)!; option.ApplicableStatusCodes = dto.ApplicableStatusCodes.Select(x => x.Trim().ToUpperInvariant()).Distinct().ToList(); option.RequiresAdditionalText = dto.RequiresAdditionalText; option.IsActive = dto.IsActive; option.DisplayOrder = dto.DisplayOrder;
-        return string.IsNullOrEmpty(option.RemarkOptionId) ? await remarkOptions.AddOne(option) : await remarkOptions.Update(Builders<AttendanceRemarkOption>.Filter.Eq(x => x.RemarkOptionId, option.RemarkOptionId), option);
+        option ??= new AttendanceRemarkOption { CompanyId = CompanyId }; option.Code = dto.Code.Trim().ToUpperInvariant(); option.DisplayName = Clean(dto.DisplayName)!; option.Category = Clean(dto.Category)!; option.ApplicableStatusCodes = dto.ApplicableStatusCodes.Select(x => x.Trim().ToUpperInvariant()).Distinct().ToList(); option.RequiresAdditionalText = dto.RequiresAdditionalText; option.IsActive = dto.IsActive; option.DisplayOrder = dto.DisplayOrder;
+        return string.IsNullOrEmpty(option.RemarkOptionId) ? await remarkOptions.AddOne(option) : await remarkOptions.Update(Builders<AttendanceRemarkOption>.Filter.Where(x => x.CompanyId == CompanyId && x.RemarkOptionId == option.RemarkOptionId), option);
     }
 
     private async Task<Result> ReconcileApproved(WorkFromHomeRequest request, EmpUser employee, WorkFromHomePolicy policy, int sourceVersion)
@@ -405,8 +472,7 @@ public sealed class WorkFromHomeService(
         for (var date = BusinessDateUtc(request.FromDate); date <= BusinessDateUtc(request.ToDate); date = date.AddDays(1))
         {
             var week = StartOfWeek(date);
-            var alreadyApproved = (await requests.GetAll(x => x.CompanyId == CompanyId && x.UserId == request.UserId && x.RequestId != request.RequestId && x.Status == "Approved" && x.FromDate < week.AddDays(7) && x.ToDate >= week))
-                .SelectMany(x => Days(x.FromDate, x.ToDate)).Where(x => x >= week && x < week.AddDays(7)).Distinct().Count();
+            var alreadyApproved = WeeklyUsage(await requests.GetAll(x => x.CompanyId == CompanyId && x.UserId == request.UserId && x.RequestId != request.RequestId && x.Status == "Approved" && x.FromDate < week.AddDays(7) && x.ToDate >= week), week);
             var weeklyLimit = WeeklyLimitFor(policy, employee);
             if (alreadyApproved >= weeklyLimit)
                 return Fail("WFH_WEEKLY_QUOTA_EXCEEDED", $"Only {weeklyLimit} WFH day(s) are allowed per week.");
@@ -427,6 +493,12 @@ public sealed class WorkFromHomeService(
                 await InvalidateSummary(employee, date);
                 await Log(request, request.Status, request.Status, "AttendanceSegmentGenerated", "WFH_APPROVED", null);
                 continue;
+            }
+            var existingSegments = await attendanceSegments.GetAll(x => x.CompanyId == CompanyId && x.UserId == request.UserId && x.Date >= date && x.Date < date.AddDays(1));
+            if (existingSegments.Any())
+            {
+                await CreateSegmentException(request, employee, date, existingSegments.First(), "WFH_ATTENDANCE_SEGMENT_CONFLICT", "Approved full-day WFH conflicts with existing half-day attendance.");
+                return Fail("WFH_ATTENDANCE_SEGMENT_CONFLICT", "A blocking half-day attendance conflict was recorded.");
             }
             var row = await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == request.UserId && x.Date >= date && x.Date < date.AddDays(1));
             if (row is not null && !(row.SourceType == "WFH_REQUEST" && row.SourceId == request.RequestId) && !AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent(row.SourceType))
@@ -458,13 +530,20 @@ public sealed class WorkFromHomeService(
         if (await requests.Exist(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && (x.Status == "Pending" || x.Status == "Approved" || x.Status == "Returned") && dto.FromDate.Date <= x.ToDate.Date && dto.ToDate.Date >= x.FromDate.Date)) return ("WFH_OVERLAPPING_REQUEST", "The request overlaps an existing WFH request.");
         foreach (var week in Days(dto.FromDate, dto.ToDate).Select(StartOfWeek).Distinct())
         {
-            var usedDates = (await requests.GetAll(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && (x.Status == "Pending" || x.Status == "Approved" || x.Status == "Returned") && x.FromDate < week.AddDays(7) && x.ToDate >= week))
-                .SelectMany(x => Days(x.FromDate, x.ToDate)).Where(x => x >= week && x < week.AddDays(7)).Distinct().Count();
-            var requestedDates = Days(dto.FromDate, dto.ToDate).Where(x => x >= week && x < week.AddDays(7)).Distinct().Count();
+            var usedDates = WeeklyUsage(await requests.GetAll(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && (x.Status == "Pending" || x.Status == "Approved" || x.Status == "Returned") && x.FromDate < week.AddDays(7) && x.ToDate >= week), week);
+            var requestedDates = WeeklyUsage(dto.FromDate, dto.ToDate, dto.DurationType, week);
             var weeklyLimit = WeeklyLimitFor(policy, employee);
             if (usedDates + requestedDates > weeklyLimit) return ("WFH_WEEKLY_QUOTA_EXCEEDED", $"Only {weeklyLimit} WFH day(s) are allowed per week.");
         }
         foreach (var day in Days(dto.FromDate, dto.ToDate)) { var check = await ValidateWorkingDay(employee, policy, day); if (check is not null) return check; }
+        var schedule = await effectiveSchedules.ResolveAsync(CompanyId, employee, dto.FromDate);
+        var companyNow = CompanyNow(schedule?.TimeZoneId ?? policy.TimeZoneId);
+        var officeStart = schedule?.StartTime ?? policy.OfficeStartTime;
+        if (Days(dto.FromDate, dto.ToDate).Any(day => IsSameDayWfhStartCutoffReached(day, companyNow, officeStart)))
+        {
+            var startLabel = DateTime.Today.Add(officeStart!.Value).ToString("hh:mm tt", System.Globalization.CultureInfo.InvariantCulture);
+            return ("WFH_SAME_DAY_OFFICE_STARTED", $"Work From Home for today must be requested before your office start time ({startLabel}).");
+        }
         return null;
     }
 
@@ -475,7 +554,7 @@ public sealed class WorkFromHomeService(
         var off = await weeklyOffs.FirstOrDefault(x => x.CompanyId == CompanyId);
         if (!policy.AllowOnWeeklyOff && (off?.OffDays ?? [(int)DayOfWeek.Saturday, (int)DayOfWeek.Sunday]).Contains((int)date.DayOfWeek)) return ("WFH_WEEKLY_OFF_NOT_ALLOWED", "WFH is not allowed on a weekly off.");
         var holidays = await calendar.GetAll(x => x.CompanyId == CompanyId && x.Type == EnumsHelper.CalendarItem.Holiday && (x.Recurring || x.Date.Date == date.Date));
-        if (!policy.AllowOnHoliday && holidays.Any(x => x.Recurring ? x.Date.Month == date.Month && x.Date.Day == date.Day : x.Date.Date == date.Date)) return ("WFH_HOLIDAY_NOT_ALLOWED", "WFH is not allowed on a holiday.");
+        if (!policy.AllowOnHoliday && holidays.Any(x => CalendarDateHelpers.MatchesDate(x, date))) return ("WFH_HOLIDAY_NOT_ALLOWED", "WFH is not allowed on a holiday.");
         return null;
     }
 
@@ -543,18 +622,33 @@ public sealed class WorkFromHomeService(
         await userNotifications.AddMany(userItems);
         await Task.WhenAll(userItems.Select(item => notificationService.SendNotificationToUser(item.UserId, new NotificationViewModel { UserNotificationId = item.UserNotificationId, Title = title, Body = body, TargetId = requestId, SentDateTime = DateTime.UtcNow, SentBy = senderUserId, NotificationTypes = type }))); 
     }
-    private async Task Log(WorkFromHomeRequest r, string? previous, string current, string action, string? code, string? text) => await logs.AddOne(new WorkFromHomeRequestLog { RequestId = r.RequestId, PreviousStatus = previous, NewStatus = current, Action = action, PerformedByUserId = UserId, PerformedAt = DateTime.UtcNow, RemarksCode = code, RemarksText = Clean(text), Version = r.Version });
+    private async Task Log(WorkFromHomeRequest r, string? previous, string current, string action, string? code, string? text) => await logs.AddOne(new WorkFromHomeRequestLog { CompanyId = CompanyId, RequestId = r.RequestId, PreviousStatus = previous, NewStatus = current, Action = action, PerformedByUserId = UserId, PerformedAt = DateTime.UtcNow, RemarksCode = code, RemarksText = Clean(text), Version = r.Version });
     private static IEnumerable<DateTime> Days(DateTime from, DateTime to) { for (var d = from.Date; d <= to.Date; d = d.AddDays(1)) yield return d; }
     private static DateTime StartOfWeek(DateTime value) => value.Date.AddDays(-(((int)value.DayOfWeek + 6) % 7));
     private static bool IsEligible(WorkFromHomePolicy policy, EmpUser employee)
     {
-        if (policy.ExcludedEmployeeIds.Contains(employee.EmployeeId, StringComparer.Ordinal)) return false;
-        if (policy.ApplicableEmployeeIds.Contains(employee.EmployeeId, StringComparer.Ordinal)) return true;
-        if (policy.ApplicableDepartments.Contains(employee.Department, StringComparer.OrdinalIgnoreCase)) return true;
-        if (employee.EmploymentType.HasValue && policy.ApplicableEmploymentTypes.Contains(employee.EmploymentType.Value)) return true;
+        if ((policy.ExcludedEmployeeIds ?? []).Contains(employee.EmployeeId, StringComparer.Ordinal)) return false;
+        // A positive employee allocation is an explicit WFH assignment, even if
+        // the company policy does not otherwise apply to all employees.
+        if ((policy.EmployeeAllocations ?? []).Any(x => string.Equals(x.EmployeeId, employee.EmployeeId, StringComparison.Ordinal) && x.WeeklyLimit > 0)) return true;
+        if ((policy.ApplicableEmployeeIds ?? []).Contains(employee.EmployeeId, StringComparer.Ordinal)) return true;
+        if ((policy.ApplicableDepartments ?? []).Contains(employee.Department, StringComparer.OrdinalIgnoreCase)) return true;
+        if (employee.EmploymentType.HasValue && (policy.ApplicableEmploymentTypes ?? []).Contains(employee.EmploymentType.Value)) return true;
         return policy.ApplyToAllEmployees;
     }
-    private static int WeeklyLimitFor(WorkFromHomePolicy policy, EmpUser employee) => policy.EmployeeAllocations.FirstOrDefault(x => string.Equals(x.EmployeeId, employee.EmployeeId, StringComparison.Ordinal))?.WeeklyLimit ?? policy.MaxDaysPerWeek;
+    private static int WeeklyLimitFor(WorkFromHomePolicy policy, EmpUser employee) => (policy.EmployeeAllocations ?? []).FirstOrDefault(x => string.Equals(x.EmployeeId, employee.EmployeeId, StringComparison.Ordinal))?.WeeklyLimit ?? policy.MaxDaysPerWeek;
+    // Pending and returned requests reserve capacity, matching the existing
+    // submission rule. Rejected and cancelled records remain historical only.
+    private static bool CountsTowardsWeeklyAllowance(string status) => status is "Pending" or "Approved" or "Returned";
+    private static decimal WeeklyUsage(IEnumerable<WorkFromHomeRequest> requests, DateTime week) => requests.Sum(request => WeeklyUsage(request.FromDate, request.ToDate, request.DurationType, week));
+    private static decimal WeeklyUsage(DateTime fromDate, DateTime toDate, string durationType, DateTime week)
+    {
+        var unitsPerDay = durationType is "FirstHalf" or "SecondHalf" ? .5m : 1m;
+        return Days(fromDate, toDate).Count(day => day >= week && day < week.AddDays(7)) * unitsPerDay;
+    }
+    internal static decimal WeeklyUsageForPeriod(DateTime fromDate, DateTime toDate, string durationType, DateTime week) => WeeklyUsage(fromDate, toDate, durationType, week);
+    internal static bool IsSameDayWfhStartCutoffReached(DateTime requestedDate, DateTime companyNow, TimeSpan? officeStartTime) =>
+        officeStartTime.HasValue && requestedDate.Date == companyNow.Date && companyNow.TimeOfDay >= officeStartTime.Value;
     public static DateTime BusinessDateUtc(DateTime value) => DateTime.SpecifyKind(value.Date, DateTimeKind.Utc);
     private static bool IsEffectiveFor(WorkFromHomePolicy policy, DateTime date) => (!policy.EffectiveFrom.HasValue || date.Date >= policy.EffectiveFrom.Value.Date) && (!policy.EffectiveTo.HasValue || date.Date <= policy.EffectiveTo.Value.Date);
     private static DateTime CompanyNow(WorkFromHomePolicy policy) => CompanyNow(policy.TimeZoneId);
@@ -570,6 +664,6 @@ public sealed class WorkFromHomeService(
     private static Result<T> Fail<T>(string code, string message) => new() { Success = false, Message = $"{code}: {message}" };
     private static Result<T> Ok<T>(T value) => new() { Success = true, MethodResult = value };
     private static WorkFromHomePolicyDto Map(WorkFromHomePolicy x) => new() { IsEnabled=x.IsEnabled, MaxDaysPerMonth=x.MaxDaysPerMonth, MaxDaysPerWeek=x.MaxDaysPerWeek, MaxConsecutiveDays=x.MaxConsecutiveDays, MinimumAdvanceNoticeHours=x.MinimumAdvanceNoticeHours, AllowBackdatedRequest=x.AllowBackdatedRequest, MaximumBackdatedDays=x.MaximumBackdatedDays, AllowHalfDay=x.AllowHalfDay, AllowMixedDay=x.AllowMixedDay, ManagerApprovalRequired=x.ManagerApprovalRequired, AllowManagerSelfApproval=x.AllowManagerSelfApproval, AllowOnWeeklyOff=x.AllowOnWeeklyOff, AllowOnHoliday=x.AllowOnHoliday, RequireReason=x.RequireReason, RequireAttachment=x.RequireAttachment, ApplyToAllEmployees=x.ApplyToAllEmployees, ApplicableDepartments=x.ApplicableDepartments, ApplicableEmployeeIds=x.ApplicableEmployeeIds, ExcludedEmployeeIds=x.ExcludedEmployeeIds, ApplicableEmploymentTypes=x.ApplicableEmploymentTypes, EffectiveFrom=x.EffectiveFrom, EffectiveTo=x.EffectiveTo, AllowedCheckInFrom=x.AllowedCheckInFrom, AllowedCheckInUntil=x.AllowedCheckInUntil, AllowedCheckOutFrom=x.AllowedCheckOutFrom, AllowedCheckOutUntil=x.AllowedCheckOutUntil, OfficeStartTime=x.OfficeStartTime, OfficeEndTime=x.OfficeEndTime, TimeZoneId=x.TimeZoneId, FullDayMinimumHours=x.FullDayMinimumHours, HalfDayMinimumHours=x.HalfDayMinimumHours, FullDayAttendanceStatusCode=x.FullDayAttendanceStatusCode, HalfDayAttendanceStatusCode=x.HalfDayAttendanceStatusCode, MixedAttendanceStatusCode=x.MixedAttendanceStatusCode };
-    private static WorkFromHomeResponseDto Map(WorkFromHomeRequest x) => new() { RequestId=x.RequestId, UserId=x.UserId, EmployeeId=x.EmployeeId, FromDate=x.FromDate, ToDate=x.ToDate, DurationType=x.DurationType, ReasonCode=x.ReasonCode, ReasonText=x.ReasonText, Status=x.Status, ApproverUserId=x.ApproverUserId, Version=x.Version, ReviewRemarksText=x.ReviewRemarksText };
+    private static WorkFromHomeResponseDto Map(WorkFromHomeRequest x) => new() { RequestId=x.RequestId, UserId=x.UserId, EmployeeId=x.EmployeeId, FromDate=x.FromDate, ToDate=x.ToDate, DurationType=x.DurationType, ReasonCode=x.ReasonCode, ReasonText=x.ReasonText, Status=x.Status, ApproverUserId=x.ApproverUserId, Version=x.Version, ReviewRemarksText=x.ReviewRemarksText, CreatedDate=x.CreatedDate, ReviewedByUserId=x.ReviewedByUserId, ReviewedAt=x.ReviewedAt };
     private static void Apply(WorkFromHomePolicy p, WorkFromHomePolicyDto d) { p.IsEnabled=d.IsEnabled;p.MaxDaysPerMonth=d.MaxDaysPerMonth;p.MaxDaysPerWeek=d.MaxDaysPerWeek;p.MaxConsecutiveDays=d.MaxConsecutiveDays;p.MinimumAdvanceNoticeHours=d.MinimumAdvanceNoticeHours;p.AllowBackdatedRequest=d.AllowBackdatedRequest;p.MaximumBackdatedDays=d.MaximumBackdatedDays;p.AllowHalfDay=d.AllowHalfDay;p.AllowMixedDay=d.AllowMixedDay;p.ManagerApprovalRequired=d.ManagerApprovalRequired;p.AllowManagerSelfApproval=d.AllowManagerSelfApproval;p.AllowOnWeeklyOff=d.AllowOnWeeklyOff;p.AllowOnHoliday=d.AllowOnHoliday;p.RequireReason=d.RequireReason;p.RequireAttachment=d.RequireAttachment;p.ApplyToAllEmployees=d.ApplyToAllEmployees;p.ApplicableDepartments=d.ApplicableDepartments.Where(x=>!string.IsNullOrWhiteSpace(x)).Select(x=>x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();p.ApplicableEmployeeIds=d.ApplicableEmployeeIds.Where(x=>!string.IsNullOrWhiteSpace(x)).Select(x=>x.Trim()).Distinct(StringComparer.Ordinal).ToList();p.ExcludedEmployeeIds=d.ExcludedEmployeeIds.Where(x=>!string.IsNullOrWhiteSpace(x)).Select(x=>x.Trim()).Distinct(StringComparer.Ordinal).ToList();p.ApplicableEmploymentTypes=d.ApplicableEmploymentTypes.Distinct().ToList();p.EffectiveFrom=d.EffectiveFrom?.Date;p.EffectiveTo=d.EffectiveTo?.Date;p.AllowedCheckInFrom=d.AllowedCheckInFrom;p.AllowedCheckInUntil=d.AllowedCheckInUntil;p.AllowedCheckOutFrom=d.AllowedCheckOutFrom;p.AllowedCheckOutUntil=d.AllowedCheckOutUntil;p.OfficeStartTime=d.OfficeStartTime;p.OfficeEndTime=d.OfficeEndTime;p.TimeZoneId=string.IsNullOrWhiteSpace(d.TimeZoneId) ? "UTC" : d.TimeZoneId.Trim();p.FullDayMinimumHours=d.FullDayMinimumHours;p.HalfDayMinimumHours=d.HalfDayMinimumHours;p.FullDayAttendanceStatusCode=d.FullDayAttendanceStatusCode.Trim().ToUpperInvariant();p.HalfDayAttendanceStatusCode=d.HalfDayAttendanceStatusCode.Trim().ToUpperInvariant();p.MixedAttendanceStatusCode=d.MixedAttendanceStatusCode.Trim().ToUpperInvariant(); }
 }

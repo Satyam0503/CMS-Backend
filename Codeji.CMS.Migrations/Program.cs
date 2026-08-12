@@ -109,6 +109,12 @@ if (args.Contains("migrate-leave-balance-allocation-fields", StringComparer.Ordi
     return;
 }
 
+if (args.Contains("deduplicate-employee-leave-balances", StringComparer.OrdinalIgnoreCase))
+{
+    await new DeduplicateEmployeeLeaveBalanceRecords().ExecuteAsync(db);
+    return;
+}
+
 if (args.Contains("reassign-active-leave-policies", StringComparer.OrdinalIgnoreCase))
 {
     await new ReassignActiveLeavePoliciesToAllEmployees().ExecuteAsync(db);

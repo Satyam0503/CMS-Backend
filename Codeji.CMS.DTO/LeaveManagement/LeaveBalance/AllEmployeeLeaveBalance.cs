@@ -18,5 +18,6 @@ public class LeaveBalanceDetail
     public decimal TotalAllocated { get; set; }
     public decimal Taken { get; set; }
     public decimal Remaining { get; set; }
+    public long Version { get; set; }
     [Obsolete("Use Taken.")] public decimal UsedLeave { get; set; }
 }

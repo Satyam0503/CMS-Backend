@@ -31,8 +31,9 @@ namespace Codeji.CMS.Services.Interface
         Task<Result> DeletePolicy(string policyId, string companyId);
 
 
-        Task<Result<PolicyVersionResponseModel>> AddPolicyVersion(PolicyVersionRequestModel model);
-        Task<Result<PolicyVersionResponseModel>> EditPolicyVersion(PolicyVersionUpdateModel model);
+        Task<Result<PolicyVersionResponseModel>> AddPolicyVersion(PolicyVersionRequestModel model, string companyId);
+        Task<Result<PolicyVersionResponseModel>> EditPolicyVersion(PolicyVersionUpdateModel model, string companyId);
+        Task<Result<PolicyVersionResponseModel>> SetCurrentPolicyVersion(SetCurrentPolicyVersionRequestModel model, string companyId);
         Task<Result<PolicyVersionResponseModel>> GetAllPolicyVersion(string policyId, string userId, string companyId);
         Task<Result> DeletePolicyVersion(string policyVersionId, string companyId);
         Task<Result<PolicyDocumentResult>> GetPolicyDocument(string policyVersionId, string userId, string companyId);

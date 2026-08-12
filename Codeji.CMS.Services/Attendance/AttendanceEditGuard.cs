@@ -2,6 +2,7 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Attendance;
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Utility.Enums;
 
 public interface IAttendanceEditGuard
@@ -35,7 +36,7 @@ public sealed class AttendanceEditGuard(
             throw new InvalidOperationException($"{date:yyyy-MM-dd} is a configured weekly off for employee {employee.EmployeeId}.");
 
         var holidays = await calendar.GetAll(x => x.CompanyId == employee.CompanyId && x.Type == EnumsHelper.CalendarItem.Holiday && (x.Recurring || x.Date.Date == date.Date));
-        if (holidays.Any(x => x.Recurring ? x.Date.Month == date.Month && x.Date.Day == date.Day : x.Date.Date == date.Date))
+        if (holidays.Any(x => CalendarDateHelpers.MatchesDate(x, date)))
             throw new InvalidOperationException($"{date:yyyy-MM-dd} is a company holiday for employee {employee.EmployeeId}.");
     }
 }

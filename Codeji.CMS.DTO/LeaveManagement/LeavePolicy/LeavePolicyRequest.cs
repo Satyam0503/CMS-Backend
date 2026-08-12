@@ -22,6 +22,8 @@ public class LeavePolicyRequest : IValidatableObject
     public bool WeekendInclusive { get; set; } = false;
     public bool HolidayInclusive { get; set; } = false;
     public string? AttendanceStatusCode { get; set; }
+    public string? FullDayAttendanceStatusCode { get; set; }
+    public string? HalfDayAttendanceStatusCode { get; set; }
     public string[]? ApplicableTo { get; set; } = [];
     [EnumDataType(typeof(LeavePolicyType), ErrorMessage = "Invalid leave policy type value")]
     public LeavePolicyType PolicyType { get; set; } = LeavePolicyType.Leave;

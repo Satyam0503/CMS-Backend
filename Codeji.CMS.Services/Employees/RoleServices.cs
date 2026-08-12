@@ -11,6 +11,7 @@ using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.Enums;
+using AppModule = Codeji.CMS.Utility.Constraints.AppModule;
 using MongoDB.Driver;
 using MongoDB.Driver.Linq;
 using Module = Codeji.CMS.Repository.Entities.RolePermissions.Module;
@@ -85,7 +86,7 @@ public class RoleServices : IRoleService
         else
         {
 
-            Roles? currentRole = await _RolesRepository.FirstOrDefault(x => x.RolesId == roles.RoleId);
+            Roles? currentRole = await _RolesRepository.FirstOrDefault(x => x.CompanyId == companyId && x.RolesId == roles.RoleId && !x.IsDeleted);
             if (currentRole != null)
             {
                 Expression<Func<Roles, bool>> roleWhereCondition = x => x.CompanyId == companyId && x.RolesId == roles.RoleId;
@@ -95,23 +96,22 @@ public class RoleServices : IRoleService
 
                 foreach (ModuleRolePermissionsModel currentRolePermission in roles.RolePermissions)
                 {
-                    RolePermission? data = await _rolePermissionRepository.FirstOrDefault(x => x.RoleId == roles.RoleId && x.RolePermissionId == currentRolePermission.RolePermissionId);
+                    RolePermission? data = await _rolePermissionRepository.FirstOrDefault(x => x.CompanyId == companyId && x.RoleId == roles.RoleId && x.ModulePermissionId == currentRolePermission.ModulePermissionId);
                     if (data != null)
                     {
-                        Expression<Func<RolePermission, bool>> whereCondition = x => x.RoleId == currentRolePermission.RolesId && x.RolePermissionId == currentRolePermission.RolePermissionId;
+                        Expression<Func<RolePermission, bool>> whereCondition = x => x.CompanyId == companyId && x.RoleId == roles.RoleId && x.ModulePermissionId == currentRolePermission.ModulePermissionId;
                         await _rolePermissionRepository.UpdateMany(whereCondition, Builders<RolePermission>.Update
                             .Set(x => x.HasAccess, currentRolePermission.HasAccess)
                             .Set(x => x.UpdatedDate, DateTime.UtcNow));
                     }
                     else
                     {
-                        bool isAccessible = (await _rolePermissionRepository.FirstOrDefault(rp => rp.CompanyId == companyId && rp.ModulePermissionId == currentRolePermission.ModulePermissionId))?.IsAccessible ?? false;
                         RolePermission newPermission = new RolePermission()
                         {
                             RoleId = roles.RoleId,
                             ModulePermissionId = currentRolePermission.ModulePermissionId,
                             HasAccess = currentRolePermission.HasAccess,
-                            IsAccessible = isAccessible,
+                            IsAccessible = true,
                             CompanyId = companyId
                         };
                         await _rolePermissionRepository.AddOne(newPermission);
@@ -186,7 +186,7 @@ public class RoleServices : IRoleService
         Roles role = await _RolesRepository.FirstOrDefault(whereCondition);
         if (role != null)
         {
-            IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => x.RoleId == role.RolesId);
+            IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId && x.RoleId == role.RolesId);
             List<ModulePermission> modulePermissions = (await _modulePermissionRepository.GetAll()).ToList();
             List<Permission> permissions = (await _permissionRepository.GetAll()).ToList();
             List<Module> modules = (await _moduleRepository.GetAll()).ToList();
@@ -220,9 +220,10 @@ public class RoleServices : IRoleService
         }
         return moduleWithPermissionsModel;
     }
-    public async Task<string[]> GetRolePermissionOfuser(string roleId)
+    public async Task<string[]> GetRolePermissionOfuser(string roleId, string companyId)
     {
-        Expression<Func<Roles, bool>> whereCondition = x => x.RolesId == roleId;
+        if (string.IsNullOrWhiteSpace(roleId) || string.IsNullOrWhiteSpace(companyId)) return Array.Empty<string>();
+        Expression<Func<Roles, bool>> whereCondition = x => x.RolesId == roleId && x.CompanyId == companyId && !x.IsDeleted;
         IEnumerable<Permission> permissions = await _permissionRepository.GetAll();
         IEnumerable<Module> modules = await _moduleRepository.GetAll();
         IEnumerable<ModulePermission> modulePermissions = await _modulePermissionRepository.GetAll();
@@ -231,7 +232,7 @@ public class RoleServices : IRoleService
         string[] res = Array.Empty<string>();
         if (role != null)
         {
-            List<int> rolePermissions = _rolePermissionRepository.Get(x => x.RoleId == role.RolesId && x.IsAccessible && x.HasAccess).Select(x => x.ModulePermissionId).ToList();
+            List<int> rolePermissions = _rolePermissionRepository.Get(x => x.CompanyId == companyId && x.RoleId == role.RolesId && x.IsAccessible && x.HasAccess).Select(x => x.ModulePermissionId).ToList();
 
 
             res = (from rp in rolePermissions
@@ -349,7 +350,7 @@ public class RoleServices : IRoleService
     }
     public async Task<List<string>> GetUsersByRole(string[] roleIds, string companyId)
     {
-        Expression<Func<EmpUser, bool>> whereUserCondtion = x => roleIds.Contains(x.RoleId);
+        Expression<Func<EmpUser, bool>> whereUserCondtion = x => roleIds.Contains(x.RoleId) && x.CompanyId == companyId;
         List<string> users = await _userRepository.Get(whereUserCondtion).Select(x => x.UserId).ToListAsync();
         return users;
     }
@@ -423,7 +424,7 @@ public class RoleServices : IRoleService
 
         {
             UserModel? user = await _middleware.GetUserById(userId);
-            if (user is null)
+            if (user is null || user.CompanyId != companyId)
             {
                 return hasPermission;
             }
@@ -434,11 +435,23 @@ public class RoleServices : IRoleService
                 return true;
             }
 
-            string[] modulePermissions = await GetRolePermissionOfuser(user.RoleId);
+            string[] modulePermissions = await GetRolePermissionOfuser(user.RoleId, companyId);
             string[] permission = Role.Select(_ => $"{module}.{_}").ToArray();
             if (!string.IsNullOrEmpty(module))
                 modules = new string[] { module };
             hasPermission = permission.Any(x => modulePermissions.Contains(x));
+
+            // HR system roles use their company's dashboard. Dashboard access is
+            // role-owned (the React dashboard follows the same rule), while the
+            // attendance compatibility path below still requires an assigned
+            // attendance module permission.
+            bool isHrRole = role?.RoleType == (int)EnumsHelper.Roles.HR || role?.RoleType == (int)EnumsHelper.Roles.HRExecutive;
+            bool hasAnyModulePermission = modulePermissions.Any(x => x.StartsWith($"{module}.", StringComparison.Ordinal));
+            if (!hasPermission && isHrRole &&
+                (module == AppModule.Dashboard || (module == AppModule.Attendance && hasAnyModulePermission)))
+            {
+                hasPermission = true;
+            }
 
         }
 

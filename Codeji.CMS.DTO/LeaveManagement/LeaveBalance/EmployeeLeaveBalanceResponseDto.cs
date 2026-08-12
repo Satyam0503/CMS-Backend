@@ -9,6 +9,7 @@ public class EmployeeLeaveBalanceResponseDto
     public decimal TotalAllocated { get; set; }
     public decimal Taken { get; set; }
     public decimal Remaining { get; set; }
+    public long Version { get; set; }
     public string Name { get; set; }
     public string Code { get; set; }
     public string Description { get; set; }

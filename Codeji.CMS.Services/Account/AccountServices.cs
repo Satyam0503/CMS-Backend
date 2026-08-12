@@ -93,7 +93,7 @@ public class AccountServices : IAccountServices
             result.StatusCode = CustomStatusCode.UnVerifiedMail;
             return result;
         }
-        Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == user.RoleId);
+        Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == user.RoleId && x.CompanyId == user.CompanyId && !x.IsDeleted);
         if (role == null)
         {
             result.Success = false;
@@ -345,11 +345,7 @@ public class AccountServices : IAccountServices
             return new Result { Success = false, StatusCode = StatusCodes.Status500InternalServerError, Message = "Unable to create an email verification link." };
 
         Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == user.CompanyId);
-        string apiBaseUrl = ConfigManager.AppSettings.APIUrl.Trim().TrimEnd('/');
-        string verifyEndpoint = apiBaseUrl.EndsWith("/api", StringComparison.OrdinalIgnoreCase)
-            ? "/account/verify-email"
-            : "/api/account/verify-email";
-        string verifyLink = $"{apiBaseUrl}{verifyEndpoint}?token={Uri.EscapeDataString(token)}";
+        string verifyLink = EmailVerificationUrlBuilder.Build(ConfigManager.AppSettings.APIUrl, token);
         var delivery = await _middlewareService.EmailSendAndSaveWithResult(new EmpEmailLogs
         {
             UserTo = user.UserId,
@@ -391,13 +387,23 @@ public class AccountServices : IAccountServices
             result.StatusCode = CustomStatusCode.RefreshTokenExpired;
             return result;
         }
-        EmpUser? empUser = await _employeeRepository.FirstOrDefault(x => x.UserId == storedRefreshToken.UserId);
+        EmpUser? empUser = await _employeeRepository.FirstOrDefault(x => x.UserId == storedRefreshToken.UserId && x.Status && !x.IsDeleted);
         if (empUser == null)
         {
             result.StatusCode = CustomStatusCode.InvalidRefreshToken;
             return result;
         }
-        Roles? role = await _rolesRepository.FirstOrDefault(r => r.CompanyId == empUser.CompanyId && r.RolesId == empUser.RoleId);
+        Roles? role = await _rolesRepository.FirstOrDefault(r =>
+            r.CompanyId == empUser.CompanyId &&
+            r.RolesId == empUser.RoleId &&
+            !r.IsDeleted &&
+            r.HasAppAccess);
+        if (role is null)
+        {
+            result.StatusCode = CustomStatusCode.InvalidRefreshToken;
+            return result;
+        }
+
         string newRefreshToken = TokenHelper.GenerateToken();
         string newRefreshTokenHashed = TokenHelper.ComputeSha256Hash(newRefreshToken);
         List<string> roles = [role.Titles];

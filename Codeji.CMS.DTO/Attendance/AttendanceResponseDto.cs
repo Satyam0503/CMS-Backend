@@ -10,6 +10,11 @@ public class AttendanceResponseDto
     public string Remarks { get; set; }
     public string? SourceType { get; set; }
     public string? SourceId { get; set; }
+    // A half-day leave/WFH is stored as a segment so the other half can retain
+    // its attendance.  Calendar clients use this flag to give that segment
+    // precedence over the compatibility daily AttendanceModel row.
+    public bool IsDaySegment { get; set; }
+    public string? Segment { get; set; }
     public int LateCount { get; set; }
     public int EarlyExitCount { get; set; }
 }

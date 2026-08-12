@@ -85,7 +85,7 @@ public class RolePermissionTests
             .ReturnsAsync([new ModulePermission { ModulePermissionId = 10, ModuleId = 1, PermissionId = 1 }]);
         fixture.RolePermissionRepository
             .Setup(x => x.Get(It.IsAny<Expression<Func<RolePermission, bool>>>(), null, false))
-            .Returns(new[] { new RolePermission { RoleId = "role-1", ModulePermissionId = 10, IsAccessible = true, HasAccess = true } }.AsQueryable());
+            .Returns(new[] { new RolePermission { CompanyId = "company-1", RoleId = "role-1", ModulePermissionId = 10, IsAccessible = true, HasAccess = true } }.AsQueryable());
 
         var allowed = await fixture.Service.VerifyUserAccess(
             "Employee", [requestedPermission], "user-1", "company-1");
@@ -116,7 +116,7 @@ public class RolePermissionTests
             .ReturnsAsync([new ModulePermission { ModulePermissionId = 10, ModuleId = 1, PermissionId = 1 }]);
         fixture.RolePermissionRepository
             .Setup(x => x.Get(It.IsAny<Expression<Func<RolePermission, bool>>>(), null, false))
-            .Returns(new[] { new RolePermission { RoleId = "role-1", ModulePermissionId = 10, IsAccessible = true, HasAccess = true } }.AsQueryable());
+            .Returns(new[] { new RolePermission { CompanyId = "company-1", RoleId = "role-1", ModulePermissionId = 10, IsAccessible = true, HasAccess = true } }.AsQueryable());
 
         var allowed = await fixture.Service.VerifyUserAccess(
             Codeji.CMS.Utility.Constraints.AppModule.PayRoll,
@@ -124,6 +124,27 @@ public class RolePermissionTests
             "user-1", "company-1");
 
         Assert.True(allowed);
+    }
+
+    [Fact]
+    public async Task ModulePermission_DoesNotResolveAMappingFromAnotherCompany()
+    {
+        var fixture = new RoleFixture();
+        fixture.Middleware.Setup(x => x.GetUserById("user-1"))
+            .ReturnsAsync(new UserModel { UserId = "user-1", RoleId = "role-1", CompanyId = "company-1" });
+        fixture.RoleRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Roles, bool>>>(), false))
+            .ReturnsAsync(new Roles { RolesId = "role-1", CompanyId = "company-1", Titles = "HR Executive", UserRoles = [] });
+        fixture.PermissionRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new Permission { PermissionId = 1, PermissionConstant = "Edit", PermissionName = "Edit" }]);
+        fixture.ModuleRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new Module { ModuleId = 1, ModuleConstant = "Employees", ModuleName = "Employees" }]);
+        fixture.ModulePermissionRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new ModulePermission { ModulePermissionId = 10, ModuleId = 1, PermissionId = 1 }]);
+        var otherCompanyPermission = new[] { new RolePermission { CompanyId = "company-2", RoleId = "role-1", ModulePermissionId = 10, IsAccessible = true, HasAccess = true } };
+        fixture.RolePermissionRepository.Setup(x => x.Get(It.IsAny<Expression<Func<RolePermission, bool>>>(), null, false))
+            .Returns((Expression<Func<RolePermission, bool>> predicate, object? _, bool _) => otherCompanyPermission.Where(predicate.Compile()).AsQueryable());
+
+        Assert.False(await fixture.Service.VerifyUserAccess("Employees", ["Edit"], "user-1", "company-1"));
     }
 
     [Fact]

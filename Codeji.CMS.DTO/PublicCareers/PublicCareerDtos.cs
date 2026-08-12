@@ -94,6 +94,12 @@ public sealed class PublicJobApplicationRequest
     public required string Phone { get; init; }
     public string? State { get; init; }
     public decimal Experience { get; init; }
+    public string? CurrentCompany { get; init; }
+    public string? CurrentJobTitle { get; init; }
+    public int? NoticePeriodDays { get; init; }
+    public string? LinkedInUrl { get; init; }
+    public string? PortfolioUrl { get; init; }
+    public string? CoverLetter { get; init; }
 }
 
 public sealed class PublicJobApplicationResponse
