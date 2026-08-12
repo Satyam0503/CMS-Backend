@@ -16,7 +16,23 @@ public sealed class AddEmployeeIdSequenceIndexes : IMigration
 
         await db.GetCollection<BsonDocument>("EmpUser").Indexes.CreateOneAsync(new CreateIndexModel<BsonDocument>(
             new BsonDocument { { "CompanyId", 1 }, { "EmployeeId", 1 } },
-            new CreateIndexOptions { Name = "ux_employee_company_employee_id", Unique = true }));
+            new CreateIndexOptions
+            {
+                Name = "ux_employee_company_employee_id",
+                Unique = true,
+                PartialFilterExpression = new BsonDocument
+                {
+                    {
+                        "$and",
+                        new BsonArray
+                        {
+                            new BsonDocument("EmployeeId", new BsonDocument("$exists", true)),
+                            new BsonDocument("EmployeeId", new BsonDocument("$ne", BsonNull.Value)),
+                            new BsonDocument("EmployeeId", new BsonDocument("$ne", "")),
+                        }
+                    }
+                }
+            }));
         await db.GetCollection<BsonDocument>("EmployeeIdSequence").Indexes.CreateOneAsync(new CreateIndexModel<BsonDocument>(
             new BsonDocument("CompanyId", 1), new CreateIndexOptions { Name = "ux_employee_id_sequence_company", Unique = true }));
         await migrations.InsertOneAsync(new Migration { Id = Id, ExecutedAt = DateTime.UtcNow });
