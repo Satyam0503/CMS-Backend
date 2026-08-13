@@ -54,6 +54,10 @@ public class WorkFromHomePolicySettingsRequest
     public string FullDayAttendanceStatusCode { get; set; } = string.Empty;
     public string HalfDayAttendanceStatusCode { get; set; } = string.Empty;
     public string? MixedAttendanceStatusCode { get; set; }
+    public string? WfhWfoAttendanceStatusCode { get; set; }
+    public string? WfhHdAttendanceStatusCode { get; set; }
+    public string? WfhSlAttendanceStatusCode { get; set; }
+    public string? WfhClAttendanceStatusCode { get; set; }
     public bool UseEffectiveOfficeSchedule { get; set; } = true;
     public int? FullDayRequiredWorkingMinutes { get; set; }
     public int? HalfDayRequiredWorkingMinutes { get; set; }

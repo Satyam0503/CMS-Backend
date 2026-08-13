@@ -208,7 +208,7 @@ namespace Codeji.CMS.API.Controllers
             if (Request.GetTypedHeaders().Accept?.Any(x => x.MediaType.Value?.Contains("text/html", StringComparison.OrdinalIgnoreCase) == true) == true)
             {
                 var outcome = result.Success ? "success" : "failed";
-                return Redirect($"{ConfigManager.AppSettings.AppUrl.TrimEnd('/')}/auth/login?emailVerified={outcome}&statusCode={result.StatusCode}");
+                return Redirect($"{ConfigManager.AppSettings.AppUrl.Trim().TrimEnd('/', '\\')}/auth/login?emailVerified={outcome}&statusCode={result.StatusCode}");
             }
             return Ok(result);
         }

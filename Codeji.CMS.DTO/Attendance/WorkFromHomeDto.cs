@@ -118,6 +118,10 @@ public class WorkFromHomePolicyDto
     public string FullDayAttendanceStatusCode { get; set; } = "WFH";
     public string HalfDayAttendanceStatusCode { get; set; } = "WFH-HD";
     public string MixedAttendanceStatusCode { get; set; } = "WFH+WFO";
+    public string? WfhWfoAttendanceStatusCode { get; set; }
+    public string? WfhHdAttendanceStatusCode { get; set; }
+    public string? WfhSlAttendanceStatusCode { get; set; }
+    public string? WfhClAttendanceStatusCode { get; set; }
 }
 
 public class WorkFromHomeEmployeeAllocationDto

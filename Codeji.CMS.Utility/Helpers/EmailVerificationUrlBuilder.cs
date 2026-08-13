@@ -8,7 +8,7 @@ public static class EmailVerificationUrlBuilder
         if (string.IsNullOrWhiteSpace(apiBaseUrl)) throw new ArgumentException("An API base URL is required.", nameof(apiBaseUrl));
         if (string.IsNullOrEmpty(token)) throw new ArgumentException("A verification token is required.", nameof(token));
 
-        var baseUrl = apiBaseUrl.Trim().TrimEnd('/');
+        var baseUrl = apiBaseUrl.Trim().TrimEnd('/', '\\');
         var path = baseUrl.EndsWith("/api", StringComparison.OrdinalIgnoreCase)
             ? "/account/verify-email"
             : "/api/account/verify-email";

@@ -207,7 +207,9 @@ public class LeaveManagementService : ILeaveManagementService
         {
             if (updatedPolicyModel.PolicyType == EnumsHelper.LeavePolicyType.WorkFromHome)
             {
-                var sync = await SyncWorkFromHomePolicy(companyId, updatedPolicyModel, model.WorkFromHome!);
+                if (model.WorkFromHome is null)
+                    return new Result<UpdateLeavePolicyRequest> { Success = false, Message = "WFH_POLICY_CONFIGURATION_INVALID: Work From Home settings are required." };
+                var sync = await SyncWorkFromHomePolicy(companyId, updatedPolicyModel, model.WorkFromHome);
                 if (!sync.Success) return new Result<UpdateLeavePolicyRequest> { Success = false, Message = sync.Message };
             }
             else if (updatedPolicyModel.PolicyType == EnumsHelper.LeavePolicyType.Leave)
@@ -304,7 +306,40 @@ public class LeaveManagementService : ILeaveManagementService
         IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(expression);
         var list = _mapper.Map<List<UpdateLeavePolicyRequest>>(leavePolicies);
         foreach (var policy in list.Where(x => x.PolicyType == EnumsHelper.LeavePolicyType.WorkFromHome))
+        {
             policy.Paid = true;
+            var operationalPolicy = await _workFromHomePolicies.FirstOrDefault(x =>
+                x.CompanyId == companyId && x.LeavePolicyId == policy.Id);
+            if (operationalPolicy is null) continue;
+
+            policy.HalfDayAllowed = operationalPolicy.AllowHalfDay;
+            policy.FullDayAttendanceStatusCode = operationalPolicy.FullDayAttendanceStatusCode;
+            policy.HalfDayAttendanceStatusCode = operationalPolicy.HalfDayAttendanceStatusCode;
+            policy.WorkFromHome = new WorkFromHomePolicySettingsRequest
+            {
+                ApprovalRequired = operationalPolicy.ManagerApprovalRequired,
+                ReasonRequired = operationalPolicy.RequireReason,
+                AttachmentRequired = operationalPolicy.RequireAttachment,
+                MaxDaysPerWeek = operationalPolicy.MaxDaysPerWeek,
+                MaxDaysPerMonth = operationalPolicy.MaxDaysPerMonth,
+                AllowFullDay = true,
+                AllowFirstHalf = operationalPolicy.AllowHalfDay,
+                AllowSecondHalf = operationalPolicy.AllowHalfDay,
+                AllowMixedHalfDayLeave = operationalPolicy.AllowMixedDay,
+                AllowOnWeeklyOff = operationalPolicy.AllowOnWeeklyOff,
+                AllowOnHoliday = operationalPolicy.AllowOnHoliday,
+                FullDayAttendanceStatusCode = operationalPolicy.FullDayAttendanceStatusCode,
+                HalfDayAttendanceStatusCode = operationalPolicy.HalfDayAttendanceStatusCode,
+                MixedAttendanceStatusCode = operationalPolicy.MixedAttendanceStatusCode,
+                WfhWfoAttendanceStatusCode = operationalPolicy.WfhWfoAttendanceStatusCode,
+                WfhHdAttendanceStatusCode = operationalPolicy.WfhHdAttendanceStatusCode,
+                WfhSlAttendanceStatusCode = operationalPolicy.WfhSlAttendanceStatusCode,
+                WfhClAttendanceStatusCode = operationalPolicy.WfhClAttendanceStatusCode,
+                FullDayRequiredWorkingMinutes = (int)(operationalPolicy.FullDayMinimumHours * 60),
+                HalfDayRequiredWorkingMinutes = (int)(operationalPolicy.HalfDayMinimumHours * 60),
+                BreakMinutes = 0,
+            };
+        }
         foreach (var policy in list.Where(IsUnpaidLeavePolicy))
         {
             // Older UL policies predate the typed policy field. Return them as UL so
@@ -465,6 +500,8 @@ public class LeaveManagementService : ILeaveManagementService
         var existingLeaveRequest = await _leave.FirstOrDefault(lr => lr.CompanyId == companyId && lr.LeaveRequestId == leaveRequestDto.LeaveRequestId && leaveRequestDto.UserId == lr.EmployeeId);
         if (existingLeaveRequest is null) return result;
         if (existingLeaveRequest.Status != EnumsHelper.LeaveRequestStatus.Pending) return result;
+        if (IsLeaveRequestStarted(existingLeaveRequest, DateTime.UtcNow))
+            return new Result { Success = false, Message = "This leave request has started and cannot be updated." };
 
         var isUnpaidLeave = IsUnpaidLeavePolicy(leavePolicyEntity);
         var employeeLeaveBalance = isUnpaidLeave ? null : await _employeeLeaveBalanceRepo.FirstOrDefault(elb => elb.CompanyId == companyId && elb.UserId == leaveRequestDto.UserId && elb.LeavePolicyId == leaveRequestDto.LeavePolicyId);
@@ -568,6 +605,9 @@ public class LeaveManagementService : ILeaveManagementService
 
     internal static DateTime UtcMidnight(DateOnly date) =>
         DateTime.SpecifyKind(date.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+
+    internal static bool IsLeaveRequestStarted(LeaveRequest request, DateTime currentDateTime) =>
+        request.StartDate.Date <= currentDateTime.Date;
 
     public async Task<Result<LeaveResponseDto>> GetLeaveRequest(LeaveRequestFilter? leaveFilter)
     {
@@ -1075,6 +1115,10 @@ public class LeaveManagementService : ILeaveManagementService
         existing.FullDayAttendanceStatusCode = settings.FullDayAttendanceStatusCode.Trim().ToUpperInvariant();
         existing.HalfDayAttendanceStatusCode = settings.HalfDayAttendanceStatusCode.Trim().ToUpperInvariant();
         existing.MixedAttendanceStatusCode = settings.MixedAttendanceStatusCode?.Trim().ToUpperInvariant() ?? string.Empty;
+        existing.WfhWfoAttendanceStatusCode = (settings.WfhWfoAttendanceStatusCode ?? settings.MixedAttendanceStatusCode)?.Trim().ToUpperInvariant();
+        existing.WfhHdAttendanceStatusCode = settings.WfhHdAttendanceStatusCode?.Trim().ToUpperInvariant();
+        existing.WfhSlAttendanceStatusCode = settings.WfhSlAttendanceStatusCode?.Trim().ToUpperInvariant();
+        existing.WfhClAttendanceStatusCode = settings.WfhClAttendanceStatusCode?.Trim().ToUpperInvariant();
         existing.FullDayMinimumHours = (settings.FullDayRequiredWorkingMinutes ?? 480) / 60m;
         existing.HalfDayMinimumHours = (settings.HalfDayRequiredWorkingMinutes ?? 240) / 60m;
         existing.UpdatedDate = DateTime.UtcNow;
@@ -1094,10 +1138,10 @@ public class LeaveManagementService : ILeaveManagementService
             wfh.ApproverStrategy is not ("REPORTING_MANAGER" or "DEPARTMENT_HEAD" or "HR_ADMIN"))
             return false;
 
-        var codes = new[] { wfh.FullDayAttendanceStatusCode, wfh.HalfDayAttendanceStatusCode, wfh.MixedAttendanceStatusCode }
+        var codes = new[] { wfh.FullDayAttendanceStatusCode, wfh.HalfDayAttendanceStatusCode, wfh.MixedAttendanceStatusCode, wfh.WfhWfoAttendanceStatusCode, wfh.WfhHdAttendanceStatusCode, wfh.WfhSlAttendanceStatusCode, wfh.WfhClAttendanceStatusCode }
             .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim().ToUpperInvariant()).Distinct().ToList();
         if (codes.Count == 0 || (wfh.AllowFirstHalf || wfh.AllowSecondHalf) && string.IsNullOrWhiteSpace(wfh.HalfDayAttendanceStatusCode) ||
-            wfh.AllowMixedHalfDayLeave && string.IsNullOrWhiteSpace(wfh.MixedAttendanceStatusCode))
+            wfh.AllowMixedHalfDayLeave && new[] { wfh.MixedAttendanceStatusCode ?? wfh.WfhWfoAttendanceStatusCode, wfh.WfhHdAttendanceStatusCode, wfh.WfhSlAttendanceStatusCode, wfh.WfhClAttendanceStatusCode }.Any(string.IsNullOrWhiteSpace))
             return false;
         return (await _attendanceStatusRepo.GetAll(x => x.CompanyId == companyId && x.IsActive && codes.Contains(x.Code)))
             .Select(x => x.Code).Distinct(StringComparer.OrdinalIgnoreCase).Count() == codes.Count;
