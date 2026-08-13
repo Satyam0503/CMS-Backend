@@ -20,6 +20,8 @@ public sealed class AddEmployeeIdSequenceIndexes : IMigration
             {
                 Name = "ux_employee_company_employee_id",
                 Unique = true,
+                // MongoDB partial index filters don't support $ne (compiles to $not, which is rejected);
+                // use $exists + $type + $gt instead to exclude missing/null/empty values.
                 PartialFilterExpression = new BsonDocument
                 {
                     {
@@ -27,8 +29,8 @@ public sealed class AddEmployeeIdSequenceIndexes : IMigration
                         new BsonArray
                         {
                             new BsonDocument("EmployeeId", new BsonDocument("$exists", true)),
-                            new BsonDocument("EmployeeId", new BsonDocument("$ne", BsonNull.Value)),
-                            new BsonDocument("EmployeeId", new BsonDocument("$ne", "")),
+                            new BsonDocument("EmployeeId", new BsonDocument("$type", "string")),
+                            new BsonDocument("EmployeeId", new BsonDocument("$gt", "")),
                         }
                     }
                 }
