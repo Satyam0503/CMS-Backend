@@ -108,6 +108,24 @@ public class LeaveManagementServiceTests
     }
 
     [Theory]
+    [InlineData("2026-07-30", "2026-07-31", "2026-07-30", true)]
+    [InlineData("2026-07-30", "2026-07-31", "2026-07-31", true)]
+    [InlineData("2026-07-30", "2026-07-31", "2026-07-29", false)]
+    public void IsLeaveRequestStarted_BlocksUpdatesFromTheStartDate(
+        string startDate, string endDate, string currentDate, bool expected)
+    {
+        var request = new LeaveRequest
+        {
+            LeavePolicyId = "policy-1",
+            Reason = "Test",
+            StartDate = DateTime.Parse(startDate),
+            EndDate = DateTime.Parse(endDate)
+        };
+
+        Assert.Equal(expected, LeaveManagementService.IsLeaveRequestStarted(request, DateTime.Parse(currentDate)));
+    }
+
+    [Theory]
     [InlineData(EnumsHelper.LeaveRequestStatus.Accepted, "", null)]
     [InlineData(EnumsHelper.LeaveRequestStatus.Rejected, "", "Rejection requires a reason.")]
     [InlineData(EnumsHelper.LeaveRequestStatus.Rejected, "  ", "Rejection requires a reason.")]
