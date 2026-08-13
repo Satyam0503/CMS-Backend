@@ -553,7 +553,10 @@ public sealed class WorkFromHomeService(
         if (await summaries.Exist(x => x.CompanyId == CompanyId && x.EmployeeId == employee.EmployeeId && x.PayrollMonth == month && x.IsLocked)) return ("WFH_DATE_LOCKED", "Attendance month is locked.");
         var off = await weeklyOffs.FirstOrDefault(x => x.CompanyId == CompanyId);
         if (!policy.AllowOnWeeklyOff && (off?.OffDays ?? [(int)DayOfWeek.Saturday, (int)DayOfWeek.Sunday]).Contains((int)date.DayOfWeek)) return ("WFH_WEEKLY_OFF_NOT_ALLOWED", "WFH is not allowed on a weekly off.");
-        var holidays = await calendar.GetAll(x => x.CompanyId == CompanyId && x.Type == EnumsHelper.CalendarItem.Holiday && (x.Recurring || x.Date.Date == date.Date));
+        var holidays = await calendar.GetAll(x => x.CompanyId == CompanyId && x.Type == EnumsHelper.CalendarItem.Holiday &&
+            // A ±1 day window tolerates a legacy row stored as an IST-midnight instant
+            // converted to UTC; CalendarDateHelpers.MatchesDate makes the exact call.
+            (x.Recurring || (x.Date >= date.Date.AddDays(-1) && x.Date <= date.Date.AddDays(1))));
         if (!policy.AllowOnHoliday && holidays.Any(x => CalendarDateHelpers.MatchesDate(x, date))) return ("WFH_HOLIDAY_NOT_ALLOWED", "WFH is not allowed on a holiday.");
         return null;
     }

@@ -201,9 +201,11 @@ public async Task<AttendanceMonthlyExportResult> ExportMonthlyAttendanceAsync(st
         .ToHashSet();
     var weeklyOffs = (await _weeklyOffs.FirstOrDefault(x => x.CompanyId == companyId))?.OffDays
         ?? [(int)DayOfWeek.Saturday, (int)DayOfWeek.Sunday];
+    // A ±1 day window tolerates a legacy row stored as an IST-midnight instant
+    // converted to UTC; CalendarDateHelpers.MatchesDate makes the exact call.
     var holidays = (await _calendar.GetAll(x => x.CompanyId == companyId &&
             x.Type == Codeji.CMS.Utility.Enums.EnumsHelper.CalendarItem.Holiday &&
-            (x.Recurring || (x.Date >= monthStart && x.Date <= monthEnd))))
+            (x.Recurring || (x.Date >= monthStart.AddDays(-1) && x.Date <= monthEnd.AddDays(1)))))
         .ToList();
     var statusColors = (await _attendanceStatuses.GetAll(x => x.CompanyId == companyId && x.IsActive))
         .Where(x => !string.IsNullOrWhiteSpace(x.Code) && IsHexColor(x.ColorHex))

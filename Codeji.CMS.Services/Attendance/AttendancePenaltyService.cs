@@ -119,7 +119,9 @@ public class AttendancePenaltyService : IAttendancePenaltyService
         var weekly=await _weeklyOffs.FirstOrDefault(x=>x.CompanyId==companyId);
         var offDays=(weekly?.OffDays??[(int)DayOfWeek.Saturday,(int)DayOfWeek.Sunday]).ToHashSet();
         var endExclusive=end.Date.AddDays(1);
-        var holidays=(await _calendar.GetAll(x=>x.CompanyId==companyId&&x.Type==EnumsHelper.CalendarItem.Holiday&&(x.Recurring||(x.Date>=start&&x.Date<endExclusive)))).ToList();
+        // A ±1 day window tolerates a legacy row stored as an IST-midnight instant
+        // converted to UTC; CalendarDateHelpers.MatchesDate makes the exact call.
+        var holidays=(await _calendar.GetAll(x=>x.CompanyId==companyId&&x.Type==EnumsHelper.CalendarItem.Holiday&&(x.Recurring||(x.Date>=start.AddDays(-1)&&x.Date<endExclusive.AddDays(1))))).ToList();
         bool IsHoliday(DateTime d)=>holidays.Any(h => CalendarDateHelpers.MatchesDate(h, d));
         var summaries=new List<MonthlyAttendanceSummary>();
         foreach(var emp in await _employees.GetAll(x=>x.CompanyId==companyId&&x.Status&&!x.IsDeleted))
@@ -318,7 +320,9 @@ public class AttendancePenaltyService : IAttendancePenaltyService
         var weekly=await _weeklyOffs.FirstOrDefault(x=>x.CompanyId==companyId);
         var offDays=(weekly?.OffDays??[(int)DayOfWeek.Saturday,(int)DayOfWeek.Sunday]).ToHashSet();
         var endExclusive=end.Date.AddDays(1);
-        var holidays=(await _calendar.GetAll(x=>x.CompanyId==companyId&&x.Type==EnumsHelper.CalendarItem.Holiday&&(x.Recurring||(x.Date>=start&&x.Date<endExclusive)))).ToList();
+        // A ±1 day window tolerates a legacy row stored as an IST-midnight instant
+        // converted to UTC; CalendarDateHelpers.MatchesDate makes the exact call.
+        var holidays=(await _calendar.GetAll(x=>x.CompanyId==companyId&&x.Type==EnumsHelper.CalendarItem.Holiday&&(x.Recurring||(x.Date>=start.AddDays(-1)&&x.Date<endExclusive.AddDays(1))))).ToList();
         bool IsHoliday(DateTime d)=>holidays.Any(h => CalendarDateHelpers.MatchesDate(h, d));
 
         foreach(var emp in await _employees.GetAll(x=>x.CompanyId==companyId&&x.Status&&!x.IsDeleted))

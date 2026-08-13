@@ -6,6 +6,7 @@ using Codeji.CMS.DTO.Calendar;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Services.Calendar.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
@@ -288,14 +289,16 @@ public class CalendarServices : ICalendarServices
 
         List<HolidayResponseDto> holidaysInRange = new();
 
-        // Use date-only comparison to avoid timezone-induced shifts. Treat stored
-        // calendar dates as business dates (date-only) regardless of Kind.
+        // Use the same IST-aware business-date helper that Attendance/WFH use for
+        // matching. This keeps a plain ".Date" truncation from re-introducing a
+        // timezone shift for any legacy row that was stored as an IST-midnight
+        // instant converted to UTC (see CalendarDateHelpers.ToBusinessDate).
         var rangeStart = DateOnly.FromDateTime(filter.FromDate);
         var rangeEnd = DateOnly.FromDateTime(filter.ToDate);
 
         foreach (var holiday in allHolidays)
         {
-            var holidayDateOnly = DateOnly.FromDateTime(holiday.Date);
+            var holidayDateOnly = CalendarDateHelpers.ToBusinessDate(holiday.Date);
             if (holiday.Recurring)
             {
                 // Generate the holiday date for each year in the range using the
@@ -323,7 +326,7 @@ public class CalendarServices : ICalendarServices
                     {
                         Id = holiday.Id,
                         Name = holiday.Name,
-                        Date = holiday.Date.Date,
+                        Date = holidayDateOnly.ToDateTime(TimeOnly.MinValue),
                         Description = holiday.Description
                     });
                 }

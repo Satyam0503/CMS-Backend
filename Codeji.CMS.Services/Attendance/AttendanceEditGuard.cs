@@ -35,7 +35,10 @@ public sealed class AttendanceEditGuard(
         if (offDays.Contains((int)date.DayOfWeek))
             throw new InvalidOperationException($"{date:yyyy-MM-dd} is a configured weekly off for employee {employee.EmployeeId}.");
 
-        var holidays = await calendar.GetAll(x => x.CompanyId == employee.CompanyId && x.Type == EnumsHelper.CalendarItem.Holiday && (x.Recurring || x.Date.Date == date.Date));
+        var holidays = await calendar.GetAll(x => x.CompanyId == employee.CompanyId && x.Type == EnumsHelper.CalendarItem.Holiday &&
+            // A ±1 day window tolerates a legacy row stored as an IST-midnight instant
+            // converted to UTC; CalendarDateHelpers.MatchesDate makes the exact call.
+            (x.Recurring || (x.Date >= date.Date.AddDays(-1) && x.Date <= date.Date.AddDays(1))));
         if (holidays.Any(x => CalendarDateHelpers.MatchesDate(x, date)))
             throw new InvalidOperationException($"{date:yyyy-MM-dd} is a company holiday for employee {employee.EmployeeId}.");
     }

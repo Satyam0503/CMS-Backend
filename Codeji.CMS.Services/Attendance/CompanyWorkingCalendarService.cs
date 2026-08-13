@@ -30,8 +30,10 @@ public sealed class CompanyWorkingCalendarService(
         var offDays = (weekly?.OffDays ?? [(int)DayOfWeek.Saturday, (int)DayOfWeek.Sunday]).ToHashSet();
         var startDate = start.ToDateTime(TimeOnly.MinValue);
         var endDate = end.ToDateTime(TimeOnly.MinValue);
+        // A ±1 day window tolerates a legacy row stored as an IST-midnight instant
+        // converted to UTC; CalendarDateHelpers.MatchesDate makes the exact call.
         var holidays = (await calendar.GetAll(x => x.CompanyId == companyId &&
-            x.Type == EnumsHelper.CalendarItem.Holiday && (x.Recurring || (x.Date >= startDate && x.Date <= endDate)))).ToList();
+            x.Type == EnumsHelper.CalendarItem.Holiday && (x.Recurring || (x.Date >= startDate.AddDays(-1) && x.Date <= endDate.AddDays(1))))).ToList();
         var result = new List<DateOnly>();
         for (var current = start; current <= end; current = current.AddDays(1))
         {
@@ -53,8 +55,10 @@ public sealed class CompanyWorkingCalendarService(
         var offDays = (weekly?.OffDays ?? [(int)DayOfWeek.Saturday, (int)DayOfWeek.Sunday]).ToHashSet();
         var startDate = start.ToDateTime(TimeOnly.MinValue);
         var endDate = end.ToDateTime(TimeOnly.MinValue);
+        // A ±1 day window tolerates a legacy row stored as an IST-midnight instant
+        // converted to UTC; CalendarDateHelpers.MatchesDate makes the exact call.
         var holidays = (await calendar.GetAll(x => x.CompanyId == companyId && x.Type == EnumsHelper.CalendarItem.Holiday &&
-            (x.Recurring || (x.Date >= startDate && x.Date <= endDate)))).ToList();
+            (x.Recurring || (x.Date >= startDate.AddDays(-1) && x.Date <= endDate.AddDays(1))))).ToList();
         var result = new List<DateOnly>();
         for (var current = start; current <= end; current = current.AddDays(1))
         {
