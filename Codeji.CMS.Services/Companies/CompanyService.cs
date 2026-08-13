@@ -91,6 +91,19 @@ namespace Codeji.CMS.Services
         public async Task<Result> Register(CompanyRequestModel companyModel)
         {
             Result result = new Result();
+
+            // Email is globally unique in the employee identity model; check before
+            // creating anything so a duplicate registration email can't slip past the
+            // application layer the way legacy data did.
+            bool emailExists = await _userRepo.Exist(e =>
+                e.Email.Equals(companyModel.Email, StringComparison.OrdinalIgnoreCase));
+            if (emailExists)
+            {
+                result.StatusCode = CustomStatusCode.EmployeeAlreadyExist;
+                result.Message = "An employee/user with this email address already exists.";
+                return result;
+            }
+
             string companyId = Guid.NewGuid().ToString();
             //Add Default Role
             List<Roles> adminRole = await _roleService.AddDefaultRole(companyId);
