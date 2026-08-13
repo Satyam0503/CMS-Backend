@@ -131,7 +131,10 @@ namespace Codeji.CMS.Services
                 CareerPortalEnabled = true,
                 PublishJobsToMasterPortal = true,
                 DefaultLanguage = Languages.English,
-                ApplicationLanguage = [Languages.English],
+                // All supported UI languages are enabled by default so the language
+                // switcher and per-attribute translation columns are usable immediately;
+                // an admin can still narrow this later from Company Info.
+                ApplicationLanguage = [Languages.English, Languages.Mandarin, Languages.Spanish, Languages.Japanese, Languages.German, Languages.French],
                 Status = true,
             };
 
