@@ -6,6 +6,17 @@ public static class CalendarDateHelpers
 {
     private static readonly TimeZoneInfo IndiaZone = ResolveIndiaZone();
 
+    /// <summary>
+    /// Returns the completed business-date cutoff for attendance validation.
+    /// Today's attendance may still be in progress, so exceptions can only be
+    /// raised through the preceding India business day.
+    /// </summary>
+    public static DateOnly GetLastCompletedBusinessDate(DateTime utcNow)
+    {
+        var utc = DateTime.SpecifyKind(utcNow, DateTimeKind.Utc);
+        return DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(utc, IndiaZone)).AddDays(-1);
+    }
+
     // Recovers the calendar business date a stored value was meant to represent.
     // A correctly stored value is an exact IST midnight and this is a no-op. A
     // legacy row that was saved by converting IST midnight to UTC (shifting it

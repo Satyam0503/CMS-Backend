@@ -1,4 +1,5 @@
 using Codeji.CMS.Domain.Models;
+using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Calendar;
@@ -13,6 +14,7 @@ using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Leave;
+using Codeji.CMS.Repository.Entities.Company;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
 using System.Net;
@@ -50,6 +52,8 @@ public sealed class WorkFromHomeService(
     IMongoDbRepository<WorkFromHomeRequestLog> logs,
     IMongoDbRepository<LeaveRequest> leaveRequests,
     IMongoDbRepository<EmpUser> employees,
+    IMongoDbRepository<Department> departments,
+    IMongoDbRepository<JobTitles> jobTitles,
     IMongoDbRepository<AttendanceStatusSetting> statuses,
     IMongoDbRepository<AttendanceModel> attendance,
     IMongoDbRepository<AttendanceDaySegment> attendanceSegments,
@@ -484,9 +488,9 @@ public sealed class WorkFromHomeService(
         var code = request.DurationType switch
         {
             "Mixed" => policy.WfhWfoAttendanceStatusCode ?? policy.MixedAttendanceStatusCode,
-            "WfhHd" => policy.WfhHdAttendanceStatusCode,
-            "WfhSl" => policy.WfhSlAttendanceStatusCode,
-            "WfhCl" => policy.WfhClAttendanceStatusCode,
+            "WfhHd" => policy.WfhHdAttendanceStatusCode ?? policy.HalfDayAttendanceStatusCode,
+            "WfhSl" => policy.WfhSlAttendanceStatusCode ?? "WFH+SL",
+            "WfhCl" => policy.WfhClAttendanceStatusCode ?? "WFH+CL",
             "FullDay" => policy.FullDayAttendanceStatusCode,
             _ => policy.HalfDayAttendanceStatusCode
         };
@@ -630,7 +634,13 @@ public sealed class WorkFromHomeService(
         {
             var roleIds = (await companyRoles.GetAll(x => x.CompanyId == companyId && !x.IsDeleted && (x.RoleType == (int)EnumsHelper.Roles.Administrator || x.RoleType == (int)EnumsHelper.Roles.HR || x.RoleType == (int)EnumsHelper.Roles.HRExecutive), withDefaultFilter: false)).Select(x => x.RolesId).ToHashSet();
             var recipients = (await employees.GetAll(x => x.CompanyId == companyId && x.Status && roleIds.Contains(x.RoleId), withDefaultFilter: false)).GroupBy(x => x.UserId, StringComparer.Ordinal).Select(x => x.First());
-            var body = $"<p><strong>{WebUtility.HtmlEncode(subject)}</strong></p><p>Employee: {WebUtility.HtmlEncode(employee.FirstName)} {WebUtility.HtmlEncode(employee.LastName)} ({WebUtility.HtmlEncode(employee.EmployeeId)})</p><p>Department: {WebUtility.HtmlEncode(employee.Department)}<br/>Role: {WebUtility.HtmlEncode(employee.JobRole)}<br/>Dates: {request.FromDate:dd MMM yyyy} - {request.ToDate:dd MMM yyyy}<br/>Duration: {WebUtility.HtmlEncode(request.DurationType)}<br/>Reason category: {WebUtility.HtmlEncode(ReasonLabel(request.ReasonCode))}</p>";
+            var department = string.IsNullOrWhiteSpace(employee.Department)
+                ? "Not assigned"
+                : DisplayName((await departments.FirstOrDefault(x => x.CompanyId == companyId && x.DepartmentId == employee.Department && !x.IsDeleted))?.Titles);
+            var jobTitle = string.IsNullOrWhiteSpace(employee.JobRole)
+                ? "Not assigned"
+                : DisplayName((await jobTitles.FirstOrDefault(x => x.CompanyId == companyId && x.JobTitleId == employee.JobRole && !x.IsDeleted))?.Titles);
+            var body = WfhRequestEmail(subject, employee, request, department, jobTitle);
             var recipientList = recipients.ToList();
             await SaveAndPushNotification(companyId, submittedByUserId, recipientList.Select(x => x.UserId), subject, $"{employee.FirstName} {employee.LastName} ({employee.EmployeeId}) - {request.FromDate:dd MMM}", request.RequestId, EnumsHelper.NotificationTypes.WorkFromHomeRequest);
             foreach (var recipient in recipientList.Where(x => x.IsEmailVerified && !string.IsNullOrWhiteSpace(x.Email))) await mail.EmailSendAndSave(new EmpEmailLogs { CompanyId = companyId, UserTo = recipient.UserId, UserFrom = submittedByUserId, Email = recipient.Email, Subject = subject, Body = body, EmailLogType = EnumsHelper.MailType.LeaveMailToHR });
@@ -645,8 +655,35 @@ public sealed class WorkFromHomeService(
             var employee = (await employees.GetAll(x => x.CompanyId == companyId && x.UserId == request.UserId && x.Status && x.IsEmailVerified, withDefaultFilter: false)).FirstOrDefault();
             if (employee is null || string.IsNullOrWhiteSpace(employee.Email)) return;
             await SaveAndPushNotification(companyId, actorUserId, [employee.UserId], subject, $"WFH dates: {request.FromDate:dd MMM yyyy} - {request.ToDate:dd MMM yyyy}", request.RequestId, EnumsHelper.NotificationTypes.WorkFromHomeApproved);
-            await mail.EmailSendAndSave(new EmpEmailLogs { CompanyId = companyId, UserTo = employee.UserId, UserFrom = actorUserId, Email = employee.Email, Subject = subject, Body = $"<p>{WebUtility.HtmlEncode(subject)}</p><p>WFH dates: {request.FromDate:dd MMM yyyy} - {request.ToDate:dd MMM yyyy}</p>", EmailLogType = EnumsHelper.MailType.LeaveReplyMail });
+            await mail.EmailSendAndSave(new EmpEmailLogs { CompanyId = companyId, UserTo = employee.UserId, UserFrom = actorUserId, Email = employee.Email, Subject = subject, Body = WfhStatusEmail(subject, employee, request), EmailLogType = EnumsHelper.MailType.LeaveReplyMail });
         }, 1);
+    }
+    private static string DisplayName(IEnumerable<MultilingualModel>? titles) =>
+        titles?.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Label))?.Label?.Trim() ?? "Not assigned";
+    private static string WfhRequestEmail(string subject, EmpUser employee, WorkFromHomeRequest request, string department, string jobTitle)
+    {
+        var employeeName = $"{employee.FirstName} {employee.LastName}".Trim();
+        var dateRange = request.FromDate.Date == request.ToDate.Date ? request.FromDate.ToString("dddd, dd MMMM yyyy") : $"{request.FromDate:dd MMM yyyy} - {request.ToDate:dd MMM yyyy}";
+        var details = new List<(string Label, string Value)>
+        {
+            ("Employee", employeeName), ("Employee ID", employee.EmployeeId), ("Department", department), ("Job role", jobTitle),
+            ("WFH date", dateRange), ("Duration", DurationLabel(request.DurationType)), ("Reason category", ReasonLabel(request.ReasonCode))
+        };
+        if (!string.IsNullOrWhiteSpace(request.ReasonText)) details.Add(("Employee note", request.ReasonText.Trim()));
+        return RequestEmailLayout(subject, $"A Work From Home request has been submitted by <strong>{WebUtility.HtmlEncode(employeeName)}</strong> and is awaiting review.", details, "Pending review");
+    }
+    private static string WfhStatusEmail(string subject, EmpUser employee, WorkFromHomeRequest request)
+    {
+        var employeeName = $"{employee.FirstName} {employee.LastName}".Trim();
+        var dateRange = request.FromDate.Date == request.ToDate.Date ? request.FromDate.ToString("dddd, dd MMMM yyyy") : $"{request.FromDate:dd MMM yyyy} - {request.ToDate:dd MMM yyyy}";
+        var details = new List<(string Label, string Value)> { ("WFH date", dateRange), ("Duration", DurationLabel(request.DurationType)), ("Request status", request.Status) };
+        if (!string.IsNullOrWhiteSpace(request.ReviewRemarksText)) details.Add(("Reviewer note", request.ReviewRemarksText.Trim()));
+        return RequestEmailLayout(subject, $"Hello {WebUtility.HtmlEncode(employeeName)}, your Work From Home request has been updated.", details, request.Status);
+    }
+    private static string RequestEmailLayout(string title, string introduction, IEnumerable<(string Label, string Value)> details, string status)
+    {
+        var rows = string.Concat(details.Where(x => !string.IsNullOrWhiteSpace(x.Value)).Select(x => $"<tr><td style=\"width:36%;padding:10px 14px;color:#64748b;font-weight:600;border-bottom:1px solid #e7edf4;vertical-align:top\">{WebUtility.HtmlEncode(x.Label)}</td><td style=\"padding:10px 0;border-bottom:1px solid #e7edf4;color:#1e293b;vertical-align:top\">{WebUtility.HtmlEncode(x.Value)}</td></tr>"));
+        return $"<div style=\"font-family:Arial,Helvetica,sans-serif;color:#1e293b\"><h1 style=\"font-size:22px;line-height:1.3;margin:0 0 12px;color:#172554\">{WebUtility.HtmlEncode(title)}</h1><p style=\"margin:0 0 20px;line-height:1.6\">{introduction}</p><div style=\"display:inline-block;padding:7px 12px;margin:0 0 18px;background:#eef2ff;border-radius:999px;color:#4338ca;font-size:13px;font-weight:700\">{WebUtility.HtmlEncode(status)}</div><table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border-collapse:collapse;border-top:1px solid #e7edf4\">{rows}</table><p style=\"margin:20px 0 0;color:#64748b;font-size:13px;line-height:1.5\">Please review the request in Codeji CMS to take the next action.</p></div>";
     }
     private async Task SaveAndPushNotification(string companyId, string senderUserId, IEnumerable<string> targetUserIds, string title, string body, string requestId, EnumsHelper.NotificationTypes type)
     {
@@ -695,6 +732,7 @@ public sealed class WorkFromHomeService(
         catch (InvalidTimeZoneException) { return DateTime.UtcNow; }
     }
     private static string ReasonLabel(string? code) => (code ?? "OTHER").Trim().ToUpperInvariant() switch { "PERSONAL" => "Personal", "MEDICAL" => "Medical", "FAMILY" => "Family", "HOME_MAINTENANCE" => "Home maintenance", "TRAVEL_DISRUPTION" => "Travel disruption", "OPERATIONAL" => "Operational", "MANAGER_INSTRUCTION" => "Manager instruction", _ => "Other" };
+    private static string DurationLabel(string? duration) => duration switch { "FirstHalf" => "First half", "SecondHalf" => "Second half", _ => "Full day" };
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim()[..Math.Min(value.Trim().Length, 500)];
     private static Result Fail(string code, string message) => new() { Success = false, Message = $"{code}: {message}" };
     private static Result<T> Fail<T>(string code, string message) => new() { Success = false, Message = $"{code}: {message}" };
