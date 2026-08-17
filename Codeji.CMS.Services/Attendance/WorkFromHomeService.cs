@@ -12,6 +12,7 @@ using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Repository.Entities.Attendance;
+using Codeji.CMS.Repository.Entities.Leave;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
 using System.Net;
@@ -47,6 +48,7 @@ public sealed class WorkFromHomeService(
     IMongoDbRepository<WorkFromHomePolicy> policies,
     IMongoDbRepository<WorkFromHomeRequest> requests,
     IMongoDbRepository<WorkFromHomeRequestLog> logs,
+    IMongoDbRepository<LeaveRequest> leaveRequests,
     IMongoDbRepository<EmpUser> employees,
     IMongoDbRepository<AttendanceStatusSetting> statuses,
     IMongoDbRepository<AttendanceModel> attendance,
@@ -241,6 +243,17 @@ public sealed class WorkFromHomeService(
         {
             var policy = await ActivePolicy();
             var employee = await ActiveEmployee(request.UserId);
+            if (await HasActiveLeaveOverlap(request.UserId, request.FromDate, request.ToDate))
+            {
+                request.Status = previous;
+                request.Version++;
+                request.ReviewedByUserId = null;
+                request.ReviewedAt = null;
+                request.ReviewRemarksCode = null;
+                request.ReviewRemarksText = null;
+                await requests.Update(Builders<WorkFromHomeRequest>.Filter.Where(x => x.CompanyId == CompanyId && x.RequestId == requestId && x.Status == status && x.Version == request.Version - 1), request);
+                return Fail("WFH_LEAVE_OVERLAP", "The Work From Home request overlaps an active leave request.");
+            }
             var reconcile = policy is null
                 ? Fail("WFH_POLICY_DISABLED", "WFH policy is disabled.")
                 : employee is null
@@ -538,6 +551,7 @@ public sealed class WorkFromHomeService(
         if (dto.DurationType is "Mixed" or "WfhHd" or "WfhSl" or "WfhCl" && !policy.AllowMixedDay) return ("WFH_MIXED_DAY_NOT_ALLOWED", "Mixed WFH combinations are not allowed.");
         if (!IsEffectiveFor(policy, dto.FromDate.Date) || !IsEffectiveFor(policy, dto.ToDate.Date)) return ("WFH_POLICY_NOT_EFFECTIVE", "The selected date is outside the effective WFH policy period.");
         if (await requests.Exist(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && (x.Status == "Pending" || x.Status == "Approved" || x.Status == "Returned") && dto.FromDate.Date <= x.ToDate.Date && dto.ToDate.Date >= x.FromDate.Date)) return ("WFH_OVERLAPPING_REQUEST", "The request overlaps an existing WFH request.");
+        if (await HasActiveLeaveOverlap(employee.UserId, dto.FromDate.Date, dto.ToDate.Date)) return ("WFH_LEAVE_OVERLAP", "The request overlaps an active leave request.");
         foreach (var week in Days(dto.FromDate, dto.ToDate).Select(StartOfWeek).Distinct())
         {
             var usedDates = WeeklyUsage(await requests.GetAll(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && (x.Status == "Pending" || x.Status == "Approved" || x.Status == "Returned") && x.FromDate < week.AddDays(7) && x.ToDate >= week), week);
@@ -555,6 +569,15 @@ public sealed class WorkFromHomeService(
             return ("WFH_SAME_DAY_OFFICE_STARTED", $"Work From Home for today must be requested before your office start time ({startLabel}).");
         }
         return null;
+    }
+
+    private async Task<bool> HasActiveLeaveOverlap(string userId, DateTime fromDate, DateTime toDate)
+    {
+        var activeLeaves = await leaveRequests.GetAll(request =>
+            request.CompanyId == CompanyId && request.EmployeeId == userId &&
+            (request.Status == EnumsHelper.LeaveRequestStatus.Pending || request.Status == EnumsHelper.LeaveRequestStatus.Accepted) &&
+            request.StartDate <= toDate && request.EndDate >= fromDate);
+        return activeLeaves.Any();
     }
 
     private async Task<(string Code, string Message)?> ValidateWorkingDay(EmpUser employee, WorkFromHomePolicy policy, DateTime date)

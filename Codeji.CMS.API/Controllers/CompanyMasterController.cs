@@ -183,8 +183,18 @@ public class CompanyMasterController : BaseApiController
     public async Task<Result> UpdateCustomAttribute([FromBody] CustomAttributeRequestDto data)
     {
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-        string userId = CurrentContext.CompanyId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
         return await _companyMasterService.UpdateCustomAttribute(data, companyId, userId);
+    }
+
+    [HttpDelete]
+    [Route("DeleteCustomAttribute/{customAttributeId}")]
+    [Authorize(Policy = "AdminOnly")]
+    public async Task<Result> DeleteCustomAttribute(string customAttributeId)
+    {
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _companyMasterService.DeleteCustomAttribute(customAttributeId, companyId, userId);
     }
 
     [HttpDelete]

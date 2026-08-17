@@ -55,6 +55,8 @@ The administrator cannot login until verification succeeds. See the audit report
 
 `POST /api/account/login` calls `AccountServices.VerifyAndGenerateToken`.
 
+Login, refresh, email verification, resend-verification, and recovery begin before a JWT exists. Their identity lookup is therefore an explicit server-owned exception to normal repository tenant scoping: it resolves one active user from an email or opaque token, caps the result at one record, and then derives company and role from that user. These endpoints never accept a browser-supplied `CompanyId`. All ordinary authenticated module reads remain tenant-scoped.
+
 It rejects an account unless all are true:
 
 - employee email matches case-insensitively and the employee is active;

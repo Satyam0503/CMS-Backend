@@ -15,6 +15,10 @@ public sealed class CompanyOfficeSchedule : BaseClass
     public TimeSpan? CheckInAllowedUntil { get; set; }
     public TimeSpan? CheckOutAllowedFrom { get; set; }
     public TimeSpan? CheckOutAllowedUntil { get; set; }
+    public TimeSpan? LateArrivalAfter { get; set; }
+    public TimeSpan? EarlyDepartureBefore { get; set; }
+    public TimeSpan? HalfDayCheckInAfter { get; set; }
+    public TimeSpan? HalfDayCheckOutBefore { get; set; }
     public int RequiredWorkingMinutes { get; set; } = 480;
     public int BreakMinutes { get; set; }
     public int GraceMinutes { get; set; }

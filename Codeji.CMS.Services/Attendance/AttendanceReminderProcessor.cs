@@ -30,6 +30,7 @@ public sealed class AttendanceReminderProcessor(
     IAttendanceMutationValidator mutationValidator,
     IAttendanceInitializationService initialization,
     IEffectiveOfficeScheduleService schedules,
+    ICompanyWorkingCalendarService calendar,
     IMongoDbRepository<Company> companies,
     ILogger<AttendanceReminderProcessor> logger) : IAttendanceReminderProcessor
 {
@@ -45,9 +46,65 @@ public sealed class AttendanceReminderProcessor(
         {
             try
             {
-                var result = await initialization.InitializeMonthAsync(companyId, "system", today, cancellationToken, today);
-                if (!result.Success) logger.LogWarning("Automatic present skipped for company {CompanyId}: {Reason}", companyId, result.Message);
-                else logger.LogInformation("Automatic present completed for company {CompanyId}: {Created} created, {Existing} existing", companyId, result.MethodResult?.Created, result.MethodResult?.AlreadyExisting);
+                if (!await calendar.IsWorkingDayAsync(companyId, DateOnly.FromDateTime(today), cancellationToken))
+                {
+                    logger.LogInformation("Automatic present skipped for company {CompanyId}: today is not a working day", companyId);
+                    continue;
+                }
+
+                var presentCode = await initialization.ResolvePresentStatusCodeAsync(companyId, cancellationToken);
+                if (string.IsNullOrWhiteSpace(presentCode))
+                {
+                    logger.LogWarning("Automatic present skipped for company {CompanyId}: ATTENDANCE_PRESENT_STATUS_NOT_CONFIGURED", companyId);
+                    continue;
+                }
+
+                var created = 0;
+                var existing = 0;
+                foreach (var employee in await employees.GetAll(x => x.CompanyId == companyId && x.Status && !x.IsDeleted, WithDeletedObjects: false, withDefaultFilter: false))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var schedule = await schedules.ResolveAsync(companyId, employee, today, cancellationToken);
+                    if (schedule is null || !AttendanceReminderEvaluator.HasOfficeStarted(reference, schedule.StartTime)) continue;
+
+                    var prepared = await mutationValidator.PrepareAsync(new AttendanceMutationRequest
+                    {
+                        CompanyId = companyId,
+                        ActorUserId = "system",
+                        TargetUserId = employee.UserId,
+                        AttendanceDate = DateOnly.FromDateTime(today),
+                        StatusCode = presentCode,
+                        TimingMode = AttendanceTimingMode.Auto,
+                        ExistingRecordPolicy = ExistingAttendancePolicy.CreateMissingOnly,
+                        SourceType = "SYSTEM_OFFICE_START_PRESENT",
+                        RemarkCode = "SYSTEM_OFFICE_START_PRESENT",
+                        OperatorRemark = "System Present created at the effective office start time."
+                    }, cancellationToken);
+
+                    if (!prepared.Success || prepared.MethodResult is null)
+                    {
+                        logger.LogWarning("Automatic present skipped for employee {EmployeeId} in company {CompanyId}: {Reason}", employee.EmployeeId, companyId, prepared.Message);
+                        continue;
+                    }
+                    if (!prepared.MethodResult.ShouldWrite)
+                    {
+                        existing++;
+                        continue;
+                    }
+                    try
+                    {
+                        var save = await attendance.AddOne(prepared.MethodResult.Attendance);
+                        if (save.Success) created++;
+                        else logger.LogWarning("Automatic present could not be saved for employee {EmployeeId} in company {CompanyId}", employee.EmployeeId, companyId);
+                    }
+                    catch (MongoDB.Driver.MongoWriteException)
+                    {
+                        // The unique company/user/date index can race another scheduler instance;
+                        // both outcomes mean a row now exists and no row was overwritten.
+                        existing++;
+                    }
+                }
+                logger.LogInformation("Automatic present completed for company {CompanyId}: {Created} created, {Existing} existing", companyId, created, existing);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -69,7 +126,19 @@ public sealed class AttendanceReminderProcessor(
         {
             var companyId = companyGroup.Key;
             var targetId = $"attendance-review-{today:yyyy-MM-dd}";
-            if (await notifications.FirstOrDefault(x => x.CompanyId == companyId && x.TargetId == targetId, WithDeletedObjects: false) is not null) continue;
+            // Hosted services have no authenticated HTTP tenant context.  Use the
+            // explicit company predicate without the repository's request filter;
+            // otherwise this idempotency check always sees no notification and
+            // creates the same review reminder every scheduler minute.
+            var reviewReminderAlreadyCreated = (await notifications.GetAll(
+                x => x.CompanyId == companyId && x.TargetId == targetId,
+                WithDeletedObjects: false,
+                withDefaultFilter: false)).Any();
+            if (reviewReminderAlreadyCreated)
+            {
+                logger.LogInformation("Skipping duplicate attendance review reminder for company {CompanyId}", companyId);
+                continue;
+            }
 
             var reviewers = await GetReviewersAsync(companyId);
             if (reviewers.Count == 0) continue;

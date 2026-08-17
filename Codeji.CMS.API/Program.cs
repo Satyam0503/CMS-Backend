@@ -324,9 +324,11 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseRateLimiter();
 app.UseAuthentication();
-app.UseAuthorization();
-
+// Establish the authenticated tenant before any policy handler performs a
+// tenant-scoped repository lookup.  In particular, AdminOnly verifies the
+// role against CompanyId, so it must run after this request validation.
 app.UseMiddleware<AntiforgeryMiddleware>();
+app.UseAuthorization();
 // app.UseMiddleware<CompanyIdMiddleware>();
 
 // Configure SignalR hub

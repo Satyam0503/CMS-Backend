@@ -44,6 +44,7 @@ public class LeaveManagementService : ILeaveManagementService
     private readonly ICompanyWorkingCalendarService _workingCalendar;
     private readonly IMongoDbRepository<AttendanceStatusSetting> _attendanceStatusRepo;
     private readonly IMongoDbRepository<WorkFromHomePolicy> _workFromHomePolicies;
+    private readonly IMongoDbRepository<WorkFromHomeRequest> _workFromHomeRequests;
     private readonly ILeaveAttendanceReconciliationService _leaveAttendanceReconciliation;
     private readonly IMongoClient _mongoClient;
     public LeaveManagementService(
@@ -63,6 +64,7 @@ public class LeaveManagementService : ILeaveManagementService
     IMongoDbRepository<AttendanceStatusSetting> attendanceStatusRepo,
     ILeaveAttendanceReconciliationService leaveAttendanceReconciliation,
     IMongoDbRepository<WorkFromHomePolicy> workFromHomePolicies,
+    IMongoDbRepository<WorkFromHomeRequest> workFromHomeRequests,
     IMongoClient mongoClient
     )
     {
@@ -83,6 +85,7 @@ public class LeaveManagementService : ILeaveManagementService
         _attendanceStatusRepo = attendanceStatusRepo;
         _leaveAttendanceReconciliation = leaveAttendanceReconciliation;
         _workFromHomePolicies = workFromHomePolicies;
+        _workFromHomeRequests = workFromHomeRequests;
         _mongoClient = mongoClient;
     }
 
@@ -412,6 +415,9 @@ public class LeaveManagementService : ILeaveManagementService
             return result;
         }
 
+        if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequest.UserId, requestStartDateTime, requestEndDateTime))
+            return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: The leave request overlaps an active Work From Home request." };
+
         // check if employee already has approved leave on request date
         var nowDate = DateTime.UtcNow.Date;
         var upcomingApprovedLeaves = await _leave.GetAll(lr => lr.EmployeeId == leaveRequest.UserId && lr.Status == EnumsHelper.LeaveRequestStatus.Accepted && lr.EndDate >= nowDate);
@@ -522,6 +528,9 @@ public class LeaveManagementService : ILeaveManagementService
             result.Message = "The leave request overlaps an existing pending or accepted request.";
             return result;
         }
+
+        if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequestDto.UserId, requestStartDateTime, requestEndDateTime))
+            return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: The leave request overlaps an active Work From Home request." };
 
         var totalAdvanceNoticeDays = (requestStartDateTime - DateTime.UtcNow.Date).TotalDays + 1;
         if (leavePolicyEntity.MinNoticeDays > 0 && leavePolicyEntity.MinNoticeDays > totalAdvanceNoticeDays)
@@ -808,6 +817,8 @@ public class LeaveManagementService : ILeaveManagementService
                     : policyForDecision.FullDayAttendanceStatusCode ?? policyForDecision.AttendanceStatusCode;
             if (string.IsNullOrWhiteSpace(mappedStatus) || !await ValidateAttendanceStatusMapping(companyId, mappedStatus))
                 return new Result { Success = false, Message = existingLeaveRequest.IsHalfDay ? "Select an active leave attendance status for half-day leave before approval." : "Select an active leave attendance status for full-day leave before approval." };
+            if (await HasActiveWorkFromHomeOverlap(companyId, existingLeaveRequest.EmployeeId, existingLeaveRequest.StartDate, existingLeaveRequest.EndDate))
+                return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: This leave request overlaps an active Work From Home request." };
         }
 
         var now = DateTime.UtcNow;
@@ -1071,6 +1082,15 @@ public class LeaveManagementService : ILeaveManagementService
         if (string.IsNullOrWhiteSpace(code)) return true;
         var normalized = code.Trim().ToUpperInvariant();
         return await _attendanceStatusRepo.Exist(x => x.CompanyId == companyId && x.Code == normalized && x.IsActive && !x.RequiresTime && x.IsAvailableForLeaveManagement);
+    }
+
+    private async Task<bool> HasActiveWorkFromHomeOverlap(string companyId, string userId, DateTime startDate, DateTime endDate)
+    {
+        var requests = await _workFromHomeRequests.GetAll(request =>
+            request.CompanyId == companyId && request.UserId == userId &&
+            (request.Status == "Pending" || request.Status == "Approved" || request.Status == "Returned") &&
+            request.FromDate <= endDate && request.ToDate >= startDate);
+        return requests.Any();
     }
 
     private async Task<Result> SyncWorkFromHomePolicy(string companyId, LeavePolicy leavePolicy, WorkFromHomePolicySettingsRequest settings)

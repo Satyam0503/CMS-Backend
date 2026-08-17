@@ -107,6 +107,11 @@ namespace Codeji.CMS.Services
             string companyId = Guid.NewGuid().ToString();
             //Add Default Role
             List<Roles> adminRole = await _roleService.AddDefaultRole(companyId);
+            var administratorRole = adminRole.FirstOrDefault(x => x.RoleType == 1 && !x.IsDeleted);
+            if (administratorRole is null)
+            {
+                return new Result { Success = false, StatusCode = StatusCodes.Status500InternalServerError, Message = "The company administrator role is not configured." };
+            }
 
             EmpUser user = new EmpUser()
             {
@@ -116,7 +121,7 @@ namespace Codeji.CMS.Services
                 LastName = companyModel.LastName,
                 CompanyId = companyId,
                 Password = AuthenticationHandler.HashedPassword(companyModel.Password),
-                RoleId = adminRole.FirstOrDefault(x => x.RoleType == 1)?.RolesId ?? "",
+                RoleId = administratorRole.RolesId,
                 Status = true,
                 IsEmailVerified = false
             };
@@ -151,7 +156,11 @@ namespace Codeji.CMS.Services
                 // company. Use the same company-owned atomic sequence as every
                 // subsequent employee instead of bypassing EmployeeService.
                 user.EmployeeId = await _employeeService.ReserveNextEmployeeId(companyId);
-                await _userRepo.AddOne(user);
+                var userResult = await _userRepo.AddOne(user);
+                if (!userResult.Success)
+                {
+                    return new Result { Success = false, StatusCode = StatusCodes.Status500InternalServerError, Message = "The company administrator account could not be created." };
+                }
                 await _notificationPreferenceRepo.AddOne(notificationPreferenceSetting);
                 await _attendanceStatusService.EnsureCompanyDefaults(companyId);
                 await SendCompanyUserVerificationEmail(user, company);

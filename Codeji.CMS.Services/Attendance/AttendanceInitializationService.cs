@@ -22,7 +22,7 @@ public sealed class AttendanceInitializationService(
     public async Task<string?> ResolvePresentStatusCodeAsync(string companyId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var present = (await statuses.GetAll(x => x.CompanyId == companyId && x.IsActive))
+        var present = (await statuses.GetAll(x => x.CompanyId == companyId && x.IsActive, withDefaultFilter: false))
             .Where(x => string.Equals(x.Name?.Trim(), "Present", StringComparison.OrdinalIgnoreCase))
             .OrderBy(x => x.SortOrder).FirstOrDefault();
         return present?.Code?.Trim().ToUpperInvariant();

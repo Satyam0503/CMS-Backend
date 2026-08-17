@@ -12,6 +12,7 @@ public sealed class OfficeScheduleSettingsDto
     [Required] public string CheckInAllowedUntil { get; set; } = "10:00";
     [Required] public string CheckOutAllowedFrom { get; set; } = "17:30";
     [Required] public string CheckOutAllowedUntil { get; set; } = "19:00";
+    [Range(0, 180)] public int GraceMinutes { get; set; }
     [Range(0, 180)] public int BreakMinutes { get; set; } = 60;
     [Range(1, 24 * 60)] public int RequiredWorkingMinutes { get; set; } = 480;
 }

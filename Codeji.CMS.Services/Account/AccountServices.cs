@@ -80,7 +80,9 @@ public class AccountServices : IAccountServices
     public async Task<Result<TokenResponseDto>> VerifyAndGenerateToken(LoginModel model)
     {
         Result<TokenResponseDto> result = new();
-        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase) && x.Status);
+        model.Email = model.Email.Trim();
+        EmpUser? user = await FindSingleForAnonymousAuthAsync(_employeeRepository,
+            x => x.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase) && x.Status && !x.IsDeleted);
         if (user == null)
         {
             result.Success = false;
@@ -93,7 +95,23 @@ public class AccountServices : IAccountServices
             result.StatusCode = CustomStatusCode.UnVerifiedMail;
             return result;
         }
-        Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == user.RoleId && x.CompanyId == user.CompanyId && !x.IsDeleted);
+        Roles? role = await FindSingleForAnonymousAuthAsync(_rolesRepository,
+            x => x.RolesId == user.RoleId && x.CompanyId == user.CompanyId && !x.IsDeleted);
+        if (role is null && string.IsNullOrWhiteSpace(user.RoleId))
+        {
+            var company = await FindSingleForAnonymousAuthAsync(_companyRepository, x =>
+                x.CompanyId == user.CompanyId && x.PrimaryContact == user.UserId && x.Status && !x.IsDeleted);
+            if (company is not null)
+            {
+                role = await FindSingleForAnonymousAuthAsync(_rolesRepository, x =>
+                    x.CompanyId == user.CompanyId && x.RoleType == (int)EnumsHelper.Roles.Administrator && !x.IsDeleted);
+                if (role is not null)
+                {
+                    user.RoleId = role.RolesId;
+                    await _employeeRepository.Update(Builders<EmpUser>.Filter.Eq(x => x.UserId, user.UserId), user);
+                }
+            }
+        }
         if (role == null)
         {
             result.Success = false;
@@ -150,7 +168,8 @@ public class AccountServices : IAccountServices
         email = email.Trim();
         // Employees who have not created an initial password must still be able
         // to prove mailbox ownership and create one through this flow.
-        var emp = await _employeeRepository.FirstOrDefault(x => x.Email == email && x.Status && !x.IsDeleted);
+        var emp = await FindSingleForAnonymousAuthAsync(_employeeRepository,
+            x => x.Email.Equals(email, StringComparison.OrdinalIgnoreCase) && x.Status && !x.IsDeleted);
         // Do not reveal whether an address exists, but return the same accepted
         // response used for a real reset request.
         if (emp is null)
@@ -174,7 +193,7 @@ public class AccountServices : IAccountServices
         if (!tokenResult.Success)
             return new Result { Success=false, StatusCode=StatusCodes.Status500InternalServerError, Message="Unable to create a password reset request." };
 
-        Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == emp.CompanyId);
+        Company? company = await FindSingleForAnonymousAuthAsync(_companyRepository, x => x.CompanyId == emp.CompanyId);
         RepositoryEmailTemplate.TryGet(EnumsHelper.MailType.ResetPassword, out var templateSubject, out var templateBody);
         var resetLink = $"{ConfigManager.AppSettings.AppUrl.TrimEnd('/')}/auth/createpassword?token={Uri.EscapeDataString(token)}";
         var bodyTemplate = string.IsNullOrWhiteSpace(templateBody) ? "<p>Hello [EmployeeName],</p><p>Reset your password using this link: <a href=\"[PasswordResetLink]\">Reset password</a>.</p><p>This link expires in [LinkExpiryTime].</p>" : templateBody;
@@ -238,7 +257,8 @@ public class AccountServices : IAccountServices
             return result;
         }
 
-        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userSecurityToken.UserId && x.Status && !x.IsDeleted);
+        EmpUser? user = await FindSingleForAnonymousAuthAsync(_employeeRepository,
+            x => x.UserId == userSecurityToken.UserId && x.Status && !x.IsDeleted);
         if (user is null) return result;
         user.Password = AuthenticationHandler.HashedPassword(model.NewPassword);
         user.IsEmailVerified = true;
@@ -287,7 +307,8 @@ public class AccountServices : IAccountServices
             return result;
         }
 
-        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userSecurityToken.UserId && x.Status);
+        EmpUser? user = await FindSingleForAnonymousAuthAsync(_employeeRepository,
+            x => x.UserId == userSecurityToken.UserId && x.Status && !x.IsDeleted);
         if (user is null)
         {
             result.StatusCode = CustomStatusCode.EmployeeNotExist;
@@ -319,7 +340,7 @@ public class AccountServices : IAccountServices
         if (string.IsNullOrWhiteSpace(email))
             return accepted;
 
-        EmpUser? user = await _employeeRepository.FirstOrDefault(x =>
+        EmpUser? user = await FindSingleForAnonymousAuthAsync(_employeeRepository, x =>
             x.Email.Equals(email.Trim(), StringComparison.OrdinalIgnoreCase) && x.Status && !x.IsDeleted);
         if (user is null || user.IsEmailVerified)
             return accepted;
@@ -344,7 +365,7 @@ public class AccountServices : IAccountServices
         if (!tokenResult.Success)
             return new Result { Success = false, StatusCode = StatusCodes.Status500InternalServerError, Message = "Unable to create an email verification link." };
 
-        Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == user.CompanyId);
+        Company? company = await FindSingleForAnonymousAuthAsync(_companyRepository, x => x.CompanyId == user.CompanyId);
         string verifyLink = EmailVerificationUrlBuilder.Build(ConfigManager.AppSettings.APIUrl, token);
         var delivery = await _middlewareService.EmailSendAndSaveWithResult(new EmpEmailLogs
         {
@@ -387,13 +408,14 @@ public class AccountServices : IAccountServices
             result.StatusCode = CustomStatusCode.RefreshTokenExpired;
             return result;
         }
-        EmpUser? empUser = await _employeeRepository.FirstOrDefault(x => x.UserId == storedRefreshToken.UserId && x.Status && !x.IsDeleted);
+        EmpUser? empUser = await FindSingleForAnonymousAuthAsync(_employeeRepository,
+            x => x.UserId == storedRefreshToken.UserId && x.Status && !x.IsDeleted);
         if (empUser == null)
         {
             result.StatusCode = CustomStatusCode.InvalidRefreshToken;
             return result;
         }
-        Roles? role = await _rolesRepository.FirstOrDefault(r =>
+        Roles? role = await FindSingleForAnonymousAuthAsync(_rolesRepository, r =>
             r.CompanyId == empUser.CompanyId &&
             r.RolesId == empUser.RoleId &&
             !r.IsDeleted &&
@@ -450,6 +472,32 @@ public class AccountServices : IAccountServices
         storedRefreshToken.RevokedAt = DateTime.UtcNow;
         result = await _refreshTokenRepository.Update(whereCondition, storedRefreshToken);
         return result;
+    }
+
+    /// <summary>
+    /// Resolves an identity from a server-owned credential/token path before a JWT exists.
+    /// This is deliberately limited to AccountServices anonymous flows: callers never provide
+    /// a company ID, and the resolved user determines the company/role checks that follow.
+    /// Normal application reads must continue to use the tenant-scoped repository methods.
+    /// </summary>
+    private static async Task<TEntity?> FindSingleForAnonymousAuthAsync<TEntity>(
+        IMongoDbRepository<TEntity> repository,
+        Expression<Func<TEntity, bool>> filter)
+    {
+        // Keep the ordinary scoped path for callers that do have a tenant context.
+        // Anonymous account endpoints have no JWT yet, so their scoped lookup returns
+        // no records and only then may they use the explicit server-owned fallback.
+        var scopedMatch = await repository.FirstOrDefault(filter);
+        if (scopedMatch is not null)
+        {
+            return scopedMatch;
+        }
+
+        var matches = (await repository.GetAll(filter, WithDeletedObjects: false, withDefaultFilter: false))
+            .Take(2)
+            .ToList();
+
+        return matches.Count == 1 ? matches[0] : default;
     }
 
 }

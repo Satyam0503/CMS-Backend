@@ -21,34 +21,32 @@ namespace Codeji.CMS.API.App_Start
             {
                 throw new ArgumentNullException(nameof(context));
             }
-            // check if user id is present in request and path is not in pathForNOCompanyIdRequired then return unauthorized
+            // These routes establish/recover identity before a valid JWT exists. A stale
+            // browser token must not turn login into an "Invalid Company Id" request.
+            // They resolve any company only from the server-owned credential/token flow.
+            if (IsTenantValidationExemptPath(context.Request.Path))
+            {
+                return context;
+            }
 
-            string[] pathForNOCompanyIdRequired = [
-                 "/api/account/antiforgerytoken/" ,
-                 "/api/app/checkAppVersion",
-                 "/api/account/register",
-                 "/api/account/login",
-                 "/api/account/refresh-token",
-                 "/api/account/verify-email",
-                 "/api/account/resend-email-verification",
-                 "/api/CreateNewPassword",
-                 "/api/account/CreateNewPassword",
-                 "/api/account/ResetPassword",
-                 "/api/company/career",
-                 "/api/public",
-                 "/api/VerificationCaptch",
-                 "/api/SendEmail",
-                 "/fs/",
-                ];
             IEmployeeService? _employeeService = context.RequestServices.GetService(typeof(IEmployeeService)) as IEmployeeService;
             ICompanyService? _companyService = context.RequestServices.GetService(typeof(ICompanyService)) as ICompanyService;
 
             string company_Id = CurrentContext.CompanyId(_IhttpContextAccessor);
             string userId = CurrentContext.UserId(_IhttpContextAccessor);
+
+            // Repository reads made by the validation checks below are tenant-scoped.
+            // Make the already authenticated JWT claim available before those reads;
+            // otherwise every valid token is evaluated as having no tenant context and
+            // is incorrectly rejected as "Invalid Company Id".
+            if (!string.IsNullOrWhiteSpace(company_Id))
+            {
+                context.Items["CompanyId"] = company_Id;
+            }
+
             #region check company id and user id are active
-            //  company id not present in request and path not in pathForNOCompanyIdRequired then return unauthorized
-            if (string.IsNullOrEmpty(company_Id) && !pathForNOCompanyIdRequired.Any(x =>
-                context.Request.Path.Value?.Contains(x, StringComparison.OrdinalIgnoreCase) == true))
+            // Authenticated application routes always require a JWT-derived company ID.
+            if (string.IsNullOrEmpty(company_Id))
             {
                 context.Response.StatusCode = (int)System.Net.HttpStatusCode.Unauthorized;
                 await context.Response.WriteAsync("Required Company Id");
@@ -115,5 +113,22 @@ namespace Codeji.CMS.API.App_Start
             return context;
 
         }
+
+        private static bool IsTenantValidationExemptPath(PathString path) =>
+            path.StartsWithSegments("/api/account/antiforgerytoken") ||
+            path.StartsWithSegments("/api/app/checkAppVersion") ||
+            path.StartsWithSegments("/api/account/register") ||
+            path.StartsWithSegments("/api/account/login") ||
+            path.StartsWithSegments("/api/account/refresh-token") ||
+            path.StartsWithSegments("/api/account/verify-email") ||
+            path.StartsWithSegments("/api/account/resend-email-verification") ||
+            path.StartsWithSegments("/api/CreateNewPassword") ||
+            path.StartsWithSegments("/api/account/CreateNewPassword") ||
+            path.StartsWithSegments("/api/account/ResetPassword") ||
+            path.StartsWithSegments("/api/company/career") ||
+            path.StartsWithSegments("/api/public") ||
+            path.StartsWithSegments("/api/VerificationCaptch") ||
+            path.StartsWithSegments("/api/SendEmail") ||
+            path.StartsWithSegments("/fs/");
     }
 }

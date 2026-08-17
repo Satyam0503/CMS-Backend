@@ -94,7 +94,8 @@ namespace Codeji.CMS.API.Controllers
         [Authorize(Policy = "AdminOnly")]
         public async Task<Result<RoleModel>> GetRoleById(string roleId)
         {
-            var data = await _roleService.GetRoleById(roleId);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var data = await _roleService.GetRoleById(roleId, companyId);
             return new Result<RoleModel>()
             {
                 StatusCode = 200,

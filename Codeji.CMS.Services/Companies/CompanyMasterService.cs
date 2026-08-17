@@ -97,7 +97,7 @@ public class CompanyMasterService : ICompanyMasterService
         {
             DepartmentId = d.DepartmentId,
             IsActive = d.IsActive,
-            Titles = d.Titles.ToDictionary(keySelector: dt => dt.Language, elementSelector: dt => dt.Label),
+            Titles = DefaultCompanySeeds.GetTitlesWithKnownTranslations(d.Titles),
         });
         result.MethodResults = data.ToList();
         result.Success = true;
@@ -190,7 +190,7 @@ public class CompanyMasterService : ICompanyMasterService
             JobTitleId = jt.JobTitleId,
             DepartmentId = jt.DepartmentId,
             IsActive = jt.IsActive,
-            Titles = jt.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label),
+            Titles = DefaultCompanySeeds.GetTitlesWithKnownTranslations(jt.Titles),
         });
         result.MethodResults = data.ToList();
         result.Success = true;
@@ -345,6 +345,7 @@ public class CompanyMasterService : ICompanyMasterService
         CustomAttribute customAttribute = new()
         {
             CustomAttributeId = Guid.NewGuid().ToString(),
+            CompanyId = companyId,
             CustomAttributeTitle = [],
             CustomAttributeNumber = totalAttribute + 1
         };
@@ -378,6 +379,21 @@ public class CompanyMasterService : ICompanyMasterService
         CustomAttribute? customAttribute = await _customAttributeRepository.FirstOrDefault(ca => ca.CompanyId == companyId && ca.CustomAttributeId == customAttributeId);
         if (customAttribute == null) return result;
         IEnumerable<CustomAttributeValue> customAttributeValuesList = await _customAttributeValueRepository.GetAll(v => v.CompanyId == companyId && v.CustomAttributeId == customAttributeId);
+        // Older value rows could be created without CompanyId. The parent attribute
+        // has already been verified for this company, and CustomAttributeId is unique,
+        // so these rows can be safely repaired and returned to the editor.
+        var orphanedValues = await _customAttributeValueRepository.GetAll(
+            v => v.CustomAttributeId == customAttributeId && string.IsNullOrWhiteSpace(v.CompanyId),
+            withDefaultFilter: false);
+        foreach (var orphanedValue in orphanedValues)
+        {
+            orphanedValue.CompanyId = companyId;
+            await _customAttributeValueRepository.Update(
+                Builders<CustomAttributeValue>.Filter.Eq(v => v.CustomAttributeValueId, orphanedValue.CustomAttributeValueId) &
+                Builders<CustomAttributeValue>.Filter.Eq(v => v.CustomAttributeId, customAttributeId),
+                orphanedValue);
+        }
+        customAttributeValuesList = customAttributeValuesList.Concat(orphanedValues);
         if (active.HasValue && active.Value)
         {
             customAttributeValuesList = customAttributeValuesList.Where(v => v.IsActive);
@@ -400,30 +416,99 @@ public class CompanyMasterService : ICompanyMasterService
     }
     public async Task<Result> UpdateCustomAttribute(CustomAttributeRequestDto model, string companyId, string userId)
     {
-        // check custom attribute exist or not
-        Result result = new();
-        Expression<Func<CustomAttribute, bool>> whereCondition = ca => ca.CustomAttributeId == model.CustomAttributeId && ca.CompanyId == companyId;
-        bool isExist = await _customAttributeRepository.Exist(whereCondition);
-        if (!isExist) return result;
-        result = await _customAttributeRepository.UpdateMany(whereCondition, Builders<CustomAttribute>.Update.Set(ca => ca.CustomAttributeTitle, model.CustomAttributeTitle).Set(ca => ca.UpdatedDate, DateTime.UtcNow).Set(ca => ca.UpdatedBy, userId));
-        if (model.CustomAttributeValues.Count != 0)
+        Result result = new() { Success = false };
+        if (string.IsNullOrWhiteSpace(model.CustomAttributeId))
         {
-            List<CustomAttributeValue> customAttributeValues = [];
-            _mapper.Map(model.CustomAttributeValues, customAttributeValues);
-            foreach (CustomAttributeValue data in customAttributeValues)
+            result.Message = "CUSTOM_ATTRIBUTE_ID_REQUIRED";
+            return result;
+        }
+
+        var submittedTitle = model.CustomAttributeTitle ?? [];
+        if (!submittedTitle.Any(title => !string.IsNullOrWhiteSpace(title.Label)))
+        {
+            result.Message = "CUSTOM_ATTRIBUTE_TITLE_REQUIRED";
+            return result;
+        }
+
+        Expression<Func<CustomAttribute, bool>> whereCondition = ca => ca.CustomAttributeId == model.CustomAttributeId && ca.CompanyId == companyId;
+        var existing = await _customAttributeRepository.FirstOrDefault(whereCondition);
+        if (existing is null)
+        {
+            result.Message = "CUSTOM_ATTRIBUTE_NOT_FOUND";
+            return result;
+        }
+
+        // UpdateMany reports an unchanged document as a failure. A later value-only edit
+        // must remain successful when its attribute title was already saved, so only issue
+        // the title update when the actual multilingual title has changed.
+        var titleChanged = !existing.CustomAttributeTitle
+            .OrderBy(x => x.Language, StringComparer.OrdinalIgnoreCase)
+            .SequenceEqual(submittedTitle.OrderBy(x => x.Language, StringComparer.OrdinalIgnoreCase), new MultilingualTitleComparer());
+        if (titleChanged)
+        {
+            result = await _customAttributeRepository.UpdateMany(whereCondition, Builders<CustomAttribute>.Update
+                .Set(ca => ca.CustomAttributeTitle, submittedTitle)
+                .Set(ca => ca.UpdatedDate, DateTime.UtcNow)
+                .Set(ca => ca.UpdatedBy, userId));
+            if (!result.Success) return result;
+        }
+        else
+        {
+            result.Success = true;
+            result.Message = "OK";
+        }
+
+        if (model.CustomAttributeValues?.Count != 0)
+        {
+            // Do not rely on the generic mapper for this persistence boundary.
+            // A new option must retain its submitted titles and receive a stable ID
+            // before it is inserted, so the subsequent read and future edits target
+            // exactly the same company-scoped document.
+            foreach (CustomAttributeValueRequestDto requestedValue in model.CustomAttributeValues)
             {
                 // update if custAttributeValueId is present else add new attribute item
-                if (string.IsNullOrEmpty(data.CustomAttributeValueId))
+                if (string.IsNullOrWhiteSpace(requestedValue.CustomAttributeValueId))
                 {
-                    data.CustomAttributeId = model.CustomAttributeId;
-                    data.CreatedDate = DateTime.UtcNow;
-                    await _customAttributeValueRepository.AddOne(data);
+                    CustomAttributeValue data = new()
+                    {
+                        CustomAttributeValueId = Guid.NewGuid().ToString(),
+                        CustomAttributeId = model.CustomAttributeId,
+                        CompanyId = companyId,
+                        IsActive = requestedValue.IsActive,
+                        Titles = requestedValue.Titles ?? [],
+                        CreatedBy = userId,
+                        CreatedDate = DateTime.UtcNow
+                    };
+                    result = await _customAttributeValueRepository.AddOne(data);
+                    if (!result.Success)
+                    {
+                        return result;
+                    }
+
+                    // A successful write must be readable through the same tenant
+                    // filter used by GetCustomAttributeById. Never report success
+                    // when the option cannot be reloaded for the current company.
+                    CustomAttributeValue? savedValue = await _customAttributeValueRepository.FirstOrDefault(
+                        value => value.CustomAttributeValueId == data.CustomAttributeValueId
+                                 && value.CustomAttributeId == model.CustomAttributeId
+                                 && value.CompanyId == companyId);
+                    if (savedValue is null)
+                    {
+                        return new Result
+                        {
+                            Success = false,
+                            Message = "CUSTOM_ATTRIBUTE_VALUE_SAVE_FAILED"
+                        };
+                    }
                 }
                 else
                 {
-
-                    Expression<Func<CustomAttributeValue, bool>> filter = cav => cav.CustomAttributeValueId == data.CustomAttributeValueId && cav.CustomAttributeId == model.CustomAttributeId && cav.CompanyId == companyId;
-                    await _customAttributeValueRepository.UpdateMany(filter, Builders<CustomAttributeValue>.Update.Set(v => v.UpdatedDate, DateTime.UtcNow).Set(v => v.UpdatedBy, userId).Set(v => v.Titles, data.Titles).Set(v => v.IsActive, data.IsActive));
+                    Expression<Func<CustomAttributeValue, bool>> filter = cav => cav.CustomAttributeValueId == requestedValue.CustomAttributeValueId && cav.CustomAttributeId == model.CustomAttributeId && cav.CompanyId == companyId;
+                    result = await _customAttributeValueRepository.UpdateMany(filter, Builders<CustomAttributeValue>.Update.Set(v => v.UpdatedDate, DateTime.UtcNow).Set(v => v.UpdatedBy, userId).Set(v => v.Titles, requestedValue.Titles ?? []).Set(v => v.IsActive, requestedValue.IsActive));
+                    if (!result.Success)
+                    {
+                        return result;
+                    }
                 }
             }
         }
@@ -438,6 +523,57 @@ public class CompanyMasterService : ICompanyMasterService
         if (customAttributeValue == null) return result;
         customAttributeValue.IsDeleted = true;
         return await _customAttributeValueRepository.Update(expression, customAttributeValue);
+    }
+
+    public async Task<Result> DeleteCustomAttribute(string customAttributeId, string companyId, string userId)
+    {
+        Result result = new() { Success = false };
+        if (string.IsNullOrWhiteSpace(customAttributeId))
+        {
+            result.Message = "CUSTOM_ATTRIBUTE_ID_REQUIRED";
+            return result;
+        }
+
+        Expression<Func<CustomAttribute, bool>> attributeFilter = attribute =>
+            attribute.CustomAttributeId == customAttributeId && attribute.CompanyId == companyId;
+        if (await _customAttributeRepository.FirstOrDefault(attributeFilter) is null)
+        {
+            result.Message = "CUSTOM_ATTRIBUTE_NOT_FOUND";
+            return result;
+        }
+
+        var isUsedByEmployee = await _employeeRepository.Exist(employee =>
+            employee.CompanyId == companyId &&
+            employee.CustomAttributeList.Any(attribute => attribute.CustomAttributeId == customAttributeId));
+        if (isUsedByEmployee)
+        {
+            result.Message = "CUSTOM_ATTRIBUTE_IN_USE";
+            return result;
+        }
+
+        var values = await _customAttributeValueRepository.GetAll(value =>
+            value.CompanyId == companyId && value.CustomAttributeId == customAttributeId);
+        if (values.Any())
+        {
+            result = await _customAttributeValueRepository.UpdateMany(
+                Builders<CustomAttributeValue>.Filter.Eq(value => value.CompanyId, companyId) &
+                Builders<CustomAttributeValue>.Filter.Eq(value => value.CustomAttributeId, customAttributeId),
+                Builders<CustomAttributeValue>.Update
+                    .Set(value => value.IsDeleted, true)
+                    .Set(value => value.UpdatedDate, DateTime.UtcNow)
+                    .Set(value => value.UpdatedBy, userId));
+            if (!result.Success) return result;
+        }
+
+        result = await _customAttributeRepository.UpdateMany(
+            Builders<CustomAttribute>.Filter.Eq(attribute => attribute.CompanyId, companyId) &
+            Builders<CustomAttribute>.Filter.Eq(attribute => attribute.CustomAttributeId, customAttributeId),
+            Builders<CustomAttribute>.Update
+                .Set(attribute => attribute.IsDeleted, true)
+                .Set(attribute => attribute.UpdatedDate, DateTime.UtcNow)
+                .Set(attribute => attribute.UpdatedBy, userId));
+        if (result.Success) result.Message = "CUSTOM_ATTRIBUTE_DELETED";
+        return result;
     }
 }
 

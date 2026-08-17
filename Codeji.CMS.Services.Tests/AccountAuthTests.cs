@@ -82,6 +82,41 @@ public class AccountAuthTests
     }
 
     [Fact]
+    public async Task Login_AnonymousRequest_UsesServerOwnedFallbackWhenTenantScopedLookupHasNoMatch()
+    {
+        var fixture = new AccountFixture();
+        var user = CreateUser();
+        var role = CreateRole(hasAppAccess: true);
+
+        // A login request has no JWT/company context. The normal repository read is
+        // therefore denied by the tenant filter; AccountServices may only fall back
+        // to its explicit anonymous-auth lookup and must derive the company from user.
+        fixture.EmployeeRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>(), false))
+            .ReturnsAsync((EmpUser?)null);
+        fixture.EmployeeRepository
+            .Setup(x => x.GetAll(It.IsAny<Expression<Func<EmpUser, bool>>>(), false, false))
+            .ReturnsAsync([user]);
+        fixture.RoleRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Roles, bool>>>(), false))
+            .ReturnsAsync(role);
+        fixture.RefreshTokenRepository
+            .Setup(x => x.AddOne(It.IsAny<RefreshToken>()))
+            .ReturnsAsync(new Result { Success = true });
+
+        var result = await fixture.Service.VerifyAndGenerateToken(new LoginModel
+        {
+            Email = user.Email,
+            Password = "CorrectPassword1!"
+        });
+
+        Assert.True(result.Success);
+        Assert.Equal(200, result.StatusCode);
+        fixture.EmployeeRepository.Verify(
+            x => x.GetAll(It.IsAny<Expression<Func<EmpUser, bool>>>(), false, false), Times.Once);
+    }
+
+    [Fact]
     public async Task Login_InvalidPassword_IsRejectedWithoutCreatingRefreshToken()
     {
         var fixture = new AccountFixture();
