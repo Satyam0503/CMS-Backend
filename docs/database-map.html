@@ -1,1646 +1,2302 @@
 <title>Codeji Database Map</title>
 <style>
-  @font-face {
-    font-family: 'SystemMono';
-    src: local('SF Mono'), local('Menlo'), local('Monaco'), local('Consolas');
-  }
-
   :root {
     --ground: #f6f5f2;
     --surface: #ffffff;
-    --surface-alt: #eeedea;
-    --border: #d8d5cf;
-    --border-light: #e8e6e1;
-    --text-primary: #1a1917;
-    --text-secondary: #5c5a54;
-    --text-tertiary: #8a877f;
     --accent: #2d6a4f;
-    --accent-light: #d8f3dc;
-    --accent-muted: #40916c;
-    --danger: #c1292e;
-    --danger-light: #fde8e8;
-    --danger-border: #e8a0a0;
-    --warning: #b45309;
-    --warning-light: #fef3c7;
-    --warning-border: #e5c07b;
-    --info: #1e5f8a;
-    --info-light: #dbeafe;
-    --info-border: #93c5fd;
-    --tag-base: #e8e6e1;
-    --tag-text: #5c5a54;
+    --text-primary: #1a1a19;
+    --text-secondary: #52524e;
+    --text-tertiary: #87867e;
+    --border: #d4d3cd;
+    --border-light: #e8e7e2;
+    --search-bg: #ffffff;
+    --search-border: #c4c3be;
+    --tag-bg: #eeedea;
+    --tag-text: #52524e;
+    --card-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --card-shadow-hover: 0 4px 12px rgba(0,0,0,0.08);
+    --filter-bg: #eeedea;
+    --filter-active-bg: var(--accent);
+    --filter-active-text: #ffffff;
+    --issue-critical-bg: #fef2f2;
+    --issue-critical-border: #dc2626;
+    --issue-critical-text: #991b1b;
+    --issue-high-bg: #fff7ed;
+    --issue-high-border: #d97706;
+    --issue-high-text: #92400e;
+    --issue-medium-bg: #fefce8;
+    --issue-medium-border: #ca8a04;
+    --issue-medium-text: #854d0e;
+    --issue-low-bg: #eff6ff;
+    --issue-low-border: #2563eb;
+    --issue-low-text: #1e40af;
+    --domain-company: #0891b2;
     --domain-employees: #2563eb;
     --domain-attendance: #7c3aed;
     --domain-leave: #059669;
     --domain-payroll: #d97706;
     --domain-recruitment: #dc2626;
     --domain-career: #db2777;
-    --domain-company: #0891b2;
     --domain-roles: #4f46e5;
     --domain-calendar: #16a34a;
+    --domain-holiday: #16a34a;
     --domain-notice: #ea580c;
     --domain-notifications: #6366f1;
     --domain-auth: #64748b;
+    --domain-email: #64748b;
     --domain-system: #78716c;
-    --shadow-sm: 0 1px 2px rgba(26,25,23,.06);
-    --shadow-md: 0 4px 12px rgba(26,25,23,.08);
-    --radius: 6px;
+    --domain-company-bg: #ecfeff;
+    --domain-employees-bg: #eff6ff;
+    --domain-attendance-bg: #f5f3ff;
+    --domain-leave-bg: #ecfdf5;
+    --domain-payroll-bg: #fffbeb;
+    --domain-recruitment-bg: #fef2f2;
+    --domain-career-bg: #fdf2f8;
+    --domain-roles-bg: #eef2ff;
+    --domain-calendar-bg: #f0fdf4;
+    --domain-holiday-bg: #f0fdf4;
+    --domain-notice-bg: #fff7ed;
+    --domain-notifications-bg: #eef2ff;
+    --domain-auth-bg: #f8fafc;
+    --domain-email-bg: #f8fafc;
+    --domain-system-bg: #f5f5f4;
+    --expand-icon: #94938d;
+    --pk-color: #b45309;
+    --fk-color: #6d28d9;
+    --field-type-color: #0e7490;
+    --code-bg: #f4f4f0;
+    --scrollbar-thumb: #c4c3be;
+    --scrollbar-track: transparent;
   }
 
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --ground: #141413;
       --surface: #1e1e1c;
-      --surface-alt: #262624;
-      --border: #3a3936;
-      --border-light: #2e2d2b;
-      --text-primary: #e8e6e1;
-      --text-secondary: #a8a59e;
-      --text-tertiary: #6e6b64;
       --accent: #52b788;
-      --accent-light: #1a3a2a;
-      --accent-muted: #74c69d;
-      --danger: #f87171;
-      --danger-light: #3a1a1a;
-      --danger-border: #7f1d1d;
-      --warning: #fbbf24;
-      --warning-light: #3a2a0a;
-      --warning-border: #78350f;
-      --info: #60a5fa;
-      --info-light: #1a2a3a;
-      --info-border: #1e40af;
-      --tag-base: #2e2d2b;
-      --tag-text: #a8a59e;
+      --text-primary: #e8e7e2;
+      --text-secondary: #a3a299;
+      --text-tertiary: #6b6b63;
+      --border: #333330;
+      --border-light: #2a2a27;
+      --search-bg: #252523;
+      --search-border: #444440;
+      --tag-bg: #2a2a27;
+      --tag-text: #a3a299;
+      --card-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+      --card-shadow-hover: 0 4px 12px rgba(0,0,0,0.4);
+      --filter-bg: #2a2a27;
+      --filter-active-bg: var(--accent);
+      --filter-active-text: #141413;
+      --issue-critical-bg: #2a1515;
+      --issue-critical-border: #f87171;
+      --issue-critical-text: #fca5a5;
+      --issue-high-bg: #2a1f0a;
+      --issue-high-border: #fbbf24;
+      --issue-high-text: #fde68a;
+      --issue-medium-bg: #2a270a;
+      --issue-medium-border: #facc15;
+      --issue-medium-text: #fef08a;
+      --issue-low-bg: #0a1a2a;
+      --issue-low-border: #60a5fa;
+      --issue-low-text: #93c5fd;
+      --domain-company: #22d3ee;
       --domain-employees: #60a5fa;
       --domain-attendance: #a78bfa;
       --domain-leave: #34d399;
       --domain-payroll: #fbbf24;
       --domain-recruitment: #f87171;
       --domain-career: #f472b6;
-      --domain-company: #22d3ee;
       --domain-roles: #818cf8;
       --domain-calendar: #4ade80;
+      --domain-holiday: #4ade80;
       --domain-notice: #fb923c;
       --domain-notifications: #a5b4fc;
       --domain-auth: #94a3b8;
+      --domain-email: #94a3b8;
       --domain-system: #a8a29e;
-      --shadow-sm: 0 1px 2px rgba(0,0,0,.2);
-      --shadow-md: 0 4px 12px rgba(0,0,0,.3);
+      --domain-company-bg: #0c2a2e;
+      --domain-employees-bg: #0c1a2e;
+      --domain-attendance-bg: #1a0c2e;
+      --domain-leave-bg: #0c2e1a;
+      --domain-payroll-bg: #2e250c;
+      --domain-recruitment-bg: #2e0c0c;
+      --domain-career-bg: #2e0c1e;
+      --domain-roles-bg: #0c0c2e;
+      --domain-calendar-bg: #0c2e0c;
+      --domain-holiday-bg: #0c2e0c;
+      --domain-notice-bg: #2e1a0c;
+      --domain-notifications-bg: #0c0c2e;
+      --domain-auth-bg: #1a1e22;
+      --domain-email-bg: #1a1e22;
+      --domain-system-bg: #1e1e1a;
+      --expand-icon: #6b6b63;
+      --pk-color: #fbbf24;
+      --fk-color: #a78bfa;
+      --field-type-color: #22d3ee;
+      --code-bg: #252523;
+      --scrollbar-thumb: #444440;
+      --scrollbar-track: transparent;
     }
   }
 
   :root[data-theme="dark"] {
     --ground: #141413;
     --surface: #1e1e1c;
-    --surface-alt: #262624;
-    --border: #3a3936;
-    --border-light: #2e2d2b;
-    --text-primary: #e8e6e1;
-    --text-secondary: #a8a59e;
-    --text-tertiary: #6e6b64;
     --accent: #52b788;
-    --accent-light: #1a3a2a;
-    --accent-muted: #74c69d;
-    --danger: #f87171;
-    --danger-light: #3a1a1a;
-    --danger-border: #7f1d1d;
-    --warning: #fbbf24;
-    --warning-light: #3a2a0a;
-    --warning-border: #78350f;
-    --info: #60a5fa;
-    --info-light: #1a2a3a;
-    --info-border: #1e40af;
-    --tag-base: #2e2d2b;
-    --tag-text: #a8a59e;
+    --text-primary: #e8e7e2;
+    --text-secondary: #a3a299;
+    --text-tertiary: #6b6b63;
+    --border: #333330;
+    --border-light: #2a2a27;
+    --search-bg: #252523;
+    --search-border: #444440;
+    --tag-bg: #2a2a27;
+    --tag-text: #a3a299;
+    --card-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+    --card-shadow-hover: 0 4px 12px rgba(0,0,0,0.4);
+    --filter-bg: #2a2a27;
+    --filter-active-bg: var(--accent);
+    --filter-active-text: #141413;
+    --issue-critical-bg: #2a1515;
+    --issue-critical-border: #f87171;
+    --issue-critical-text: #fca5a5;
+    --issue-high-bg: #2a1f0a;
+    --issue-high-border: #fbbf24;
+    --issue-high-text: #fde68a;
+    --issue-medium-bg: #2a270a;
+    --issue-medium-border: #facc15;
+    --issue-medium-text: #fef08a;
+    --issue-low-bg: #0a1a2a;
+    --issue-low-border: #60a5fa;
+    --issue-low-text: #93c5fd;
+    --domain-company: #22d3ee;
     --domain-employees: #60a5fa;
     --domain-attendance: #a78bfa;
     --domain-leave: #34d399;
     --domain-payroll: #fbbf24;
     --domain-recruitment: #f87171;
     --domain-career: #f472b6;
-    --domain-company: #22d3ee;
     --domain-roles: #818cf8;
     --domain-calendar: #4ade80;
+    --domain-holiday: #4ade80;
     --domain-notice: #fb923c;
     --domain-notifications: #a5b4fc;
     --domain-auth: #94a3b8;
+    --domain-email: #94a3b8;
     --domain-system: #a8a29e;
-    --shadow-sm: 0 1px 2px rgba(0,0,0,.2);
-    --shadow-md: 0 4px 12px rgba(0,0,0,.3);
+    --domain-company-bg: #0c2a2e;
+    --domain-employees-bg: #0c1a2e;
+    --domain-attendance-bg: #1a0c2e;
+    --domain-leave-bg: #0c2e1a;
+    --domain-payroll-bg: #2e250c;
+    --domain-recruitment-bg: #2e0c0c;
+    --domain-career-bg: #2e0c1e;
+    --domain-roles-bg: #0c0c2e;
+    --domain-calendar-bg: #0c2e0c;
+    --domain-holiday-bg: #0c2e0c;
+    --domain-notice-bg: #2e1a0c;
+    --domain-notifications-bg: #0c0c2e;
+    --domain-auth-bg: #1a1e22;
+    --domain-email-bg: #1a1e22;
+    --domain-system-bg: #1e1e1a;
+    --expand-icon: #6b6b63;
+    --pk-color: #fbbf24;
+    --fk-color: #a78bfa;
+    --field-type-color: #22d3ee;
+    --code-bg: #252523;
+    --scrollbar-thumb: #444440;
+    --scrollbar-track: transparent;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     background: var(--ground);
     color: var(--text-primary);
+    font-family: system-ui, -apple-system, sans-serif;
     line-height: 1.5;
-    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
   }
 
-  .page-header {
-    padding: 2.5rem 2rem 1.5rem;
-    max-width: 1400px;
-    margin: 0 auto;
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+  ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 24px 32px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
   }
 
-  .page-header h1 {
-    font-size: 1.75rem;
+  .header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .header-title {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .header-title h1 {
+    font-size: 22px;
     font-weight: 700;
     letter-spacing: -0.02em;
-    margin-bottom: 0.25rem;
+    color: var(--text-primary);
   }
 
-  .page-header p {
-    color: var(--text-secondary);
-    font-size: 0.9rem;
+  .header-title .entity-count {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    background: var(--tag-bg);
+    padding: 2px 10px;
+    border-radius: 12px;
   }
 
-  .stats-bar {
+  .header-stats {
     display: flex;
-    gap: 1.5rem;
-    padding: 0 2rem;
-    max-width: 1400px;
-    margin: 0 auto 1rem;
+    gap: 16px;
     flex-wrap: wrap;
   }
 
-  .stat {
+  .stat-badge {
     display: flex;
-    align-items: baseline;
-    gap: 0.4rem;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid;
   }
 
-  .stat-value {
-    font-family: 'SystemMono', monospace;
-    font-size: 1.4rem;
-    font-weight: 700;
-    color: var(--accent);
-    font-variant-numeric: tabular-nums;
+  .stat-badge.critical { background: var(--issue-critical-bg); border-color: var(--issue-critical-border); color: var(--issue-critical-text); }
+  .stat-badge.high { background: var(--issue-high-bg); border-color: var(--issue-high-border); color: var(--issue-high-text); }
+  .stat-badge.medium { background: var(--issue-medium-bg); border-color: var(--issue-medium-border); color: var(--issue-medium-text); }
+  .stat-badge.low { background: var(--issue-low-bg); border-color: var(--issue-low-border); color: var(--issue-low-text); }
+
+  .stat-badge .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
   }
 
-  .stat-label {
-    font-size: 0.8rem;
+  .header-controls {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .search-box {
+    position: relative;
+    flex: 1 1 280px;
+    min-width: 200px;
+  }
+
+  .search-box input {
+    width: 100%;
+    padding: 8px 12px 8px 36px;
+    border: 1px solid var(--search-border);
+    border-radius: 8px;
+    background: var(--search-bg);
+    color: var(--text-primary);
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .search-box input:focus {
+    border-color: var(--accent);
+  }
+
+  .search-box input::placeholder {
     color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
   }
 
-  .controls {
+  .search-box svg {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-tertiary);
+    pointer-events: none;
+  }
+
+  .filter-group {
     display: flex;
-    gap: 0.5rem;
-    padding: 0 2rem;
-    max-width: 1400px;
-    margin: 0 auto 1.5rem;
+    gap: 4px;
     flex-wrap: wrap;
     align-items: center;
   }
 
   .filter-btn {
-    padding: 0.35rem 0.75rem;
+    padding: 6px 12px;
     border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--surface);
+    border-radius: 6px;
+    background: var(--filter-bg);
     color: var(--text-secondary);
-    font-size: 0.78rem;
+    font-size: 12px;
+    font-weight: 500;
+    font-family: inherit;
     cursor: pointer;
     transition: all 0.15s;
     white-space: nowrap;
-    font-family: inherit;
   }
 
   .filter-btn:hover {
     border-color: var(--accent);
-    color: var(--accent);
+    color: var(--text-primary);
   }
 
   .filter-btn.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
+    background: var(--filter-active-bg);
+    color: var(--filter-active-text);
+    border-color: var(--filter-active-bg);
   }
 
-  .filter-btn.issues-only {
-    border-color: var(--danger);
-    color: var(--danger);
+  .domain-filters {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    align-items: center;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-light);
   }
 
-  .filter-btn.issues-only.active {
-    background: var(--danger);
-    border-color: var(--danger);
-    color: #fff;
-  }
-
-  .search-box {
-    flex: 1;
-    min-width: 200px;
-    max-width: 320px;
-    padding: 0.4rem 0.75rem;
+  .domain-btn {
+    padding: 4px 10px;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
-    color: var(--text-primary);
-    font-size: 0.85rem;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 500;
     font-family: inherit;
-    outline: none;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 5px;
   }
 
-  .search-box:focus {
+  .domain-btn .domain-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  .domain-btn:hover {
+    background: var(--tag-bg);
+  }
+
+  .domain-btn.active {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent-light);
-  }
-
-  .search-box::placeholder { color: var(--text-tertiary); }
-
-  .issues-panel {
-    padding: 0 2rem;
-    max-width: 1400px;
-    margin: 0 auto 1.5rem;
-  }
-
-  .issues-summary {
-    background: var(--danger-light);
-    border: 1px solid var(--danger-border);
-    border-radius: var(--radius);
-    padding: 1rem 1.25rem;
-  }
-
-  .issues-summary h3 {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--danger);
-    margin-bottom: 0.6rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .issue-list {
-    list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-
-  .issue-item {
-    font-size: 0.82rem;
     color: var(--text-primary);
-    display: flex;
-    gap: 0.5rem;
-    align-items: flex-start;
-    line-height: 1.45;
+    background: var(--tag-bg);
   }
 
-  .issue-severity {
-    flex-shrink: 0;
-    font-family: 'SystemMono', monospace;
-    font-size: 0.7rem;
-    font-weight: 600;
-    padding: 0.1rem 0.4rem;
-    border-radius: 3px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    margin-top: 0.1rem;
-  }
-
-  .sev-critical { background: var(--danger); color: #fff; }
-  .sev-high { background: var(--warning); color: #fff; }
-  .sev-medium { background: var(--warning-light); color: var(--warning); border: 1px solid var(--warning-border); }
-  .sev-low { background: var(--info-light); color: var(--info); border: 1px solid var(--info-border); }
-
-  .domains-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
-    gap: 1.25rem;
-    padding: 0 2rem 3rem;
-    max-width: 1400px;
+  .content {
+    padding: 24px 32px 48px;
+    max-width: 1600px;
     margin: 0 auto;
   }
 
-  .domain-group {
-    background: var(--surface);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-sm);
-    overflow: hidden;
+  .visible-count {
+    font-size: 13px;
+    color: var(--text-tertiary);
+    margin-bottom: 16px;
+    font-weight: 500;
   }
 
-  .domain-group.has-issues {
-    border-color: var(--warning-border);
+  .domain-section {
+    margin-bottom: 32px;
   }
 
   .domain-header {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--border-light);
-    cursor: pointer;
-    user-select: none;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--border-light);
   }
 
-  .domain-header:hover {
-    background: var(--surface-alt);
+  .domain-header .domain-color-bar {
+    width: 4px;
+    height: 24px;
+    border-radius: 2px;
   }
 
-  .domain-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .domain-name {
+  .domain-header h2 {
+    font-size: 16px;
     font-weight: 600;
-    font-size: 0.88rem;
-    flex: 1;
+    letter-spacing: -0.01em;
   }
 
-  .domain-count {
-    font-family: 'SystemMono', monospace;
-    font-size: 0.75rem;
+  .domain-header .domain-count {
+    font-size: 12px;
     color: var(--text-tertiary);
-    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    background: var(--tag-bg);
+    padding: 1px 8px;
+    border-radius: 10px;
   }
 
-  .domain-chevron {
-    color: var(--text-tertiary);
-    transition: transform 0.2s;
-    font-size: 0.7rem;
-  }
-
-  .domain-group.collapsed .domain-chevron {
-    transform: rotate(-90deg);
-  }
-
-  .domain-group.collapsed .domain-body {
-    display: none;
-  }
-
-  .domain-body {
-    padding: 0.5rem;
+  .entity-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 12px;
   }
 
   .entity-card {
-    border: 1px solid var(--border-light);
-    border-radius: 4px;
-    margin-bottom: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
     overflow: hidden;
-    transition: border-color 0.15s;
-  }
-
-  .entity-card:last-child {
-    margin-bottom: 0;
+    box-shadow: var(--card-shadow);
+    transition: box-shadow 0.2s, border-color 0.2s;
   }
 
   .entity-card:hover {
-    border-color: var(--accent);
+    box-shadow: var(--card-shadow-hover);
   }
 
-  .entity-card.has-issue {
-    border-left: 3px solid var(--warning);
+  .entity-card.has-issues {
+    border-left: 3px solid;
   }
 
-  .entity-card.has-critical-issue {
-    border-left: 3px solid var(--danger);
+  .entity-card.issue-critical { border-left-color: var(--issue-critical-border); }
+  .entity-card.issue-high { border-left-color: var(--issue-high-border); }
+  .entity-card.issue-medium { border-left-color: var(--issue-medium-border); }
+  .entity-card.issue-low { border-left-color: var(--issue-low-border); }
+
+  .card-header {
+    padding: 12px 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    user-select: none;
   }
 
-  .entity-head {
+  .card-header:hover {
+    background: var(--tag-bg);
+  }
+
+  .card-header-left {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .card-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
-    cursor: pointer;
-    user-select: none;
-    background: var(--surface-alt);
-  }
-
-  .entity-head:hover {
-    background: var(--border-light);
-  }
-
-  .entity-name {
-    font-family: 'SystemMono', monospace;
-    font-size: 0.82rem;
-    font-weight: 600;
-    flex: 1;
-  }
-
-  .entity-tags {
-    display: flex;
-    gap: 0.3rem;
+    gap: 8px;
     flex-wrap: wrap;
   }
 
-  .tag {
-    font-size: 0.65rem;
-    padding: 0.1rem 0.4rem;
-    border-radius: 3px;
-    background: var(--tag-base);
-    color: var(--tag-text);
-    font-family: 'SystemMono', monospace;
-    white-space: nowrap;
-  }
-
-  .tag-base { background: var(--accent-light); color: var(--accent); }
-  .tag-standalone { background: var(--warning-light); color: var(--warning); border: 1px solid var(--warning-border); }
-  .tag-no-tenant { background: var(--danger-light); color: var(--danger); border: 1px solid var(--danger-border); }
-  .tag-no-audit { background: var(--info-light); color: var(--info); border: 1px solid var(--info-border); }
-  .tag-global { background: var(--tag-base); color: var(--text-tertiary); }
-
-  .entity-expand {
-    color: var(--text-tertiary);
-    font-size: 0.65rem;
-    transition: transform 0.15s;
-  }
-
-  .entity-card.collapsed .entity-expand {
-    transform: rotate(-90deg);
-  }
-
-  .entity-card.collapsed .entity-body {
-    display: none;
-  }
-
-  .entity-body {
-    padding: 0.5rem 0.75rem 0.6rem;
-    font-size: 0.78rem;
-  }
-
-  .props-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.76rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .props-table th {
-    text-align: left;
+  .card-name .domain-tag {
+    font-size: 10px;
     font-weight: 600;
-    color: var(--text-tertiary);
-    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  .card-meta {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+  }
+
+  .meta-tag {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+
+  .meta-tag.base { background: var(--tag-bg); color: var(--accent); }
+  .meta-tag.standalone { background: var(--tag-bg); color: var(--text-tertiary); }
+  .meta-tag.tenant { background: var(--tag-bg); color: var(--domain-leave); }
+  .meta-tag.no-tenant { background: var(--issue-medium-bg); color: var(--issue-medium-text); }
+  .meta-tag.field-count { background: var(--tag-bg); color: var(--text-tertiary); }
+
+  .expand-icon {
+    color: var(--expand-icon);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .entity-card.expanded .expand-icon {
+    transform: rotate(180deg);
+  }
+
+  .card-body {
+    display: none;
+    border-top: 1px solid var(--border-light);
+    padding: 0;
+  }
+
+  .entity-card.expanded .card-body {
+    display: block;
+  }
+
+  .issue-banner {
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.4;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .issue-banner.critical { background: var(--issue-critical-bg); color: var(--issue-critical-text); }
+  .issue-banner.high { background: var(--issue-high-bg); color: var(--issue-high-text); }
+  .issue-banner.medium { background: var(--issue-medium-bg); color: var(--issue-medium-text); }
+  .issue-banner.low { background: var(--issue-low-bg); color: var(--issue-low-text); }
+
+  .issue-banner .issue-label {
+    font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    padding: 0.25rem 0.4rem;
+    font-size: 10px;
+    margin-right: 6px;
+  }
+
+  .field-list {
+    padding: 0;
+    margin: 0;
+    list-style: none;
+  }
+
+  .field-item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 5px 16px;
+    font-size: 13px;
     border-bottom: 1px solid var(--border-light);
   }
 
-  .props-table td {
-    padding: 0.2rem 0.4rem;
-    border-bottom: 1px solid var(--border-light);
-    vertical-align: top;
-  }
-
-  .props-table tr:last-child td {
+  .field-item:last-child {
     border-bottom: none;
   }
 
-  .prop-name {
-    font-family: 'SystemMono', monospace;
+  .field-item:nth-child(even) {
+    background: rgba(128,128,128,0.04);
+  }
+
+  .field-markers {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+    width: 30px;
+    justify-content: flex-end;
+  }
+
+  .field-marker {
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 3px;
+    padding: 0 3px;
+  }
+
+  .field-marker.pk {
+    color: var(--pk-color);
+    font-size: 13px;
+  }
+
+  .field-marker.fk {
+    color: var(--fk-color);
+    font-size: 12px;
+  }
+
+  .field-name {
+    font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
     font-weight: 500;
     color: var(--text-primary);
+    flex-shrink: 0;
+  }
+
+  .field-type {
+    font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    color: var(--field-type-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .prop-name.is-pk {
-    color: var(--accent);
+  .field-attrs {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
   }
 
-  .prop-name.is-fk {
-    color: var(--domain-employees);
-  }
-
-  .prop-type {
-    font-family: 'SystemMono', monospace;
-    color: var(--text-secondary);
-    font-size: 0.72rem;
-  }
-
-  .prop-note {
-    color: var(--text-tertiary);
-    font-size: 0.7rem;
-    font-style: italic;
-  }
-
-  .entity-issue {
-    margin-top: 0.5rem;
-    padding: 0.4rem 0.6rem;
-    background: var(--warning-light);
-    border: 1px solid var(--warning-border);
-    border-radius: 3px;
-    font-size: 0.75rem;
-    color: var(--text-primary);
-    line-height: 1.4;
-  }
-
-  .entity-issue.critical {
-    background: var(--danger-light);
-    border-color: var(--danger-border);
-  }
-
-  .entity-issue strong {
-    color: var(--danger);
-    font-size: 0.7rem;
+  .field-attr {
+    font-size: 9px;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.03em;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: var(--tag-bg);
+    color: var(--text-tertiary);
+    white-space: nowrap;
   }
 
-  .entity-refs {
-    margin-top: 0.4rem;
-    padding-top: 0.4rem;
-    border-top: 1px dashed var(--border);
-    font-size: 0.73rem;
-    color: var(--text-secondary);
+  .refs-section {
+    padding: 8px 16px 10px;
+    border-top: 1px solid var(--border-light);
+    background: var(--code-bg);
   }
 
-  .ref-arrow {
-    color: var(--accent-muted);
-    font-weight: 600;
+  .refs-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-tertiary);
+    margin-bottom: 4px;
   }
 
-  .hidden { display: none !important; }
+  .ref-item {
+    font-size: 12px;
+    color: var(--fk-color);
+    font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+    padding: 2px 0;
+  }
+
+  .ref-item span {
+    color: var(--text-tertiary);
+    font-size: 11px;
+  }
 
   .no-results {
-    grid-column: 1 / -1;
     text-align: center;
-    padding: 3rem;
+    padding: 64px 24px;
     color: var(--text-tertiary);
-    font-size: 0.9rem;
+    font-size: 15px;
   }
 
-  @media (max-width: 900px) {
-    .domains-grid { grid-template-columns: 1fr; }
-    .page-header, .stats-bar, .controls, .issues-panel, .domains-grid { padding-left: 1rem; padding-right: 1rem; }
+  .no-results .no-results-icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+    opacity: 0.4;
+  }
+
+  .highlight {
+    background: rgba(45, 106, 79, 0.2);
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+
+  @media (max-width: 768px) {
+    .header { padding: 16px; }
+    .content { padding: 16px 16px 40px; }
+    .entity-grid { grid-template-columns: 1fr; }
+    .header-top { flex-direction: column; align-items: flex-start; }
+    .header-controls { width: 100%; }
+    .search-box { flex: 1 1 100%; }
   }
 </style>
 
-<div class="page-header">
-  <h1>Codeji CMS Database Map</h1>
-  <p>57 MongoDB collections across 13 domain areas &middot; .NET 10 + MongoDB 3.8</p>
+<div class="header">
+  <div class="header-top">
+    <div class="header-title">
+      <h1>Codeji CMS Database Map</h1>
+      <span class="entity-count" id="entityCount">69 entities</span>
+    </div>
+    <div class="header-stats" id="headerStats"></div>
+  </div>
+  <div class="header-controls">
+    <div class="search-box">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14.5 14.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <input type="text" id="searchInput" placeholder="Search entities, fields, or types..." autocomplete="off" />
+    </div>
+    <div class="filter-group" id="typeFilters">
+      <button class="filter-btn active" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="base">BaseClass</button>
+      <button class="filter-btn" data-filter="standalone">Standalone</button>
+      <button class="filter-btn" data-filter="no-tenant">No Tenant</button>
+      <button class="filter-btn" data-filter="issues">Issues Only</button>
+    </div>
+  </div>
+  <div class="domain-filters" id="domainFilters"></div>
 </div>
 
-<div class="stats-bar">
-  <div class="stat"><span class="stat-value">57</span><span class="stat-label">Collections</span></div>
-  <div class="stat"><span class="stat-value">24</span><span class="stat-label">BaseClass</span></div>
-  <div class="stat"><span class="stat-value">18</span><span class="stat-label">Standalone</span></div>
-  <div class="stat"><span class="stat-value">15</span><span class="stat-label">No CompanyId</span></div>
-  <div class="stat"><span class="stat-value">11</span><span class="stat-label">Issues Found</span></div>
-</div>
-
-<div class="controls">
-  <input type="text" class="search-box" placeholder="Search entities, fields, types..." id="search">
-  <button class="filter-btn active" data-filter="all">All</button>
-  <button class="filter-btn" data-filter="base">BaseClass</button>
-  <button class="filter-btn" data-filter="standalone">Standalone</button>
-  <button class="filter-btn" data-filter="no-tenant">No CompanyId</button>
-  <button class="filter-btn issues-only" data-filter="issues">Issues Only</button>
-</div>
-
-<div class="issues-panel">
-  <div class="issues-summary">
-    <h3>Entity-Level Issues Found</h3>
-    <ul class="issue-list">
-      <li class="issue-item"><span class="issue-severity sev-critical">CRIT</span>Resume entity contains IFormFile (ASP.NET runtime type) — will fail MongoDB serialization</li>
-      <li class="issue-item"><span class="issue-severity sev-critical">CRIT</span>AttendanceModel bypasses BaseClass — no ISupportAuditing/ISupportSoftDelete interfaces, relies on reflection-only tenant filtering</li>
-      <li class="issue-item"><span class="issue-severity sev-critical">CRIT</span>EmpPayRoll bypasses BaseClass — no audit trail, no soft-delete, same reflection-only path</li>
-      <li class="issue-item"><span class="issue-severity sev-high">HIGH</span>Company entity lacks CreatedBy field — the only auditable entity missing the creator</li>
-      <li class="issue-item"><span class="issue-severity sev-high">HIGH</span>Roles entity manually duplicates BaseClass fields but does not implement ISupportAuditing — automatic filters may not apply via interface check</li>
-      <li class="issue-item"><span class="issue-severity sev-high">HIGH</span>SalaryModel lives in DTO project, uses Guid IDs (not string) — inconsistent with every other entity</li>
-      <li class="issue-item"><span class="issue-severity sev-high">HIGH</span>WeeklyOffSetting.Id and LeaveSettings.Id lack [BsonId] — MongoDB may not map them as _id</li>
-      <li class="issue-item"><span class="issue-severity sev-medium">MED</span>AttendanceStatusSetting has no audit fields — changes are untraceable</li>
-      <li class="issue-item"><span class="issue-severity sev-medium">MED</span>8 career portal services bypass generic repository with direct IMongoCollection access — tenant filters not applied</li>
-      <li class="issue-item"><span class="issue-severity sev-medium">MED</span>UserNotifications has no CompanyId — relies solely on UserId for isolation</li>
-      <li class="issue-item"><span class="issue-severity sev-low">LOW</span>EmpUser stores dates (DateOfBirth, DateOfJoining, ExitDate) as string, not DateTime</li>
-    </ul>
+<div class="content">
+  <div class="visible-count" id="visibleCount"></div>
+  <div id="entityContainer"></div>
+  <div class="no-results" id="noResults" style="display:none;">
+    <div class="no-results-icon">&#x1f50d;</div>
+    <div>No entities match your search or filter criteria.</div>
   </div>
 </div>
 
-<div class="domains-grid" id="domains-grid"></div>
-
 <script>
-const DB = [
+const ENTITIES = [
   {
-    domain: "Company",
-    color: "var(--domain-company)",
-    entities: [
-      {
-        name: "Company",
-        collection: "Company",
-        base: "standalone",
-        hasTenant: true,
-        tenantNote: "CompanyId IS the PK",
-        issues: [{ severity: "high", text: "Does not extend BaseClass. Missing CreatedBy field. No ISupportAuditing — automatic repository filters won't apply via interface." }],
-        props: [
-          { name: "CompanyId", type: "string", pk: true, note: "BsonId" },
-          { name: "CompanyName", type: "string", note: "required" },
-          { name: "CareerSlug", type: "string" },
-          { name: "CareerPortalEnabled", type: "bool" },
-          { name: "PublicCompanyCode", type: "string" },
-          { name: "PublishJobsToMasterPortal", type: "bool" },
-          { name: "ExternalCareerUrl", type: "string?" },
-          { name: "CompanyLogo", type: "string?" },
-          { name: "PrimaryContact", type: "string" },
-          { name: "DefaultLanguage", type: "string", note: "required" },
-          { name: "ApplicationLanguage", type: "List<string>" },
-          { name: "Country", type: "string" },
-          { name: "State", type: "string" },
-          { name: "Address", type: "string" },
-          { name: "Status", type: "bool" },
-          { name: "CreatedDate", type: "DateTime?" },
-          { name: "UpdatedBy", type: "string" },
-          { name: "UpdatedDate", type: "DateTime?" },
-          { name: "IsDeleted", type: "bool" },
-        ],
-        refs: []
-      },
-      {
-        name: "Department",
-        collection: "Department",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "DepartmentId", type: "string", pk: true, note: "BsonId" },
-          { name: "IsActive", type: "bool" },
-          { name: "Titles", type: "List<MultilingualModel>", note: "embedded" },
-        ],
-        refs: []
-      },
-      {
-        name: "JobTitles",
-        collection: "JobTitles",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "JobTitleId", type: "string", pk: true, note: "BsonId" },
-          { name: "IsActive", type: "bool" },
-          { name: "Titles", type: "List<MultilingualModel>", note: "embedded" },
-        ],
-        refs: []
-      },
-      {
-        name: "CustomAttribute",
-        collection: "CustomAttribute",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "CustomAttributeId", type: "string", pk: true, note: "BsonId" },
-          { name: "CustomAttributeTitle", type: "List<MultilingualModel>", note: "embedded" },
-          { name: "CustomAttributeNumber", type: "int" },
-        ],
-        refs: []
-      },
-      {
-        name: "CustomAttributeValue",
-        collection: "CustomAttributeValue",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "CustomAttributeValueId", type: "string", pk: true, note: "BsonId" },
-          { name: "CustomAttributeId", type: "string", fk: true },
-          { name: "IsActive", type: "bool" },
-          { name: "Titles", type: "List<MultilingualModel>", note: "embedded" },
-        ],
-        refs: ["CustomAttribute"]
-      },
-      {
-        name: "LeaveSettings",
-        collection: "LeaveSettings",
-        base: "BaseClass",
-        hasTenant: true,
-        issues: [{ severity: "high", text: "Id field lacks [BsonId] attribute — MongoDB may not correctly map it as _id." }],
-        props: [
-          { name: "Id", type: "string", pk: true, note: "NO BsonId attr" },
-          { name: "FinancialYearStartMonth", type: "int", note: "Range(1,12)" },
-        ],
-        refs: []
-      },
-      {
-        name: "Policy",
-        collection: "Policy",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "PolicyId", type: "string", pk: true, note: "BsonId" },
-          { name: "PolicyName", type: "string", note: "required" },
-          { name: "Description", type: "string" },
-          { name: "Departments", type: "List<string>", fk: true, note: "Department IDs" },
-          { name: "Roles", type: "List<string>", fk: true, note: "Role IDs" },
-          { name: "IsActive", type: "bool" },
-        ],
-        refs: ["Department", "Roles"]
-      },
-      {
-        name: "PolicyVersion",
-        collection: "PolicyVersion",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "PolicyId", type: "string", fk: true, note: "required" },
-          { name: "DocUrl", type: "string?" },
-          { name: "VersionName", type: "string", note: "required" },
-          { name: "IsCurrent", type: "bool" },
-        ],
-        refs: ["Policy"]
-      },
+    id: 1, name: "Company", domain: "company", isBase: false, hasTenant: false,
+    tenantNote: "has CompanyId (IS the PK)",
+    issues: [{ severity: "high", text: "Does not extend BaseClass. Missing CreatedBy field. No ISupportAuditing." }],
+    fields: [
+      { name: "CompanyId", type: "string", pk: true, bsonId: true },
+      { name: "CompanyName", type: "string", required: true },
+      { name: "CareerSlug", type: "string" },
+      { name: "CareerPortalEnabled", type: "bool" },
+      { name: "PublicCompanyCode", type: "string" },
+      { name: "EmployeeIdPrefix", type: "string" },
+      { name: "AutoGenerateEmployeeId", type: "bool" },
+      { name: "PublishJobsToMasterPortal", type: "bool" },
+      { name: "ExternalCareerUrl", type: "string?" },
+      { name: "CompanyLogo", type: "string?" },
+      { name: "PrimaryContact", type: "string" },
+      { name: "DefaultLanguage", type: "string", required: true },
+      { name: "ApplicationLanguage", type: "List<string>" },
+      { name: "Country", type: "string" },
+      { name: "State", type: "string" },
+      { name: "Address", type: "string" },
+      { name: "Status", type: "bool" },
+      { name: "CreatedDate", type: "DateTime?" },
+      { name: "UpdatedBy", type: "string" },
+      { name: "UpdatedDate", type: "DateTime?" },
+      { name: "IsDeleted", type: "bool" }
+    ],
+    refs: []
+  },
+  {
+    id: 2, name: "Department", domain: "company", isBase: true, hasTenant: true,
+    fields: [
+      { name: "DepartmentId", type: "string", pk: true, bsonId: true },
+      { name: "IsActive", type: "bool" },
+      { name: "Titles", type: "List<MultilingualModel>", embedded: true }
+    ],
+    refs: []
+  },
+  {
+    id: 3, name: "JobTitles", domain: "company", isBase: true, hasTenant: true,
+    fields: [
+      { name: "JobTitleId", type: "string", pk: true, bsonId: true },
+      { name: "DepartmentId", type: "string?", fk: true },
+      { name: "IsActive", type: "bool" },
+      { name: "Titles", type: "List<MultilingualModel>", embedded: true }
+    ],
+    refs: [{ target: "Department", via: "DepartmentId" }]
+  },
+  {
+    id: 4, name: "CustomAttribute", domain: "company", isBase: true, hasTenant: true,
+    fields: [
+      { name: "CustomAttributeId", type: "string", pk: true, bsonId: true },
+      { name: "CustomAttributeTitle", type: "List<MultilingualModel>" },
+      { name: "CustomAttributeNumber", type: "int" }
+    ],
+    refs: []
+  },
+  {
+    id: 5, name: "CustomAttributeValue", domain: "company", isBase: true, hasTenant: true,
+    fields: [
+      { name: "CustomAttributeValueId", type: "string", pk: true, bsonId: true },
+      { name: "CustomAttributeId", type: "string", fk: true, required: true },
+      { name: "IsActive", type: "bool" },
+      { name: "Titles", type: "List<MultilingualModel>" }
+    ],
+    refs: [{ target: "CustomAttribute", via: "CustomAttributeId" }]
+  },
+  {
+    id: 6, name: "LeaveSettings", domain: "company", isBase: true, hasTenant: true,
+    issues: [{ severity: "high", text: "Id has no [BsonId] attribute — may cause duplicate _id." }],
+    fields: [
+      { name: "Id", type: "string", pk: true },
+      { name: "FinancialYearStartMonth", type: "int", attrs: ["Range 1-12"] }
+    ],
+    refs: []
+  },
+  {
+    id: 7, name: "Policy", domain: "company", isBase: true, hasTenant: true,
+    fields: [
+      { name: "PolicyId", type: "string", pk: true, bsonId: true },
+      { name: "PolicyName", type: "string", required: true },
+      { name: "Description", type: "string" },
+      { name: "Departments", type: "List<string>" },
+      { name: "Roles", type: "List<string>" },
+      { name: "IsActive", type: "bool" }
+    ],
+    refs: [{ target: "Department", via: "Departments list" }, { target: "Roles", via: "Roles list" }]
+  },
+  {
+    id: 8, name: "PolicyVersion", domain: "company", isBase: true, hasTenant: true,
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "PolicyId", type: "string", fk: true, required: true },
+      { name: "DocUrl", type: "string?" },
+      { name: "VersionName", type: "string", required: true },
+      { name: "IsCurrent", type: "bool" }
+    ],
+    refs: [{ target: "Policy", via: "PolicyId" }]
+  },
+  {
+    id: 9, name: "EmpUser", domain: "employees", isBase: true, hasTenant: true,
+    issues: [{ severity: "low", text: "DateOfBirth, DateOfJoining, ExitDate stored as string instead of DateTime." }],
+    fields: [
+      { name: "UserId", type: "string", pk: true, bsonId: true },
+      { name: "RoleId", type: "string", fk: true },
+      { name: "FirstName", type: "string", required: true },
+      { name: "LastName", type: "string?", required: true },
+      { name: "Email", type: "string", required: true },
+      { name: "Password", type: "string" },
+      { name: "Gender", type: "string" },
+      { name: "EmployeeId", type: "string" },
+      { name: "JobRole", type: "string" },
+      { name: "DateOfBirth", type: "string?" },
+      { name: "Department", type: "string" },
+      { name: "ReportingManager", type: "string" },
+      { name: "PhoneNumber", type: "string" },
+      { name: "BloodGroup", type: "string" },
+      { name: "PersonalEmail", type: "string" },
+      { name: "EmergencyContact", type: "string" },
+      { name: "DateOfJoining", type: "string" },
+      { name: "ExitDate", type: "string?" },
+      { name: "EmploymentType", type: "int?" },
+      { name: "Status", type: "bool" },
+      { name: "IsEmailVerified", type: "bool" },
+      { name: "Address", type: "string" },
+      { name: "ProfileUrl", type: "string" },
+      { name: "PanNumber", type: "string?" },
+      { name: "BankAccountNumber", type: "ulong?" },
+      { name: "CustomAttributeList", type: "List<EmpUserCustomAttribute>", embedded: true }
+    ],
+    refs: [{ target: "Roles", via: "RoleId" }, { target: "Department", via: "Department" }, { target: "JobTitles", via: "JobRole" }]
+  },
+  {
+    id: 10, name: "EmpSummary", domain: "employees", isBase: true, hasTenant: true,
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "UserId", type: "string", fk: true },
+      { name: "Summary", type: "string" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }]
+  },
+  {
+    id: 11, name: "EmpEducationDetails", domain: "employees", isBase: true, hasTenant: true,
+    fields: [
+      { name: "EducationId", type: "string", pk: true, bsonId: true },
+      { name: "UserId", type: "string", fk: true },
+      { name: "EducationTitle", type: "string" },
+      { name: "CollegeName", type: "string" },
+      { name: "StartDate", type: "string" },
+      { name: "EndDate", type: "string" },
+      { name: "Type", type: "string" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }]
+  },
+  {
+    id: 12, name: "EmpCertificationDetails", domain: "employees", isBase: true, hasTenant: true,
+    fields: [
+      { name: "CertificationId", type: "string", pk: true, bsonId: true },
+      { name: "UserId", type: "string", fk: true },
+      { name: "CertificationTitle", type: "string" },
+      { name: "OrganisationName", type: "string" },
+      { name: "StartDate", type: "string" },
+      { name: "EndDate", type: "string" },
+      { name: "Mode", type: "string" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }]
+  },
+  {
+    id: 13, name: "EmpSkills", domain: "employees", isBase: true, hasTenant: true,
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "UserId", type: "string", fk: true },
+      { name: "Skills", type: "List<string>" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }]
+  },
+  {
+    id: 14, name: "EmpWorkHistory", domain: "employees", isBase: true, hasTenant: true,
+    fields: [
+      { name: "WorkHistoryId", type: "string", pk: true, bsonId: true },
+      { name: "UserId", type: "string", fk: true, required: true },
+      { name: "OrganisationName", type: "string", required: true },
+      { name: "StartDate", type: "DateTime", required: true },
+      { name: "EndDate", type: "DateTime?" },
+      { name: "JobRole", type: "string", required: true },
+      { name: "JobLocation", type: "string?" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }]
+  },
+  {
+    id: 15, name: "EmpPayRoll", domain: "employees", isBase: false, hasTenant: false,
+    tenantNote: "has CompanyId (manual)",
+    issues: [{ severity: "critical", text: "Does not extend BaseClass. No ISupportAuditing/ISupportSoftDelete. Payroll changes untraceable." }],
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "CompanyId", type: "string", required: true },
+      { name: "UserId", type: "string", fk: true, required: true },
+      { name: "EmployeeId", type: "string", required: true },
+      { name: "PayMonth", type: "DateTime", required: true },
+      { name: "PaidDate", type: "DateTime", required: true },
+      { name: "BasicPay", type: "decimal", required: true },
+      { name: "Bonus", type: "decimal" },
+      { name: "PaidDays", type: "float", required: true },
+      { name: "Allowance", type: "Allowance", embedded: true },
+      { name: "Deduction", type: "Deduction", embedded: true },
+      { name: "CreatedAt", type: "DateTime" },
+      { name: "IsProcessed", type: "bool" },
+      { name: "ProcessedAt", type: "DateTime?" },
+      { name: "ProcessedBy", type: "string?" },
+      { name: "DeductionLines", type: "List<PayrollDeductionLine>", embedded: true },
+      { name: "CalculationSnapshot", type: "PayrollCalculationSnapshot?", embedded: true }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }]
+  },
+  {
+    id: 16, name: "PayrollDivisorPolicy", domain: "employees", isBase: true, hasTenant: true,
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "DivisorPolicy", type: "string" },
+      { name: "EffectiveFrom", type: "DateTime" },
+      { name: "EffectiveTo", type: "DateTime?" },
+      { name: "IsActive", type: "bool" },
+      { name: "Version", type: "int" }
+    ],
+    refs: []
+  },
+  {
+    id: 17, name: "EmployeeIdSequence", domain: "employees", isBase: true, hasTenant: true,
+    fields: [
+      { name: "SequenceId", type: "string", pk: true, bsonId: true },
+      { name: "Prefix", type: "string" },
+      { name: "NextNumber", type: "int" }
+    ],
+    refs: [{ target: "Company", via: "CompanyId" }]
+  },
+  {
+    id: 18, name: "AttendanceModel", domain: "attendance", isBase: false, hasTenant: false,
+    tenantNote: "has CompanyId (manual)",
+    issues: [{ severity: "critical", text: "Does not extend BaseClass. No ISupportAuditing/ISupportSoftDelete. Has manual audit fields but repository interface-based filters don't apply." }],
+    fields: [
+      { name: "AttendanceId", type: "string?", pk: true, bsonId: true },
+      { name: "UserId", type: "string?" },
+      { name: "EmployeeId", type: "string?" },
+      { name: "CompanyId", type: "string" },
+      { name: "SourceType", type: "string?" },
+      { name: "SourceId", type: "string?" },
+      { name: "SourceVersion", type: "int" },
+      { name: "Date", type: "DateTime" },
+      { name: "CheckInTime", type: "DateTime?" },
+      { name: "CheckOutTime", type: "DateTime?" },
+      { name: "TotalHours", type: "decimal?" },
+      { name: "Status", type: "string", attrs: ["custom serializer"] },
+      { name: "Remarks", type: "string?" },
+      { name: "RemarkCode", type: "string?" },
+      { name: "RemarkText", type: "string?" },
+      { name: "SystemRemark", type: "string?" },
+      { name: "OperatorRemark", type: "string?" },
+      { name: "BreakMinutes", type: "int" },
+      { name: "ScheduleId", type: "string?" },
+      { name: "ScheduleVersion", type: "long?" },
+      { name: "MarkedByUserId", type: "string?" },
+      { name: "MarkedAtUtc", type: "DateTime?" },
+      { name: "ModifiedByUserId", type: "string?" },
+      { name: "ModifiedAtUtc", type: "DateTime?" },
+      { name: "Version", type: "long" },
+      { name: "LateCount", type: "int" },
+      { name: "EarlyExitCount", type: "int" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }, { target: "CompanyOfficeSchedule", via: "ScheduleId" }]
+  },
+  {
+    id: 19, name: "AttendanceStatusSetting", domain: "attendance", isBase: false, hasTenant: false,
+    tenantNote: "has CompanyId (manual)",
+    issues: [{ severity: "medium", text: "No audit fields (CreatedBy/UpdatedBy/dates). Status setting changes affect payroll and are untraceable." }],
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "CompanyId", type: "string", required: true },
+      { name: "Code", type: "string", required: true },
+      { name: "Name", type: "string", required: true },
+      { name: "IsActive", type: "bool" },
+      { name: "IsSystem", type: "bool" },
+      { name: "SortOrder", type: "int" },
+      { name: "RequiresTime", type: "bool" },
+      { name: "IsAvailableForLeaveManagement", type: "bool" },
+      { name: "ColorHex", type: "string" },
+      { name: "PaidDayFraction", type: "decimal" },
+      { name: "UnpaidDayFraction", type: "decimal" }
+    ],
+    refs: [{ target: "Company", via: "CompanyId" }]
+  },
+  {
+    id: 20, name: "WeeklyOffSetting", domain: "attendance", isBase: true, hasTenant: true,
+    issues: [{ severity: "high", text: "Id has no [BsonId] attribute." }],
+    fields: [
+      { name: "Id", type: "string", pk: true },
+      { name: "OffDays", type: "List<int>" }
+    ],
+    refs: []
+  },
+  {
+    id: 21, name: "MonthlyAttendanceSummary", domain: "attendance", isBase: true, hasTenant: true,
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "UserId", type: "string", fk: true, required: true },
+      { name: "EmployeeId", type: "string", required: true },
+      { name: "PayrollMonth", type: "DateTime", required: true },
+      { name: "EligibleFrom", type: "DateTime" },
+      { name: "EligibleTo", type: "DateTime" },
+      { name: "ExpectedWorkingDays", type: "int" },
+      { name: "EligibleWorkingDays", type: "int" },
+      { name: "PresentDays", type: "decimal" },
+      { name: "WfhDays", type: "decimal" },
+      { name: "PaidLeaveDays", type: "decimal" },
+      { name: "UnpaidLeaveDays", type: "decimal" },
+      { name: "HalfDays", type: "decimal" },
+      { name: "AbsentDays", type: "decimal" },
+      { name: "MissingAttendanceDays", type: "int" },
+      { name: "MissingCheckoutDays", type: "int" },
+      { name: "PaidDays", type: "decimal" },
+      { name: "UnpaidDays", type: "decimal" },
+      { name: "LhdCount", type: "int" },
+      { name: "EdCount", type: "int" },
+      { name: "CombinedLhdEdCount", type: "int" },
+      { name: "OvertimeMinutes", type: "int" },
+      { name: "BlockingExceptionCount", type: "int" },
+      { name: "IsApproved", type: "bool" },
+      { name: "IsLocked", type: "bool" },
+      { name: "ApprovedBy", type: "string?" },
+      { name: "ApprovedAt", type: "DateTime?" },
+      { name: "LockedAt", type: "DateTime?" },
+      { name: "LockedBy", type: "string?" },
+      { name: "Version", type: "int" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }]
+  },
+  {
+    id: 22, name: "AttendancePayrollException", domain: "attendance", isBase: true, hasTenant: true,
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "UserId", type: "string", fk: true, required: true },
+      { name: "EmployeeId", type: "string", required: true },
+      { name: "PayrollMonth", type: "DateTime", required: true },
+      { name: "ExceptionType", type: "string" },
+      { name: "AttendanceDate", type: "DateTime?" },
+      { name: "Severity", type: "string" },
+      { name: "Resolution", type: "string?" },
+      { name: "AffectedDates", type: "List<DateTime>" },
+      { name: "LhdCount", type: "int" },
+      { name: "EdCount", type: "int" },
+      { name: "CombinedOccurrenceCount", type: "int" },
+      { name: "AllowedOccurrenceCount", type: "int" },
+      { name: "ExceededOccurrenceCount", type: "int" },
+      { name: "AffectedAttendanceRecordIds", type: "List<string>" },
+      { name: "Status", type: "string" },
+      { name: "Decision", type: "string?" },
+      { name: "DeductionDayFraction", type: "decimal" },
+      { name: "DeductionAmount", type: "decimal" },
+      { name: "Reason", type: "string?" },
+      { name: "ReviewedBy", type: "string?" },
+      { name: "ReviewedAt", type: "DateTime?" },
+      { name: "PolicyId", type: "string" },
+      { name: "PolicyVersion", type: "int" },
+      { name: "Version", type: "int" },
+      { name: "LeaveRequestId", type: "string?" },
+      { name: "ExistingAttendanceId", type: "string?" },
+      { name: "ExistingStatus", type: "string?" },
+      { name: "RequestedLeaveStatus", type: "string?" },
+      { name: "SourceVersion", type: "int" }
+    ],
+    refs: [
+      { target: "EmpUser", via: "UserId" },
+      { target: "AttendancePenaltyPolicy", via: "PolicyId" },
+      { target: "LeaveRequest", via: "LeaveRequestId" },
+      { target: "AttendanceModel", via: "ExistingAttendanceId" }
     ]
   },
   {
-    domain: "Employees",
-    color: "var(--domain-employees)",
-    entities: [
-      {
-        name: "EmpUser",
-        collection: "EmpUser",
-        base: "BaseClass",
-        hasTenant: true,
-        issues: [{ severity: "low", text: "DateOfBirth, DateOfJoining, ExitDate are stored as string, not DateTime — prevents date queries/sorting." }],
-        props: [
-          { name: "UserId", type: "string", pk: true, note: "BsonId" },
-          { name: "RoleId", type: "string", fk: true },
-          { name: "FirstName", type: "string", note: "required" },
-          { name: "LastName", type: "string?", note: "required" },
-          { name: "Email", type: "string", note: "required" },
-          { name: "Password", type: "string", note: "BCrypt hash" },
-          { name: "Gender", type: "string" },
-          { name: "EmployeeId", type: "string" },
-          { name: "JobRole", type: "string", fk: true },
-          { name: "DateOfBirth", type: "string?", note: "should be DateTime" },
-          { name: "Department", type: "string", fk: true },
-          { name: "ReportingManager", type: "string", fk: true, note: "self-ref" },
-          { name: "PhoneNumber", type: "string" },
-          { name: "BloodGroup", type: "string" },
-          { name: "PersonalEmail", type: "string" },
-          { name: "EmergencyContact", type: "string" },
-          { name: "DateOfJoining", type: "string", note: "should be DateTime" },
-          { name: "ExitDate", type: "string?", note: "should be DateTime" },
-          { name: "EmploymentType", type: "int?" },
-          { name: "Status", type: "bool" },
-          { name: "IsEmailVerified", type: "bool" },
-          { name: "Address", type: "string" },
-          { name: "ProfileUrl", type: "string" },
-          { name: "PanNumber", type: "string?" },
-          { name: "BankAccountNumber", type: "ulong?" },
-          { name: "CustomAttributeList", type: "List<EmpUserCustomAttribute>", note: "embedded" },
-        ],
-        refs: ["Roles", "JobTitles", "Department", "EmpUser (self)"]
-      },
-      {
-        name: "EmpSummary",
-        collection: "EmpSummary",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "UserId", type: "string", fk: true },
-          { name: "Summary", type: "string" },
-        ],
-        refs: ["EmpUser"]
-      },
-      {
-        name: "EmpEducationDetails",
-        collection: "EmpEducationDetails",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "EducationId", type: "string", pk: true, note: "BsonId" },
-          { name: "UserId", type: "string", fk: true },
-          { name: "EducationTitle", type: "string" },
-          { name: "CollegeName", type: "string" },
-          { name: "StartDate", type: "string" },
-          { name: "EndDate", type: "string" },
-          { name: "Type", type: "string" },
-        ],
-        refs: ["EmpUser"]
-      },
-      {
-        name: "EmpCertificationDetails",
-        collection: "EmpCertificationDetails",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "CertificationId", type: "string", pk: true, note: "BsonId" },
-          { name: "UserId", type: "string", fk: true },
-          { name: "CertificationTitle", type: "string" },
-          { name: "OrganisationName", type: "string" },
-          { name: "StartDate", type: "string" },
-          { name: "EndDate", type: "string" },
-          { name: "Mode", type: "string" },
-        ],
-        refs: ["EmpUser"]
-      },
-      {
-        name: "EmpSkills",
-        collection: "EmpSkills",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "UserId", type: "string", fk: true },
-          { name: "Skills", type: "List<string>" },
-        ],
-        refs: ["EmpUser"]
-      },
-      {
-        name: "EmpWorkHistory",
-        collection: "EmpWorkHistory",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "WorkHistoryId", type: "string", pk: true, note: "BsonId" },
-          { name: "UserId", type: "string", fk: true, note: "required" },
-          { name: "OrganisationName", type: "string", note: "required" },
-          { name: "StartDate", type: "DateTime", note: "required" },
-          { name: "EndDate", type: "DateTime?" },
-          { name: "JobRole", type: "string", note: "required" },
-          { name: "JobLocation", type: "string?" },
-        ],
-        refs: ["EmpUser"]
-      },
-    ]
+    id: 23, name: "AttendancePenaltyPolicy", domain: "attendance", isBase: true, hasTenant: true,
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "Name", type: "string" },
+      { name: "CombinedLhdEdMonthlyLimit", type: "int" },
+      { name: "IsEnabled", type: "bool" },
+      { name: "RequiresHrApproval", type: "bool" },
+      { name: "DefaultDecision", type: "string" },
+      { name: "EffectiveFrom", type: "DateTime" },
+      { name: "EffectiveTo", type: "DateTime?" },
+      { name: "Version", type: "int" }
+    ],
+    refs: []
   },
   {
-    domain: "Attendance",
-    color: "var(--domain-attendance)",
-    entities: [
-      {
-        name: "AttendanceModel",
-        collection: "Attendance",
-        base: "standalone",
-        hasTenant: true,
-        tenantNote: "Own CompanyId field, reflection-only filtering",
-        issues: [{ severity: "critical", text: "Does NOT extend BaseClass, no ISupportAuditing/ISupportSoftDelete. No audit trail (CreatedBy/UpdatedBy). Relies on reflection-only path for tenant filtering." }],
-        props: [
-          { name: "AttendanceId", type: "string?", pk: true, note: "BsonId, ObjectId" },
-          { name: "UserId", type: "string?", fk: true },
-          { name: "EmployeeId", type: "string?", fk: true },
-          { name: "CompanyId", type: "string" },
-          { name: "SourceType", type: "string?" },
-          { name: "SourceId", type: "string?" },
-          { name: "SourceVersion", type: "int" },
-          { name: "Date", type: "DateTime" },
-          { name: "CheckInTime", type: "DateTime?" },
-          { name: "CheckOutTime", type: "DateTime?" },
-          { name: "TotalHours", type: "decimal?" },
-          { name: "Status", type: "string", note: "custom serializer" },
-          { name: "Remarks", type: "string?" },
-          { name: "LateCount", type: "int" },
-          { name: "EarlyExitCount", type: "int" },
-        ],
-        refs: ["EmpUser"]
-      },
-      {
-        name: "AttendanceStatusSetting",
-        collection: "AttendanceStatusSetting",
-        base: "standalone",
-        hasTenant: true,
-        issues: [{ severity: "medium", text: "No audit fields (CreatedBy/UpdatedBy/dates). Changes to attendance status configs are untraceable." }],
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "CompanyId", type: "string", note: "required" },
-          { name: "Code", type: "string", note: "required" },
-          { name: "Name", type: "string", note: "required" },
-          { name: "IsActive", type: "bool" },
-          { name: "IsSystem", type: "bool" },
-          { name: "SortOrder", type: "int" },
-          { name: "RequiresTime", type: "bool" },
-          { name: "PaidDayFraction", type: "decimal" },
-          { name: "UnpaidDayFraction", type: "decimal" },
-        ],
-        refs: []
-      },
-      {
-        name: "MonthlyAttendanceSummary",
-        collection: "MonthlyAttendanceSummary",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "UserId", type: "string", fk: true, note: "required" },
-          { name: "EmployeeId", type: "string", fk: true, note: "required" },
-          { name: "PayrollMonth", type: "DateTime", note: "required" },
-          { name: "PresentDays", type: "decimal" },
-          { name: "AbsentDays", type: "decimal" },
-          { name: "PaidDays", type: "decimal" },
-          { name: "UnpaidDays", type: "decimal" },
-          { name: "LhdCount", type: "int" },
-          { name: "EdCount", type: "int" },
-          { name: "IsLocked", type: "bool" },
-          { name: "Version", type: "int" },
-          { name: "...+15 more", type: "" },
-        ],
-        refs: ["EmpUser"]
-      },
-      {
-        name: "AttendancePayrollException",
-        collection: "AttendancePayrollException",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "UserId", type: "string", fk: true, note: "required" },
-          { name: "PayrollMonth", type: "DateTime", note: "required" },
-          { name: "ExceptionType", type: "string" },
-          { name: "Severity", type: "string" },
-          { name: "Status", type: "string" },
-          { name: "Decision", type: "string?" },
-          { name: "DeductionDayFraction", type: "decimal" },
-          { name: "Version", type: "int" },
-          { name: "...+16 more", type: "" },
-        ],
-        refs: ["EmpUser"]
-      },
-      {
-        name: "AttendancePenaltyPolicy",
-        collection: "AttendancePenaltyPolicy",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "Name", type: "string" },
-          { name: "CombinedLhdEdMonthlyLimit", type: "int" },
-          { name: "IsEnabled", type: "bool" },
-          { name: "RequiresHrApproval", type: "bool" },
-          { name: "DefaultDecision", type: "string" },
-          { name: "EffectiveFrom", type: "DateTime" },
-          { name: "EffectiveTo", type: "DateTime?" },
-          { name: "Version", type: "int" },
-        ],
-        refs: []
-      },
-      {
-        name: "WeeklyOffSetting",
-        collection: "WeeklyOffSetting",
-        base: "BaseClass",
-        hasTenant: true,
-        issues: [{ severity: "high", text: "Id field lacks [BsonId] attribute — MongoDB may not map it as _id, potentially creating duplicate documents." }],
-        props: [
-          { name: "Id", type: "string", pk: true, note: "NO BsonId attr" },
-          { name: "OffDays", type: "List<int>", note: "default [6,0]" },
-        ],
-        refs: []
-      },
-    ]
+    id: 24, name: "AttendanceCorrectionRequest", domain: "attendance", isBase: true, hasTenant: true,
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "UserId", type: "string", fk: true },
+      { name: "AttendanceDate", type: "DateTime" },
+      { name: "Reason", type: "string" },
+      { name: "Status", type: "string" },
+      { name: "RequestedAt", type: "DateTime" },
+      { name: "ReviewDueAt", type: "DateTime?" },
+      { name: "ReviewedByUserId", type: "string?" },
+      { name: "ReviewedAtUtc", type: "DateTime?" },
+      { name: "Resolution", type: "string?" },
+      { name: "ResolutionNote", type: "string?" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }]
   },
   {
-    domain: "Leave",
-    color: "var(--domain-leave)",
-    entities: [
-      {
-        name: "LeavePolicy",
-        collection: "LeavePolicy",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "Name", type: "string", note: "required" },
-          { name: "Code", type: "string", note: "required" },
-          { name: "NormalizedName", type: "string" },
-          { name: "NormalizedCode", type: "string" },
-          { name: "AttendanceStatusCode", type: "string?" },
-          { name: "Description", type: "string" },
-          { name: "Paid", type: "bool" },
-          { name: "AccrualPeriod", type: "LeaveAccrualPeriod" },
-          { name: "AccrualAmount", type: "decimal" },
-          { name: "MaxBalance", type: "decimal?" },
-          { name: "CarryOverAllowed", type: "bool" },
-          { name: "CarryOverLimit", type: "decimal?" },
-          { name: "MinNoticeDays", type: "int" },
-          { name: "HalfDayAllowed", type: "bool" },
-          { name: "Status", type: "bool" },
-        ],
-        refs: []
-      },
-      {
-        name: "LeaveRequest",
-        collection: "LeaveRequest",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "LeaveRequestId", type: "string", pk: true, note: "BsonId" },
-          { name: "EmployeeId", type: "string", fk: true },
-          { name: "LeavePolicyId", type: "string", fk: true, note: "required" },
-          { name: "IsHalfDay", type: "bool" },
-          { name: "StartDate", type: "DateTime" },
-          { name: "EndDate", type: "DateTime" },
-          { name: "TotalDays", type: "decimal" },
-          { name: "Reason", type: "string", note: "required" },
-          { name: "Status", type: "LeaveRequestStatus" },
-          { name: "ReviewedBy", type: "string?" },
-          { name: "Comment", type: "string" },
-          { name: "Version", type: "int" },
-          { name: "ReviewedAt", type: "DateTime?" },
-        ],
-        refs: ["EmpUser", "LeavePolicy"]
-      },
-      {
-        name: "EmployeeLeaveBalance",
-        collection: "EmployeeLeaveBalance",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "UserId", type: "string", fk: true, note: "required" },
-          { name: "LeavePolicyId", type: "string", fk: true, note: "required" },
-          { name: "Balance", type: "decimal" },
-          { name: "UsedBalance", type: "decimal" },
-          { name: "LastAccrual", type: "DateTime?" },
-        ],
-        refs: ["EmpUser", "LeavePolicy"]
-      },
-    ]
+    id: 25, name: "AttendanceAuditEvent", domain: "attendance", isBase: true, hasTenant: true,
+    fields: [
+      { name: "EventId", type: "string", pk: true, bsonId: true },
+      { name: "AttendanceUserId", type: "string", fk: true },
+      { name: "AttendanceDate", type: "DateTime" },
+      { name: "Action", type: "string" },
+      { name: "ActorUserId", type: "string" },
+      { name: "AttendanceVersion", type: "long" },
+      { name: "SnapshotJson", type: "string" },
+      { name: "OccurredAtUtc", type: "DateTime" }
+    ],
+    refs: [{ target: "EmpUser", via: "AttendanceUserId" }, { target: "EmpUser", via: "ActorUserId" }]
   },
   {
-    domain: "Payroll & Salary",
-    color: "var(--domain-payroll)",
-    entities: [
-      {
-        name: "EmpPayRoll",
-        collection: "EmpPayRoll",
-        base: "standalone",
-        hasTenant: true,
-        tenantNote: "Own CompanyId field",
-        issues: [{ severity: "critical", text: "Does NOT extend BaseClass, no ISupportAuditing/ISupportSoftDelete. No audit trail, no soft-delete. Payroll records cannot be traced to who created/modified them." }],
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "CompanyId", type: "string", note: "required" },
-          { name: "UserId", type: "string", fk: true, note: "required" },
-          { name: "EmployeeId", type: "string", fk: true, note: "required" },
-          { name: "PayMonth", type: "DateTime", note: "required" },
-          { name: "PaidDate", type: "DateTime", note: "required" },
-          { name: "BasicPay", type: "decimal", note: "required" },
-          { name: "Bonus", type: "decimal" },
-          { name: "PaidDays", type: "float", note: "required" },
-          { name: "Allowance", type: "Allowance", note: "embedded {HRA, LTA, Other}" },
-          { name: "Deduction", type: "Deduction", note: "embedded {LOP, Tax, EPF...}" },
-          { name: "IsProcessed", type: "bool" },
-          { name: "ProcessedAt", type: "DateTime?" },
-          { name: "ProcessedBy", type: "string?" },
-          { name: "DeductionLines", type: "List<PayrollDeductionLine>", note: "embedded" },
-          { name: "CalculationSnapshot", type: "PayrollCalculationSnapshot?", note: "embedded" },
-          { name: "CreatedAt", type: "DateTime" },
-        ],
-        refs: ["EmpUser"]
-      },
-      {
-        name: "PayrollDivisorPolicy",
-        collection: "PayrollDivisorPolicy",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "DivisorPolicy", type: "string" },
-          { name: "EffectiveFrom", type: "DateTime" },
-          { name: "EffectiveTo", type: "DateTime?" },
-          { name: "IsActive", type: "bool" },
-          { name: "Version", type: "int" },
-        ],
-        refs: []
-      },
-      {
-        name: "SalaryModel",
-        collection: "SalaryModel",
-        base: "standalone",
-        hasTenant: true,
-        tenantNote: "Own CompanyId field, lives in DTO project",
-        issues: [{ severity: "high", text: "Located in DTO project instead of Entities. Uses Guid IDs with BsonRepresentation(String) — inconsistent with every other entity's string IDs. No audit trail, no soft-delete." }],
-        props: [
-          { name: "SalaryId", type: "Guid", pk: true, note: "BsonId, Guid→String" },
-          { name: "UserId", type: "Guid", fk: true, note: "Guid→String" },
-          { name: "CompanyId", type: "string" },
-          { name: "EmployeeId", type: "string" },
-          { name: "BasicPay", type: "decimal" },
-          { name: "Hra", type: "decimal?" },
-          { name: "OtherAllowances", type: "decimal?" },
-          { name: "Lta", type: "decimal?" },
-          { name: "Bonus", type: "decimal?" },
-          { name: "GrossSalary", type: "decimal" },
-          { name: "NetSalary", type: "decimal" },
-          { name: "Ctc", type: "decimal" },
-          { name: "EffectiveFrom", type: "DateTime" },
-          { name: "EffectiveTo", type: "DateTime?" },
-          { name: "PaymentFrequency", type: "string" },
-          { name: "Currency", type: "string" },
-          { name: "Status", type: "Boolean" },
-        ],
-        refs: ["EmpUser"]
-      },
-    ]
+    id: 26, name: "AttendanceNotificationOutbox", domain: "attendance", isBase: true, hasTenant: true,
+    fields: [
+      { name: "OutboxId", type: "string", pk: true, bsonId: true },
+      { name: "EventType", type: "string" },
+      { name: "AggregateId", type: "string" },
+      { name: "RecipientUserId", type: "string" },
+      { name: "Title", type: "string" },
+      { name: "Body", type: "string" },
+      { name: "PayloadJson", type: "string" },
+      { name: "Status", type: "string" },
+      { name: "AttemptCount", type: "int" },
+      { name: "AvailableAtUtc", type: "DateTime" },
+      { name: "ProcessingStartedAtUtc", type: "DateTime?" },
+      { name: "SentAtUtc", type: "DateTime?" },
+      { name: "LastError", type: "string?" }
+    ],
+    refs: [{ target: "EmpUser", via: "RecipientUserId" }]
   },
   {
-    domain: "Recruitment",
-    color: "var(--domain-recruitment)",
-    entities: [
-      {
-        name: "JobVacancy",
-        collection: "JobVacancy",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "JobId", type: "string", pk: true, note: "BsonId" },
-          { name: "PublicJobId", type: "string" },
-          { name: "Slug", type: "string" },
-          { name: "Title", type: "string" },
-          { name: "Vacancies", type: "int" },
-          { name: "Status", type: "bool" },
-          { name: "Description", type: "string" },
-          { name: "PublishToCareerPortal", type: "bool" },
-          { name: "ApplicationMode", type: "string" },
-          { name: "Location", type: "string?" },
-          { name: "Skills", type: "List<string>" },
-          { name: "PublishedAt", type: "DateTime?" },
-          { name: "ExpiresAt", type: "DateTime?" },
-          { name: "...+25 more", type: "", note: "rich job metadata" },
-        ],
-        refs: []
-      },
-      {
-        name: "Applicant",
-        collection: "Applicant",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "ApplicantId", type: "string", pk: true, note: "BsonId" },
-          { name: "FirstName", type: "string" },
-          { name: "LastName", type: "string" },
-          { name: "Email", type: "string" },
-          { name: "Phone", type: "string", note: "required" },
-          { name: "VacancyId", type: "string", fk: true },
-          { name: "ActivityType", type: "ActivityType" },
-          { name: "Status", type: "ActivityStatus" },
-          { name: "State", type: "string" },
-          { name: "Experience", type: "decimal" },
-          { name: "ResumeUrl", type: "string" },
-        ],
-        refs: ["JobVacancy"]
-      },
-      {
-        name: "ApplicantLogs",
-        collection: "ApplicantLogs",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "Description", type: "string" },
-          { name: "ApplicantId", type: "string", fk: true },
-          { name: "UserId", type: "string" },
-          { name: "JobRole", type: "string" },
-          { name: "ActivityCategory", type: "int" },
-          { name: "ApplicantName", type: "string" },
-        ],
-        refs: ["Applicant"]
-      },
-      {
-        name: "Resume",
-        collection: "Resume",
-        base: "standalone",
-        hasTenant: true,
-        tenantNote: "Own CompanyId field",
-        issues: [{ severity: "critical", text: "Contains IFormFile property — this is an ASP.NET runtime type that cannot be serialized to MongoDB. Will throw on any attempt to persist." }],
-        props: [
-          { name: "ResumeId", type: "string", pk: true, note: "BsonId" },
-          { name: "ApplicantId", type: "string", fk: true },
-          { name: "CompanyId", type: "string" },
-          { name: "FileName", type: "string" },
-          { name: "ResumeUrl", type: "string" },
-          { name: "File", type: "IFormFile", note: "CANNOT serialize" },
-        ],
-        refs: ["Applicant"]
-      },
-      {
-        name: "MailTemplate",
-        collection: "MailTemplate",
-        base: "standalone",
-        hasTenant: false,
-        props: [
-          { name: "_id", type: "string", pk: true, note: "BsonId" },
-          { name: "mailType", type: "MailType" },
-          { name: "subject", type: "string" },
-          { name: "body", type: "string" },
-        ],
-        refs: []
-      },
-      {
-        name: "PublicApplicationToken",
-        collection: "PublicApplicationToken",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "TokenId", type: "string", pk: true, note: "BsonId" },
-          { name: "TokenHash", type: "string" },
-          { name: "ApplicationReference", type: "string" },
-          { name: "ApplicantId", type: "string", fk: true },
-          { name: "JobId", type: "string", fk: true },
-          { name: "Purpose", type: "string" },
-          { name: "ExpiresAt", type: "DateTime" },
-          { name: "IsUsed", type: "bool" },
-          { name: "UsedAt", type: "DateTime?" },
-        ],
-        refs: ["Applicant", "JobVacancy"]
-      },
-    ]
+    id: 27, name: "AttendanceDaySegment", domain: "attendance", isBase: false, hasTenant: false,
+    tenantNote: "has CompanyId (manual)",
+    issues: [{ severity: "medium", text: "Does not extend BaseClass. No ISupportAuditing/ISupportSoftDelete. Relies on manual CreatedAtUtc/UpdatedAtUtc only." }],
+    fields: [
+      { name: "AttendanceDaySegmentId", type: "string?", pk: true, bsonId: true },
+      { name: "CompanyId", type: "string" },
+      { name: "UserId", type: "string" },
+      { name: "EmployeeId", type: "string" },
+      { name: "Date", type: "DateTime" },
+      { name: "Segment", type: "string" },
+      { name: "Status", type: "string", attrs: ["custom serializer"] },
+      { name: "SourceType", type: "string" },
+      { name: "SourceId", type: "string" },
+      { name: "SourceVersion", type: "int" },
+      { name: "CheckInTime", type: "DateTime?" },
+      { name: "CheckOutTime", type: "DateTime?" },
+      { name: "TotalHours", type: "decimal?" },
+      { name: "Remarks", type: "string?" },
+      { name: "CreatedAtUtc", type: "DateTime" },
+      { name: "UpdatedAtUtc", type: "DateTime" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }, { target: "AttendanceModel", via: "SourceId when SourceType=Attendance" }]
   },
   {
-    domain: "Career Portal",
-    color: "var(--domain-career)",
-    entities: [
-      { name: "PublicCompanyProfile", collection: "PublicCompanyProfile", base: "BaseClass", hasTenant: true,
-        props: [
-          { name: "PublicCompanyProfileId", type: "string", pk: true, note: "BsonId" },
-          { name: "PublicCompanyCode", type: "string" },
-          { name: "DisplayName", type: "string?" },
-          { name: "AboutCompanyHtml", type: "string?" },
-          { name: "LogoUrl", type: "string?" },
-          { name: "IsPublished", type: "bool" },
-          { name: "...+15 more", type: "", note: "profile metadata" },
-        ], refs: [] },
-      { name: "CareerSubscriber", collection: "CareerSubscriber", base: "standalone", hasTenant: false,
-        props: [
-          { name: "SubscriberId", type: "string", pk: true, note: "BsonId, ObjectId" },
-          { name: "Email", type: "string" },
-          { name: "IsVerified", type: "bool" },
-          { name: "SessionToken", type: "string" },
-          { name: "...+13 more", type: "", note: "consent, prefs" },
-        ], refs: [] },
-      { name: "JobAlertSubscription", collection: "JobAlertSubscription", base: "standalone", hasTenant: false,
-        props: [
-          { name: "JobAlertSubscriptionId", type: "string", pk: true, note: "BsonId, ObjectId" },
-          { name: "SubscriberId", type: "string", fk: true },
-          { name: "...+14 more", type: "", note: "search criteria, notifications" },
-        ], refs: ["CareerSubscriber"] },
-      { name: "CompanyFollower", collection: "CompanyFollower", base: "standalone", hasTenant: true,
-        props: [
-          { name: "CompanyFollowerId", type: "string", pk: true, note: "ObjectId" },
-          { name: "SubscriberId", type: "string", fk: true },
-          { name: "CompanyId", type: "string" },
-          { name: "PublicCompanyCode", type: "string" },
-          { name: "NotifyForNewJobs", type: "bool" },
-          { name: "IsActive", type: "bool" },
-          { name: "FollowedAt", type: "DateTime" },
-        ], refs: ["CareerSubscriber"] },
-      { name: "SavedJob", collection: "SavedJob", base: "standalone", hasTenant: true,
-        props: [
-          { name: "SavedJobId", type: "string", pk: true, note: "ObjectId" },
-          { name: "SubscriberId", type: "string?", fk: true },
-          { name: "AnonymousVisitorIdHash", type: "string?" },
-          { name: "JobId", type: "string", fk: true },
-          { name: "PublicJobId", type: "string" },
-          { name: "CompanyId", type: "string" },
-        ], refs: ["CareerSubscriber", "JobVacancy"] },
-      { name: "CareerVisitorPreference", collection: "CareerVisitorPreference", base: "standalone", hasTenant: false,
-        props: [
-          { name: "VisitorPreferenceId", type: "string", pk: true, note: "ObjectId" },
-          { name: "VisitorIdHash", type: "string" },
-          { name: "...+6 more", type: "" },
-        ], refs: [] },
-      { name: "CareerNotificationOutbox", collection: "CareerNotificationOutbox", base: "standalone", hasTenant: true, tenantNote: "Optional CompanyId",
-        props: [
-          { name: "OutboxId", type: "string", pk: true, note: "ObjectId" },
-          { name: "CompanyId", type: "string?" },
-          { name: "NotificationType", type: "string" },
-          { name: "Status", type: "string" },
-          { name: "...+9 more", type: "" },
-        ], refs: [] },
-      { name: "CareerNotificationDelivery", collection: "CareerNotificationDelivery", base: "standalone", hasTenant: true,
-        props: [
-          { name: "DeliveryId", type: "string", pk: true, note: "ObjectId" },
-          { name: "CompanyId", type: "string" },
-          { name: "OutboxId", type: "string", fk: true },
-          { name: "SubscriberId", type: "string", fk: true },
-          { name: "Status", type: "string" },
-          { name: "...+5 more", type: "" },
-        ], refs: ["CareerNotificationOutbox", "CareerSubscriber"] },
-      { name: "CareerAnalyticsEvent", collection: "CareerAnalyticsEvent", base: "standalone", hasTenant: false,
-        props: [
-          { name: "EventId", type: "string", pk: true, note: "ObjectId" },
-          { name: "EventType", type: "string" },
-          { name: "VisitorIdHash", type: "string?" },
-          { name: "SubscriberId", type: "string?" },
-          { name: "PublicJobId", type: "string?" },
-          { name: "PublicCompanyCode", type: "string?", note: "not CompanyId" },
-          { name: "CreatedAt", type: "DateTime" },
-        ], refs: [] },
-    ]
+    id: 28, name: "CompanyOfficeSchedule", domain: "attendance", isBase: true, hasTenant: true,
+    fields: [
+      { name: "ScheduleId", type: "string", pk: true, bsonId: true },
+      { name: "Name", type: "string" },
+      { name: "TimeZoneId", type: "string" },
+      { name: "StartTime", type: "TimeSpan" },
+      { name: "EndTime", type: "TimeSpan" },
+      { name: "CheckInAllowedFrom", type: "TimeSpan?" },
+      { name: "CheckInAllowedUntil", type: "TimeSpan?" },
+      { name: "CheckOutAllowedFrom", type: "TimeSpan?" },
+      { name: "CheckOutAllowedUntil", type: "TimeSpan?" },
+      { name: "LateArrivalAfter", type: "TimeSpan?" },
+      { name: "EarlyDepartureBefore", type: "TimeSpan?" },
+      { name: "HalfDayCheckInAfter", type: "TimeSpan?" },
+      { name: "HalfDayCheckOutBefore", type: "TimeSpan?" },
+      { name: "RequiredWorkingMinutes", type: "int" },
+      { name: "BreakMinutes", type: "int" },
+      { name: "GraceMinutes", type: "int" },
+      { name: "FirstHalfStart", type: "TimeSpan?" },
+      { name: "FirstHalfEnd", type: "TimeSpan?" },
+      { name: "SecondHalfStart", type: "TimeSpan?" },
+      { name: "SecondHalfEnd", type: "TimeSpan?" },
+      { name: "EffectiveFrom", type: "DateTime" },
+      { name: "EffectiveTo", type: "DateTime?" },
+      { name: "IsDefault", type: "bool" },
+      { name: "IsActive", type: "bool" },
+      { name: "Version", type: "long" }
+    ],
+    refs: []
   },
   {
-    domain: "Roles & Permissions",
-    color: "var(--domain-roles)",
-    entities: [
-      {
-        name: "Roles",
-        collection: "Roles",
-        base: "standalone",
-        hasTenant: true,
-        tenantNote: "Own CompanyId field",
-        issues: [{ severity: "high", text: "Manually duplicates all BaseClass fields but does NOT implement ISupportAuditing/ISupportSoftDelete. Repository interface-based filters won't apply; relies on reflection." }],
-        props: [
-          { name: "RolesId", type: "string", pk: true, note: "BsonId" },
-          { name: "RoleType", type: "int" },
-          { name: "CompanyId", type: "string" },
-          { name: "Titles", type: "string" },
-          { name: "Description", type: "string" },
-          { name: "HasAppAccess", type: "bool" },
-          { name: "IsNotEditable", type: "bool" },
-          { name: "IsDefault", type: "bool" },
-          { name: "IsDeleted", type: "bool" },
-          { name: "UserRoles", type: "List<string>" },
-          { name: "CreatedDate", type: "DateTime" },
-          { name: "UpdatedDate", type: "DateTime" },
-          { name: "CreatedBy", type: "string" },
-          { name: "UpdatedBy", type: "string" },
-        ],
-        refs: []
-      },
-      { name: "Module", collection: "Module", base: "standalone", hasTenant: false,
-        props: [
-          { name: "_id", type: "string", pk: true, note: "BsonId" },
-          { name: "ModuleId", type: "int" },
-          { name: "ModuleName", type: "string" },
-          { name: "ModuleConstant", type: "string" },
-          { name: "SortOrder", type: "int" },
-        ], refs: [] },
-      { name: "Permission", collection: "Permission", base: "standalone", hasTenant: false,
-        props: [
-          { name: "_id", type: "string", pk: true, note: "BsonId" },
-          { name: "PermissionId", type: "int" },
-          { name: "PermissionName", type: "string" },
-          { name: "PermissionConstant", type: "string" },
-        ], refs: [] },
-      { name: "ModulePermission", collection: "ModulePermission", base: "standalone", hasTenant: false,
-        props: [
-          { name: "_id", type: "string", pk: true, note: "BsonId" },
-          { name: "ModulePermissionId", type: "int" },
-          { name: "ModuleId", type: "int", fk: true },
-          { name: "PermissionId", type: "int", fk: true },
-          { name: "HasModuleAccess", type: "bool" },
-        ], refs: ["Module", "Permission"] },
-      {
-        name: "RolePermission",
-        collection: "RolePermission",
-        base: "BaseClass",
-        hasTenant: true,
-        props: [
-          { name: "RolePermissionId", type: "string", pk: true, note: "BsonId" },
-          { name: "RoleId", type: "string", fk: true },
-          { name: "ModulePermissionId", type: "int", fk: true },
-          { name: "HasAccess", type: "bool" },
-          { name: "IsAccessible", type: "bool" },
-        ],
-        refs: ["Roles", "ModulePermission"]
-      },
-    ]
+    id: 29, name: "DepartmentScheduleAssignment", domain: "attendance", isBase: true, hasTenant: true,
+    fields: [
+      { name: "AssignmentId", type: "string", pk: true, bsonId: true },
+      { name: "Department", type: "string", fk: true },
+      { name: "ScheduleId", type: "string", fk: true },
+      { name: "EffectiveFrom", type: "DateTime" },
+      { name: "EffectiveTo", type: "DateTime?" },
+      { name: "IsActive", type: "bool" }
+    ],
+    refs: [{ target: "Department", via: "Department" }, { target: "CompanyOfficeSchedule", via: "ScheduleId" }]
   },
   {
-    domain: "Calendar & Holidays",
-    color: "var(--domain-calendar)",
-    entities: [
-      { name: "Holidays", collection: "Holidays", base: "BaseClass", hasTenant: true,
-        props: [
-          { name: "HolidayId", type: "string", pk: true, note: "BsonId" },
-          { name: "HolidayName", type: "string" },
-          { name: "Date", type: "DateTime" },
-          { name: "Detail", type: "string" },
-          { name: "HolidayImageUrl", type: "string?" },
-        ], refs: [] },
-      { name: "CalendarEntity", collection: "CalendarEntity", base: "BaseClass", hasTenant: true,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "Name", type: "string" },
-          { name: "Date", type: "DateTime" },
-          { name: "Recurring", type: "bool" },
-          { name: "Description", type: "string" },
-          { name: "Type", type: "CalendarItem" },
-          { name: "ImageUrl", type: "string?" },
-        ], refs: [] },
-    ]
+    id: 30, name: "EmployeeScheduleAssignment", domain: "attendance", isBase: true, hasTenant: true,
+    fields: [
+      { name: "AssignmentId", type: "string", pk: true, bsonId: true },
+      { name: "UserId", type: "string", fk: true },
+      { name: "ScheduleId", type: "string", fk: true },
+      { name: "EffectiveFrom", type: "DateTime" },
+      { name: "EffectiveTo", type: "DateTime?" },
+      { name: "IsActive", type: "bool" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }, { target: "CompanyOfficeSchedule", via: "ScheduleId" }]
   },
   {
-    domain: "Notice Board",
-    color: "var(--domain-notice)",
-    entities: [
-      { name: "Notice", collection: "Notice", base: "BaseClass", hasTenant: true,
-        props: [
-          { name: "NoticeId", type: "string", pk: true, note: "BsonId" },
-          { name: "Title", type: "string" },
-          { name: "Message", type: "string" },
-          { name: "Target", type: "string" },
-          { name: "Departments", type: "string" },
-          { name: "NoticeType", type: "NoticeType" },
-          { name: "Views", type: "List<NoticeView>", note: "embedded" },
-        ], refs: [] },
-    ]
+    id: 31, name: "WorkFromHomeRequest", domain: "attendance", isBase: true, hasTenant: true,
+    fields: [
+      { name: "RequestId", type: "string", pk: true, bsonId: true },
+      { name: "UserId", type: "string", fk: true },
+      { name: "EmployeeId", type: "string" },
+      { name: "FromDate", type: "DateTime" },
+      { name: "ToDate", type: "DateTime" },
+      { name: "DurationType", type: "string" },
+      { name: "ReasonCode", type: "string" },
+      { name: "ReasonText", type: "string?" },
+      { name: "Status", type: "string" },
+      { name: "ApproverUserId", type: "string" },
+      { name: "ReviewedByUserId", type: "string?" },
+      { name: "ReviewedAt", type: "DateTime?" },
+      { name: "ReviewRemarksCode", type: "string?" },
+      { name: "ReviewRemarksText", type: "string?" },
+      { name: "Version", type: "int" },
+      { name: "CancelledAt", type: "DateTime?" },
+      { name: "CancelledByUserId", type: "string?" },
+      { name: "RevokedAt", type: "DateTime?" },
+      { name: "RevokedByUserId", type: "string?" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }, { target: "EmpUser", via: "ApproverUserId" }]
   },
   {
-    domain: "Notifications",
-    color: "var(--domain-notifications)",
-    entities: [
-      { name: "Notifications", collection: "Notifications", base: "standalone", hasTenant: true,
-        props: [
-          { name: "NotificationId", type: "string", pk: true, note: "BsonId" },
-          { name: "Title", type: "string" },
-          { name: "Body", type: "string" },
-          { name: "TargetId", type: "string?" },
-          { name: "NotificationType", type: "NotificationTypes" },
-          { name: "CreatedDateTime", type: "DateTime" },
-          { name: "CreatedBy", type: "string" },
-          { name: "CompanyId", type: "string" },
-        ], refs: [] },
-      {
-        name: "UserNotifications",
-        collection: "UserNotifications",
-        base: "standalone",
-        hasTenant: false,
-        issues: [{ severity: "medium", text: "No CompanyId — relies solely on UserId for tenant isolation. A user moved between companies could see stale notifications." }],
-        props: [
-          { name: "UserNotificationId", type: "string", pk: true, note: "BsonId" },
-          { name: "UserId", type: "string", fk: true },
-          { name: "NotificationId", type: "string", fk: true },
-          { name: "IsRead", type: "bool" },
-          { name: "CreatedDateTime", type: "DateTime" },
-          { name: "IsDeleted", type: "bool" },
-        ], refs: ["EmpUser", "Notifications"] },
-      { name: "NotificationPreference", collection: "NotificationPreference", base: "BaseClass", hasTenant: true,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "UserId", type: "string", fk: true, note: "required" },
-          { name: "Preferences", type: "Dict<PreferenceType,bool>", note: "BsonDict" },
-        ], refs: ["EmpUser"] },
-    ]
+    id: 32, name: "WorkFromHomePolicy", domain: "attendance", isBase: true, hasTenant: true,
+    fields: [
+      { name: "PolicyId", type: "string", pk: true, bsonId: true },
+      { name: "LeavePolicyId", type: "string?", fk: true },
+      { name: "IsEnabled", type: "bool" },
+      { name: "MaxDaysPerMonth", type: "int?" },
+      { name: "MaxDaysPerWeek", type: "int" },
+      { name: "MaxConsecutiveDays", type: "int?" },
+      { name: "MinimumAdvanceNoticeHours", type: "int" },
+      { name: "AllowBackdatedRequest", type: "bool" },
+      { name: "MaximumBackdatedDays", type: "int?" },
+      { name: "AllowHalfDay", type: "bool" },
+      { name: "AllowMixedDay", type: "bool" },
+      { name: "ManagerApprovalRequired", type: "bool" },
+      { name: "AllowManagerSelfApproval", type: "bool" },
+      { name: "AllowOnWeeklyOff", type: "bool" },
+      { name: "AllowOnHoliday", type: "bool" },
+      { name: "RequireReason", type: "bool" },
+      { name: "RequireAttachment", type: "bool" },
+      { name: "ApplyToAllEmployees", type: "bool" },
+      { name: "ApplicableDepartments", type: "List<string>" },
+      { name: "ApplicableEmployeeIds", type: "List<string>" },
+      { name: "ExcludedEmployeeIds", type: "List<string>" },
+      { name: "ApplicableEmploymentTypes", type: "List<int>" },
+      { name: "EmployeeAllocations", type: "List<WorkFromHomeEmployeeAllocation>", embedded: true },
+      { name: "EffectiveFrom", type: "DateTime?" },
+      { name: "EffectiveTo", type: "DateTime?" },
+      { name: "AllowedCheckInFrom", type: "TimeSpan?" },
+      { name: "AllowedCheckInUntil", type: "TimeSpan?" },
+      { name: "AllowedCheckOutFrom", type: "TimeSpan?" },
+      { name: "AllowedCheckOutUntil", type: "TimeSpan?" },
+      { name: "OfficeStartTime", type: "TimeSpan?" },
+      { name: "OfficeEndTime", type: "TimeSpan?" },
+      { name: "TimeZoneId", type: "string" },
+      { name: "FullDayMinimumHours", type: "decimal" },
+      { name: "HalfDayMinimumHours", type: "decimal" },
+      { name: "FullDayAttendanceStatusCode", type: "string" },
+      { name: "HalfDayAttendanceStatusCode", type: "string" },
+      { name: "MixedAttendanceStatusCode", type: "string" },
+      { name: "WfhWfoAttendanceStatusCode", type: "string?" },
+      { name: "WfhHdAttendanceStatusCode", type: "string?" },
+      { name: "WfhSlAttendanceStatusCode", type: "string?" },
+      { name: "WfhClAttendanceStatusCode", type: "string?" }
+    ],
+    refs: [{ target: "LeavePolicy", via: "LeavePolicyId" }, { target: "AttendanceStatusSetting", via: "status codes" }]
   },
   {
-    domain: "Auth & Security",
-    color: "var(--domain-auth)",
-    entities: [
-      { name: "RefreshToken", collection: "RefreshToken", base: "standalone", hasTenant: false,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "Token", type: "string", note: "required" },
-          { name: "UserId", type: "string", fk: true, note: "required" },
-          { name: "ExpireAt", type: "DateTime", note: "required" },
-          { name: "CreatedAt", type: "DateTime" },
-          { name: "IsRevoked", type: "bool" },
-          { name: "RevokedAt", type: "DateTime?" },
-        ], refs: ["EmpUser"] },
-      { name: "UserSecurityToken", collection: "UserSecurityToken", base: "standalone", hasTenant: false,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "UserId", type: "string", fk: true, note: "required" },
-          { name: "TokenHash", type: "string", note: "required" },
-          { name: "Expiry", type: "DateTime", note: "required" },
-          { name: "IsUsed", type: "bool", note: "required" },
-          { name: "Type", type: "SecurityTokenType", note: "required" },
-          { name: "CreatedAt", type: "DateTime" },
-          { name: "UsedAt", type: "DateTime?" },
-        ], refs: ["EmpUser"] },
-    ]
+    id: 33, name: "WorkFromHomeRequestLog", domain: "attendance", isBase: true, hasTenant: true,
+    fields: [
+      { name: "LogId", type: "string", pk: true, bsonId: true },
+      { name: "RequestId", type: "string", fk: true },
+      { name: "PreviousStatus", type: "string?" },
+      { name: "NewStatus", type: "string" },
+      { name: "Action", type: "string" },
+      { name: "PerformedByUserId", type: "string" },
+      { name: "PerformedAt", type: "DateTime" },
+      { name: "RemarksCode", type: "string?" },
+      { name: "RemarksText", type: "string?" },
+      { name: "Version", type: "int" }
+    ],
+    refs: [{ target: "WorkFromHomeRequest", via: "RequestId" }, { target: "EmpUser", via: "PerformedByUserId" }]
   },
   {
-    domain: "System",
-    color: "var(--domain-system)",
-    entities: [
-      { name: "Skills", collection: "Skills", base: "standalone", hasTenant: false,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "BsonId" },
-          { name: "Name", type: "string", note: "required" },
-        ], refs: [] },
-      { name: "EmpEmailLogs", collection: "EmpEmailLogs", base: "BaseClass", hasTenant: true,
-        props: [
-          { name: "EmailLogId", type: "string", pk: true, note: "BsonId" },
-          { name: "UserTo", type: "string" },
-          { name: "Email", type: "string" },
-          { name: "Subject", type: "string" },
-          { name: "Body", type: "string" },
-          { name: "EmailLogType", type: "MailType" },
-          { name: "UserFrom", type: "string" },
-          { name: "Status", type: "bool" },
-          { name: "ErrorMessage", type: "string" },
-        ], refs: [] },
-      { name: "Migration", collection: "Migration", base: "standalone", hasTenant: false,
-        props: [
-          { name: "Id", type: "string", pk: true, note: "required" },
-          { name: "ExecutedAt", type: "DateTime", note: "required" },
-        ], refs: [] },
-    ]
+    id: 34, name: "AttendanceRemarkOption", domain: "attendance", isBase: true, hasTenant: true,
+    fields: [
+      { name: "RemarkOptionId", type: "string", pk: true, bsonId: true },
+      { name: "Code", type: "string" },
+      { name: "DisplayName", type: "string" },
+      { name: "Category", type: "string" },
+      { name: "ApplicableStatusCodes", type: "List<string>" },
+      { name: "RequiresAdditionalText", type: "bool" },
+      { name: "IsActive", type: "bool" },
+      { name: "DisplayOrder", type: "int" }
+    ],
+    refs: [{ target: "AttendanceStatusSetting", via: "ApplicableStatusCodes" }]
   },
+  {
+    id: 35, name: "LeavePolicy", domain: "leave", isBase: true, hasTenant: true,
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "Name", type: "string", required: true },
+      { name: "Code", type: "string", required: true },
+      { name: "NormalizedName", type: "string" },
+      { name: "NormalizedCode", type: "string" },
+      { name: "AttendanceStatusCode", type: "string?" },
+      { name: "FullDayAttendanceStatusCode", type: "string?" },
+      { name: "HalfDayAttendanceStatusCode", type: "string?" },
+      { name: "PolicyType", type: "LeavePolicyType enum" },
+      { name: "WorkFromHome", type: "WorkFromHomePolicySettings?", embedded: true },
+      { name: "Description", type: "string" },
+      { name: "Status", type: "bool" },
+      { name: "Paid", type: "bool" },
+      { name: "AccrualPeriod", type: "LeaveAccrualPeriod enum" },
+      { name: "AccrualAmount", type: "decimal" },
+      { name: "MaxBalance", type: "decimal?" },
+      { name: "CarryOverAllowed", type: "bool" },
+      { name: "CarryOverLimit", type: "decimal?" },
+      { name: "MinNoticeDays", type: "int" },
+      { name: "HalfDayAllowed", type: "bool" },
+      { name: "WeekendInclusive", type: "bool" },
+      { name: "HolidayInclusive", type: "bool" },
+      { name: "ApplicableTo", type: "List<string>?" }
+    ],
+    refs: [{ target: "AttendanceStatusSetting", via: "AttendanceStatusCode" }]
+  },
+  {
+    id: 36, name: "LeaveRequest", domain: "leave", isBase: true, hasTenant: true,
+    fields: [
+      { name: "LeaveRequestId", type: "string", pk: true, bsonId: true },
+      { name: "EmployeeId", type: "string", fk: true },
+      { name: "IsHalfDay", type: "bool" },
+      { name: "HalfDayPeriod", type: "string?" },
+      { name: "LeavePolicyId", type: "string", fk: true, required: true },
+      { name: "StartDate", type: "DateTime" },
+      { name: "EndDate", type: "DateTime" },
+      { name: "TotalDays", type: "decimal" },
+      { name: "Reason", type: "string", required: true },
+      { name: "ReviewedBy", type: "string?" },
+      { name: "Comment", type: "string" },
+      { name: "Status", type: "LeaveRequestStatus enum" },
+      { name: "Version", type: "int" },
+      { name: "ReviewedAt", type: "DateTime?" },
+      { name: "ReconciliationStatus", type: "string" },
+      { name: "ReconciliationErrorCode", type: "string?" },
+      { name: "ReconciliationErrorMessage", type: "string?" },
+      { name: "ReconciliationAttempts", type: "int" },
+      { name: "LastReconciliationAttemptAtUtc", type: "DateTime?" },
+      { name: "NextReconciliationAttemptAtUtc", type: "DateTime?" },
+      { name: "ReconciledAtUtc", type: "DateTime?" },
+      { name: "ReversedAtUtc", type: "DateTime?" },
+      { name: "ReconciliationJobId", type: "string?" },
+      { name: "AssignedReviewerUserId", type: "string?" },
+      { name: "AssignedReviewerSource", type: "string?" },
+      { name: "AssignedAtUtc", type: "DateTime?" }
+    ],
+    refs: [{ target: "EmpUser", via: "EmployeeId" }, { target: "LeavePolicy", via: "LeavePolicyId" }, { target: "EmpUser", via: "AssignedReviewerUserId" }]
+  },
+  {
+    id: 37, name: "EmployeeLeaveBalance", domain: "leave", isBase: true, hasTenant: true,
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "UserId", type: "string", fk: true, required: true },
+      { name: "LeavePolicyId", type: "string", fk: true, required: true },
+      { name: "TotalAllocated", type: "decimal" },
+      { name: "Taken", type: "decimal" },
+      { name: "Remaining", type: "decimal" },
+      { name: "IsManualAllocation", type: "bool" },
+      { name: "LastAccrual", type: "DateTime?" },
+      { name: "Version", type: "long" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }, { target: "LeavePolicy", via: "LeavePolicyId" }]
+  },
+  {
+    id: 38, name: "SalaryModel", domain: "payroll", isBase: false, hasTenant: false,
+    tenantNote: "has CompanyId (manual)",
+    issues: [{ severity: "high", text: "Lives in Codeji.CMS.DTO project instead of Repository/Entities. Uses Guid IDs with BsonRepresentation(String) while all others use string IDs." }],
+    fields: [
+      { name: "SalaryId", type: "Guid", pk: true, bsonId: true },
+      { name: "UserId", type: "Guid", fk: true },
+      { name: "CompanyId", type: "string" },
+      { name: "EmployeeId", type: "string" },
+      { name: "BasicPay", type: "decimal" },
+      { name: "Hra", type: "decimal?" },
+      { name: "OtherAllowances", type: "decimal?" },
+      { name: "Lta", type: "decimal?" },
+      { name: "Bonus", type: "decimal?" },
+      { name: "HealthInsurance", type: "decimal?" },
+      { name: "GrossSalary", type: "decimal" },
+      { name: "TotalDeductions", type: "decimal?" },
+      { name: "NetSalary", type: "decimal" },
+      { name: "Ctc", type: "decimal" },
+      { name: "EffectiveFrom", type: "DateTime" },
+      { name: "EffectiveTo", type: "DateTime?" },
+      { name: "PaymentFrequency", type: "string" },
+      { name: "Currency", type: "string" },
+      { name: "Status", type: "bool" },
+      { name: "CreatedAt", type: "DateTime" },
+      { name: "UpdatedAt", type: "DateTime" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }]
+  },
+  {
+    id: 39, name: "CalendarEntity", domain: "calendar", isBase: true, hasTenant: true,
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "Name", type: "string" },
+      { name: "Date", type: "DateTime" },
+      { name: "Recurring", type: "bool" },
+      { name: "Description", type: "string" },
+      { name: "Type", type: "CalendarItem enum" },
+      { name: "ImageUrl", type: "string?" }
+    ],
+    refs: []
+  },
+  {
+    id: 40, name: "Holidays", domain: "holiday", isBase: true, hasTenant: true,
+    fields: [
+      { name: "HolidayId", type: "string", pk: true, bsonId: true },
+      { name: "HolidayName", type: "string" },
+      { name: "Date", type: "DateTime" },
+      { name: "Detail", type: "string" },
+      { name: "HolidayImageUrl", type: "string?" }
+    ],
+    refs: []
+  },
+  {
+    id: 41, name: "Applicant", domain: "recruitment", isBase: true, hasTenant: true,
+    fields: [
+      { name: "ApplicantId", type: "string", pk: true, bsonId: true },
+      { name: "FirstName", type: "string" },
+      { name: "LastName", type: "string" },
+      { name: "Email", type: "string" },
+      { name: "Phone", type: "string", required: true },
+      { name: "VacancyId", type: "string", fk: true },
+      { name: "ActivityType", type: "ActivityType enum" },
+      { name: "Status", type: "ActivityStatus enum" },
+      { name: "State", type: "string" },
+      { name: "Experience", type: "decimal" },
+      { name: "CurrentCompany", type: "string?" },
+      { name: "CurrentJobTitle", type: "string?" },
+      { name: "NoticePeriodDays", type: "int?" },
+      { name: "LinkedInUrl", type: "string?" },
+      { name: "PortfolioUrl", type: "string?" },
+      { name: "CoverLetter", type: "string?" },
+      { name: "ResumeUrl", type: "string" }
+    ],
+    refs: [{ target: "JobVacancy", via: "VacancyId" }]
+  },
+  {
+    id: 42, name: "ApplicantLogs", domain: "recruitment", isBase: true, hasTenant: true,
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "Description", type: "string" },
+      { name: "ApplicantId", type: "string", fk: true },
+      { name: "UserId", type: "string" },
+      { name: "JobRole", type: "string" },
+      { name: "ActivityCategory", type: "int" },
+      { name: "ApplicantName", type: "string" }
+    ],
+    refs: [{ target: "Applicant", via: "ApplicantId" }, { target: "EmpUser", via: "UserId" }]
+  },
+  {
+    id: 43, name: "JobVacancy", domain: "recruitment", isBase: true, hasTenant: true,
+    fields: [
+      { name: "JobId", type: "string", pk: true, bsonId: true },
+      { name: "PublicJobId", type: "string" },
+      { name: "Slug", type: "string" },
+      { name: "ReferenceCode", type: "string?" },
+      { name: "Title", type: "string" },
+      { name: "Vacancies", type: "int" },
+      { name: "JobType", type: "int" },
+      { name: "Status", type: "bool" },
+      { name: "Description", type: "string" },
+      { name: "PublishToCareerPortal", type: "bool" },
+      { name: "PublishToMasterPortal", type: "bool" },
+      { name: "ApplicationMode", type: "string" },
+      { name: "ExternalApplicationUrl", type: "string?" },
+      { name: "Location", type: "string?" },
+      { name: "WorkplaceType", type: "string?" },
+      { name: "EmploymentType", type: "string?" },
+      { name: "ExperienceMin", type: "decimal?" },
+      { name: "ExperienceMax", type: "decimal?" },
+      { name: "SalaryMin", type: "decimal?" },
+      { name: "SalaryMax", type: "decimal?" },
+      { name: "Currency", type: "string?" },
+      { name: "Skills", type: "List<string>" },
+      { name: "PublishedAt", type: "DateTime?" },
+      { name: "ExpiresAt", type: "DateTime?" },
+      { name: "ApplicationDeadline", type: "DateTime?" },
+      { name: "Summary", type: "string?" },
+      { name: "Department", type: "string?" },
+      { name: "FunctionalArea", type: "string?" },
+      { name: "Industry", type: "string?" },
+      { name: "RoleCategory", type: "string?" },
+      { name: "EducationRequirement", type: "string?" },
+      { name: "Responsibilities", type: "List<string>" },
+      { name: "RequiredSkills", type: "List<string>" },
+      { name: "PreferredSkills", type: "List<string>" },
+      { name: "Benefits", type: "List<string>" },
+      { name: "Keywords", type: "List<string>" },
+      { name: "ShiftType", type: "string?" },
+      { name: "WorkingDays", type: "string?" },
+      { name: "TravelRequirement", type: "string?" },
+      { name: "IsFeatured", type: "bool?" },
+      { name: "IsUrgentHiring", type: "bool?" },
+      { name: "IsWalkIn", type: "bool?" },
+      { name: "WalkInStartAt", type: "DateTime?" },
+      { name: "WalkInEndAt", type: "DateTime?" },
+      { name: "WalkInAddress", type: "string?" },
+      { name: "RecruiterContactEmail", type: "string?" },
+      { name: "NoticePeriodMaxDays", type: "int?" },
+      { name: "ShowSalary", type: "bool?" }
+    ],
+    refs: []
+  },
+  {
+    id: 44, name: "Resume", domain: "recruitment", isBase: false, hasTenant: false,
+    tenantNote: "has CompanyId (manual)",
+    issues: [{ severity: "critical", text: "File property is IFormFile — cannot be serialized to MongoDB." }],
+    fields: [
+      { name: "ResumeId", type: "string", pk: true, bsonId: true },
+      { name: "ApplicantId", type: "string", fk: true },
+      { name: "CompanyId", type: "string" },
+      { name: "FileName", type: "string" },
+      { name: "ResumeUrl", type: "string" },
+      { name: "File", type: "IFormFile" }
+    ],
+    refs: [{ target: "Applicant", via: "ApplicantId" }]
+  },
+  {
+    id: 45, name: "MailTemplate", domain: "recruitment", isBase: false, hasTenant: false,
+    tenantNote: "NO CompanyId (global)",
+    fields: [
+      { name: "_id", type: "string", pk: true, bsonId: true },
+      { name: "mailType", type: "MailType enum" },
+      { name: "subject", type: "string" },
+      { name: "body", type: "string" }
+    ],
+    refs: []
+  },
+  {
+    id: 46, name: "PublicApplicationToken", domain: "recruitment", isBase: true, hasTenant: true,
+    fields: [
+      { name: "TokenId", type: "string", pk: true, bsonId: true },
+      { name: "TokenHash", type: "string" },
+      { name: "ApplicationReference", type: "string" },
+      { name: "ApplicantId", type: "string", fk: true },
+      { name: "JobId", type: "string", fk: true },
+      { name: "Purpose", type: "string" },
+      { name: "ExpiresAt", type: "DateTime" },
+      { name: "IsUsed", type: "bool" },
+      { name: "UsedAt", type: "DateTime?" }
+    ],
+    refs: [{ target: "Applicant", via: "ApplicantId" }, { target: "JobVacancy", via: "JobId" }]
+  },
+  {
+    id: 47, name: "PublicCompanyProfile", domain: "career", isBase: true, hasTenant: true,
+    fields: [
+      { name: "PublicCompanyProfileId", type: "string", pk: true, bsonId: true },
+      { name: "PublicCompanyCode", type: "string" },
+      { name: "DisplayName", type: "string?" },
+      { name: "ShortDescription", type: "string?" },
+      { name: "AboutCompanyHtml", type: "string?" },
+      { name: "LogoUrl", type: "string?" },
+      { name: "CoverImageUrl", type: "string?" },
+      { name: "WebsiteUrl", type: "string?" },
+      { name: "Industry", type: "string?" },
+      { name: "CompanyType", type: "string?" },
+      { name: "CompanySize", type: "string?" },
+      { name: "FoundedYear", type: "int?" },
+      { name: "Headquarters", type: "string?" },
+      { name: "OfficeLocations", type: "List<string>" },
+      { name: "Mission", type: "string?" },
+      { name: "Vision", type: "string?" },
+      { name: "Values", type: "List<string>" },
+      { name: "Benefits", type: "List<string>" },
+      { name: "Technologies", type: "List<string>" },
+      { name: "SocialLinks", type: "Dictionary<string,string>" },
+      { name: "WorkCultureHtml", type: "string?" },
+      { name: "HiringProcessHtml", type: "string?" },
+      { name: "DiversityStatementHtml", type: "string?" },
+      { name: "IsPublished", type: "bool" }
+    ],
+    refs: [{ target: "Company", via: "PublicCompanyCode" }]
+  },
+  {
+    id: 48, name: "CareerSubscriber", domain: "career", isBase: false, hasTenant: false,
+    tenantNote: "NO CompanyId (global)",
+    fields: [
+      { name: "SubscriberId", type: "string", pk: true, bsonId: true },
+      { name: "EmailNormalized", type: "string" },
+      { name: "Email", type: "string" },
+      { name: "IsEmailVerified", type: "bool" },
+      { name: "IsActive", type: "bool" },
+      { name: "VerificationTokenHash", type: "string?" },
+      { name: "VerificationExpiresAt", type: "DateTime?" },
+      { name: "UnsubscribeTokenHash", type: "string" },
+      { name: "SessionTokenHash", type: "string?" },
+      { name: "SessionExpiresAt", type: "DateTime?" },
+      { name: "PreferredLanguage", type: "string" },
+      { name: "NotificationFrequency", type: "string" },
+      { name: "ConsentSource", type: "string?" },
+      { name: "ConsentTimestamp", type: "DateTime" },
+      { name: "PrivacyPolicyVersion", type: "string?" },
+      { name: "CreatedAt", type: "DateTime" },
+      { name: "VerifiedAt", type: "DateTime?" },
+      { name: "UnsubscribedAt", type: "DateTime?" },
+      { name: "LastNotificationAt", type: "DateTime?" }
+    ],
+    refs: []
+  },
+  {
+    id: 49, name: "JobAlertSubscription", domain: "career", isBase: false, hasTenant: false,
+    tenantNote: "NO CompanyId (global)",
+    fields: [
+      { name: "JobAlertSubscriptionId", type: "string", pk: true, bsonId: true },
+      { name: "SubscriberId", type: "string", fk: true },
+      { name: "Name", type: "string" },
+      { name: "SearchText", type: "string?" },
+      { name: "Locations", type: "List<string>" },
+      { name: "EmploymentTypes", type: "List<string>" },
+      { name: "WorkplaceTypes", type: "List<string>" },
+      { name: "JobTypes", type: "List<int>" },
+      { name: "Industries", type: "List<string>" },
+      { name: "Departments", type: "List<string>" },
+      { name: "Skills", type: "List<string>" },
+      { name: "ExperienceMin", type: "decimal?" },
+      { name: "ExperienceMax", type: "decimal?" },
+      { name: "SalaryMin", type: "decimal?" },
+      { name: "Currency", type: "string?" },
+      { name: "NotificationFrequency", type: "string" },
+      { name: "IsActive", type: "bool" },
+      { name: "LastMatchedAt", type: "DateTime?" },
+      { name: "LastNotificationAt", type: "DateTime?" },
+      { name: "CreatedAt", type: "DateTime" },
+      { name: "UpdatedAt", type: "DateTime?" }
+    ],
+    refs: [{ target: "CareerSubscriber", via: "SubscriberId" }]
+  },
+  {
+    id: 50, name: "CompanyFollower", domain: "career", isBase: false, hasTenant: false,
+    tenantNote: "has CompanyId (manual)",
+    fields: [
+      { name: "CompanyFollowerId", type: "string", pk: true, bsonId: true },
+      { name: "SubscriberId", type: "string", fk: true },
+      { name: "CompanyId", type: "string" },
+      { name: "PublicCompanyCode", type: "string" },
+      { name: "NotifyForNewJobs", type: "bool" },
+      { name: "NotifyForJobUpdates", type: "bool" },
+      { name: "IsActive", type: "bool" },
+      { name: "FollowedAt", type: "DateTime" },
+      { name: "UnfollowedAt", type: "DateTime?" }
+    ],
+    refs: [{ target: "CareerSubscriber", via: "SubscriberId" }, { target: "Company", via: "CompanyId" }]
+  },
+  {
+    id: 51, name: "SavedJob", domain: "career", isBase: false, hasTenant: false,
+    tenantNote: "has CompanyId (manual)",
+    fields: [
+      { name: "SavedJobId", type: "string", pk: true, bsonId: true },
+      { name: "SubscriberId", type: "string?", fk: true },
+      { name: "AnonymousVisitorIdHash", type: "string?" },
+      { name: "JobId", type: "string", fk: true },
+      { name: "PublicJobId", type: "string" },
+      { name: "CompanyId", type: "string" },
+      { name: "SavedAt", type: "DateTime" },
+      { name: "IsActive", type: "bool" }
+    ],
+    refs: [{ target: "CareerSubscriber", via: "SubscriberId" }, { target: "JobVacancy", via: "JobId" }]
+  },
+  {
+    id: 52, name: "CareerVisitorPreference", domain: "career", isBase: false, hasTenant: false,
+    tenantNote: "NO CompanyId (global)",
+    fields: [
+      { name: "VisitorPreferenceId", type: "string", pk: true, bsonId: true },
+      { name: "VisitorIdHash", type: "string" },
+      { name: "SubscribePopupDismissedAt", type: "DateTime?" },
+      { name: "DoNotShowUntil", type: "DateTime?" },
+      { name: "PopupDisplayCount", type: "int" },
+      { name: "LastVisitedCompanyCode", type: "string?" },
+      { name: "LastVisitedAt", type: "DateTime?" },
+      { name: "CreatedAt", type: "DateTime" },
+      { name: "UpdatedAt", type: "DateTime?" }
+    ],
+    refs: []
+  },
+  {
+    id: 53, name: "CareerNotificationOutbox", domain: "career", isBase: false, hasTenant: false,
+    tenantNote: "has CompanyId (optional)",
+    fields: [
+      { name: "NotificationId", type: "string", pk: true, bsonId: true },
+      { name: "SubscriberId", type: "string", fk: true },
+      { name: "NotificationType", type: "string" },
+      { name: "CompanyId", type: "string?" },
+      { name: "JobId", type: "string?" },
+      { name: "PayloadJson", type: "string" },
+      { name: "Status", type: "string" },
+      { name: "AttemptCount", type: "int" },
+      { name: "AvailableAt", type: "DateTime" },
+      { name: "ProcessingStartedAt", type: "DateTime?" },
+      { name: "SentAt", type: "DateTime?" },
+      { name: "LastError", type: "string?" },
+      { name: "CreatedAt", type: "DateTime" },
+      { name: "UpdatedAt", type: "DateTime?" }
+    ],
+    refs: [{ target: "CareerSubscriber", via: "SubscriberId" }, { target: "JobVacancy", via: "JobId" }]
+  },
+  {
+    id: 54, name: "CareerNotificationDelivery", domain: "career", isBase: false, hasTenant: false,
+    tenantNote: "has CompanyId (manual)",
+    fields: [
+      { name: "DeliveryId", type: "string", pk: true, bsonId: true },
+      { name: "SubscriberId", type: "string", fk: true },
+      { name: "JobId", type: "string", fk: true },
+      { name: "CompanyId", type: "string" },
+      { name: "NotificationReason", type: "string" },
+      { name: "Channel", type: "string" },
+      { name: "SentAt", type: "DateTime" },
+      { name: "ProviderReference", type: "string?" },
+      { name: "Status", type: "string" }
+    ],
+    refs: [{ target: "CareerSubscriber", via: "SubscriberId" }, { target: "JobVacancy", via: "JobId" }]
+  },
+  {
+    id: 55, name: "CareerAnalyticsEvent", domain: "career", isBase: false, hasTenant: false,
+    tenantNote: "NO CompanyId (uses PublicCompanyCode)",
+    fields: [
+      { name: "EventId", type: "string", pk: true, bsonId: true },
+      { name: "EventType", type: "string" },
+      { name: "VisitorIdHash", type: "string?" },
+      { name: "SubscriberId", type: "string?" },
+      { name: "PublicJobId", type: "string?" },
+      { name: "PublicCompanyCode", type: "string?" },
+      { name: "CreatedAt", type: "DateTime" }
+    ],
+    refs: [{ target: "CareerSubscriber", via: "SubscriberId" }]
+  },
+  {
+    id: 56, name: "Roles", domain: "roles", isBase: false, hasTenant: false,
+    tenantNote: "has CompanyId (manual)",
+    issues: [{ severity: "high", text: "Manually duplicates all BaseClass fields but does not implement ISupportAuditing/ISupportSoftDelete. Repository interface-based filters won't trigger; works only via reflection." }],
+    fields: [
+      { name: "RolesId", type: "string", pk: true, bsonId: true },
+      { name: "RoleType", type: "int" },
+      { name: "CompanyId", type: "string" },
+      { name: "Titles", type: "string" },
+      { name: "Description", type: "string" },
+      { name: "HasAppAccess", type: "bool" },
+      { name: "IsNotEditable", type: "bool" },
+      { name: "IsDefault", type: "bool" },
+      { name: "IsDeleted", type: "bool" },
+      { name: "UserRoles", type: "List<string>" },
+      { name: "CreatedDate", type: "DateTime" },
+      { name: "UpdatedDate", type: "DateTime" },
+      { name: "CreatedBy", type: "string" },
+      { name: "UpdatedBy", type: "string" }
+    ],
+    refs: []
+  },
+  {
+    id: 57, name: "Module", domain: "roles", isBase: false, hasTenant: false,
+    tenantNote: "NO CompanyId (system-level)",
+    fields: [
+      { name: "_id", type: "string", pk: true, bsonId: true },
+      { name: "ModuleId", type: "int" },
+      { name: "ModuleName", type: "string" },
+      { name: "ModuleConstant", type: "string" },
+      { name: "SortOrder", type: "int" }
+    ],
+    refs: []
+  },
+  {
+    id: 58, name: "Permission", domain: "roles", isBase: false, hasTenant: false,
+    tenantNote: "NO CompanyId (system-level)",
+    fields: [
+      { name: "_id", type: "string", pk: true, bsonId: true },
+      { name: "PermissionId", type: "int" },
+      { name: "PermissionName", type: "string" },
+      { name: "PermissionConstant", type: "string" }
+    ],
+    refs: []
+  },
+  {
+    id: 59, name: "ModulePermission", domain: "roles", isBase: false, hasTenant: false,
+    tenantNote: "NO CompanyId (system-level)",
+    fields: [
+      { name: "_id", type: "string", pk: true, bsonId: true },
+      { name: "ModulePermissionId", type: "int" },
+      { name: "ModuleId", type: "int", fk: true },
+      { name: "PermissionId", type: "int", fk: true },
+      { name: "HasModuleAccess", type: "bool" }
+    ],
+    refs: [{ target: "Module", via: "ModuleId" }, { target: "Permission", via: "PermissionId" }]
+  },
+  {
+    id: 60, name: "RolePermission", domain: "roles", isBase: true, hasTenant: true,
+    fields: [
+      { name: "RolePermissionId", type: "string", pk: true, bsonId: true },
+      { name: "RoleId", type: "string", fk: true },
+      { name: "ModulePermissionId", type: "int", fk: true },
+      { name: "HasAccess", type: "bool" },
+      { name: "IsAccessible", type: "bool" }
+    ],
+    refs: [{ target: "Roles", via: "RoleId" }, { target: "ModulePermission", via: "ModulePermissionId" }]
+  },
+  {
+    id: 61, name: "Notice", domain: "notice", isBase: true, hasTenant: true,
+    fields: [
+      { name: "NoticeId", type: "string", pk: true, bsonId: true },
+      { name: "Title", type: "string" },
+      { name: "Message", type: "string" },
+      { name: "Target", type: "string" },
+      { name: "Departments", type: "string" },
+      { name: "NoticeType", type: "NoticeType enum" },
+      { name: "Views", type: "List<NoticeView>", embedded: true }
+    ],
+    refs: []
+  },
+  {
+    id: 62, name: "Notifications", domain: "notifications", isBase: false, hasTenant: false,
+    tenantNote: "has CompanyId (manual)",
+    fields: [
+      { name: "NotificationId", type: "string", pk: true, bsonId: true },
+      { name: "Title", type: "string" },
+      { name: "Body", type: "string" },
+      { name: "TargetId", type: "string?" },
+      { name: "NotificationType", type: "NotificationTypes enum" },
+      { name: "CreatedDateTime", type: "DateTime" },
+      { name: "CreatedBy", type: "string" },
+      { name: "CompanyId", type: "string" }
+    ],
+    refs: []
+  },
+  {
+    id: 63, name: "UserNotifications", domain: "notifications", isBase: false, hasTenant: false,
+    tenantNote: "NO CompanyId (user-scoped)",
+    issues: [{ severity: "medium", text: "No CompanyId — relies solely on UserId. If a user moves between companies, they see stale cross-company notifications." }],
+    fields: [
+      { name: "UserNotificationId", type: "string", pk: true, bsonId: true },
+      { name: "UserId", type: "string", fk: true },
+      { name: "NotificationId", type: "string", fk: true },
+      { name: "IsRead", type: "bool" },
+      { name: "CreatedDateTime", type: "DateTime" },
+      { name: "IsDeleted", type: "bool" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }, { target: "Notifications", via: "NotificationId" }]
+  },
+  {
+    id: 64, name: "NotificationPreference", domain: "notifications", isBase: true, hasTenant: true,
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "UserId", type: "string", fk: true, required: true },
+      { name: "Preferences", type: "Dictionary<NotificationPreferenceType,bool>" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }]
+  },
+  {
+    id: 65, name: "RefreshToken", domain: "auth", isBase: false, hasTenant: false,
+    tenantNote: "NO CompanyId (user-scoped)",
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "Token", type: "string", required: true },
+      { name: "UserId", type: "string", fk: true, required: true },
+      { name: "ExpireAt", type: "DateTime", required: true },
+      { name: "CreatedAt", type: "DateTime" },
+      { name: "IsRevoked", type: "bool" },
+      { name: "RevokedAt", type: "DateTime?" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }]
+  },
+  {
+    id: 66, name: "UserSecurityToken", domain: "auth", isBase: false, hasTenant: false,
+    tenantNote: "NO CompanyId (user-scoped)",
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "UserId", type: "string", fk: true, required: true },
+      { name: "TokenHash", type: "string", required: true },
+      { name: "Expiry", type: "DateTime", required: true },
+      { name: "IsUsed", type: "bool", required: true },
+      { name: "CreatedAt", type: "DateTime" },
+      { name: "UsedAt", type: "DateTime?" },
+      { name: "Type", type: "SecurityTokenType enum", required: true }
+    ],
+    refs: [{ target: "EmpUser", via: "UserId" }]
+  },
+  {
+    id: 67, name: "EmpEmailLogs", domain: "email", isBase: true, hasTenant: true,
+    fields: [
+      { name: "EmailLogId", type: "string", pk: true, bsonId: true },
+      { name: "UserTo", type: "string" },
+      { name: "Email", type: "string" },
+      { name: "Subject", type: "string" },
+      { name: "Body", type: "string" },
+      { name: "EmailLogType", type: "MailType enum" },
+      { name: "UserFrom", type: "string" },
+      { name: "Status", type: "bool" },
+      { name: "ErrorMessage", type: "string" }
+    ],
+    refs: [{ target: "EmpUser", via: "UserTo" }, { target: "EmpUser", via: "UserFrom" }]
+  },
+  {
+    id: 68, name: "Migration", domain: "system", isBase: false, hasTenant: false,
+    tenantNote: "NO CompanyId (system)",
+    fields: [
+      { name: "Id", type: "string", pk: true, required: true },
+      { name: "ExecutedAt", type: "DateTime", required: true }
+    ],
+    refs: []
+  },
+  {
+    id: 69, name: "Skills", domain: "system", isBase: false, hasTenant: false,
+    tenantNote: "NO CompanyId (global library)",
+    fields: [
+      { name: "Id", type: "string", pk: true, bsonId: true },
+      { name: "Name", type: "string", required: true }
+    ],
+    refs: []
+  }
 ];
 
-function renderDomains(filter = 'all', search = '') {
-  const grid = document.getElementById('domains-grid');
-  grid.innerHTML = '';
-  const q = search.toLowerCase();
-  let anyVisible = false;
+const DOMAIN_LABELS = {
+  company: "Company",
+  employees: "Employees",
+  attendance: "Attendance",
+  leave: "Leave",
+  payroll: "Payroll",
+  recruitment: "Recruitment",
+  career: "Career Portal",
+  roles: "Roles",
+  calendar: "Calendar",
+  holiday: "Holiday",
+  notice: "Notice Board",
+  notifications: "Notifications",
+  auth: "Auth",
+  email: "Email",
+  system: "System"
+};
 
-  DB.forEach(domain => {
-    let entities = domain.entities;
+const DOMAIN_ORDER = ["company","employees","attendance","leave","payroll","calendar","holiday","recruitment","career","roles","notice","notifications","auth","email","system"];
 
-    if (filter === 'base') entities = entities.filter(e => e.base === 'BaseClass');
-    else if (filter === 'standalone') entities = entities.filter(e => e.base === 'standalone');
-    else if (filter === 'no-tenant') entities = entities.filter(e => !e.hasTenant);
-    else if (filter === 'issues') entities = entities.filter(e => e.issues && e.issues.length > 0);
+const issueCounts = { critical: 0, high: 0, medium: 0, low: 0 };
+ENTITIES.forEach(function(e) {
+  if (e.issues) e.issues.forEach(function(i) { issueCounts[i.severity]++; });
+});
 
-    if (q) {
-      entities = entities.filter(e => {
-        const nameMatch = e.name.toLowerCase().includes(q) || e.collection.toLowerCase().includes(q);
-        const propMatch = e.props.some(p =>
-          p.name.toLowerCase().includes(q) ||
-          p.type.toLowerCase().includes(q) ||
-          (p.note && p.note.toLowerCase().includes(q))
-        );
-        const refMatch = e.refs.some(r => r.toLowerCase().includes(q));
-        const issueMatch = e.issues && e.issues.some(i => i.text.toLowerCase().includes(q));
-        return nameMatch || propMatch || refMatch || issueMatch;
-      });
+function renderHeaderStats() {
+  var el = document.getElementById("headerStats");
+  var html = "";
+  var entries = [["critical", issueCounts.critical], ["high", issueCounts.high], ["medium", issueCounts.medium], ["low", issueCounts.low]];
+  for (var i = 0; i < entries.length; i++) {
+    if (entries[i][1] > 0) {
+      html += '<span class="stat-badge ' + entries[i][0] + '"><span class="dot"></span>' + entries[i][1] + ' ' + entries[i][0] + '</span>';
     }
+  }
+  el.innerHTML = html;
+}
 
-    if (entities.length === 0) return;
-    anyVisible = true;
+function getHighestSeverity(entity) {
+  if (!entity.issues || !entity.issues.length) return null;
+  var order = ["critical","high","medium","low"];
+  for (var i = 0; i < order.length; i++) {
+    for (var j = 0; j < entity.issues.length; j++) {
+      if (entity.issues[j].severity === order[i]) return order[i];
+    }
+  }
+  return null;
+}
 
-    const hasIssues = entities.some(e => e.issues && e.issues.length > 0);
-    const group = document.createElement('div');
-    group.className = `domain-group${hasIssues ? ' has-issues' : ''}`;
+function escapeHtml(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
 
-    group.innerHTML = `
-      <div class="domain-header" onclick="this.parentElement.classList.toggle('collapsed')">
-        <span class="domain-dot" style="background:${domain.color}"></span>
-        <span class="domain-name">${domain.domain}</span>
-        <span class="domain-count">${entities.length} collection${entities.length > 1 ? 's' : ''}</span>
-        <span class="domain-chevron">&#9660;</span>
-      </div>
-      <div class="domain-body">
-        ${entities.map(e => renderEntity(e, domain.color)).join('')}
-      </div>
-    `;
+function highlightMatch(text, query) {
+  if (!query) return escapeHtml(text);
+  var escaped = escapeHtml(text);
+  var q = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  var re = new RegExp("(" + q + ")", "gi");
+  return escaped.replace(re, '<span class="highlight">$1</span>');
+}
 
-    grid.appendChild(group);
-  });
+function entityMatchesSearch(entity, query) {
+  if (!query) return true;
+  var q = query.toLowerCase();
+  if (entity.name.toLowerCase().indexOf(q) !== -1) return true;
+  if (entity.domain.toLowerCase().indexOf(q) !== -1) return true;
+  if (DOMAIN_LABELS[entity.domain] && DOMAIN_LABELS[entity.domain].toLowerCase().indexOf(q) !== -1) return true;
+  for (var i = 0; i < entity.fields.length; i++) {
+    if (entity.fields[i].name.toLowerCase().indexOf(q) !== -1) return true;
+    if (entity.fields[i].type.toLowerCase().indexOf(q) !== -1) return true;
+  }
+  for (var j = 0; j < entity.refs.length; j++) {
+    if (entity.refs[j].target.toLowerCase().indexOf(q) !== -1) return true;
+  }
+  if (entity.issues) {
+    for (var k = 0; k < entity.issues.length; k++) {
+      if (entity.issues[k].text.toLowerCase().indexOf(q) !== -1) return true;
+    }
+  }
+  return false;
+}
 
-  if (!anyVisible) {
-    grid.innerHTML = '<div class="no-results">No entities match your search.</div>';
+function entityMatchesFilter(entity, filter) {
+  switch (filter) {
+    case "all": return true;
+    case "base": return entity.isBase;
+    case "standalone": return !entity.isBase;
+    case "no-tenant": return !entity.hasTenant;
+    case "issues": return entity.issues && entity.issues.length > 0;
+    default: return true;
   }
 }
 
-function renderEntity(e, color) {
-  const issueSev = e.issues ? (e.issues.some(i => i.severity === 'critical') ? 'has-critical-issue' : 'has-issue') : '';
-  const baseTag = e.base === 'BaseClass'
-    ? '<span class="tag tag-base">BaseClass</span>'
-    : '<span class="tag tag-standalone">standalone</span>';
-  const tenantTag = e.hasTenant
-    ? ''
-    : '<span class="tag tag-no-tenant">no CompanyId</span>';
+function renderEntityCard(entity, query) {
+  var sev = getHighestSeverity(entity);
+  var issueClass = sev ? "has-issues issue-" + sev : "";
+  var domainColor = "var(--domain-" + entity.domain + ")";
+  var domainBg = "var(--domain-" + entity.domain + "-bg)";
 
-  const propsHtml = e.props.map(p => {
-    const cls = p.pk ? 'is-pk' : (p.fk ? 'is-fk' : '');
-    const prefix = p.pk ? '🔑 ' : (p.fk ? '→ ' : '');
-    return `<tr>
-      <td><span class="prop-name ${cls}">${prefix}${p.name}</span></td>
-      <td><span class="prop-type">${p.type}</span></td>
-      <td><span class="prop-note">${p.note || ''}</span></td>
-    </tr>`;
-  }).join('');
+  var issuesHtml = "";
+  if (entity.issues) {
+    for (var i = 0; i < entity.issues.length; i++) {
+      var issue = entity.issues[i];
+      issuesHtml += '<div class="issue-banner ' + issue.severity + '"><span class="issue-label">' + issue.severity + '</span>' + highlightMatch(issue.text, query) + '</div>';
+    }
+  }
 
-  const refsHtml = e.refs.length > 0
-    ? `<div class="entity-refs"><span class="ref-arrow">References:</span> ${e.refs.map(r => `<span class="tag">${r}</span>`).join(' ')}</div>`
-    : '';
+  var fieldsHtml = "";
+  for (var fi = 0; fi < entity.fields.length; fi++) {
+    var f = entity.fields[fi];
+    var markers = "";
+    if (f.pk) markers += '<span class="field-marker pk" title="Primary Key">&#x1f511;</span>';
+    if (f.fk) markers += '<span class="field-marker fk" title="Foreign Key">&#x2192;</span>';
 
-  const issuesHtml = e.issues
-    ? e.issues.map(i => `<div class="entity-issue ${i.severity === 'critical' ? 'critical' : ''}"><strong>${i.severity}:</strong> ${i.text}</div>`).join('')
-    : '';
+    var attrs = [];
+    if (f.required) attrs.push("required");
+    if (f.bsonId) attrs.push("BsonId");
+    if (f.embedded) attrs.push("embedded");
+    if (f.attrs) for (var ai = 0; ai < f.attrs.length; ai++) attrs.push(f.attrs[ai]);
 
-  return `<div class="entity-card collapsed ${issueSev}">
-    <div class="entity-head" onclick="this.parentElement.classList.toggle('collapsed')">
-      <span class="entity-name" style="color:${color}">${e.name}</span>
-      <div class="entity-tags">${baseTag}${tenantTag}</div>
-      <span class="entity-expand">&#9660;</span>
-    </div>
-    <div class="entity-body">
-      <table class="props-table">
-        <thead><tr><th>Field</th><th>Type</th><th>Note</th></tr></thead>
-        <tbody>${propsHtml}</tbody>
-      </table>
-      ${refsHtml}
-      ${issuesHtml}
-    </div>
-  </div>`;
+    var attrsHtml = "";
+    for (var ati = 0; ati < attrs.length; ati++) {
+      attrsHtml += '<span class="field-attr">' + escapeHtml(attrs[ati]) + '</span>';
+    }
+
+    fieldsHtml += '<li class="field-item">' +
+      '<span class="field-markers">' + markers + '</span>' +
+      '<span class="field-name">' + highlightMatch(f.name, query) + '</span>' +
+      '<span class="field-type">' + highlightMatch(f.type, query) + '</span>' +
+      (attrsHtml ? '<span class="field-attrs">' + attrsHtml + '</span>' : '') +
+      '</li>';
+  }
+
+  var refsHtml = "";
+  if (entity.refs.length > 0) {
+    var refItems = "";
+    for (var ri = 0; ri < entity.refs.length; ri++) {
+      var r = entity.refs[ri];
+      refItems += '<div class="ref-item">' + highlightMatch(r.target, query) + ' <span>via ' + highlightMatch(r.via, query) + '</span></div>';
+    }
+    refsHtml = '<div class="refs-section"><div class="refs-title">References</div>' + refItems + '</div>';
+  }
+
+  var tenantLabel = entity.hasTenant
+    ? '<span class="meta-tag tenant">Tenant</span>'
+    : '<span class="meta-tag no-tenant">' + (entity.tenantNote ? escapeHtml(entity.tenantNote) : "No tenant") + '</span>';
+
+  var baseLabel = entity.isBase
+    ? '<span class="meta-tag base">BaseClass</span>'
+    : '<span class="meta-tag standalone">Standalone</span>';
+
+  return '<div class="entity-card ' + issueClass + '" data-entity-id="' + entity.id + '" data-domain="' + entity.domain + '">' +
+    '<div class="card-header" onclick="toggleCard(this)">' +
+      '<div class="card-header-left">' +
+        '<div class="card-name">' +
+          highlightMatch(entity.name, query) +
+          ' <span class="domain-tag" style="background:' + domainBg + ';color:' + domainColor + '">' + (DOMAIN_LABELS[entity.domain] || entity.domain) + '</span>' +
+        '</div>' +
+        '<div class="card-meta">' + baseLabel + tenantLabel + '<span class="meta-tag field-count">' + entity.fields.length + ' fields</span></div>' +
+      '</div>' +
+      '<svg class="expand-icon" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+    '</div>' +
+    '<div class="card-body">' + issuesHtml + '<ul class="field-list">' + fieldsHtml + '</ul>' + refsHtml + '</div>' +
+  '</div>';
 }
 
-// Init
-renderDomains();
+function toggleCard(header) {
+  header.closest(".entity-card").classList.toggle("expanded");
+}
 
-// Filters
-document.querySelectorAll('.filter-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    renderDomains(btn.dataset.filter, document.getElementById('search').value);
-  });
+var currentFilter = "all";
+var currentDomain = "all";
+var currentQuery = "";
+
+function render() {
+  var container = document.getElementById("entityContainer");
+  var noResults = document.getElementById("noResults");
+
+  var filtered = [];
+  for (var i = 0; i < ENTITIES.length; i++) {
+    var e = ENTITIES[i];
+    if (!entityMatchesFilter(e, currentFilter)) continue;
+    if (currentDomain !== "all" && e.domain !== currentDomain) continue;
+    if (!entityMatchesSearch(e, currentQuery)) continue;
+    filtered.push(e);
+  }
+
+  document.getElementById("visibleCount").textContent =
+    filtered.length === ENTITIES.length
+      ? "Showing all " + ENTITIES.length + " entities"
+      : "Showing " + filtered.length + " of " + ENTITIES.length + " entities";
+
+  if (filtered.length === 0) {
+    container.innerHTML = "";
+    noResults.style.display = "block";
+    return;
+  }
+
+  noResults.style.display = "none";
+
+  var grouped = {};
+  for (var gi = 0; gi < filtered.length; gi++) {
+    var ent = filtered[gi];
+    if (!grouped[ent.domain]) grouped[ent.domain] = [];
+    grouped[ent.domain].push(ent);
+  }
+
+  var html = "";
+  for (var di = 0; di < DOMAIN_ORDER.length; di++) {
+    var domain = DOMAIN_ORDER[di];
+    if (!grouped[domain]) continue;
+    var entities = grouped[domain];
+    var domainColor = "var(--domain-" + domain + ")";
+
+    html += '<div class="domain-section">' +
+      '<div class="domain-header">' +
+        '<div class="domain-color-bar" style="background:' + domainColor + '"></div>' +
+        '<h2>' + (DOMAIN_LABELS[domain] || domain) + '</h2>' +
+        '<span class="domain-count">' + entities.length + '</span>' +
+      '</div>' +
+      '<div class="entity-grid">';
+
+    for (var ei = 0; ei < entities.length; ei++) {
+      html += renderEntityCard(entities[ei], currentQuery);
+    }
+
+    html += '</div></div>';
+  }
+
+  container.innerHTML = html;
+}
+
+function renderDomainFilters() {
+  var el = document.getElementById("domainFilters");
+  var html = '<button class="domain-btn active" data-domain="all">All Domains</button>';
+  var domainCounts = {};
+  for (var i = 0; i < ENTITIES.length; i++) {
+    var d = ENTITIES[i].domain;
+    domainCounts[d] = (domainCounts[d] || 0) + 1;
+  }
+
+  for (var di = 0; di < DOMAIN_ORDER.length; di++) {
+    var domain = DOMAIN_ORDER[di];
+    if (!domainCounts[domain]) continue;
+    html += '<button class="domain-btn" data-domain="' + domain + '">' +
+      '<span class="domain-dot" style="background:var(--domain-' + domain + ')"></span>' +
+      (DOMAIN_LABELS[domain] || domain) + ' (' + domainCounts[domain] + ')' +
+    '</button>';
+  }
+  el.innerHTML = html;
+}
+
+document.getElementById("searchInput").addEventListener("input", function(e) {
+  currentQuery = e.target.value.trim();
+  render();
 });
 
-// Search
-let debounce;
-document.getElementById('search').addEventListener('input', (ev) => {
-  clearTimeout(debounce);
-  debounce = setTimeout(() => {
-    const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
-    renderDomains(activeFilter, ev.target.value);
-  }, 200);
+document.getElementById("typeFilters").addEventListener("click", function(e) {
+  var btn = e.target.closest(".filter-btn");
+  if (!btn) return;
+  var allBtns = document.getElementById("typeFilters").querySelectorAll(".filter-btn");
+  for (var i = 0; i < allBtns.length; i++) allBtns[i].classList.remove("active");
+  btn.classList.add("active");
+  currentFilter = btn.getAttribute("data-filter");
+  render();
 });
+
+document.getElementById("domainFilters").addEventListener("click", function(e) {
+  var btn = e.target.closest(".domain-btn");
+  if (!btn) return;
+  var allBtns = document.getElementById("domainFilters").querySelectorAll(".domain-btn");
+  for (var i = 0; i < allBtns.length; i++) allBtns[i].classList.remove("active");
+  btn.classList.add("active");
+  currentDomain = btn.getAttribute("data-domain");
+  render();
+});
+
+document.addEventListener("keydown", function(e) {
+  if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+    e.preventDefault();
+    document.getElementById("searchInput").focus();
+  }
+  if (e.key === "Escape") {
+    var input = document.getElementById("searchInput");
+    if (document.activeElement === input) {
+      input.value = "";
+      currentQuery = "";
+      render();
+      input.blur();
+    }
+  }
+});
+
+renderHeaderStats();
+renderDomainFilters();
+render();
 </script>

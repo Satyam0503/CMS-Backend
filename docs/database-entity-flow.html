@@ -1,10 +1,5 @@
 <title>Codeji Entity Relationship Diagram</title>
 <style>
-  @font-face {
-    font-family: 'SystemMono';
-    src: local('SF Mono'), local('Menlo'), local('Monaco'), local('Consolas');
-  }
-
   :root {
     --ground: #f8f7f5;
     --surface: #ffffff;
@@ -16,31 +11,26 @@
     --text-tertiary: #908d85;
     --accent: #2d6a4f;
     --accent-light: #d8f3dc;
+    --line-color: rgba(0,0,0,0.13);
+    --line-highlight: rgba(0,0,0,0.55);
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.12);
+    --node-shadow: 0 1px 2px rgba(0,0,0,0.06);
+    --domain-bg-alpha: 0.06;
 
-    --d-company: #0891b2;
-    --d-employees: #2563eb;
-    --d-attendance: #7c3aed;
-    --d-leave: #059669;
-    --d-payroll: #d97706;
-    --d-recruitment: #dc2626;
-    --d-career: #db2777;
-    --d-roles: #4f46e5;
-    --d-calendar: #16a34a;
-    --d-notice: #ea580c;
-    --d-notifications: #6366f1;
-    --d-auth: #64748b;
-    --d-system: #78716c;
-
-    --node-bg: #ffffff;
-    --node-border: #d4d1cb;
-    --line-color: #b0ada6;
-    --line-highlight: #2d6a4f;
-    --tooltip-bg: #1c1b19;
-    --tooltip-text: #f8f7f5;
-    --issue-bg: #fef3c7;
-    --issue-border: #f59e0b;
-    --critical-bg: #fde8e8;
-    --critical-border: #dc2626;
+    --c-company: #0891b2;
+    --c-employees: #2563eb;
+    --c-attendance: #7c3aed;
+    --c-leave: #059669;
+    --c-payroll: #d97706;
+    --c-recruitment: #dc2626;
+    --c-career: #db2777;
+    --c-roles: #4f46e5;
+    --c-calendar: #16a34a;
+    --c-notice: #ea580c;
+    --c-notifications: #6366f1;
+    --c-auth: #64748b;
+    --c-system: #78716c;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -48,38 +38,33 @@
       --ground: #131312;
       --surface: #1c1c1a;
       --surface-alt: #242422;
-      --border: #3c3a37;
-      --border-light: #2e2d2a;
-      --text-primary: #e6e4df;
-      --text-secondary: #a6a39c;
-      --text-tertiary: #706d66;
+      --border: #333330;
+      --border-light: #2a2a28;
+      --text-primary: #e8e8e6;
+      --text-secondary: #a0a09e;
+      --text-tertiary: #6b6b68;
       --accent: #52b788;
       --accent-light: #1a3a2a;
+      --line-color: rgba(255,255,255,0.1);
+      --line-highlight: rgba(255,255,255,0.5);
+      --shadow: 0 1px 3px rgba(0,0,0,0.3);
+      --shadow-lg: 0 4px 12px rgba(0,0,0,0.4);
+      --node-shadow: 0 1px 2px rgba(0,0,0,0.2);
+      --domain-bg-alpha: 0.08;
 
-      --d-company: #22d3ee;
-      --d-employees: #60a5fa;
-      --d-attendance: #a78bfa;
-      --d-leave: #34d399;
-      --d-payroll: #fbbf24;
-      --d-recruitment: #f87171;
-      --d-career: #f472b6;
-      --d-roles: #818cf8;
-      --d-calendar: #4ade80;
-      --d-notice: #fb923c;
-      --d-notifications: #a5b4fc;
-      --d-auth: #94a3b8;
-      --d-system: #a8a29e;
-
-      --node-bg: #1c1c1a;
-      --node-border: #3c3a37;
-      --line-color: #4a4845;
-      --line-highlight: #52b788;
-      --tooltip-bg: #e6e4df;
-      --tooltip-text: #1c1b19;
-      --issue-bg: #3a2a0a;
-      --issue-border: #b45309;
-      --critical-bg: #3a1a1a;
-      --critical-border: #f87171;
+      --c-company: #22d3ee;
+      --c-employees: #60a5fa;
+      --c-attendance: #a78bfa;
+      --c-leave: #34d399;
+      --c-payroll: #fbbf24;
+      --c-recruitment: #f87171;
+      --c-career: #f472b6;
+      --c-roles: #818cf8;
+      --c-calendar: #4ade80;
+      --c-notice: #fb923c;
+      --c-notifications: #a5b4fc;
+      --c-auth: #94a3b8;
+      --c-system: #a8a29e;
     }
   }
 
@@ -87,813 +72,1262 @@
     --ground: #131312;
     --surface: #1c1c1a;
     --surface-alt: #242422;
-    --border: #3c3a37;
-    --border-light: #2e2d2a;
-    --text-primary: #e6e4df;
-    --text-secondary: #a6a39c;
-    --text-tertiary: #706d66;
+    --border: #333330;
+    --border-light: #2a2a28;
+    --text-primary: #e8e8e6;
+    --text-secondary: #a0a09e;
+    --text-tertiary: #6b6b68;
     --accent: #52b788;
     --accent-light: #1a3a2a;
-    --d-company: #22d3ee;
-    --d-employees: #60a5fa;
-    --d-attendance: #a78bfa;
-    --d-leave: #34d399;
-    --d-payroll: #fbbf24;
-    --d-recruitment: #f87171;
-    --d-career: #f472b6;
-    --d-roles: #818cf8;
-    --d-calendar: #4ade80;
-    --d-notice: #fb923c;
-    --d-notifications: #a5b4fc;
-    --d-auth: #94a3b8;
-    --d-system: #a8a29e;
-    --node-bg: #1c1c1a;
-    --node-border: #3c3a37;
-    --line-color: #4a4845;
-    --line-highlight: #52b788;
-    --tooltip-bg: #e6e4df;
-    --tooltip-text: #1c1b19;
-    --issue-bg: #3a2a0a;
-    --issue-border: #b45309;
-    --critical-bg: #3a1a1a;
-    --critical-border: #f87171;
+    --line-color: rgba(255,255,255,0.1);
+    --line-highlight: rgba(255,255,255,0.5);
+    --shadow: 0 1px 3px rgba(0,0,0,0.3);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.4);
+    --node-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    --domain-bg-alpha: 0.08;
+
+    --c-company: #22d3ee;
+    --c-employees: #60a5fa;
+    --c-attendance: #a78bfa;
+    --c-leave: #34d399;
+    --c-payroll: #fbbf24;
+    --c-recruitment: #f87171;
+    --c-career: #f472b6;
+    --c-roles: #818cf8;
+    --c-calendar: #4ade80;
+    --c-notice: #fb923c;
+    --c-notifications: #a5b4fc;
+    --c-auth: #94a3b8;
+    --c-system: #a8a29e;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     background: var(--ground);
     color: var(--text-primary);
-    overflow: hidden;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
     height: 100vh;
-    width: 100vw;
+    overflow: hidden;
   }
 
-  .toolbar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 100;
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* --- Header --- */
+  #header {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.6rem 1.25rem;
+    gap: 16px;
+    padding: 10px 20px;
     background: var(--surface);
     border-bottom: 1px solid var(--border-light);
-    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    flex-shrink: 0;
+    z-index: 10;
   }
-
-  .toolbar h1 {
-    font-size: 0.95rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+  #header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
     white-space: nowrap;
   }
+  .header-stats {
+    display: flex;
+    gap: 12px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: monospace, monospace;
+  }
+  .header-stats span {
+    padding: 2px 8px;
+    background: var(--surface-alt);
+    border-radius: 4px;
+    border: 1px solid var(--border-light);
+  }
 
+  /* --- Toolbar --- */
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    z-index: 10;
+  }
+  .toolbar-label {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: 4px;
+    font-weight: 500;
+  }
   .toolbar-sep {
     width: 1px;
     height: 20px;
     background: var(--border);
+    margin: 0 6px;
   }
-
-  .toolbar-info {
-    font-size: 0.75rem;
-    color: var(--text-tertiary);
-    white-space: nowrap;
-  }
-
-  .toolbar-controls {
-    display: flex;
-    gap: 0.4rem;
-    margin-left: auto;
-  }
-
-  .tb {
-    padding: 0.3rem 0.65rem;
+  .domain-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
     border: 1px solid var(--border);
     border-radius: 4px;
     background: var(--surface);
     color: var(--text-secondary);
-    font-size: 0.72rem;
+    font-size: 11px;
+    font-family: system-ui, sans-serif;
     cursor: pointer;
-    font-family: inherit;
+    transition: all 0.15s;
     white-space: nowrap;
   }
-
-  .tb:hover { border-color: var(--accent); color: var(--accent); }
-  .tb.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-
-  .domain-filter {
-    padding: 0.25rem 0.55rem;
+  .domain-btn:hover { background: var(--surface-alt); }
+  .domain-btn.active {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+  .domain-btn .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .domain-btn:not(.active) .dot { opacity: 0.35; }
+  .action-btn {
+    padding: 3px 12px;
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: 4px;
     background: var(--surface);
     color: var(--text-secondary);
-    font-size: 0.68rem;
+    font-size: 11px;
+    font-family: system-ui, sans-serif;
     cursor: pointer;
-    font-family: inherit;
-    white-space: nowrap;
-    transition: all 0.12s;
+    transition: all 0.15s;
+  }
+  .action-btn:hover {
+    background: var(--accent-light);
+    color: var(--accent);
+    border-color: var(--accent);
   }
 
-  .domain-filter:hover { opacity: 0.8; }
-  .domain-filter.active { color: #fff; }
-  .domain-filter.dimmed { opacity: 0.3; }
-
-  .canvas-container {
-    position: absolute;
-    top: 42px;
-    left: 0;
-    right: 0;
-    bottom: 0;
+  /* --- Viewport --- */
+  #viewport {
+    flex: 1;
+    position: relative;
     overflow: hidden;
     cursor: grab;
+    background: var(--ground);
   }
+  #viewport.dragging { cursor: grabbing; }
 
-  .canvas-container.dragging { cursor: grabbing; }
-
-  .canvas-world {
+  #world {
     position: absolute;
+    top: 0;
+    left: 0;
     transform-origin: 0 0;
   }
 
-  .legend {
-    position: fixed;
-    bottom: 12px;
+  #lines-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+  }
+
+  #nodes-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+
+  /* --- Domain Groups --- */
+  .domain-group {
+    position: absolute;
+    border-radius: 6px;
+    border: 1px solid var(--border-light);
+  }
+  .domain-group-label {
+    position: absolute;
+    top: 8px;
     left: 12px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    opacity: 0.7;
+  }
+  .domain-group-count {
+    position: absolute;
+    top: 7px;
+    right: 10px;
+    font-size: 9px;
+    font-family: monospace, monospace;
+    opacity: 0.45;
+  }
+
+  /* --- Entity Nodes --- */
+  .entity-node {
+    position: absolute;
+    height: 36px;
+    border-radius: 4px;
     background: var(--surface);
     border: 1px solid var(--border-light);
-    border-radius: 6px;
-    padding: 0.6rem 0.8rem;
-    font-size: 0.7rem;
-    z-index: 50;
-    box-shadow: 0 2px 8px rgba(0,0,0,.08);
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-  }
-
-  .legend-title {
-    font-weight: 600;
-    font-size: 0.68rem;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin-bottom: 0.15rem;
-  }
-
-  .legend-row {
+    border-left: 4px solid var(--node-domain-color, var(--border));
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    color: var(--text-secondary);
+    padding: 0 8px 0 8px;
+    cursor: pointer;
+    transition: box-shadow 0.12s, border-color 0.12s;
+    box-shadow: var(--node-shadow);
+    user-select: none;
+  }
+  .entity-node:hover {
+    box-shadow: var(--shadow-lg);
+    z-index: 5;
+  }
+  .entity-node.standalone {
+    border-style: solid solid solid solid;
+    border-left-width: 4px;
+    background: repeating-linear-gradient(
+      -45deg,
+      var(--surface),
+      var(--surface) 6px,
+      var(--surface-alt) 6px,
+      var(--surface-alt) 7px
+    );
+  }
+  .entity-node.highlighted {
+    box-shadow: var(--shadow-lg);
+    z-index: 5;
+    border-color: var(--node-domain-color, var(--accent));
+  }
+  .entity-node.dimmed { opacity: 0.25; }
+  .entity-node .name {
+    font-family: monospace, monospace;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+  .entity-node .issue-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-left: 5px;
   }
 
-  .legend-line {
+  /* --- Tooltip --- */
+  #tooltip {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    max-width: 380px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: var(--shadow-lg);
+    padding: 12px 14px;
+    pointer-events: none;
+    font-size: 12px;
+  }
+  .tt-header {
+    font-family: monospace, monospace;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tt-domain-badge {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: #fff;
+    font-family: system-ui, sans-serif;
+    font-weight: 600;
+  }
+  .tt-meta {
+    display: flex;
+    gap: 12px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+  .tt-meta span { white-space: nowrap; }
+  .tt-section {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border-light);
+  }
+  .tt-section-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-tertiary);
+    margin-bottom: 3px;
+    font-weight: 600;
+  }
+  .tt-ref {
+    font-family: monospace, monospace;
+    font-size: 11px;
+    color: var(--text-secondary);
+    padding: 1px 0;
+  }
+  .tt-ref .field { color: var(--text-tertiary); }
+  .tt-ref .target { color: var(--accent); font-weight: 500; }
+  .tt-issue {
+    margin-top: 6px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .tt-issue.critical { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+  .tt-issue.high { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+  .tt-issue.medium { background: #fefce8; color: #a16207; border: 1px solid #fef08a; }
+  .tt-issue.low { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .tt-issue.critical { background: #3b1111; color: #f87171; border-color: #5c1d1d; }
+    :root:not([data-theme="light"]) .tt-issue.high { background: #3b2506; color: #fbbf24; border-color: #5c3a0e; }
+    :root:not([data-theme="light"]) .tt-issue.medium { background: #3b3506; color: #facc15; border-color: #5c520e; }
+    :root:not([data-theme="light"]) .tt-issue.low { background: #0c1e3b; color: #60a5fa; border-color: #1e3a5f; }
+  }
+  :root[data-theme="dark"] .tt-issue.critical { background: #3b1111; color: #f87171; border-color: #5c1d1d; }
+  :root[data-theme="dark"] .tt-issue.high { background: #3b2506; color: #fbbf24; border-color: #5c3a0e; }
+  :root[data-theme="dark"] .tt-issue.medium { background: #3b3506; color: #facc15; border-color: #5c520e; }
+  :root[data-theme="dark"] .tt-issue.low { background: #0c1e3b; color: #60a5fa; border-color: #1e3a5f; }
+
+  /* --- Legend --- */
+  #legend {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 7px 20px;
+    background: var(--surface);
+    border-top: 1px solid var(--border-light);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    font-size: 11px;
+    color: var(--text-secondary);
+    z-index: 10;
+  }
+  .legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+  }
+  .legend-swatch {
     width: 24px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .legend-swatch.base {
+    background: var(--surface);
+  }
+  .legend-swatch.standalone {
+    background: repeating-linear-gradient(
+      -45deg,
+      var(--surface),
+      var(--surface) 3px,
+      var(--surface-alt) 3px,
+      var(--surface-alt) 4px
+    );
+  }
+  .legend-line {
+    width: 28px;
     height: 2px;
+    flex-shrink: 0;
     border-radius: 1px;
   }
-
-  .legend-line.solid { background: var(--line-color); }
-  .legend-line.dashed { background: repeating-linear-gradient(90deg, var(--line-color) 0, var(--line-color) 4px, transparent 4px, transparent 7px); }
-
+  .legend-line.solid { background: var(--text-tertiary); }
+  .legend-line.dashed {
+    background: transparent;
+    border-top: 2px dashed var(--text-tertiary);
+    height: 0;
+  }
   .legend-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 2px;
-    border: 1.5px solid;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
 
-  .legend-dot.base { background: var(--accent-light); border-color: var(--accent); }
-  .legend-dot.standalone { background: var(--issue-bg); border-color: var(--issue-border); }
-  .legend-dot.issue { background: var(--critical-bg); border-color: var(--critical-border); }
-
-  .zoom-controls {
-    position: fixed;
-    bottom: 12px;
-    right: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    z-index: 50;
-  }
-
-  .zoom-btn {
-    width: 32px;
-    height: 32px;
-    border: 1px solid var(--border);
+  /* --- Zoom Indicator --- */
+  #zoom-indicator {
+    position: absolute;
+    bottom: 50px;
+    right: 16px;
+    font-size: 10px;
+    font-family: monospace, monospace;
+    color: var(--text-tertiary);
     background: var(--surface);
-    color: var(--text-primary);
-    font-size: 1rem;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    border: 1px solid var(--border-light);
     border-radius: 4px;
-    font-family: inherit;
-  }
-
-  .zoom-btn:hover { background: var(--surface-alt); }
-
-  .tooltip {
-    position: fixed;
-    z-index: 200;
-    background: var(--tooltip-bg);
-    color: var(--tooltip-text);
-    padding: 0.5rem 0.7rem;
-    border-radius: 5px;
-    font-size: 0.72rem;
-    line-height: 1.45;
-    max-width: 320px;
+    padding: 2px 8px;
+    z-index: 8;
     pointer-events: none;
-    display: none;
-    box-shadow: 0 4px 12px rgba(0,0,0,.2);
-  }
-
-  .tooltip .tt-name {
-    font-family: 'SystemMono', monospace;
-    font-weight: 600;
-    font-size: 0.78rem;
-    margin-bottom: 0.2rem;
-  }
-
-  .tooltip .tt-domain {
-    font-size: 0.68rem;
-    opacity: 0.7;
-    margin-bottom: 0.3rem;
-  }
-
-  .tooltip .tt-fields {
-    font-family: 'SystemMono', monospace;
-    font-size: 0.68rem;
-    opacity: 0.85;
-  }
-
-  .tooltip .tt-issue {
-    margin-top: 0.3rem;
-    padding-top: 0.3rem;
-    border-top: 1px solid rgba(128,128,128,.3);
-    font-size: 0.7rem;
-    color: #fbbf24;
   }
 </style>
 
-<div class="toolbar">
-  <h1>Codeji Entity Relationships</h1>
-  <span class="toolbar-sep"></span>
-  <span class="toolbar-info">57 collections &middot; 32 references &middot; pan &amp; zoom</span>
-  <div class="toolbar-controls" id="domain-filters"></div>
-  <button class="tb" onclick="resetView()">Reset View</button>
-</div>
-
-<div class="canvas-container" id="canvasContainer">
-  <div class="canvas-world" id="canvasWorld">
-    <canvas id="linesCanvas"></canvas>
-    <div id="nodesContainer"></div>
+<div id="app">
+  <div id="header">
+    <h1>Codeji CMS &mdash; Entity Relationship Diagram</h1>
+    <div class="header-stats">
+      <span>69 Entities</span>
+      <span>57 Relationships</span>
+      <span>13 Domains</span>
+    </div>
   </div>
-</div>
 
-<div class="legend">
-  <div class="legend-title">Legend</div>
-  <div class="legend-row"><div class="legend-dot base"></div> Extends BaseClass</div>
-  <div class="legend-row"><div class="legend-dot standalone"></div> Standalone entity</div>
-  <div class="legend-row"><div class="legend-dot issue"></div> Has issues</div>
-  <div class="legend-row"><span class="legend-line solid"></span> FK reference</div>
-  <div class="legend-row"><span class="legend-line dashed"></span> Self-reference</div>
-</div>
+  <div id="toolbar">
+    <span class="toolbar-label">Domains</span>
+    <div id="domain-buttons"></div>
+    <div class="toolbar-sep"></div>
+    <button class="action-btn" id="btn-show-all">Show All</button>
+    <button class="action-btn" id="btn-reset-view">Reset View</button>
+  </div>
 
-<div class="zoom-controls">
-  <button class="zoom-btn" onclick="zoomIn()">+</button>
-  <button class="zoom-btn" onclick="zoomOut()">&minus;</button>
-  <button class="zoom-btn" onclick="resetView()" style="font-size:0.7rem">&#8634;</button>
-</div>
+  <div id="viewport">
+    <div id="world">
+      <canvas id="lines-canvas"></canvas>
+      <div id="nodes-layer"></div>
+    </div>
+    <div id="zoom-indicator"></div>
+  </div>
 
-<div class="tooltip" id="tooltip"></div>
+  <div id="legend">
+    <span style="font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;font-size:10px;">Legend</span>
+    <span class="legend-item"><span class="legend-swatch base" style="border-left:3px solid var(--accent);"></span> BaseClass</span>
+    <span class="legend-item"><span class="legend-swatch standalone" style="border-left:3px solid var(--accent);"></span> Standalone</span>
+    <span class="legend-item"><span class="legend-line solid"></span> Direct FK</span>
+    <span class="legend-item"><span class="legend-line dashed"></span> Indirect FK</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#ef4444;"></span> Critical</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span> High</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#eab308;"></span> Medium</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#3b82f6;"></span> Low</span>
+  </div>
+
+  <div id="tooltip"></div>
+</div>
 
 <script>
-const DOMAINS = [
-  { key: 'company', label: 'Company', color: 'var(--d-company)' },
-  { key: 'employees', label: 'Employees', color: 'var(--d-employees)' },
-  { key: 'attendance', label: 'Attendance', color: 'var(--d-attendance)' },
-  { key: 'leave', label: 'Leave', color: 'var(--d-leave)' },
-  { key: 'payroll', label: 'Payroll', color: 'var(--d-payroll)' },
-  { key: 'recruitment', label: 'Recruitment', color: 'var(--d-recruitment)' },
-  { key: 'career', label: 'Career Portal', color: 'var(--d-career)' },
-  { key: 'roles', label: 'Roles', color: 'var(--d-roles)' },
-  { key: 'calendar', label: 'Calendar', color: 'var(--d-calendar)' },
-  { key: 'notice', label: 'Notice', color: 'var(--d-notice)' },
-  { key: 'notifications', label: 'Notifications', color: 'var(--d-notifications)' },
-  { key: 'auth', label: 'Auth', color: 'var(--d-auth)' },
-  { key: 'system', label: 'System', color: 'var(--d-system)' },
-];
+(function() {
+  'use strict';
 
-const ENTITIES = [
-  // Company domain - top-left cluster
-  { id:'Company', domain:'company', base:false, issue:true, x:80, y:80, fields:['CompanyId(PK)','CompanyName','CareerSlug','PublicCompanyCode','Status'], issueText:'Missing CreatedBy, no BaseClass' },
-  { id:'Department', domain:'company', base:true, x:80, y:240, fields:['DepartmentId(PK)','IsActive','Titles[]'] },
-  { id:'JobTitles', domain:'company', base:true, x:80, y:360, fields:['JobTitleId(PK)','IsActive','Titles[]'] },
-  { id:'CustomAttribute', domain:'company', base:true, x:280, y:240, fields:['CustomAttributeId(PK)','Title[]','Number'] },
-  { id:'CustomAttributeValue', domain:'company', base:true, x:280, y:360, fields:['CustomAttributeValueId(PK)','CustomAttributeId(FK)','Titles[]'] },
-  { id:'LeaveSettings', domain:'company', base:true, issue:true, x:80, y:480, fields:['Id(PK)','FinancialYearStartMonth'], issueText:'Id lacks [BsonId] attribute' },
-  { id:'Policy', domain:'company', base:true, x:280, y:480, fields:['PolicyId(PK)','PolicyName','Departments[]','Roles[]'] },
-  { id:'PolicyVersion', domain:'company', base:true, x:480, y:480, fields:['Id(PK)','PolicyId(FK)','DocUrl','VersionName','IsCurrent'] },
+  // ==================== DATA ====================
 
-  // Employees domain - center-top
-  { id:'EmpUser', domain:'employees', base:true, issue:true, x:580, y:80, fields:['UserId(PK)','RoleId(FK)','Email','Department(FK)','JobRole(FK)','ReportingManager(FK)','DateOfJoining','Password','Status','...+15'], issueText:'Date fields stored as string' },
-  { id:'EmpSummary', domain:'employees', base:true, x:820, y:80, fields:['Id(PK)','UserId(FK)','Summary'] },
-  { id:'EmpEducationDetails', domain:'employees', base:true, x:820, y:190, fields:['EducationId(PK)','UserId(FK)','Title','College'] },
-  { id:'EmpCertificationDetails', domain:'employees', base:true, x:820, y:290, fields:['CertificationId(PK)','UserId(FK)','Title','Org'] },
-  { id:'EmpSkills', domain:'employees', base:true, x:1020, y:80, fields:['Id(PK)','UserId(FK)','Skills[]'] },
-  { id:'EmpWorkHistory', domain:'employees', base:true, x:1020, y:190, fields:['WorkHistoryId(PK)','UserId(FK)','Org','JobRole','StartDate'] },
+  var ENTITIES = [
+    // COMPANY (8)
+    { id:'Company', domain:'company', base:false, scope:'tenant', issue:{ level:'high', text:'No BaseClass, missing CreatedBy' } },
+    { id:'Department', domain:'company', base:true, scope:'tenant', issue:null },
+    { id:'JobTitles', domain:'company', base:true, scope:'tenant', issue:null },
+    { id:'CustomAttribute', domain:'company', base:true, scope:'tenant', issue:null },
+    { id:'CustomAttributeValue', domain:'company', base:true, scope:'tenant', issue:null },
+    { id:'LeaveSettings', domain:'company', base:true, scope:'tenant', issue:{ level:'high', text:'No [BsonId]' } },
+    { id:'Policy', domain:'company', base:true, scope:'tenant', issue:null },
+    { id:'PolicyVersion', domain:'company', base:true, scope:'tenant', issue:null },
+    // EMPLOYEES (9)
+    { id:'EmpUser', domain:'employees', base:true, scope:'tenant', issue:{ level:'low', text:'Dates stored as string' } },
+    { id:'EmpSummary', domain:'employees', base:true, scope:'tenant', issue:null },
+    { id:'EmpEducationDetails', domain:'employees', base:true, scope:'tenant', issue:null },
+    { id:'EmpCertificationDetails', domain:'employees', base:true, scope:'tenant', issue:null },
+    { id:'EmpSkills', domain:'employees', base:true, scope:'tenant', issue:null },
+    { id:'EmpWorkHistory', domain:'employees', base:true, scope:'tenant', issue:null },
+    { id:'EmpPayRoll', domain:'employees', base:false, scope:'tenant', issue:{ level:'critical', text:'No BaseClass, payroll untraceable' } },
+    { id:'PayrollDivisorPolicy', domain:'employees', base:true, scope:'tenant', issue:null },
+    { id:'EmployeeIdSequence', domain:'employees', base:true, scope:'tenant', issue:null },
+    // ATTENDANCE (17)
+    { id:'AttendanceModel', domain:'attendance', base:false, scope:'tenant', issue:{ level:'critical', text:'No BaseClass' } },
+    { id:'AttendanceStatusSetting', domain:'attendance', base:false, scope:'tenant', issue:{ level:'medium', text:'No audit trail' } },
+    { id:'WeeklyOffSetting', domain:'attendance', base:true, scope:'tenant', issue:{ level:'high', text:'No [BsonId]' } },
+    { id:'MonthlyAttendanceSummary', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'AttendancePayrollException', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'AttendancePenaltyPolicy', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'AttendanceCorrectionRequest', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'AttendanceAuditEvent', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'AttendanceNotificationOutbox', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'AttendanceDaySegment', domain:'attendance', base:false, scope:'tenant', issue:{ level:'medium', text:'No BaseClass' } },
+    { id:'CompanyOfficeSchedule', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'DepartmentScheduleAssignment', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'EmployeeScheduleAssignment', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'WorkFromHomeRequest', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'WorkFromHomePolicy', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'WorkFromHomeRequestLog', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'AttendanceRemarkOption', domain:'attendance', base:true, scope:'tenant', issue:null },
+    // LEAVE (3)
+    { id:'LeavePolicy', domain:'leave', base:true, scope:'tenant', issue:null },
+    { id:'LeaveRequest', domain:'leave', base:true, scope:'tenant', issue:null },
+    { id:'EmployeeLeaveBalance', domain:'leave', base:true, scope:'tenant', issue:null },
+    // PAYROLL (1)
+    { id:'SalaryModel', domain:'payroll', base:false, scope:'tenant', issue:{ level:'high', text:'In DTO project, Guid IDs' } },
+    // RECRUITMENT (6)
+    { id:'Applicant', domain:'recruitment', base:true, scope:'tenant', issue:null },
+    { id:'ApplicantLogs', domain:'recruitment', base:true, scope:'tenant', issue:null },
+    { id:'JobVacancy', domain:'recruitment', base:true, scope:'tenant', issue:null },
+    { id:'Resume', domain:'recruitment', base:false, scope:'tenant', issue:{ level:'critical', text:'IFormFile stored in entity' } },
+    { id:'MailTemplate', domain:'recruitment', base:false, scope:'global', issue:null },
+    { id:'PublicApplicationToken', domain:'recruitment', base:true, scope:'tenant', issue:null },
+    // CAREER PORTAL (9)
+    { id:'PublicCompanyProfile', domain:'career', base:true, scope:'tenant', issue:null },
+    { id:'CareerSubscriber', domain:'career', base:false, scope:'global', issue:null },
+    { id:'JobAlertSubscription', domain:'career', base:false, scope:'global', issue:null },
+    { id:'CompanyFollower', domain:'career', base:false, scope:'tenant', issue:null },
+    { id:'SavedJob', domain:'career', base:false, scope:'tenant', issue:null },
+    { id:'CareerVisitorPreference', domain:'career', base:false, scope:'global', issue:null },
+    { id:'CareerNotificationOutbox', domain:'career', base:false, scope:'optional-tenant', issue:null },
+    { id:'CareerNotificationDelivery', domain:'career', base:false, scope:'tenant', issue:null },
+    { id:'CareerAnalyticsEvent', domain:'career', base:false, scope:'global', issue:null },
+    // ROLES (5)
+    { id:'Roles', domain:'roles', base:false, scope:'tenant', issue:{ level:'high', text:'Duplicates BaseClass fields' } },
+    { id:'Module', domain:'roles', base:false, scope:'global', issue:null },
+    { id:'Permission', domain:'roles', base:false, scope:'global', issue:null },
+    { id:'ModulePermission', domain:'roles', base:false, scope:'global', issue:null },
+    { id:'RolePermission', domain:'roles', base:true, scope:'tenant', issue:null },
+    // CALENDAR (2)
+    { id:'CalendarEntity', domain:'calendar', base:true, scope:'tenant', issue:null },
+    { id:'Holidays', domain:'calendar', base:true, scope:'tenant', issue:null },
+    // NOTICE (1)
+    { id:'Notice', domain:'notice', base:true, scope:'tenant', issue:null },
+    // NOTIFICATIONS (3)
+    { id:'Notifications', domain:'notifications', base:false, scope:'tenant', issue:null },
+    { id:'UserNotifications', domain:'notifications', base:false, scope:'no-tenant', issue:{ level:'medium', text:'No CompanyId' } },
+    { id:'NotificationPreference', domain:'notifications', base:true, scope:'tenant', issue:null },
+    // AUTH (2)
+    { id:'RefreshToken', domain:'auth', base:false, scope:'no-tenant', issue:null },
+    { id:'UserSecurityToken', domain:'auth', base:false, scope:'no-tenant', issue:null },
+    // SYSTEM (3)
+    { id:'Migration', domain:'system', base:false, scope:'global', issue:null },
+    { id:'Skills', domain:'system', base:false, scope:'global', issue:null },
+    { id:'EmpEmailLogs', domain:'system', base:true, scope:'tenant', issue:null }
+  ];
 
-  // Attendance domain - center
-  { id:'AttendanceModel', domain:'attendance', base:false, issue:true, x:580, y:360, fields:['AttendanceId(PK)','UserId(FK)','CompanyId','Date','Status','CheckIn/Out','TotalHours'], issueText:'CRITICAL: No BaseClass, no audit trail' },
-  { id:'AttendanceStatusSetting', domain:'attendance', base:false, issue:true, x:580, y:500, fields:['Id(PK)','CompanyId','Code','Name','PaidDayFraction'], issueText:'No audit fields' },
-  { id:'MonthlyAttendanceSummary', domain:'attendance', base:true, x:810, y:420, fields:['Id(PK)','UserId(FK)','PayrollMonth','PaidDays','IsLocked','Version','...+20'] },
-  { id:'AttendancePayrollException', domain:'attendance', base:true, x:810, y:550, fields:['Id(PK)','UserId(FK)','PayrollMonth','ExceptionType','Severity','Status'] },
-  { id:'AttendancePenaltyPolicy', domain:'attendance', base:true, x:580, y:640, fields:['Id(PK)','CombinedLhdEdMonthlyLimit','IsEnabled','Version'] },
-  { id:'WeeklyOffSetting', domain:'attendance', base:true, issue:true, x:810, y:670, fields:['Id(PK)','OffDays[]'], issueText:'Id lacks [BsonId] attribute' },
+  var RELATIONSHIPS = [
+    // Company internal
+    { from:'JobTitles', to:'Department', field:'DepartmentId', dashed:false },
+    { from:'CustomAttributeValue', to:'CustomAttribute', field:'CustomAttributeId', dashed:false },
+    { from:'PolicyVersion', to:'Policy', field:'PolicyId', dashed:false },
+    // Employees cross-domain
+    { from:'EmpUser', to:'Roles', field:'RoleId', dashed:false },
+    // Employees internal
+    { from:'EmpSummary', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'EmpEducationDetails', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'EmpCertificationDetails', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'EmpSkills', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'EmpWorkHistory', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'EmpPayRoll', to:'EmpUser', field:'UserId', dashed:false },
+    // Attendance
+    { from:'AttendanceModel', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'AttendanceModel', to:'CompanyOfficeSchedule', field:'ScheduleId', dashed:false },
+    { from:'MonthlyAttendanceSummary', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'AttendancePayrollException', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'AttendancePayrollException', to:'AttendancePenaltyPolicy', field:'PolicyId', dashed:false },
+    { from:'AttendanceCorrectionRequest', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'AttendanceAuditEvent', to:'EmpUser', field:'AttendanceUserId', dashed:false },
+    { from:'AttendanceNotificationOutbox', to:'EmpUser', field:'RecipientUserId', dashed:false },
+    { from:'AttendanceDaySegment', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'DepartmentScheduleAssignment', to:'Department', field:'Department', dashed:false },
+    { from:'DepartmentScheduleAssignment', to:'CompanyOfficeSchedule', field:'ScheduleId', dashed:false },
+    { from:'EmployeeScheduleAssignment', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'EmployeeScheduleAssignment', to:'CompanyOfficeSchedule', field:'ScheduleId', dashed:false },
+    { from:'WorkFromHomeRequest', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'WorkFromHomeRequest', to:'EmpUser', field:'ApproverUserId', dashed:false },
+    { from:'WorkFromHomePolicy', to:'LeavePolicy', field:'LeavePolicyId', dashed:false },
+    { from:'WorkFromHomeRequestLog', to:'WorkFromHomeRequest', field:'RequestId', dashed:false },
+    // Leave
+    { from:'LeaveRequest', to:'EmpUser', field:'EmployeeId', dashed:false },
+    { from:'LeaveRequest', to:'LeavePolicy', field:'LeavePolicyId', dashed:false },
+    { from:'EmployeeLeaveBalance', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'EmployeeLeaveBalance', to:'LeavePolicy', field:'LeavePolicyId', dashed:false },
+    // Payroll
+    { from:'SalaryModel', to:'EmpUser', field:'UserId', dashed:false },
+    // Recruitment
+    { from:'Applicant', to:'JobVacancy', field:'VacancyId', dashed:false },
+    { from:'ApplicantLogs', to:'Applicant', field:'ApplicantId', dashed:false },
+    { from:'ApplicantLogs', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'Resume', to:'Applicant', field:'ApplicantId', dashed:false },
+    { from:'PublicApplicationToken', to:'Applicant', field:'ApplicantId', dashed:false },
+    { from:'PublicApplicationToken', to:'JobVacancy', field:'JobId', dashed:false },
+    // Career Portal
+    { from:'JobAlertSubscription', to:'CareerSubscriber', field:'SubscriberId', dashed:false },
+    { from:'CompanyFollower', to:'CareerSubscriber', field:'SubscriberId', dashed:false },
+    { from:'CompanyFollower', to:'Company', field:'CompanyId', dashed:false },
+    { from:'SavedJob', to:'CareerSubscriber', field:'SubscriberId', dashed:false },
+    { from:'SavedJob', to:'JobVacancy', field:'JobId', dashed:false },
+    { from:'CareerNotificationOutbox', to:'CareerSubscriber', field:'SubscriberId', dashed:false },
+    { from:'CareerNotificationDelivery', to:'CareerSubscriber', field:'SubscriberId', dashed:false },
+    { from:'CareerNotificationDelivery', to:'JobVacancy', field:'JobId', dashed:false },
+    // Roles
+    { from:'ModulePermission', to:'Module', field:'ModuleId', dashed:false },
+    { from:'ModulePermission', to:'Permission', field:'PermissionId', dashed:false },
+    { from:'RolePermission', to:'Roles', field:'RoleId', dashed:false },
+    { from:'RolePermission', to:'ModulePermission', field:'ModulePermissionId', dashed:false },
+    // Notifications
+    { from:'UserNotifications', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'UserNotifications', to:'Notifications', field:'NotificationId', dashed:false },
+    { from:'NotificationPreference', to:'EmpUser', field:'UserId', dashed:false },
+    // Auth
+    { from:'RefreshToken', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'UserSecurityToken', to:'EmpUser', field:'UserId', dashed:false },
+    // Indirect / dashed
+    { from:'LeavePolicy', to:'AttendanceStatusSetting', field:'AttendanceStatusCode', dashed:true },
+    { from:'PublicCompanyProfile', to:'Company', field:'PublicCompanyCode', dashed:true }
+  ];
 
-  // Leave domain - right-center
-  { id:'LeavePolicy', domain:'leave', base:true, x:1080, y:360, fields:['Id(PK)','Name','Code','AttendanceStatusCode','AccrualPeriod','Paid','HalfDayAllowed'] },
-  { id:'LeaveRequest', domain:'leave', base:true, x:1080, y:500, fields:['LeaveRequestId(PK)','EmployeeId(FK)','LeavePolicyId(FK)','StartDate','EndDate','Status','Version'] },
-  { id:'EmployeeLeaveBalance', domain:'leave', base:true, x:1300, y:430, fields:['Id(PK)','UserId(FK)','LeavePolicyId(FK)','Balance','UsedBalance'] },
+  var DOMAIN_NAMES = {
+    company:'Company', employees:'Employees', attendance:'Attendance',
+    leave:'Leave', payroll:'Payroll', recruitment:'Recruitment',
+    career:'Career Portal', roles:'Roles', calendar:'Calendar',
+    notice:'Notice', notifications:'Notifications', auth:'Auth', system:'System'
+  };
 
-  // Payroll domain - far right
-  { id:'EmpPayRoll', domain:'payroll', base:false, issue:true, x:1300, y:80, fields:['Id(PK)','CompanyId','UserId(FK)','PayMonth','BasicPay','PaidDays','Allowance{}','Deduction{}','IsProcessed'], issueText:'CRITICAL: No BaseClass, no audit trail' },
-  { id:'PayrollDivisorPolicy', domain:'payroll', base:true, x:1300, y:240, fields:['Id(PK)','DivisorPolicy','EffectiveFrom','Version'] },
-  { id:'SalaryModel', domain:'payroll', base:false, issue:true, x:1500, y:80, fields:['SalaryId(PK,Guid)','UserId(FK,Guid)','CompanyId','BasicPay','GrossSalary','NetSalary','Ctc'], issueText:'In DTO project, uses Guid not string' },
+  var ISSUE_COLORS = { critical:'#ef4444', high:'#f59e0b', medium:'#eab308', low:'#3b82f6' };
 
-  // Recruitment domain - bottom-left
-  { id:'JobVacancy', domain:'recruitment', base:true, x:80, y:720, fields:['JobId(PK)','PublicJobId','Slug','Title','Status','Description','PublishToCareerPortal','...+25'] },
-  { id:'Applicant', domain:'recruitment', base:true, x:280, y:720, fields:['ApplicantId(PK)','VacancyId(FK)','Email','Phone','ActivityType','ResumeUrl'] },
-  { id:'ApplicantLogs', domain:'recruitment', base:true, x:280, y:850, fields:['Id(PK)','ApplicantId(FK)','Description','ActivityCategory'] },
-  { id:'Resume', domain:'recruitment', base:false, issue:true, x:480, y:720, fields:['ResumeId(PK)','ApplicantId(FK)','CompanyId','FileName','File(IFormFile)'], issueText:'CRITICAL: IFormFile cannot serialize' },
-  { id:'MailTemplate', domain:'recruitment', base:false, x:480, y:850, fields:['_id(PK)','mailType','subject','body'], noTenant:true },
-  { id:'PublicApplicationToken', domain:'recruitment', base:true, x:80, y:850, fields:['TokenId(PK)','TokenHash','ApplicantId(FK)','JobId(FK)','ExpiresAt'] },
+  var SCOPE_LABELS = {
+    tenant:'Tenant', global:'Global', 'no-tenant':'No Tenant', 'optional-tenant':'Optional Tenant'
+  };
 
-  // Career Portal - bottom-center
-  { id:'PublicCompanyProfile', domain:'career', base:true, x:700, y:770, fields:['Id(PK)','PublicCompanyCode','DisplayName','IsPublished','...+15'] },
-  { id:'CareerSubscriber', domain:'career', base:false, x:700, y:890, fields:['SubscriberId(PK)','Email','IsVerified','SessionToken','...+13'], noTenant:true },
-  { id:'JobAlertSubscription', domain:'career', base:false, x:900, y:890, fields:['Id(PK)','SubscriberId(FK)','SearchCriteria','...+14'], noTenant:true },
-  { id:'CompanyFollower', domain:'career', base:false, x:900, y:770, fields:['Id(PK)','SubscriberId(FK)','CompanyId','PublicCompanyCode'] },
-  { id:'SavedJob', domain:'career', base:false, x:1100, y:770, fields:['Id(PK)','SubscriberId(FK)','JobId(FK)','CompanyId'] },
-  { id:'CareerVisitorPreference', domain:'career', base:false, x:1100, y:890, fields:['Id(PK)','VisitorIdHash','...+6'], noTenant:true },
-  { id:'CareerNotificationOutbox', domain:'career', base:false, x:1300, y:770, fields:['OutboxId(PK)','CompanyId?','NotificationType','Status'] },
-  { id:'CareerNotificationDelivery', domain:'career', base:false, x:1300, y:890, fields:['DeliveryId(PK)','OutboxId(FK)','SubscriberId(FK)','Status'] },
-  { id:'CareerAnalyticsEvent', domain:'career', base:false, x:1500, y:830, fields:['EventId(PK)','EventType','PublicCompanyCode','CreatedAt'], noTenant:true },
+  // ==================== LAYOUT CONFIG ====================
 
-  // Roles & Permissions - far left middle
-  { id:'Roles', domain:'roles', base:false, issue:true, x:1500, y:360, fields:['RolesId(PK)','RoleType','CompanyId','Titles','HasAppAccess','IsDefault'], issueText:'Duplicates BaseClass, no interfaces' },
-  { id:'Module', domain:'roles', base:false, x:1700, y:360, fields:['_id(PK)','ModuleId','ModuleName','ModuleConstant'], noTenant:true },
-  { id:'Permission', domain:'roles', base:false, x:1700, y:460, fields:['_id(PK)','PermissionId','PermissionName'], noTenant:true },
-  { id:'ModulePermission', domain:'roles', base:false, x:1500, y:460, fields:['_id(PK)','ModuleId(FK)','PermissionId(FK)','HasModuleAccess'], noTenant:true },
-  { id:'RolePermission', domain:'roles', base:true, x:1500, y:560, fields:['RolePermissionId(PK)','RoleId(FK)','ModulePermissionId(FK)','HasAccess'] },
+  var NODE_W = 168, NODE_H = 36, GAP_H = 12, GAP_V = 10;
+  var PAD = 16, PAD_TOP = 34;
 
-  // Calendar & Holidays
-  { id:'Holidays', domain:'calendar', base:true, x:1700, y:80, fields:['HolidayId(PK)','HolidayName','Date','Detail'] },
-  { id:'CalendarEntity', domain:'calendar', base:true, x:1700, y:190, fields:['Id(PK)','Name','Date','Recurring','Type'] },
+  var DOMAIN_LAYOUT = {
+    attendance:  { x:40,   y:80,  cols:4 },
+    employees:   { x:830,  y:80,  cols:3 },
+    company:     { x:1440, y:80,  cols:3 },
+    career:      { x:2050, y:80,  cols:3 },
+    recruitment: { x:40,   y:410, cols:3 },
+    roles:       { x:650,  y:410, cols:3 },
+    leave:       { x:1260, y:410, cols:3 },
+    notifications:{ x:1870,y:410, cols:3 },
+    auth:        { x:40,   y:600, cols:2 },
+    system:      { x:470,  y:600, cols:3 },
+    calendar:    { x:1080, y:600, cols:2 },
+    notice:      { x:1510, y:600, cols:1 },
+    payroll:     { x:1760, y:600, cols:1 }
+  };
 
-  // Notice Board
-  { id:'Notice', domain:'notice', base:true, x:1900, y:80, fields:['NoticeId(PK)','Title','Message','NoticeType','Views[]'] },
+  var WORLD_W = 2700, WORLD_H = 760;
 
-  // Notifications
-  { id:'Notifications', domain:'notifications', base:false, x:1900, y:240, fields:['NotificationId(PK)','Title','Body','NotificationType','CompanyId'] },
-  { id:'UserNotifications', domain:'notifications', base:false, issue:true, x:1900, y:370, fields:['Id(PK)','UserId(FK)','NotificationId(FK)','IsRead'], noTenant:true, issueText:'No CompanyId — relies on UserId only' },
-  { id:'NotificationPreference', domain:'notifications', base:true, x:1900, y:490, fields:['Id(PK)','UserId(FK)','Preferences{}'] },
+  // ==================== STATE ====================
 
-  // Auth
-  { id:'RefreshToken', domain:'auth', base:false, x:1900, y:630, fields:['Id(PK)','Token','UserId(FK)','ExpireAt','IsRevoked'], noTenant:true },
-  { id:'UserSecurityToken', domain:'auth', base:false, x:1900, y:750, fields:['Id(PK)','UserId(FK)','TokenHash','Type','Expiry','IsUsed'], noTenant:true },
+  var entityMap = {};
+  var domainEntities = {};
+  var activeDomains = {};
+  var hoveredEntity = null;
+  var scale = 1, panX = 0, panY = 0;
+  var isDragging = false, dragStartX = 0, dragStartY = 0, dragStartPanX = 0, dragStartPanY = 0;
+  var incomingRefs = {};
+  var outgoingRefs = {};
+  var nodeElements = {};
 
-  // System
-  { id:'Skills', domain:'system', base:false, x:1020, y:300, fields:['Id(PK)','Name'], noTenant:true },
-  { id:'EmpEmailLogs', domain:'system', base:true, x:1700, y:560, fields:['EmailLogId(PK)','UserTo','Email','Subject','Body','Status'] },
-  { id:'Migration', domain:'system', base:false, x:1700, y:660, fields:['Id(PK)','ExecutedAt'], noTenant:true },
-];
+  // DOM refs
+  var viewport = document.getElementById('viewport');
+  var world = document.getElementById('world');
+  var canvas = document.getElementById('lines-canvas');
+  var nodesLayer = document.getElementById('nodes-layer');
+  var tooltip = document.getElementById('tooltip');
+  var zoomIndicator = document.getElementById('zoom-indicator');
+  var ctx = canvas.getContext('2d');
 
-const EDGES = [
-  // Company internal
-  { from:'CustomAttributeValue', to:'CustomAttribute', label:'CustomAttributeId' },
-  { from:'PolicyVersion', to:'Policy', label:'PolicyId' },
-  { from:'Policy', to:'Department', label:'Departments[]' },
-  { from:'Policy', to:'Roles', label:'Roles[]' },
+  // ==================== INIT ====================
 
-  // Employee references
-  { from:'EmpUser', to:'Roles', label:'RoleId' },
-  { from:'EmpUser', to:'Department', label:'Department' },
-  { from:'EmpUser', to:'JobTitles', label:'JobRole' },
-  { from:'EmpUser', to:'EmpUser', label:'ReportingManager', self:true },
-  { from:'EmpSummary', to:'EmpUser', label:'UserId' },
-  { from:'EmpEducationDetails', to:'EmpUser', label:'UserId' },
-  { from:'EmpCertificationDetails', to:'EmpUser', label:'UserId' },
-  { from:'EmpSkills', to:'EmpUser', label:'UserId' },
-  { from:'EmpWorkHistory', to:'EmpUser', label:'UserId' },
+  function init() {
+    // Group entities by domain
+    for (var d in DOMAIN_NAMES) {
+      domainEntities[d] = [];
+      activeDomains[d] = true;
+    }
 
-  // Attendance → EmpUser
-  { from:'AttendanceModel', to:'EmpUser', label:'UserId' },
-  { from:'MonthlyAttendanceSummary', to:'EmpUser', label:'UserId' },
-  { from:'AttendancePayrollException', to:'EmpUser', label:'UserId' },
+    // Compute node positions
+    ENTITIES.forEach(function(ent) {
+      var dom = ent.domain;
+      var idx = domainEntities[dom].length;
+      domainEntities[dom].push(ent);
 
-  // Leave references
-  { from:'LeaveRequest', to:'EmpUser', label:'EmployeeId' },
-  { from:'LeaveRequest', to:'LeavePolicy', label:'LeavePolicyId' },
-  { from:'EmployeeLeaveBalance', to:'EmpUser', label:'UserId' },
-  { from:'EmployeeLeaveBalance', to:'LeavePolicy', label:'LeavePolicyId' },
+      var layout = DOMAIN_LAYOUT[dom];
+      var col = idx % layout.cols;
+      var row = Math.floor(idx / layout.cols);
 
-  // Payroll → EmpUser
-  { from:'EmpPayRoll', to:'EmpUser', label:'UserId' },
-  { from:'SalaryModel', to:'EmpUser', label:'UserId' },
+      ent.x = layout.x + PAD + col * (NODE_W + GAP_H);
+      ent.y = layout.y + PAD_TOP + row * (NODE_H + GAP_V);
+      ent.w = NODE_W;
+      ent.h = NODE_H;
+      ent.visible = true;
 
-  // Recruitment
-  { from:'Applicant', to:'JobVacancy', label:'VacancyId' },
-  { from:'ApplicantLogs', to:'Applicant', label:'ApplicantId' },
-  { from:'Resume', to:'Applicant', label:'ApplicantId' },
-  { from:'PublicApplicationToken', to:'Applicant', label:'ApplicantId' },
-  { from:'PublicApplicationToken', to:'JobVacancy', label:'JobId' },
+      entityMap[ent.id] = ent;
+    });
 
-  // Career Portal
-  { from:'JobAlertSubscription', to:'CareerSubscriber', label:'SubscriberId' },
-  { from:'CompanyFollower', to:'CareerSubscriber', label:'SubscriberId' },
-  { from:'SavedJob', to:'CareerSubscriber', label:'SubscriberId' },
-  { from:'SavedJob', to:'JobVacancy', label:'JobId' },
-  { from:'CareerNotificationDelivery', to:'CareerNotificationOutbox', label:'OutboxId' },
-  { from:'CareerNotificationDelivery', to:'CareerSubscriber', label:'SubscriberId' },
+    // Build ref maps
+    RELATIONSHIPS.forEach(function(rel, i) {
+      rel.index = i;
+      if (!outgoingRefs[rel.from]) outgoingRefs[rel.from] = [];
+      outgoingRefs[rel.from].push(rel);
+      if (!incomingRefs[rel.to]) incomingRefs[rel.to] = [];
+      incomingRefs[rel.to].push(rel);
+    });
 
-  // Roles & Permissions
-  { from:'ModulePermission', to:'Module', label:'ModuleId' },
-  { from:'ModulePermission', to:'Permission', label:'PermissionId' },
-  { from:'RolePermission', to:'Roles', label:'RoleId' },
-  { from:'RolePermission', to:'ModulePermission', label:'ModulePermissionId' },
-
-  // Notifications
-  { from:'UserNotifications', to:'EmpUser', label:'UserId' },
-  { from:'UserNotifications', to:'Notifications', label:'NotificationId' },
-  { from:'NotificationPreference', to:'EmpUser', label:'UserId' },
-
-  // Auth
-  { from:'RefreshToken', to:'EmpUser', label:'UserId' },
-  { from:'UserSecurityToken', to:'EmpUser', label:'UserId' },
-];
-
-const NODE_W = 180;
-const NODE_H_BASE = 28;
-const FIELD_H = 14;
-
-let scale = 0.65;
-let panX = 20;
-let panY = 20;
-let isDragging = false;
-let dragStartX, dragStartY;
-let activeDomain = null;
-let hoveredNode = null;
-
-function getNodeHeight(e) {
-  return NODE_H_BASE + Math.min(e.fields.length, 6) * FIELD_H + 8;
-}
-
-function getComputedColor(varName) {
-  const el = document.createElement('div');
-  el.style.color = varName;
-  document.body.appendChild(el);
-  const c = getComputedStyle(el).color;
-  document.body.removeChild(el);
-  return c;
-}
-
-function buildDomainFilters() {
-  const container = document.getElementById('domain-filters');
-  DOMAINS.forEach(d => {
-    const btn = document.createElement('button');
-    btn.className = 'domain-filter';
-    btn.textContent = d.label;
-    btn.style.borderColor = d.color;
-    btn.dataset.domain = d.key;
-    btn.addEventListener('click', () => toggleDomain(d.key));
-    container.appendChild(btn);
-  });
-}
-
-function toggleDomain(key) {
-  if (activeDomain === key) {
-    activeDomain = null;
-  } else {
-    activeDomain = key;
+    setupCanvas();
+    createDomainGroups();
+    createNodes();
+    createToolbar();
+    setupInteraction();
+    // Defer view reset until layout is computed
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        resetView();
+        drawLines();
+      });
+    });
   }
-  updateFilters();
-  render();
-}
 
-function updateFilters() {
-  document.querySelectorAll('.domain-filter').forEach(btn => {
-    if (!activeDomain) {
-      btn.classList.remove('active', 'dimmed');
-    } else if (btn.dataset.domain === activeDomain) {
-      btn.classList.add('active');
-      btn.classList.remove('dimmed');
-      const d = DOMAINS.find(d => d.key === activeDomain);
-      btn.style.background = d.color;
-    } else {
-      btn.classList.remove('active');
-      btn.classList.add('dimmed');
-      btn.style.background = '';
-    }
-  });
-}
+  // ==================== CANVAS ====================
 
-function render() {
-  renderNodes();
-  renderLines();
-}
+  function setupCanvas() {
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = WORLD_W * dpr;
+    canvas.height = WORLD_H * dpr;
+    canvas.style.width = WORLD_W + 'px';
+    canvas.style.height = WORLD_H + 'px';
+    ctx.scale(dpr, dpr);
+  }
 
-function renderNodes() {
-  const container = document.getElementById('nodesContainer');
-  container.innerHTML = '';
+  function getDomainColor(domain) {
+    return getComputedStyle(document.documentElement).getPropertyValue('--c-' + domain).trim();
+  }
 
-  ENTITIES.forEach(e => {
-    const d = DOMAINS.find(d => d.key === e.domain);
-    const h = getNodeHeight(e);
-    const dimmed = activeDomain && e.domain !== activeDomain &&
-      !EDGES.some(edge =>
-        (edge.from === e.id && ENTITIES.find(t => t.id === edge.to)?.domain === activeDomain) ||
-        (edge.to === e.id && ENTITIES.find(t => t.id === edge.from)?.domain === activeDomain)
-      );
+  function getLineColor() {
+    return getComputedStyle(document.documentElement).getPropertyValue('--line-color').trim();
+  }
 
-    const node = document.createElement('div');
-    node.style.cssText = `
-      position:absolute; left:${e.x}px; top:${e.y}px;
-      width:${NODE_W}px; height:${h}px;
-      background:var(--node-bg);
-      border:1.5px solid ${e.issue ? 'var(--critical-border)' : (e.base ? 'var(--accent)' : 'var(--issue-border)')};
-      border-radius:5px;
-      overflow:hidden;
-      font-size:11px;
-      opacity:${dimmed ? 0.15 : 1};
-      transition: opacity 0.2s, box-shadow 0.15s;
-      cursor:pointer;
-      box-shadow: 0 1px 3px rgba(0,0,0,.06);
-    `;
-    node.dataset.id = e.id;
+  function getLineHighlight() {
+    return getComputedStyle(document.documentElement).getPropertyValue('--line-highlight').trim();
+  }
 
-    const header = document.createElement('div');
-    header.style.cssText = `
-      padding:4px 8px;
-      background:${e.issue ? 'var(--critical-bg)' : (e.base ? 'var(--accent-light)' : 'var(--issue-bg)')};
-      border-bottom:1px solid var(--border-light);
-      font-family:'SystemMono',monospace;
-      font-weight:600;
-      font-size:11px;
-      color:${d.color};
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      display:flex;
-      align-items:center;
-      gap:4px;
-    `;
-    header.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:${d.color};flex-shrink:0"></span>${e.id}`;
-    if (e.noTenant) header.innerHTML += '<span style="font-size:8px;opacity:0.5;margin-left:auto">global</span>';
-    node.appendChild(header);
+  function getEdgePoint(node, otherNode) {
+    var cx = node.x + node.w / 2;
+    var cy = node.y + node.h / 2;
+    var ox = otherNode.x + otherNode.w / 2;
+    var oy = otherNode.y + otherNode.h / 2;
+    var dx = ox - cx;
+    var dy = oy - cy;
+    if (dx === 0 && dy === 0) return [cx, cy];
+    var hw = node.w / 2;
+    var hh = node.h / 2;
+    var sx = Math.abs(dx) > 0.001 ? hw / Math.abs(dx) : 1e6;
+    var sy = Math.abs(dy) > 0.001 ? hh / Math.abs(dy) : 1e6;
+    var s = Math.min(sx, sy);
+    return [cx + dx * s, cy + dy * s];
+  }
 
-    const body = document.createElement('div');
-    body.style.cssText = 'padding:3px 8px;';
-    const visibleFields = e.fields.slice(0, 6);
-    visibleFields.forEach(f => {
-      const row = document.createElement('div');
-      row.style.cssText = `
-        font-family:'SystemMono',monospace;
-        font-size:9.5px;
-        line-height:${FIELD_H}px;
-        color:var(--text-secondary);
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      `;
-      if (f.includes('(PK)')) {
-        row.style.color = 'var(--accent)';
-        row.style.fontWeight = '600';
-      } else if (f.includes('(FK)')) {
-        row.style.color = d.color;
-      }
-      row.textContent = f;
-      body.appendChild(row);
-    });
-    node.appendChild(body);
+  function drawArrow(ctx, fx, fy, tx, ty, size) {
+    var a = Math.atan2(ty - fy, tx - fx);
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx - size * Math.cos(a - 0.38), ty - size * Math.sin(a - 0.38));
+    ctx.lineTo(tx - size * Math.cos(a + 0.38), ty - size * Math.sin(a + 0.38));
+    ctx.closePath();
+    ctx.fill();
+  }
 
-    node.addEventListener('mouseenter', (ev) => {
-      if (dimmed) return;
-      hoveredNode = e.id;
-      node.style.boxShadow = `0 0 0 2px ${d.color}, 0 4px 12px rgba(0,0,0,.12)`;
-      showTooltip(ev, e, d);
-      renderLines();
-    });
-    node.addEventListener('mousemove', (ev) => { if (!dimmed) showTooltip(ev, e, d); });
-    node.addEventListener('mouseleave', () => {
-      hoveredNode = null;
-      node.style.boxShadow = '0 1px 3px rgba(0,0,0,.06)';
-      hideTooltip();
-      renderLines();
+  function drawLines() {
+    var dpr = window.devicePixelRatio || 1;
+    ctx.clearRect(0, 0, WORLD_W * dpr, WORLD_H * dpr);
+    ctx.save();
+
+    var lineCol = getLineColor();
+    var highlightCol = getLineHighlight();
+
+    // Sort: dimmed first, normal second, highlighted last
+    var sorted = RELATIONSHIPS.slice().sort(function(a, b) {
+      var aH = hoveredEntity && (a.from === hoveredEntity || a.to === hoveredEntity);
+      var bH = hoveredEntity && (b.from === hoveredEntity || b.to === hoveredEntity);
+      if (aH && !bH) return 1;
+      if (!aH && bH) return -1;
+      return 0;
     });
 
-    container.appendChild(node);
-  });
-}
+    sorted.forEach(function(rel) {
+      var src = entityMap[rel.from];
+      var tgt = entityMap[rel.to];
+      if (!src || !tgt) return;
+      if (!activeDomains[src.domain] || !activeDomains[tgt.domain]) return;
 
-function renderLines() {
-  const canvas = document.getElementById('linesCanvas');
-  const maxX = Math.max(...ENTITIES.map(e => e.x + NODE_W)) + 100;
-  const maxY = Math.max(...ENTITIES.map(e => e.y + getNodeHeight(e))) + 100;
-  canvas.width = maxX;
-  canvas.height = maxY;
-  canvas.style.width = maxX + 'px';
-  canvas.style.height = maxY + 'px';
+      var isHL = hoveredEntity && (rel.from === hoveredEntity || rel.to === hoveredEntity);
+      var isDim = hoveredEntity && !isHL;
 
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, maxX, maxY);
+      var sp = getEdgePoint(src, tgt);
+      var tp = getEdgePoint(tgt, src);
 
-  EDGES.forEach(edge => {
-    const fromE = ENTITIES.find(e => e.id === edge.from);
-    const toE = ENTITIES.find(e => e.id === edge.to);
-    if (!fromE || !toE) return;
+      // Bezier control offset
+      var mx = (sp[0] + tp[0]) / 2;
+      var my = (sp[1] + tp[1]) / 2;
+      var dx = tp[0] - sp[0];
+      var dy = tp[1] - sp[1];
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 1) return;
 
-    const dimmed = activeDomain && fromE.domain !== activeDomain && toE.domain !== activeDomain;
-    const highlighted = hoveredNode && (edge.from === hoveredNode || edge.to === hoveredNode);
+      // Hash-based offset for curve variety
+      var hash = ((rel.index * 7 + 13) % 19) / 19;
+      var offsetMag = Math.min(dist * 0.12, 28) * (hash * 2 - 1);
+      var nx = -dy / dist;
+      var ny = dx / dist;
+      var cpx = mx + nx * offsetMag;
+      var cpy = my + ny * offsetMag;
 
-    if (dimmed && !highlighted) {
-      ctx.globalAlpha = 0.05;
-    } else if (highlighted) {
-      ctx.globalAlpha = 1;
-    } else {
-      ctx.globalAlpha = 0.25;
-    }
-
-    const fromH = getNodeHeight(fromE);
-    const toH = getNodeHeight(toE);
-
-    let x1, y1, x2, y2;
-
-    if (edge.self) {
-      x1 = fromE.x + NODE_W;
-      y1 = fromE.y + fromH / 3;
       ctx.beginPath();
-      ctx.strokeStyle = highlighted ? getComputedColor('var(--line-highlight)') : getComputedColor('var(--line-color)');
-      ctx.lineWidth = highlighted ? 2 : 1;
-      ctx.setLineDash([4, 3]);
-      ctx.moveTo(x1, y1);
-      ctx.bezierCurveTo(x1 + 30, y1 - 25, x1 + 30, y1 + 25, x1, y1 + fromH / 4);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.moveTo(sp[0], sp[1]);
+      ctx.quadraticCurveTo(cpx, cpy, tp[0], tp[1]);
 
-      const endX = x1;
-      const endY = y1 + fromH / 4;
-      ctx.beginPath();
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.moveTo(endX - 4, endY - 3);
-      ctx.lineTo(endX, endY + 3);
-      ctx.lineTo(endX + 4, endY - 3);
-      ctx.fill();
-    } else {
-      const fromCX = fromE.x + NODE_W / 2;
-      const fromCY = fromE.y + fromH / 2;
-      const toCX = toE.x + NODE_W / 2;
-      const toCY = toE.y + toH / 2;
-
-      if (Math.abs(fromCX - toCX) > Math.abs(fromCY - toCY)) {
-        if (fromCX < toCX) {
-          x1 = fromE.x + NODE_W; y1 = fromCY;
-          x2 = toE.x; y2 = toCY;
-        } else {
-          x1 = fromE.x; y1 = fromCY;
-          x2 = toE.x + NODE_W; y2 = toCY;
-        }
+      if (rel.dashed) {
+        ctx.setLineDash([6, 4]);
       } else {
-        if (fromCY < toCY) {
-          x1 = fromCX; y1 = fromE.y + fromH;
-          x2 = toCX; y2 = toE.y;
-        } else {
-          x1 = fromCX; y1 = fromE.y;
-          x2 = toCX; y2 = toE.y + toH;
-        }
+        ctx.setLineDash([]);
       }
 
-      ctx.beginPath();
-      ctx.strokeStyle = highlighted ? getComputedColor('var(--line-highlight)') : getComputedColor('var(--line-color)');
-      ctx.lineWidth = highlighted ? 2 : 1;
-      ctx.setLineDash([]);
+      if (isHL) {
+        var domCol = getDomainColor(src.domain);
+        ctx.strokeStyle = domCol;
+        ctx.lineWidth = 2.5;
+        ctx.globalAlpha = 0.85;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = domCol;
+        ctx.globalAlpha = 0.85;
+        drawArrow(ctx, cpx, cpy, tp[0], tp[1], 9);
+      } else if (isDim) {
+        ctx.strokeStyle = lineCol;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.15;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = lineCol;
+        ctx.globalAlpha = 0.1;
+        drawArrow(ctx, cpx, cpy, tp[0], tp[1], 5);
+      } else {
+        ctx.strokeStyle = lineCol;
+        ctx.lineWidth = 1.2;
+        ctx.globalAlpha = 1;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = lineCol;
+        ctx.globalAlpha = 1;
+        drawArrow(ctx, cpx, cpy, tp[0], tp[1], 6);
+      }
 
-      const dx = x2 - x1;
-      const dy = y2 - y1;
-      const cp1x = x1 + dx * 0.4;
-      const cp1y = y1;
-      const cp2x = x2 - dx * 0.4;
-      const cp2y = y2;
+      ctx.globalAlpha = 1;
+    });
 
-      ctx.moveTo(x1, y1);
-      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x2, y2);
-      ctx.stroke();
+    ctx.restore();
+  }
 
-      const angle = Math.atan2(y2 - cp2y, x2 - cp2x);
-      ctx.beginPath();
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.moveTo(x2, y2);
-      ctx.lineTo(x2 - 6 * Math.cos(angle - 0.35), y2 - 6 * Math.sin(angle - 0.35));
-      ctx.lineTo(x2 - 6 * Math.cos(angle + 0.35), y2 - 6 * Math.sin(angle + 0.35));
-      ctx.closePath();
-      ctx.fill();
+  // ==================== DOM NODES ====================
+
+  function createDomainGroups() {
+    for (var dom in DOMAIN_LAYOUT) {
+      var layout = DOMAIN_LAYOUT[dom];
+      var ents = domainEntities[dom] || [];
+      var cols = layout.cols;
+      var rows = Math.ceil(ents.length / cols);
+      var w = cols * NODE_W + (cols - 1) * GAP_H + PAD * 2;
+      var h = PAD_TOP + rows * NODE_H + (rows - 1) * GAP_V + PAD;
+      var color = 'var(--c-' + dom + ')';
+
+      var group = document.createElement('div');
+      group.className = 'domain-group';
+      group.dataset.domain = dom;
+      group.style.cssText = 'left:' + layout.x + 'px;top:' + layout.y + 'px;width:' + w + 'px;height:' + h + 'px;';
+      group.style.borderColor = color;
+      group.style.background = color;
+      group.style.backgroundColor = 'color-mix(in srgb, ' + color + ' calc(var(--domain-bg-alpha) * 100%), transparent)';
+      // Fallback for browsers without color-mix
+      group.style.opacity = '1';
+
+      var label = document.createElement('span');
+      label.className = 'domain-group-label';
+      label.textContent = DOMAIN_NAMES[dom];
+      label.style.color = color;
+      group.appendChild(label);
+
+      var count = document.createElement('span');
+      count.className = 'domain-group-count';
+      count.textContent = ents.length + (ents.length === 1 ? ' entity' : ' entities');
+      count.style.color = color;
+      group.appendChild(count);
+
+      nodesLayer.appendChild(group);
     }
-  });
+  }
 
-  ctx.globalAlpha = 1;
-}
+  function createNodes() {
+    ENTITIES.forEach(function(ent) {
+      var el = document.createElement('div');
+      el.className = 'entity-node' + (ent.base ? '' : ' standalone');
+      el.dataset.entity = ent.id;
+      el.dataset.domain = ent.domain;
+      el.style.cssText = 'left:' + ent.x + 'px;top:' + ent.y + 'px;width:' + NODE_W + 'px;';
+      el.style.setProperty('--node-domain-color', 'var(--c-' + ent.domain + ')');
+      el.style.borderLeftColor = 'var(--c-' + ent.domain + ')';
 
-function showTooltip(ev, e, d) {
-  const tt = document.getElementById('tooltip');
-  const connectedTo = EDGES.filter(edge => edge.from === e.id).map(edge => edge.to);
-  const connectedFrom = EDGES.filter(edge => edge.to === e.id && !edge.self).map(edge => edge.from);
+      var name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = ent.id;
+      el.appendChild(name);
 
-  let html = `<div class="tt-name">${e.id}</div>`;
-  html += `<div class="tt-domain">${d.label} &middot; ${e.base ? 'BaseClass' : 'standalone'}${e.noTenant ? ' &middot; no CompanyId' : ''}</div>`;
-  html += `<div class="tt-fields">${e.fields.join(', ')}</div>`;
-  if (connectedTo.length) html += `<div class="tt-fields" style="margin-top:4px">References: ${connectedTo.join(', ')}</div>`;
-  if (connectedFrom.length) html += `<div class="tt-fields" style="margin-top:2px">Referenced by: ${connectedFrom.join(', ')}</div>`;
-  if (e.issueText) html += `<div class="tt-issue">${e.issueText}</div>`;
+      if (ent.issue) {
+        var dot = document.createElement('span');
+        dot.className = 'issue-dot';
+        dot.style.background = ISSUE_COLORS[ent.issue.level];
+        el.appendChild(dot);
+      }
 
-  tt.innerHTML = html;
-  tt.style.display = 'block';
+      el.addEventListener('mouseenter', function(e) { onNodeEnter(ent, e); });
+      el.addEventListener('mouseleave', function() { onNodeLeave(ent); });
+      el.addEventListener('mousemove', function(e) { moveTooltip(e); });
 
-  const rect = tt.getBoundingClientRect();
-  let left = ev.clientX + 14;
-  let top = ev.clientY + 14;
-  if (left + rect.width > window.innerWidth - 10) left = ev.clientX - rect.width - 10;
-  if (top + rect.height > window.innerHeight - 10) top = ev.clientY - rect.height - 10;
-  tt.style.left = left + 'px';
-  tt.style.top = top + 'px';
-}
+      nodesLayer.appendChild(el);
+      nodeElements[ent.id] = el;
+    });
+  }
 
-function hideTooltip() {
-  document.getElementById('tooltip').style.display = 'none';
-}
+  // ==================== TOOLBAR ====================
 
-function applyTransform() {
-  const world = document.getElementById('canvasWorld');
-  world.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
-}
+  function createToolbar() {
+    var container = document.getElementById('domain-buttons');
+    var domains = Object.keys(DOMAIN_NAMES);
 
-function zoomIn() { scale = Math.min(scale * 1.2, 3); applyTransform(); }
-function zoomOut() { scale = Math.max(scale / 1.2, 0.15); applyTransform(); }
+    domains.forEach(function(dom) {
+      var btn = document.createElement('button');
+      btn.className = 'domain-btn active';
+      btn.dataset.domain = dom;
 
-function resetView() {
-  scale = 0.55;
-  panX = 20;
-  panY = 20;
-  activeDomain = null;
-  updateFilters();
-  applyTransform();
-  render();
-}
+      var dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.style.background = 'var(--c-' + dom + ')';
+      btn.appendChild(dot);
 
-const container = document.getElementById('canvasContainer');
+      var txt = document.createTextNode(DOMAIN_NAMES[dom]);
+      btn.appendChild(txt);
 
-container.addEventListener('mousedown', (ev) => {
-  if (ev.target.closest('[data-id]')) return;
-  isDragging = true;
-  dragStartX = ev.clientX - panX;
-  dragStartY = ev.clientY - panY;
-  container.classList.add('dragging');
-});
+      btn.addEventListener('click', function() { toggleDomain(dom); });
+      container.appendChild(btn);
+    });
 
-window.addEventListener('mousemove', (ev) => {
-  if (!isDragging) return;
-  panX = ev.clientX - dragStartX;
-  panY = ev.clientY - dragStartY;
-  applyTransform();
-});
+    document.getElementById('btn-show-all').addEventListener('click', showAll);
+    document.getElementById('btn-reset-view').addEventListener('click', resetView);
+  }
 
-window.addEventListener('mouseup', () => {
-  isDragging = false;
-  container.classList.remove('dragging');
-});
+  function toggleDomain(dom) {
+    activeDomains[dom] = !activeDomains[dom];
+    applyFilters();
+  }
 
-container.addEventListener('wheel', (ev) => {
-  ev.preventDefault();
-  const rect = container.getBoundingClientRect();
-  const mx = ev.clientX - rect.left;
-  const my = ev.clientY - rect.top;
+  function showAll() {
+    for (var d in activeDomains) activeDomains[d] = true;
+    applyFilters();
+  }
 
-  const oldScale = scale;
-  if (ev.deltaY < 0) scale = Math.min(scale * 1.08, 3);
-  else scale = Math.max(scale / 1.08, 0.15);
+  function applyFilters() {
+    // Update buttons
+    var btns = document.querySelectorAll('.domain-btn');
+    btns.forEach(function(btn) {
+      var d = btn.dataset.domain;
+      if (activeDomains[d]) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
 
-  panX = mx - (mx - panX) * (scale / oldScale);
-  panY = my - (my - panY) * (scale / oldScale);
+    // Update domain groups
+    var groups = document.querySelectorAll('.domain-group');
+    groups.forEach(function(g) {
+      g.style.display = activeDomains[g.dataset.domain] ? '' : 'none';
+    });
 
-  applyTransform();
-}, { passive: false });
+    // Update nodes
+    ENTITIES.forEach(function(ent) {
+      var el = nodeElements[ent.id];
+      var vis = activeDomains[ent.domain];
+      ent.visible = vis;
+      el.style.display = vis ? '' : 'none';
+    });
 
-buildDomainFilters();
-applyTransform();
-render();
+    drawLines();
+  }
+
+  // ==================== TOOLTIP ====================
+
+  function onNodeEnter(ent, e) {
+    hoveredEntity = ent.id;
+
+    // Highlight / dim nodes
+    ENTITIES.forEach(function(other) {
+      var el = nodeElements[other.id];
+      if (!activeDomains[other.domain]) return;
+      var connected = isConnected(ent.id, other.id);
+      if (other.id === ent.id) {
+        el.classList.add('highlighted');
+        el.classList.remove('dimmed');
+      } else if (connected) {
+        el.classList.add('highlighted');
+        el.classList.remove('dimmed');
+      } else {
+        el.classList.add('dimmed');
+        el.classList.remove('highlighted');
+      }
+    });
+
+    drawLines();
+    showTooltip(ent, e);
+  }
+
+  function onNodeLeave(ent) {
+    hoveredEntity = null;
+
+    ENTITIES.forEach(function(other) {
+      var el = nodeElements[other.id];
+      el.classList.remove('highlighted', 'dimmed');
+    });
+
+    drawLines();
+    hideTooltip();
+  }
+
+  function isConnected(id1, id2) {
+    if (id1 === id2) return true;
+    for (var i = 0; i < RELATIONSHIPS.length; i++) {
+      var r = RELATIONSHIPS[i];
+      if ((r.from === id1 && r.to === id2) || (r.from === id2 && r.to === id1)) return true;
+    }
+    return false;
+  }
+
+  function showTooltip(ent, e) {
+    var color = getDomainColor(ent.domain);
+    var out = outgoingRefs[ent.id] || [];
+    var inc = incomingRefs[ent.id] || [];
+
+    var html = '<div class="tt-header">' +
+      '<span>' + ent.id + '</span>' +
+      '<span class="tt-domain-badge" style="background:' + color + ';">' + DOMAIN_NAMES[ent.domain] + '</span>' +
+      '</div>';
+
+    html += '<div class="tt-meta">' +
+      '<span>Type: ' + (ent.base ? 'BaseClass' : 'Standalone') + '</span>' +
+      '<span>Scope: ' + SCOPE_LABELS[ent.scope] + '</span>' +
+      '</div>';
+
+    if (out.length > 0) {
+      html += '<div class="tt-section"><div class="tt-section-title">References (outgoing)</div>';
+      out.forEach(function(r) {
+        html += '<div class="tt-ref"><span class="field">' + r.field + '</span> &rarr; <span class="target">' + r.to + '</span>' +
+          (r.dashed ? ' <span style="color:var(--text-tertiary);font-size:10px;">(indirect)</span>' : '') + '</div>';
+      });
+      html += '</div>';
+    }
+
+    if (inc.length > 0) {
+      html += '<div class="tt-section"><div class="tt-section-title">Referenced by (incoming)</div>';
+      inc.forEach(function(r) {
+        html += '<div class="tt-ref"><span class="target">' + r.from + '</span>.<span class="field">' + r.field + '</span></div>';
+      });
+      html += '</div>';
+    }
+
+    if (!out.length && !inc.length) {
+      html += '<div class="tt-section" style="color:var(--text-tertiary);font-style:italic;">No foreign key relationships</div>';
+    }
+
+    if (ent.issue) {
+      html += '<div class="tt-issue ' + ent.issue.level + '">' +
+        ent.issue.level.toUpperCase() + ': ' + ent.issue.text + '</div>';
+    }
+
+    tooltip.innerHTML = html;
+    tooltip.style.display = 'block';
+    moveTooltip(e);
+  }
+
+  function moveTooltip(e) {
+    var tw = tooltip.offsetWidth;
+    var th = tooltip.offsetHeight;
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var x = e.clientX + 14;
+    var y = e.clientY + 14;
+    if (x + tw > vw - 8) x = e.clientX - tw - 10;
+    if (y + th > vh - 8) y = e.clientY - th - 10;
+    if (x < 4) x = 4;
+    if (y < 4) y = 4;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top = y + 'px';
+  }
+
+  function hideTooltip() {
+    tooltip.style.display = 'none';
+  }
+
+  // ==================== PAN & ZOOM ====================
+
+  function applyTransform() {
+    world.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + scale + ')';
+    zoomIndicator.textContent = Math.round(scale * 100) + '%';
+  }
+
+  function resetView() {
+    var vw = viewport.clientWidth;
+    var vh = viewport.clientHeight;
+    var sx = vw / WORLD_W;
+    var sy = vh / WORLD_H;
+    scale = Math.min(sx, sy) * 0.94;
+    if (scale > 1) scale = 1;
+    panX = (vw - WORLD_W * scale) / 2;
+    panY = (vh - WORLD_H * scale) / 2;
+    applyTransform();
+  }
+
+  function zoomAt(clientX, clientY, factor) {
+    var rect = viewport.getBoundingClientRect();
+    var mx = clientX - rect.left;
+    var my = clientY - rect.top;
+
+    var worldX = (mx - panX) / scale;
+    var worldY = (my - panY) / scale;
+
+    var newScale = scale * factor;
+    newScale = Math.max(0.15, Math.min(4, newScale));
+
+    panX = mx - worldX * newScale;
+    panY = my - worldY * newScale;
+    scale = newScale;
+    applyTransform();
+  }
+
+  function setupInteraction() {
+    // Mouse wheel zoom
+    viewport.addEventListener('wheel', function(e) {
+      e.preventDefault();
+      var factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
+      zoomAt(e.clientX, e.clientY, factor);
+    }, { passive: false });
+
+    // Mouse drag pan
+    viewport.addEventListener('mousedown', function(e) {
+      if (e.button !== 0) return;
+      if (e.target.closest('.entity-node')) return;
+      isDragging = true;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      dragStartPanX = panX;
+      dragStartPanY = panY;
+      viewport.classList.add('dragging');
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', function(e) {
+      if (!isDragging) return;
+      panX = dragStartPanX + (e.clientX - dragStartX);
+      panY = dragStartPanY + (e.clientY - dragStartY);
+      applyTransform();
+    });
+
+    window.addEventListener('mouseup', function() {
+      if (isDragging) {
+        isDragging = false;
+        viewport.classList.remove('dragging');
+      }
+    });
+
+    // Touch support
+    var touchState = { startX:0, startY:0, startPanX:0, startPanY:0, lastDist:0, panning:false };
+
+    viewport.addEventListener('touchstart', function(e) {
+      if (e.touches.length === 1 && !e.target.closest('.entity-node')) {
+        touchState.panning = true;
+        touchState.startX = e.touches[0].clientX;
+        touchState.startY = e.touches[0].clientY;
+        touchState.startPanX = panX;
+        touchState.startPanY = panY;
+      } else if (e.touches.length === 2) {
+        touchState.panning = false;
+        touchState.lastDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+      }
+    }, { passive: true });
+
+    viewport.addEventListener('touchmove', function(e) {
+      if (e.touches.length === 1 && touchState.panning) {
+        e.preventDefault();
+        panX = touchState.startPanX + (e.touches[0].clientX - touchState.startX);
+        panY = touchState.startPanY + (e.touches[0].clientY - touchState.startY);
+        applyTransform();
+      } else if (e.touches.length === 2) {
+        e.preventDefault();
+        var dist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        if (touchState.lastDist > 0) {
+          var cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+          var cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+          zoomAt(cx, cy, dist / touchState.lastDist);
+        }
+        touchState.lastDist = dist;
+      }
+    }, { passive: false });
+
+    viewport.addEventListener('touchend', function() {
+      touchState.panning = false;
+      touchState.lastDist = 0;
+    }, { passive: true });
+
+    // Redraw on theme change
+    var observer = new MutationObserver(function() {
+      setupCanvas();
+      drawLines();
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+    // Also redraw on color-scheme media change
+    if (window.matchMedia) {
+      var mq = window.matchMedia('(prefers-color-scheme: dark)');
+      mq.addEventListener('change', function() {
+        setupCanvas();
+        drawLines();
+      });
+    }
+  }
+
+  // ==================== START ====================
+
+  init();
+
+})();
 </script>
