@@ -1495,13 +1495,19 @@ public class LeaveManagementService : ILeaveManagementService
 
         // get leave policies details
         List<string> leavePolicyIds = employeeLeaveBalances.Select(elb => elb.LeavePolicyId).Distinct().ToList();
-        IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(lp => leavePolicyIds.Contains(lp.Id) && lp.CompanyId == companyId);
+        // Employee balance records are retained for history when a policy is
+        // deactivated, but inactive policies must not be exposed in the Leave
+        // Balance overview.
+        IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(lp =>
+            leavePolicyIds.Contains(lp.Id) && lp.CompanyId == companyId && lp.Status);
 
         var empLeaveBalanceResult = empUsers.Select(emp =>
             {
                 var balances = employeeLeaveBalances.Where(lb => lb.UserId == emp.UserId).Select(lb =>
                 {
                     LeavePolicy? policy = leavePolicies.FirstOrDefault(lp => lp.Id == lb.LeavePolicyId);
+                    if (policy is null) return null;
+
                     return new LeaveBalanceDetail
                     {
                         LeaveBalanceId = lb.Id,
@@ -1514,7 +1520,7 @@ public class LeaveManagementService : ILeaveManagementService
                         Version = lb.Version,
                         UsedLeave = lb.Taken
                     };
-                }).ToList();
+                }).Where(balance => balance is not null).Select(balance => balance!).ToList();
 
                 JobTitles? jobTitle = emp.JobRole != null ? jobTitles.FirstOrDefault(jt => jt.JobTitleId == emp.JobRole) : null;
 
