@@ -68,10 +68,10 @@ public class WorkFromHomePolicy : BaseClass
     public string FullDayAttendanceStatusCode { get; set; } = "WFH";
     public string HalfDayAttendanceStatusCode { get; set; } = "WFH-HD";
     public string MixedAttendanceStatusCode { get; set; } = "WFH+WFO";
-    public string? WfhWfoAttendanceStatusCode { get; set; }
-    public string? WfhHdAttendanceStatusCode { get; set; }
-    public string? WfhSlAttendanceStatusCode { get; set; }
-    public string? WfhClAttendanceStatusCode { get; set; }
+    public string? WfhWfoAttendanceStatusCode { get; set; } = "WFH+WFO";
+    public string? WfhHdAttendanceStatusCode { get; set; } = "WFH-HD";
+    public string? WfhSlAttendanceStatusCode { get; set; } = "WFH+SL";
+    public string? WfhClAttendanceStatusCode { get; set; } = "WFH+CL";
 }
 
 public class WorkFromHomeEmployeeAllocation

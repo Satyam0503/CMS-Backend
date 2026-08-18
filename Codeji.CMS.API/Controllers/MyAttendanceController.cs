@@ -61,7 +61,9 @@ public sealed class MyAttendanceController(IAdminAttendanceService attendance,
             var recipients = (await employees.GetAll(x => x.CompanyId == companyId && x.Status && roleIds.Contains(x.RoleId))).Select(x => x.UserId).Distinct().ToList();
             if (recipients.Count > 0)
             {
-                var note = new Notifications { NotificationId = Guid.NewGuid().ToString(), CompanyId = companyId, CreatedBy = userId, CreatedDateTime = DateTime.UtcNow, TargetId = request.Id, Title = "Attendance correction request", Body = $"An employee requested an attendance correction for {request.AttendanceDate:dd MMM yyyy}.", NotificationType = EnumsHelper.NotificationTypes.LeaveRequest };
+                // The target prefix is a UI contract: reviewers use it to open this
+                // exact company-owned correction request from their notification menu.
+                var note = new Notifications { NotificationId = Guid.NewGuid().ToString(), CompanyId = companyId, CreatedBy = userId, CreatedDateTime = DateTime.UtcNow, TargetId = $"attendance-review-{request.Id}", Title = "Attendance correction request", Body = $"An employee requested an attendance correction for {request.AttendanceDate:dd MMM yyyy}.", NotificationType = EnumsHelper.NotificationTypes.LeaveRequest };
                 if ((await notifications.AddOne(note)).Success)
                 {
                     var items = recipients.Select(id => new UserNotifications { UserNotificationId = Guid.NewGuid().ToString(), UserId = id, NotificationId = note.NotificationId, CreatedDateTime = DateTime.UtcNow }).ToList();

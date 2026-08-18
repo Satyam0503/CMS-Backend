@@ -23,12 +23,12 @@ namespace Codeji.CMS.Utility.Helpers
                 ? "Codeji"
                 : ConfigManager.EmailSettings.FromName.Trim());
             var year = DateTime.UtcNow.Year;
-            return $"<!doctype html><html><body style=\"margin:0;padding:0;background:#f4f6f8;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">" +
-                   $"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#f4f6f8;padding:32px 12px;\"><tr><td align=\"center\">" +
-                   $"<table role=\"presentation\" width=\"600\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:100%;max-width:600px;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;\">" +
-                   $"<tr><td style=\"padding:22px 32px;background:#132b3a;color:#ffffff;font-size:20px;font-weight:700;\">{brandName}</td></tr>" +
+            return $"<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" /></head><body style=\"margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#1e293b;\">" +
+                   $"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#f3f6fb;padding:32px 12px;\"><tr><td align=\"center\">" +
+                   $"<table role=\"presentation\" width=\"600\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:100%;max-width:600px;background:#ffffff;border:1px solid #dbe3ef;border-radius:14px;overflow:hidden;box-shadow:0 10px 28px rgba(15,23,42,0.08);\">" +
+                   $"<tr><td style=\"padding:24px 32px;background:#183b52;color:#ffffff;font-size:20px;font-weight:700;letter-spacing:0.1px;\">{brandName}</td></tr>" +
                    $"<tr><td style=\"padding:32px;font-size:15px;line-height:1.6;\">{content}</td></tr>" +
-                   $"<tr><td style=\"padding:18px 32px;background:#f9fafb;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;line-height:1.5;\">This is an automated message from {brandName}. Please do not reply directly to this email.<br />&copy; {year} {brandName}. All rights reserved.</td></tr>" +
+                   $"<tr><td style=\"padding:18px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px;line-height:1.5;\">This is an automated message from {brandName}. Please do not reply directly to this email.<br />&copy; {year} {brandName}. All rights reserved.</td></tr>" +
                    "</table></td></tr></table></body></html>";
         }
 

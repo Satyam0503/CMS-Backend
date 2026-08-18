@@ -157,12 +157,14 @@ public class RolePermissionTests
             new Roles { RolesId = "admin-deleted", RoleType = 1, IsDefault = true, IsDeleted = true, Titles = "Deleted admin", UserRoles = [] },
             new Roles { RolesId = "hr-old", RoleType = 2, IsDefault = true, Titles = "HR", CreatedDate = DateTime.UtcNow, UserRoles = [] },
             new Roles { RolesId = "hr-new", RoleType = 2, IsDefault = true, Titles = "HR copy", CreatedDate = DateTime.UtcNow.AddMinutes(1), UserRoles = [] },
+            new Roles { RolesId = "hr-executive", RoleType = 4, IsDefault = true, Titles = "HR Executive", CreatedDate = DateTime.UtcNow, UserRoles = [] },
+            new Roles { RolesId = "employee", RoleType = 3, IsDefault = true, Titles = "Employee", CreatedDate = DateTime.UtcNow, UserRoles = [] },
         };
         fixture.RoleRepository
             .Setup(x => x.Get(It.IsAny<Expression<Func<Roles, bool>>>(), null, false))
             .Returns((Expression<Func<Roles, bool>> predicate, object? _, bool _) => templates.Where(predicate.Compile()).AsQueryable());
         fixture.RolePermissionRepository
-            .Setup(x => x.GetAll(It.IsAny<Expression<Func<RolePermission, bool>>>(), false, true))
+            .Setup(x => x.GetAll(It.IsAny<Expression<Func<RolePermission, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
             .ReturnsAsync([
                 new RolePermission { RoleId = "admin-old", ModulePermissionId = 10, HasAccess = true, IsAccessible = true },
                 new RolePermission { RoleId = "admin-old", ModulePermissionId = 10, HasAccess = false, IsAccessible = false },
@@ -173,8 +175,8 @@ public class RolePermissionTests
 
         var roles = await fixture.Service.AddDefaultRole("company-1");
 
-        Assert.Equal(new[] { 1, 2 }, roles.Select(x => x.RoleType).Order());
-        fixture.RoleRepository.Verify(x => x.AddMany(It.Is<IEnumerable<Roles>>(saved => saved.Count() == 2)), Times.Once);
+        Assert.Equal(new[] { 1, 2, 3, 4 }, roles.Select(x => x.RoleType).Order());
+        fixture.RoleRepository.Verify(x => x.AddMany(It.Is<IEnumerable<Roles>>(saved => saved.Count() == 4)), Times.Once);
         fixture.RolePermissionRepository.Verify(x => x.AddMany(It.Is<IEnumerable<RolePermission>>(saved =>
             saved.Count() == 2 && saved.All(x => x.CompanyId == "company-1"))), Times.Once);
     }

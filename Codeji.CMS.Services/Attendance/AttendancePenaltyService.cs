@@ -66,8 +66,9 @@ public class AttendancePenaltyService : IAttendancePenaltyService
     public async Task<Result<AttendancePayrollException>> Recalculate(string companyId,DateTime month)
     {
         var start=new DateTime(month.Year,month.Month,1);var end=start.AddMonths(1).AddDays(-1);var policy=await GetPolicy(companyId,end);
+        var lastCompletedDate=CalendarDateHelpers.GetLastCompletedBusinessDate(DateTime.UtcNow).ToDateTime(TimeOnly.MinValue);
         var employees=(await _employees.GetAll(x=>x.CompanyId==companyId)).ToList();var output=new List<AttendancePayrollException>();
-        foreach(var emp in employees){if(!AttendancePayrollRules.TryGetEligiblePeriod(emp,start,end,out var from,out var to))continue;var toExclusive=to.Date.AddDays(1);var records=(await _attendance.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<toExclusive)).Where(a=>a.Status is "LHD" or "ED" or "LHD+ED").ToList();var lhd=records.Count(x=>x.Status is "LHD" or "LHD+ED");var ed=records.Count(x=>x.Status is "ED" or "LHD+ED");var combined=lhd+ed;var exceeded=AttendancePayrollRules.ExceededOccurrences(lhd,ed,policy.CombinedLhdEdMonthlyLimit);var existing=await _exceptions.FirstOrDefault(x=>x.CompanyId==companyId&&x.UserId==emp.UserId&&x.EmployeeId==emp.EmployeeId&&x.PayrollMonth==start&&x.ExceptionType=="LHD_ED_LIMIT_EXCEEDED");
+        foreach(var emp in employees){if(!AttendancePayrollRules.TryGetEligiblePeriod(emp,start,end,out var from,out var to)){var stale=await _exceptions.FirstOrDefault(x=>x.CompanyId==companyId&&x.UserId==emp.UserId&&x.EmployeeId==emp.EmployeeId&&x.PayrollMonth==start&&x.ExceptionType=="LHD_ED_LIMIT_EXCEEDED"&&x.Status=="PENDING_REVIEW");if(stale!=null){stale.Status="CANCELLED";stale.Resolution="Employee is not eligible for this attendance month.";stale.UpdatedDate=DateTime.UtcNow;stale.Version++;await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x=>x.Id,stale.Id),stale);}continue;}var reviewTo=to.Date<lastCompletedDate?to.Date:lastCompletedDate;var records=reviewTo<from.Date?new List<AttendanceModel>():(await _attendance.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<reviewTo.AddDays(1))).Where(a=>a.Status is "LHD" or "ED" or "LHD+ED").ToList();var lhd=records.Count(x=>x.Status is "LHD" or "LHD+ED");var ed=records.Count(x=>x.Status is "ED" or "LHD+ED");var combined=lhd+ed;var exceeded=AttendancePayrollRules.ExceededOccurrences(lhd,ed,policy.CombinedLhdEdMonthlyLimit);var existing=await _exceptions.FirstOrDefault(x=>x.CompanyId==companyId&&x.UserId==emp.UserId&&x.EmployeeId==emp.EmployeeId&&x.PayrollMonth==start&&x.ExceptionType=="LHD_ED_LIMIT_EXCEEDED");
             if(exceeded==0){if(existing!=null&&existing.Status=="PENDING_REVIEW"){existing.Status="CANCELLED";existing.UpdatedDate=DateTime.UtcNow;await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x=>x.Id,existing.Id),existing);}continue;}
             var item=existing??new AttendancePayrollException{CompanyId=companyId,UserId=emp.UserId,EmployeeId=emp.EmployeeId,PayrollMonth=start,PolicyId=policy.Id!,PolicyVersion=policy.Version};item.LhdCount=lhd;item.EdCount=ed;item.CombinedOccurrenceCount=combined;item.AllowedOccurrenceCount=policy.CombinedLhdEdMonthlyLimit;item.ExceededOccurrenceCount=exceeded;item.AffectedAttendanceRecordIds=records.Select(x=>x.AttendanceId!).Where(x=>x!=null).ToList();item.AffectedDates=records.Select(x=>x.Date.Date).Distinct().ToList();
             if(existing==null)
@@ -97,7 +98,52 @@ public class AttendancePenaltyService : IAttendancePenaltyService
     }
 
     public async Task<Result<AttendancePayrollException>> GetExceptions(string companyId,AttendanceExceptionFilterDto filter)
-    {var month=new DateTime(filter.PayrollMonth.Year,filter.PayrollMonth.Month,1);var all=(await _exceptions.GetAll(x=>x.CompanyId==companyId&&x.PayrollMonth==month)).Where(x=>(string.IsNullOrEmpty(filter.EmployeeId)||x.EmployeeId.Contains(filter.EmployeeId,StringComparison.OrdinalIgnoreCase))&&(string.IsNullOrEmpty(filter.Status)||x.Status==filter.Status)&&(string.IsNullOrEmpty(filter.Decision)||x.Decision==filter.Decision)).OrderByDescending(x=>x.CreatedDate).ToList();return new Result<AttendancePayrollException>{MethodResults=all.Skip((filter.PageNo-1)*filter.PageSize).Take(filter.PageSize).ToList(),TotalRecords=all.Count};}
+    {
+        var month = new DateTime(filter.PayrollMonth.Year, filter.PayrollMonth.Month, 1);
+        var end = month.AddMonths(1).AddDays(-1);
+        var employees = (await _employees.GetAll(x => x.CompanyId == companyId))
+            .ToDictionary(x => x.UserId, StringComparer.Ordinal);
+        var lastCompletedDate = CalendarDateHelpers.GetLastCompletedBusinessDate(DateTime.UtcNow).ToDateTime(TimeOnly.MinValue);
+        var all = (await _exceptions.GetAll(x => x.CompanyId == companyId && x.PayrollMonth == month))
+            // Resolved records are retained for audit, but are no longer active exceptions.
+            .Where(x => x.Status != "RESOLVED")
+            .Where(x => (string.IsNullOrEmpty(filter.EmployeeId) || x.EmployeeId.Contains(filter.EmployeeId, StringComparison.OrdinalIgnoreCase)) &&
+                        (string.IsNullOrEmpty(filter.Status) || x.Status == filter.Status) &&
+                        (string.IsNullOrEmpty(filter.Decision) || x.Decision == filter.Decision))
+            .Where(x => employees.TryGetValue(x.UserId, out var employee) &&
+                        KeepEligibleExceptionDates(x, employee, month, end, lastCompletedDate))
+            .OrderByDescending(x => x.CreatedDate)
+            .ToList();
+
+        return new Result<AttendancePayrollException>
+        {
+            MethodResults = all.Skip((filter.PageNo - 1) * filter.PageSize).Take(filter.PageSize).ToList(),
+            TotalRecords = all.Count
+        };
+    }
+
+    private static bool KeepEligibleExceptionDates(AttendancePayrollException exception, EmpUser employee, DateTime monthStart, DateTime monthEnd, DateTime lastCompletedDate)
+    {
+        if (!AttendancePayrollRules.TryGetEligiblePeriod(employee, monthStart, monthEnd, out var eligibleFrom, out var eligibleTo))
+            return false;
+
+        var reviewTo = eligibleTo.Date < lastCompletedDate ? eligibleTo.Date : lastCompletedDate;
+        if (reviewTo < eligibleFrom.Date)
+            return false;
+
+        if (exception.AffectedDates.Count > 0)
+        {
+            exception.AffectedDates = exception.AffectedDates
+                .Where(date => date.Date >= eligibleFrom.Date && date.Date <= reviewTo)
+                .Distinct()
+                .OrderBy(date => date)
+                .ToList();
+            return exception.AffectedDates.Count > 0;
+        }
+
+        return !exception.AttendanceDate.HasValue ||
+               (exception.AttendanceDate.Value.Date >= eligibleFrom.Date && exception.AttendanceDate.Value.Date <= reviewTo);
+    }
 
     public async Task<Result> Review(string companyId,string reviewerId,string id,AttendanceExceptionReviewDto dto)
     {var result=new Result();var item=await _exceptions.FirstOrDefault(x=>x.Id==id&&x.CompanyId==companyId);if(item==null){result.Message="Exception not found.";return result;}if(item.ExceptionType!="LHD_ED_LIMIT_EXCEEDED"){result.Message="Correct the underlying attendance record to resolve this exception.";return result;}if(item.Status!="PENDING_REVIEW"||item.Version!=dto.Version){result.Message="Exception was already reviewed or changed. Refresh and try again.";return result;}var allowed=new[]{"WAIVE","WARNING_ONLY","HALF_DAY_LOP","FULL_DAY_LOP","CUSTOM"};if(!allowed.Contains(dto.Decision)){result.Message="Invalid decision.";return result;}var fraction=dto.Decision switch{"HALF_DAY_LOP"=>.5m,"FULL_DAY_LOP"=>1m,"CUSTOM"=>dto.DeductionDayFraction??-1m,_=>0m};if(fraction<0||fraction>31){result.Message="Invalid deduction day fraction.";return result;}item.Decision=dto.Decision;item.DeductionDayFraction=fraction;item.Reason=dto.Reason.Trim();item.ReviewedBy=reviewerId;item.ReviewedAt=DateTime.UtcNow;item.Status=fraction>0?"DEDUCTION_APPROVED":"WAIVED";item.Version++;item.UpdatedBy=reviewerId;item.UpdatedDate=DateTime.UtcNow;var filter=Builders<AttendancePayrollException>.Filter.Eq(x=>x.Id,item.Id)&Builders<AttendancePayrollException>.Filter.Eq(x=>x.Version,dto.Version);return await _exceptions.Update(filter,item);}
@@ -325,13 +371,18 @@ public class AttendancePenaltyService : IAttendancePenaltyService
         var holidays=(await _calendar.GetAll(x=>x.CompanyId==companyId&&x.Type==EnumsHelper.CalendarItem.Holiday&&(x.Recurring||(x.Date>=start.AddDays(-1)&&x.Date<endExclusive.AddDays(1))))).ToList();
         bool IsHoliday(DateTime d)=>holidays.Any(h => CalendarDateHelpers.MatchesDate(h, d));
 
+        var lastCompletedDate=CalendarDateHelpers.GetLastCompletedBusinessDate(DateTime.UtcNow).ToDateTime(TimeOnly.MinValue);
         foreach(var emp in await _employees.GetAll(x=>x.CompanyId==companyId&&x.Status&&!x.IsDeleted))
         {
-            if(!AttendancePayrollRules.TryGetEligiblePeriod(emp,start,end,out var from,out var to))continue;
-            var toExclusive=to.Date.AddDays(1);
-            var records=(await _attendance.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<toExclusive)).ToList();
-            var daySegments=(await _segments.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<toExclusive)).ToList();
-            var expectedDates=Enumerable.Range(0,(to-from).Days+1).Select(i=>from.AddDays(i).Date).Where(d=>!offDays.Contains((int)d.DayOfWeek)&&!IsHoliday(d)).ToList();
+            if(!AttendancePayrollRules.TryGetEligiblePeriod(emp,start,end,out var from,out var to))
+            {
+                await ResolveIneligibleValidationExceptions(companyId, emp, start);
+                continue;
+            }
+            var reviewTo=to.Date<lastCompletedDate?to.Date:lastCompletedDate;
+            var records=reviewTo<from.Date?new List<AttendanceModel>():(await _attendance.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<reviewTo.AddDays(1))).ToList();
+            var daySegments=reviewTo<from.Date?new List<AttendanceDaySegment>():(await _segments.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<reviewTo.AddDays(1))).ToList();
+            var expectedDates=reviewTo<from.Date?new List<DateTime>():Enumerable.Range(0,(reviewTo-from.Date).Days+1).Select(i=>from.AddDays(i).Date).Where(d=>!offDays.Contains((int)d.DayOfWeek)&&!IsHoliday(d)).ToList();
             var recordedDates=records.Select(x=>x.Date.Date).Concat(daySegments.Select(x=>x.Date.Date)).Distinct().ToHashSet();
 
             await UpsertValidationException(companyId,emp,start,"MISSING_ATTENDANCE",expectedDates.Where(x=>!recordedDates.Contains(x)).ToList());
@@ -348,6 +399,26 @@ public class AttendancePenaltyService : IAttendancePenaltyService
         if(dates.Count==0){if(item!=null&&item.Status=="PENDING_REVIEW"){item.Status="RESOLVED";item.Resolution="Underlying attendance issue corrected.";item.UpdatedDate=DateTime.UtcNow;item.Version++;await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x=>x.Id,item.Id),item);}return;}
         if(item==null){item=new AttendancePayrollException{CompanyId=companyId,UserId=employee.UserId,EmployeeId=employee.EmployeeId,PayrollMonth=month,ExceptionType=type,Severity="BLOCKING",AffectedDates=dates};await _exceptions.AddOne(item);return;}
         item.AffectedDates=dates;item.Status="PENDING_REVIEW";item.Resolution=null;item.UpdatedDate=DateTime.UtcNow;item.Version++;await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x=>x.Id,item.Id),item);
+    }
+
+    private async Task ResolveIneligibleValidationExceptions(string companyId, EmpUser employee, DateTime month)
+    {
+        var validationTypes = new[] { "MISSING_ATTENDANCE", "MISSING_CHECKOUT", "DUPLICATE_ATTENDANCE", "INVALID_TIME_ORDER", "UNKNOWN_OR_INACTIVE_STATUS" };
+        var stale = await _exceptions.GetAll(x =>
+            x.CompanyId == companyId &&
+            x.UserId == employee.UserId &&
+            x.EmployeeId == employee.EmployeeId &&
+            x.PayrollMonth == month &&
+            x.Status == "PENDING_REVIEW");
+
+        foreach (var item in stale.Where(x => validationTypes.Contains(x.ExceptionType, StringComparer.Ordinal)))
+        {
+            item.Status = "RESOLVED";
+            item.Resolution = "Employee is not eligible for this attendance month.";
+            item.UpdatedDate = DateTime.UtcNow;
+            item.Version++;
+            await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x => x.Id, item.Id), item);
+        }
     }
 
 }

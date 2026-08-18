@@ -147,7 +147,8 @@ public async Task<IEnumerable<AttendanceResponseDto>> GetAttendanceByDateRange(
 {
     if (from.Date > to.Date) throw new ArgumentException("From date cannot be after to date.");
     var fromDate = from.Date;
-    var toDateInclusive = to.Date.AddDays(1).AddTicks(-1);
+    var toDateInclusive = to.Date.AddDays(1).AddTicks(-1); 
+    
 
     var data = await _attendanceRepository
         .GetAllByDateRangeAsync(companyId, fromDate, toDateInclusive, userIds);

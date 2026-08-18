@@ -44,6 +44,7 @@ public class LeaveManagementService : ILeaveManagementService
     private readonly ICompanyWorkingCalendarService _workingCalendar;
     private readonly IMongoDbRepository<AttendanceStatusSetting> _attendanceStatusRepo;
     private readonly IMongoDbRepository<WorkFromHomePolicy> _workFromHomePolicies;
+    private readonly IMongoDbRepository<WorkFromHomeRequest> _workFromHomeRequests;
     private readonly ILeaveAttendanceReconciliationService _leaveAttendanceReconciliation;
     private readonly IMongoClient _mongoClient;
     public LeaveManagementService(
@@ -63,6 +64,7 @@ public class LeaveManagementService : ILeaveManagementService
     IMongoDbRepository<AttendanceStatusSetting> attendanceStatusRepo,
     ILeaveAttendanceReconciliationService leaveAttendanceReconciliation,
     IMongoDbRepository<WorkFromHomePolicy> workFromHomePolicies,
+    IMongoDbRepository<WorkFromHomeRequest> workFromHomeRequests,
     IMongoClient mongoClient
     )
     {
@@ -83,6 +85,7 @@ public class LeaveManagementService : ILeaveManagementService
         _attendanceStatusRepo = attendanceStatusRepo;
         _leaveAttendanceReconciliation = leaveAttendanceReconciliation;
         _workFromHomePolicies = workFromHomePolicies;
+        _workFromHomeRequests = workFromHomeRequests;
         _mongoClient = mongoClient;
     }
 
@@ -412,6 +415,9 @@ public class LeaveManagementService : ILeaveManagementService
             return result;
         }
 
+        if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequest.UserId, requestStartDateTime, requestEndDateTime))
+            return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: The leave request overlaps an active Work From Home request." };
+
         // check if employee already has approved leave on request date
         var nowDate = DateTime.UtcNow.Date;
         var upcomingApprovedLeaves = await _leave.GetAll(lr => lr.EmployeeId == leaveRequest.UserId && lr.Status == EnumsHelper.LeaveRequestStatus.Accepted && lr.EndDate >= nowDate);
@@ -522,6 +528,9 @@ public class LeaveManagementService : ILeaveManagementService
             result.Message = "The leave request overlaps an existing pending or accepted request.";
             return result;
         }
+
+        if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequestDto.UserId, requestStartDateTime, requestEndDateTime))
+            return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: The leave request overlaps an active Work From Home request." };
 
         var totalAdvanceNoticeDays = (requestStartDateTime - DateTime.UtcNow.Date).TotalDays + 1;
         if (leavePolicyEntity.MinNoticeDays > 0 && leavePolicyEntity.MinNoticeDays > totalAdvanceNoticeDays)
@@ -753,7 +762,12 @@ public class LeaveManagementService : ILeaveManagementService
         bool isSelfWithdrawal = model.Status == EnumsHelper.LeaveRequestStatus.WithDrawn && existingLeaveRequest.EmployeeId == reviewedBy;
         if (existingLeaveRequest.EmployeeId == reviewedBy && !isSelfWithdrawal)
             return new Result { Success = false, Message = "LEAVE_SELF_APPROVAL_NOT_ALLOWED: A user cannot approve their own leave request." };
-        if (model.Status == EnumsHelper.LeaveRequestStatus.WithDrawn && !isSelfWithdrawal)
+        // This action is exposed only through the protected Leave Management
+        // review endpoint. HR/Admin may therefore cancel an approved leave to
+        // correct a source-owned attendance exception; self-service callers
+        // can still withdraw only their own request.
+        if (model.Status == EnumsHelper.LeaveRequestStatus.WithDrawn && !isSelfWithdrawal &&
+            _httpContextAccessor.HttpContext?.Request.Path.StartsWithSegments("/api/LeaveManagement/LeaveRequest") != true)
             return new Result { Success = false, Message = "Only the employee who submitted this leave request can withdraw it." };
         if (model.ExpectedVersion.HasValue && model.ExpectedVersion.Value != existingLeaveRequest.Version)
             return new Result { Success = false, Message = "LEAVE_REQUEST_VERSION_CONFLICT: The leave request was changed by another reviewer. Refresh and try again." };
@@ -808,6 +822,8 @@ public class LeaveManagementService : ILeaveManagementService
                     : policyForDecision.FullDayAttendanceStatusCode ?? policyForDecision.AttendanceStatusCode;
             if (string.IsNullOrWhiteSpace(mappedStatus) || !await ValidateAttendanceStatusMapping(companyId, mappedStatus))
                 return new Result { Success = false, Message = existingLeaveRequest.IsHalfDay ? "Select an active leave attendance status for half-day leave before approval." : "Select an active leave attendance status for full-day leave before approval." };
+            if (await HasActiveWorkFromHomeOverlap(companyId, existingLeaveRequest.EmployeeId, existingLeaveRequest.StartDate, existingLeaveRequest.EndDate))
+                return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: This leave request overlaps an active Work From Home request." };
         }
 
         var now = DateTime.UtcNow;
@@ -1071,6 +1087,15 @@ public class LeaveManagementService : ILeaveManagementService
         if (string.IsNullOrWhiteSpace(code)) return true;
         var normalized = code.Trim().ToUpperInvariant();
         return await _attendanceStatusRepo.Exist(x => x.CompanyId == companyId && x.Code == normalized && x.IsActive && !x.RequiresTime && x.IsAvailableForLeaveManagement);
+    }
+
+    private async Task<bool> HasActiveWorkFromHomeOverlap(string companyId, string userId, DateTime startDate, DateTime endDate)
+    {
+        var requests = await _workFromHomeRequests.GetAll(request =>
+            request.CompanyId == companyId && request.UserId == userId &&
+            (request.Status == "Pending" || request.Status == "Approved" || request.Status == "Returned") &&
+            request.FromDate <= endDate && request.ToDate >= startDate);
+        return requests.Any();
     }
 
     private async Task<Result> SyncWorkFromHomePolicy(string companyId, LeavePolicy leavePolicy, WorkFromHomePolicySettingsRequest settings)
@@ -1470,13 +1495,19 @@ public class LeaveManagementService : ILeaveManagementService
 
         // get leave policies details
         List<string> leavePolicyIds = employeeLeaveBalances.Select(elb => elb.LeavePolicyId).Distinct().ToList();
-        IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(lp => leavePolicyIds.Contains(lp.Id) && lp.CompanyId == companyId);
+        // Employee balance records are retained for history when a policy is
+        // deactivated, but inactive policies must not be exposed in the Leave
+        // Balance overview.
+        IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(lp =>
+            leavePolicyIds.Contains(lp.Id) && lp.CompanyId == companyId && lp.Status);
 
         var empLeaveBalanceResult = empUsers.Select(emp =>
             {
                 var balances = employeeLeaveBalances.Where(lb => lb.UserId == emp.UserId).Select(lb =>
                 {
                     LeavePolicy? policy = leavePolicies.FirstOrDefault(lp => lp.Id == lb.LeavePolicyId);
+                    if (policy is null) return null;
+
                     return new LeaveBalanceDetail
                     {
                         LeaveBalanceId = lb.Id,
@@ -1489,7 +1520,7 @@ public class LeaveManagementService : ILeaveManagementService
                         Version = lb.Version,
                         UsedLeave = lb.Taken
                     };
-                }).ToList();
+                }).Where(balance => balance is not null).Select(balance => balance!).ToList();
 
                 JobTitles? jobTitle = emp.JobRole != null ? jobTitles.FirstOrDefault(jt => jt.JobTitleId == emp.JobRole) : null;
 

@@ -26,14 +26,14 @@ public sealed class CompanyWorkingCalendarService(
     {
         if (end < start) throw new ArgumentException("End date cannot be before start date.");
         cancellationToken.ThrowIfCancellationRequested();
-        var weekly = await weeklyOffs.FirstOrDefault(x => x.CompanyId == companyId);
+        var weekly = (await weeklyOffs.GetAll(x => x.CompanyId == companyId, withDefaultFilter: false)).FirstOrDefault();
         var offDays = (weekly?.OffDays ?? [(int)DayOfWeek.Saturday, (int)DayOfWeek.Sunday]).ToHashSet();
         var startDate = start.ToDateTime(TimeOnly.MinValue);
         var endDate = end.ToDateTime(TimeOnly.MinValue);
         // A ±1 day window tolerates a legacy row stored as an IST-midnight instant
         // converted to UTC; CalendarDateHelpers.MatchesDate makes the exact call.
         var holidays = (await calendar.GetAll(x => x.CompanyId == companyId &&
-            x.Type == EnumsHelper.CalendarItem.Holiday && (x.Recurring || (x.Date >= startDate.AddDays(-1) && x.Date <= endDate.AddDays(1))))).ToList();
+            x.Type == EnumsHelper.CalendarItem.Holiday && (x.Recurring || (x.Date >= startDate.AddDays(-1) && x.Date <= endDate.AddDays(1))), withDefaultFilter: false)).ToList();
         var result = new List<DateOnly>();
         for (var current = start; current <= end; current = current.AddDays(1))
         {
@@ -51,14 +51,14 @@ public sealed class CompanyWorkingCalendarService(
     public async Task<IReadOnlyList<DateOnly>> GetLeaveDatesAsync(string companyId, DateOnly start, DateOnly end, bool weekendInclusive, bool holidayInclusive, CancellationToken cancellationToken = default)
     {
         if (end < start) throw new ArgumentException("End date cannot be before start date.");
-        var weekly = await weeklyOffs.FirstOrDefault(x => x.CompanyId == companyId);
+        var weekly = (await weeklyOffs.GetAll(x => x.CompanyId == companyId, withDefaultFilter: false)).FirstOrDefault();
         var offDays = (weekly?.OffDays ?? [(int)DayOfWeek.Saturday, (int)DayOfWeek.Sunday]).ToHashSet();
         var startDate = start.ToDateTime(TimeOnly.MinValue);
         var endDate = end.ToDateTime(TimeOnly.MinValue);
         // A ±1 day window tolerates a legacy row stored as an IST-midnight instant
         // converted to UTC; CalendarDateHelpers.MatchesDate makes the exact call.
         var holidays = (await calendar.GetAll(x => x.CompanyId == companyId && x.Type == EnumsHelper.CalendarItem.Holiday &&
-            (x.Recurring || (x.Date >= startDate.AddDays(-1) && x.Date <= endDate.AddDays(1))))).ToList();
+            (x.Recurring || (x.Date >= startDate.AddDays(-1) && x.Date <= endDate.AddDays(1))), withDefaultFilter: false)).ToList();
         var result = new List<DateOnly>();
         for (var current = start; current <= end; current = current.AddDays(1))
         {

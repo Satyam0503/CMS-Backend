@@ -1,4 +1,5 @@
 using Codeji.CMS.Domain.Models;
+using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Calendar;
@@ -12,6 +13,8 @@ using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Repository.Entities.Attendance;
+using Codeji.CMS.Repository.Entities.Leave;
+using Codeji.CMS.Repository.Entities.Company;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
 using System.Net;
@@ -47,7 +50,10 @@ public sealed class WorkFromHomeService(
     IMongoDbRepository<WorkFromHomePolicy> policies,
     IMongoDbRepository<WorkFromHomeRequest> requests,
     IMongoDbRepository<WorkFromHomeRequestLog> logs,
+    IMongoDbRepository<LeaveRequest> leaveRequests,
     IMongoDbRepository<EmpUser> employees,
+    IMongoDbRepository<Department> departments,
+    IMongoDbRepository<JobTitles> jobTitles,
     IMongoDbRepository<AttendanceStatusSetting> statuses,
     IMongoDbRepository<AttendanceModel> attendance,
     IMongoDbRepository<AttendanceDaySegment> attendanceSegments,
@@ -241,6 +247,17 @@ public sealed class WorkFromHomeService(
         {
             var policy = await ActivePolicy();
             var employee = await ActiveEmployee(request.UserId);
+            if (await HasActiveLeaveOverlap(request.UserId, request.FromDate, request.ToDate))
+            {
+                request.Status = previous;
+                request.Version++;
+                request.ReviewedByUserId = null;
+                request.ReviewedAt = null;
+                request.ReviewRemarksCode = null;
+                request.ReviewRemarksText = null;
+                await requests.Update(Builders<WorkFromHomeRequest>.Filter.Where(x => x.CompanyId == CompanyId && x.RequestId == requestId && x.Status == status && x.Version == request.Version - 1), request);
+                return Fail("WFH_LEAVE_OVERLAP", "The Work From Home request overlaps an active leave request.");
+            }
             var reconcile = policy is null
                 ? Fail("WFH_POLICY_DISABLED", "WFH policy is disabled.")
                 : employee is null
@@ -341,8 +358,13 @@ public sealed class WorkFromHomeService(
     public async Task<Result> CorrectInsufficientHours(string exceptionId, WorkFromHomeHoursCorrectionDto dto)
     {
         var exception = await exceptions.FirstOrDefault(x => x.Id == exceptionId && x.CompanyId == CompanyId);
-        if (exception is null || exception.ExceptionType != "WFH_INSUFFICIENT_HOURS")
-            return Fail("WFH_EXCEPTION_NOT_FOUND", "The WFH insufficient-hours exception was not found.");
+        // A WFH-owned row can also surface through the generic monthly
+        // validators (for example, a missing check-out).  It must still be
+        // corrected through the approved WFH request, never by overwriting the
+        // attendance row through the normal editor.
+        var supportedExceptionTypes = new[] { "WFH_INSUFFICIENT_HOURS", "MISSING_CHECKOUT", "INVALID_TIME_ORDER" };
+        if (exception is null || !supportedExceptionTypes.Contains(exception.ExceptionType, StringComparer.Ordinal))
+            return Fail("WFH_EXCEPTION_NOT_FOUND", "No correctable WFH attendance exception was found.");
         if (exception.Status != "PENDING_REVIEW" || exception.Version != dto.ExceptionVersion)
             return Fail("WFH_EXCEPTION_CHANGED", "This exception was already changed. Refresh and try again.");
         if (dto.CheckOutTime <= dto.CheckInTime)
@@ -352,28 +374,35 @@ public sealed class WorkFromHomeService(
 
         var employee = await ActiveEmployee(exception.UserId);
         if (employee is null) return Fail("WFH_EMPLOYEE_NOT_ELIGIBLE", "The employee is no longer active in this company.");
-        if (!exception.AttendanceDate.HasValue)
+        // Dedicated WFH exceptions carry AttendanceDate, while generic monthly
+        // validators (such as MISSING_CHECKOUT) carry their dates in
+        // AffectedDates. The UI corrects the first affected date, so use the
+        // same date here instead of rejecting an otherwise valid WFH record.
+        var attendanceDate = exception.AttendanceDate?.Date
+            ?? exception.AffectedDates?.Select(date => date.Date).FirstOrDefault();
+        if (!attendanceDate.HasValue || attendanceDate.Value == default)
             return Fail("WFH_EXCEPTION_DATE_MISSING", "The WFH exception does not have an affected attendance date.");
-        var attendanceDate = exception.AttendanceDate.Value.Date;
-        try { await attendanceEditGuard.EnsureEditableWorkingDayAsync(CompanyId, employee.UserId, attendanceDate); }
+        var dateToCorrect = attendanceDate.Value;
+        try { await attendanceEditGuard.EnsureEditableWorkingDayAsync(CompanyId, employee.UserId, dateToCorrect); }
         catch (InvalidOperationException ex) { return Fail("WFH_ATTENDANCE_NOT_EDITABLE", ex.Message); }
 
-        var request = await requests.FirstOrDefault(x => x.CompanyId == CompanyId && x.RequestId == exception.LeaveRequestId && x.UserId == employee.UserId && x.Status == "Approved");
-        if (request is null) return Fail("WFH_REQUEST_NOT_AVAILABLE", "The approved WFH request for this exception is no longer available.");
-        // Older exception rows can have no attendance id (or an id written before the
-        // attendance document was persisted).  The WFH request + employee + business
-        // date is the authoritative source-owned identity, so use it as a safe fallback.
+        // Generic monthly exceptions do not carry the WFH request id. Resolve the
+        // source-owned attendance row first, then use its immutable SourceId to find
+        // the approved request. This keeps the correction tied to its WFH source.
         var row = string.IsNullOrWhiteSpace(exception.ExistingAttendanceId)
             ? null
             : await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.AttendanceId == exception.ExistingAttendanceId && x.UserId == employee.UserId);
-        if (row is null || row.SourceType != "WFH_REQUEST" || row.SourceId != request.RequestId)
+        if (row is null || row.SourceType != "WFH_REQUEST" || string.IsNullOrWhiteSpace(row.SourceId))
         {
-            var endOfAttendanceDate = attendanceDate.AddDays(1);
-            row = await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.SourceType == "WFH_REQUEST" && x.SourceId == request.RequestId && x.Date >= attendanceDate && x.Date < endOfAttendanceDate);
+            var endOfAttendanceDate = dateToCorrect.AddDays(1);
+            row = await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.SourceType == "WFH_REQUEST" && x.Date >= dateToCorrect && x.Date < endOfAttendanceDate);
         }
-        if (row is null || row.SourceType != "WFH_REQUEST" || row.SourceId != request.RequestId)
-            return Fail("WFH_ATTENDANCE_CONFLICT", "No WFH attendance record matches this employee, request, and affected date. Refresh the exception list and verify the approved WFH request.");
-        if (dto.CheckInTime.Date != attendanceDate || dto.CheckOutTime.Date != attendanceDate)
+        if (row is null || row.SourceType != "WFH_REQUEST" || string.IsNullOrWhiteSpace(row.SourceId))
+            return Fail("WFH_ATTENDANCE_CONFLICT", "No WFH-owned attendance record matches this employee and affected date. Refresh the exception list and verify the approved WFH request.");
+
+        var request = await requests.FirstOrDefault(x => x.CompanyId == CompanyId && x.RequestId == row.SourceId && x.UserId == employee.UserId && x.Status == "Approved");
+        if (request is null) return Fail("WFH_REQUEST_NOT_AVAILABLE", "The approved WFH request linked to the attendance record is no longer available.");
+        if (dto.CheckInTime.Date != dateToCorrect || dto.CheckOutTime.Date != dateToCorrect)
             return Fail("WFH_CORRECTION_DATE_INVALID", "Both corrected times must be on the affected attendance date.");
 
         var policy = await ActivePolicy();
@@ -400,7 +429,7 @@ public sealed class WorkFromHomeService(
         exception.Version++;
         var resolved = await exceptions.Update(Builders<AttendancePayrollException>.Filter.Where(x => x.Id == exception.Id && x.Version == dto.ExceptionVersion), exception);
         if (!resolved.Success) return Fail("WFH_EXCEPTION_CHANGED", "Attendance was corrected, but the exception changed before it could be resolved. Recheck the exception.");
-        await InvalidateSummary(employee, attendanceDate);
+        await InvalidateSummary(employee, dateToCorrect);
         await Log(request, request.Status, request.Status, "HoursCorrected", "WFH_HOURS_CORRECTED", dto.Remarks);
         return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = $"WFH hours updated to {totalHours:0.##} hours and the exception was resolved." };
     }
@@ -471,9 +500,9 @@ public sealed class WorkFromHomeService(
         var code = request.DurationType switch
         {
             "Mixed" => policy.WfhWfoAttendanceStatusCode ?? policy.MixedAttendanceStatusCode,
-            "WfhHd" => policy.WfhHdAttendanceStatusCode,
-            "WfhSl" => policy.WfhSlAttendanceStatusCode,
-            "WfhCl" => policy.WfhClAttendanceStatusCode,
+            "WfhHd" => policy.WfhHdAttendanceStatusCode ?? policy.HalfDayAttendanceStatusCode,
+            "WfhSl" => policy.WfhSlAttendanceStatusCode ?? "WFH+SL",
+            "WfhCl" => policy.WfhClAttendanceStatusCode ?? "WFH+CL",
             "FullDay" => policy.FullDayAttendanceStatusCode,
             _ => policy.HalfDayAttendanceStatusCode
         };
@@ -538,6 +567,7 @@ public sealed class WorkFromHomeService(
         if (dto.DurationType is "Mixed" or "WfhHd" or "WfhSl" or "WfhCl" && !policy.AllowMixedDay) return ("WFH_MIXED_DAY_NOT_ALLOWED", "Mixed WFH combinations are not allowed.");
         if (!IsEffectiveFor(policy, dto.FromDate.Date) || !IsEffectiveFor(policy, dto.ToDate.Date)) return ("WFH_POLICY_NOT_EFFECTIVE", "The selected date is outside the effective WFH policy period.");
         if (await requests.Exist(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && (x.Status == "Pending" || x.Status == "Approved" || x.Status == "Returned") && dto.FromDate.Date <= x.ToDate.Date && dto.ToDate.Date >= x.FromDate.Date)) return ("WFH_OVERLAPPING_REQUEST", "The request overlaps an existing WFH request.");
+        if (await HasActiveLeaveOverlap(employee.UserId, dto.FromDate.Date, dto.ToDate.Date)) return ("WFH_LEAVE_OVERLAP", "The request overlaps an active leave request.");
         foreach (var week in Days(dto.FromDate, dto.ToDate).Select(StartOfWeek).Distinct())
         {
             var usedDates = WeeklyUsage(await requests.GetAll(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && (x.Status == "Pending" || x.Status == "Approved" || x.Status == "Returned") && x.FromDate < week.AddDays(7) && x.ToDate >= week), week);
@@ -555,6 +585,15 @@ public sealed class WorkFromHomeService(
             return ("WFH_SAME_DAY_OFFICE_STARTED", $"Work From Home for today must be requested before your office start time ({startLabel}).");
         }
         return null;
+    }
+
+    private async Task<bool> HasActiveLeaveOverlap(string userId, DateTime fromDate, DateTime toDate)
+    {
+        var activeLeaves = await leaveRequests.GetAll(request =>
+            request.CompanyId == CompanyId && request.EmployeeId == userId &&
+            (request.Status == EnumsHelper.LeaveRequestStatus.Pending || request.Status == EnumsHelper.LeaveRequestStatus.Accepted) &&
+            request.StartDate <= toDate && request.EndDate >= fromDate);
+        return activeLeaves.Any();
     }
 
     private async Task<(string Code, string Message)?> ValidateWorkingDay(EmpUser employee, WorkFromHomePolicy policy, DateTime date)
@@ -607,7 +646,13 @@ public sealed class WorkFromHomeService(
         {
             var roleIds = (await companyRoles.GetAll(x => x.CompanyId == companyId && !x.IsDeleted && (x.RoleType == (int)EnumsHelper.Roles.Administrator || x.RoleType == (int)EnumsHelper.Roles.HR || x.RoleType == (int)EnumsHelper.Roles.HRExecutive), withDefaultFilter: false)).Select(x => x.RolesId).ToHashSet();
             var recipients = (await employees.GetAll(x => x.CompanyId == companyId && x.Status && roleIds.Contains(x.RoleId), withDefaultFilter: false)).GroupBy(x => x.UserId, StringComparer.Ordinal).Select(x => x.First());
-            var body = $"<p><strong>{WebUtility.HtmlEncode(subject)}</strong></p><p>Employee: {WebUtility.HtmlEncode(employee.FirstName)} {WebUtility.HtmlEncode(employee.LastName)} ({WebUtility.HtmlEncode(employee.EmployeeId)})</p><p>Department: {WebUtility.HtmlEncode(employee.Department)}<br/>Role: {WebUtility.HtmlEncode(employee.JobRole)}<br/>Dates: {request.FromDate:dd MMM yyyy} - {request.ToDate:dd MMM yyyy}<br/>Duration: {WebUtility.HtmlEncode(request.DurationType)}<br/>Reason category: {WebUtility.HtmlEncode(ReasonLabel(request.ReasonCode))}</p>";
+            var department = string.IsNullOrWhiteSpace(employee.Department)
+                ? "Not assigned"
+                : DisplayName((await departments.FirstOrDefault(x => x.CompanyId == companyId && x.DepartmentId == employee.Department && !x.IsDeleted))?.Titles);
+            var jobTitle = string.IsNullOrWhiteSpace(employee.JobRole)
+                ? "Not assigned"
+                : DisplayName((await jobTitles.FirstOrDefault(x => x.CompanyId == companyId && x.JobTitleId == employee.JobRole && !x.IsDeleted))?.Titles);
+            var body = WfhRequestEmail(subject, employee, request, department, jobTitle);
             var recipientList = recipients.ToList();
             await SaveAndPushNotification(companyId, submittedByUserId, recipientList.Select(x => x.UserId), subject, $"{employee.FirstName} {employee.LastName} ({employee.EmployeeId}) - {request.FromDate:dd MMM}", request.RequestId, EnumsHelper.NotificationTypes.WorkFromHomeRequest);
             foreach (var recipient in recipientList.Where(x => x.IsEmailVerified && !string.IsNullOrWhiteSpace(x.Email))) await mail.EmailSendAndSave(new EmpEmailLogs { CompanyId = companyId, UserTo = recipient.UserId, UserFrom = submittedByUserId, Email = recipient.Email, Subject = subject, Body = body, EmailLogType = EnumsHelper.MailType.LeaveMailToHR });
@@ -622,8 +667,35 @@ public sealed class WorkFromHomeService(
             var employee = (await employees.GetAll(x => x.CompanyId == companyId && x.UserId == request.UserId && x.Status && x.IsEmailVerified, withDefaultFilter: false)).FirstOrDefault();
             if (employee is null || string.IsNullOrWhiteSpace(employee.Email)) return;
             await SaveAndPushNotification(companyId, actorUserId, [employee.UserId], subject, $"WFH dates: {request.FromDate:dd MMM yyyy} - {request.ToDate:dd MMM yyyy}", request.RequestId, EnumsHelper.NotificationTypes.WorkFromHomeApproved);
-            await mail.EmailSendAndSave(new EmpEmailLogs { CompanyId = companyId, UserTo = employee.UserId, UserFrom = actorUserId, Email = employee.Email, Subject = subject, Body = $"<p>{WebUtility.HtmlEncode(subject)}</p><p>WFH dates: {request.FromDate:dd MMM yyyy} - {request.ToDate:dd MMM yyyy}</p>", EmailLogType = EnumsHelper.MailType.LeaveReplyMail });
+            await mail.EmailSendAndSave(new EmpEmailLogs { CompanyId = companyId, UserTo = employee.UserId, UserFrom = actorUserId, Email = employee.Email, Subject = subject, Body = WfhStatusEmail(subject, employee, request), EmailLogType = EnumsHelper.MailType.LeaveReplyMail });
         }, 1);
+    }
+    private static string DisplayName(IEnumerable<MultilingualModel>? titles) =>
+        titles?.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Label))?.Label?.Trim() ?? "Not assigned";
+    private static string WfhRequestEmail(string subject, EmpUser employee, WorkFromHomeRequest request, string department, string jobTitle)
+    {
+        var employeeName = $"{employee.FirstName} {employee.LastName}".Trim();
+        var dateRange = request.FromDate.Date == request.ToDate.Date ? request.FromDate.ToString("dddd, dd MMMM yyyy") : $"{request.FromDate:dd MMM yyyy} - {request.ToDate:dd MMM yyyy}";
+        var details = new List<(string Label, string Value)>
+        {
+            ("Employee", employeeName), ("Employee ID", employee.EmployeeId), ("Department", department), ("Job role", jobTitle),
+            ("WFH date", dateRange), ("Duration", DurationLabel(request.DurationType)), ("Reason category", ReasonLabel(request.ReasonCode))
+        };
+        if (!string.IsNullOrWhiteSpace(request.ReasonText)) details.Add(("Employee note", request.ReasonText.Trim()));
+        return RequestEmailLayout(subject, $"A Work From Home request has been submitted by <strong>{WebUtility.HtmlEncode(employeeName)}</strong> and is awaiting review.", details, "Pending review");
+    }
+    private static string WfhStatusEmail(string subject, EmpUser employee, WorkFromHomeRequest request)
+    {
+        var employeeName = $"{employee.FirstName} {employee.LastName}".Trim();
+        var dateRange = request.FromDate.Date == request.ToDate.Date ? request.FromDate.ToString("dddd, dd MMMM yyyy") : $"{request.FromDate:dd MMM yyyy} - {request.ToDate:dd MMM yyyy}";
+        var details = new List<(string Label, string Value)> { ("WFH date", dateRange), ("Duration", DurationLabel(request.DurationType)), ("Request status", request.Status) };
+        if (!string.IsNullOrWhiteSpace(request.ReviewRemarksText)) details.Add(("Reviewer note", request.ReviewRemarksText.Trim()));
+        return RequestEmailLayout(subject, $"Hello {WebUtility.HtmlEncode(employeeName)}, your Work From Home request has been updated.", details, request.Status);
+    }
+    private static string RequestEmailLayout(string title, string introduction, IEnumerable<(string Label, string Value)> details, string status)
+    {
+        var rows = string.Concat(details.Where(x => !string.IsNullOrWhiteSpace(x.Value)).Select(x => $"<tr><td style=\"width:36%;padding:10px 14px;color:#64748b;font-weight:600;border-bottom:1px solid #e7edf4;vertical-align:top\">{WebUtility.HtmlEncode(x.Label)}</td><td style=\"padding:10px 0;border-bottom:1px solid #e7edf4;color:#1e293b;vertical-align:top\">{WebUtility.HtmlEncode(x.Value)}</td></tr>"));
+        return $"<div style=\"font-family:Arial,Helvetica,sans-serif;color:#1e293b\"><h1 style=\"font-size:22px;line-height:1.3;margin:0 0 12px;color:#172554\">{WebUtility.HtmlEncode(title)}</h1><p style=\"margin:0 0 20px;line-height:1.6\">{introduction}</p><div style=\"display:inline-block;padding:7px 12px;margin:0 0 18px;background:#eef2ff;border-radius:999px;color:#4338ca;font-size:13px;font-weight:700\">{WebUtility.HtmlEncode(status)}</div><table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border-collapse:collapse;border-top:1px solid #e7edf4\">{rows}</table><p style=\"margin:20px 0 0;color:#64748b;font-size:13px;line-height:1.5\">Please review the request in Codeji CMS to take the next action.</p></div>";
     }
     private async Task SaveAndPushNotification(string companyId, string senderUserId, IEnumerable<string> targetUserIds, string title, string body, string requestId, EnumsHelper.NotificationTypes type)
     {
@@ -672,6 +744,7 @@ public sealed class WorkFromHomeService(
         catch (InvalidTimeZoneException) { return DateTime.UtcNow; }
     }
     private static string ReasonLabel(string? code) => (code ?? "OTHER").Trim().ToUpperInvariant() switch { "PERSONAL" => "Personal", "MEDICAL" => "Medical", "FAMILY" => "Family", "HOME_MAINTENANCE" => "Home maintenance", "TRAVEL_DISRUPTION" => "Travel disruption", "OPERATIONAL" => "Operational", "MANAGER_INSTRUCTION" => "Manager instruction", _ => "Other" };
+    private static string DurationLabel(string? duration) => duration switch { "FirstHalf" => "First half", "SecondHalf" => "Second half", _ => "Full day" };
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim()[..Math.Min(value.Trim().Length, 500)];
     private static Result Fail(string code, string message) => new() { Success = false, Message = $"{code}: {message}" };
     private static Result<T> Fail<T>(string code, string message) => new() { Success = false, Message = $"{code}: {message}" };

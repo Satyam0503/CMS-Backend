@@ -22,7 +22,10 @@ public class AttendanceStatusService : IAttendanceStatusService
         ("LHD+ED","Late Arrival-Half Day + Early Departure",true,.5m,.5m,false,"#6D4C41"),
         ("WFH+WFO","Half WFH and Half WFO",true,1,0,false,"#00838F"), ("COMP-OFF","Compensatory Off",false,1,0,true,"#388E3C"),
         ("CL-HALF","Casual Leave (Half Day)",false,.5m,0,true,"#5C6BC0"), ("SL-HALF","Sick Leave (Half Day)",false,.5m,0,true,"#8E24AA"),
-        ("WFH-HD","WFH with Half Day",true,.5m,.5m,false,"#039BE5"), ("UL","Unpaid Leave",false,0,1,true,"#C62828")
+        ("WFH-HD","WFH with Half Day",true,.5m,.5m,false,"#039BE5"),
+        ("WFH+SL","Work From Home + Sick Leave",true,1,0,false,"#5C6BC0"),
+        ("WFH+CL","Work From Home + Casual Leave",true,1,0,false,"#00838F"),
+        ("UL","Unpaid Leave",false,0,1,true,"#C62828")
     ];
     public AttendanceStatusService(IMongoDbRepository<AttendanceStatusSetting> repository) => _repository = repository;
 
@@ -48,6 +51,18 @@ public class AttendanceStatusService : IAttendanceStatusService
                 await _repository.Delete(Builders<AttendanceStatusSetting>.Filter
                     .Where(x => x.CompanyId == companyId && x.Id == legacyUnpaidHalf.Id && x.Code == legacyUnpaidHalf.Code));
                 existingStatuses.Remove(legacyUnpaidHalf);
+            }
+
+            // WFH combination codes are payroll semantics, not user-defined leave
+            // balances. Keep the requested paid/unpaid split consistent for existing
+            // companies as well as newly seeded companies.
+            foreach (var status in existingStatuses.Where(x => x.Code is "WFH" or "WFH+WFO" or "WFH-HD" or "WFH+SL" or "WFH+CL"))
+            {
+                var expected = status.Code is "WFH-HD" ? (Paid: .5m, Unpaid: .5m) : (Paid: 1m, Unpaid: 0m);
+                if (status.PaidDayFraction == expected.Paid && status.UnpaidDayFraction == expected.Unpaid) continue;
+                status.PaidDayFraction = expected.Paid;
+                status.UnpaidDayFraction = expected.Unpaid;
+                await _repository.Update(Builders<AttendanceStatusSetting>.Filter.Where(x => x.CompanyId == companyId && x.Id == status.Id), status);
             }
 
             var existingCodes = existingStatuses

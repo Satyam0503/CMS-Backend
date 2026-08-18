@@ -1583,7 +1583,7 @@ namespace Codeji.CMS.Services.Employees
             var candidate = employeeId.Trim().ToUpperInvariant();
             var expression = new Regex($"^{Regex.Escape(sequence.Prefix)}(?<number>\\d{{4}})$", RegexOptions.CultureInvariant);
             var match = expression.Match(candidate);
-            if (!match.Success) return new() { Message = $"Employee ID must follow the format {FormatEmployeeId(sequence.Prefix, 0)}." };
+            if (!match.Success) return new() { Message = $"Employee ID must follow the format {FormatEmployeeId(sequence.Prefix, 1)}." };
             var number = int.Parse(match.Groups["number"].Value, CultureInfo.InvariantCulture);
             if (number <= 0) return new() { Message = "Employee ID number must be greater than 0." };
             if (await _employeeRepository.Exist(x => x.CompanyId == companyId && x.EmployeeId.Equals(candidate, StringComparison.OrdinalIgnoreCase)))
@@ -1665,9 +1665,26 @@ namespace Codeji.CMS.Services.Employees
         private async Task<EmployeeIdSequence> EnsureEmployeeIdSequence(string companyId)
         {
             var existing = await _employeeIdSequenceRepository.FirstOrDefault(x => x.CompanyId == companyId);
-            if (existing != null) return existing;
             var company = await _companyRepository.FirstOrDefault(c => c.CompanyId == companyId);
             var prefix = BuildEmployeeIdPrefix(company);
+            if (existing != null)
+            {
+                if (string.Equals(existing.Prefix, prefix, StringComparison.OrdinalIgnoreCase)) return existing;
+
+                // The company setting is the source of truth for future IDs. Preserve the
+                // counter while also accounting for any IDs already using the new prefix.
+                var highestUsingConfiguredPrefix = (await _employeeRepository.GetAll(x => x.CompanyId == companyId)).Select(x => x.EmployeeId)
+                    .Where(x => !string.IsNullOrWhiteSpace(x) && x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    .Select(x => int.TryParse(x[prefix.Length..], out var number) ? number : 0).DefaultIfEmpty(0).Max();
+                var nextNumber = Math.Max(existing.NextNumber, highestUsingConfiguredPrefix + 1);
+                var filter = Builders<EmployeeIdSequence>.Filter.Eq(x => x.SequenceId, existing.SequenceId);
+                var update = Builders<EmployeeIdSequence>.Update
+                    .Set(x => x.Prefix, prefix)
+                    .Set(x => x.NextNumber, nextNumber)
+                    .Set(x => x.UpdatedDate, DateTime.UtcNow);
+                return await _employeeIdSequenceRepository.GetCollection().FindOneAndUpdateAsync(filter, update,
+                    new FindOneAndUpdateOptions<EmployeeIdSequence> { ReturnDocument = ReturnDocument.After }) ?? existing;
+            }
             var highest = (await _employeeRepository.GetAll(x => x.CompanyId == companyId)).Select(x => x.EmployeeId)
                 .Where(x => !string.IsNullOrWhiteSpace(x) && x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 .Select(x => int.TryParse(x[prefix.Length..], out var number) ? number : 0).DefaultIfEmpty(0).Max();
@@ -1688,7 +1705,7 @@ namespace Codeji.CMS.Services.Employees
         private static Result<EmployeeIdSequenceResponseDto> SequenceResult(EmployeeIdSequence sequence) => new()
         {
             Success = true,
-            MethodResult = new EmployeeIdSequenceResponseDto { CurrentNextEmployeeId = FormatEmployeeId(sequence.Prefix, sequence.NextNumber), Format = FormatEmployeeId(sequence.Prefix, 0) }
+            MethodResult = new EmployeeIdSequenceResponseDto { CurrentNextEmployeeId = FormatEmployeeId(sequence.Prefix, sequence.NextNumber), Format = FormatEmployeeId(sequence.Prefix, 1) }
         };
         public async Task<Result> ResendInviteLink(string userId, string currentUserId)
         {

@@ -15,11 +15,20 @@ using AppModule = Codeji.CMS.Utility.Constraints.AppModule;
 using MongoDB.Driver;
 using MongoDB.Driver.Linq;
 using Module = Codeji.CMS.Repository.Entities.RolePermissions.Module;
+using PermissionConst = Codeji.CMS.Utility.Constraints.Permission;
 
 namespace Codeji.CMS.Services.Employees;
 
 public class RoleServices : IRoleService
 {
+    private static readonly (int RoleType, string Title, string Description, bool IsNotEditable)[] DefaultRoleTemplates =
+    [
+        ((int)EnumsHelper.Roles.Administrator, "Company Administrator", "Administrators have all permissions in the app. Limit this role to employees who will be in charge the client account", true),
+        ((int)EnumsHelper.Roles.HR, "HR Manager", "The HR employee can add and edit colleagues, manage attendance, leave, and assigned roles.", false),
+        ((int)EnumsHelper.Roles.HRExecutive, "HR Executive", "HR Executives have the same application permissions as HR Managers.", false),
+        ((int)EnumsHelper.Roles.Employee, "Employee", "Regular Employee", false),
+    ];
+
     private readonly IMongoDbRepository<Roles> _RolesRepository;
     private readonly IMongoDbRepository<RolePermission> _rolePermissionRepository;
     private readonly IMongoDbRepository<ModulePermission> _modulePermissionRepository;
@@ -137,12 +146,21 @@ public class RoleServices : IRoleService
             .Select(group => group.OrderByDescending(r => r.UpdatedDate).ThenByDescending(r => r.CreatedDate).First())
             .OrderBy(r => r.RoleType)
             .ToList();
+        foreach (var role in roles)
+        {
+            if (!await _rolePermissionRepository.Exist(permission =>
+                    permission.CompanyId == companyId && permission.RoleId == role.RolesId))
+            {
+                await RestoreCompanyRolePermissionsAsync(role);
+            }
+        }
         return _mapper.Map<List<RoleModel>>(roles);
     }
     //Fetch matched role with given Id
-    public async Task<RoleModel> GetRoleById(string roleId)
+    public async Task<RoleModel> GetRoleById(string roleId, string companyId)
     {
-        Roles role = await _RolesRepository.FirstOrDefault(x => x.RolesId == roleId);
+        Roles role = await _RolesRepository.FirstOrDefault(x =>
+            x.RolesId == roleId && x.CompanyId == companyId && !x.IsDeleted);
         return _mapper.Map<RoleModel>(role);
     }
     //Saving role and it's permission
@@ -187,6 +205,11 @@ public class RoleServices : IRoleService
         if (role != null)
         {
             IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId && x.RoleId == role.RolesId);
+            if (!rolePermissions.Any())
+            {
+                await RestoreCompanyRolePermissionsAsync(role);
+                rolePermissions = await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId && x.RoleId == role.RolesId);
+            }
             List<ModulePermission> modulePermissions = (await _modulePermissionRepository.GetAll()).ToList();
             List<Permission> permissions = (await _permissionRepository.GetAll()).ToList();
             List<Module> modules = (await _moduleRepository.GetAll()).ToList();
@@ -219,6 +242,38 @@ public class RoleServices : IRoleService
             }
         }
         return moduleWithPermissionsModel;
+    }
+
+    private async Task RestoreCompanyRolePermissionsAsync(Roles companyRole)
+    {
+        var sourceRole = (await _RolesRepository.GetAll(
+                role => role.IsDefault && string.IsNullOrEmpty(role.CompanyId) &&
+                        !role.IsDeleted && role.RoleType == companyRole.RoleType,
+                withDefaultFilter: false))
+            .OrderByDescending(role => role.UpdatedDate)
+            .ThenByDescending(role => role.CreatedDate)
+            .FirstOrDefault();
+        if (sourceRole is null)
+            return;
+
+        var templatePermissions = await _rolePermissionRepository.GetAll(
+            permission => permission.RoleId == sourceRole.RolesId,
+            withDefaultFilter: false);
+        var restoredPermissions = templatePermissions
+            .GroupBy(permission => permission.ModulePermissionId)
+            .Select(group => group.First())
+            .Select(permission => new RolePermission
+            {
+                RoleId = companyRole.RolesId,
+                CompanyId = companyRole.CompanyId,
+                ModulePermissionId = permission.ModulePermissionId,
+                HasAccess = permission.HasAccess,
+                IsAccessible = permission.IsAccessible,
+                CreatedDate = DateTime.UtcNow,
+            })
+            .ToList();
+        if (restoredPermissions.Count > 0)
+            await _rolePermissionRepository.AddMany(restoredPermissions);
     }
     public async Task<string[]> GetRolePermissionOfuser(string roleId, string companyId)
     {
@@ -257,6 +312,7 @@ public class RoleServices : IRoleService
                 .ThenByDescending(x => x.CreatedDate)
                 .First())
             .ToList();
+        roles = await EnsureDefaultRoleTemplatesAsync(roles);
         var existingCompanyRoles = (await _RolesRepository.GetAll(x => x.CompanyId == companyId && !x.IsDeleted))
             .GroupBy(x => x.RoleType)
             .ToDictionary(group => group.Key, group => group.OrderByDescending(x => x.UpdatedDate).ThenByDescending(x => x.CreatedDate).First());
@@ -265,7 +321,12 @@ public class RoleServices : IRoleService
             return existingCompanyRoles.Values.OrderBy(x => x.RoleType).ToList();
 
         List<string> roleIds = rolesToCreate.Select(x => x.RolesId).ToList();
-        IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(x => roleIds.Contains(x.RoleId));
+        // Global role templates are intentionally outside a tenant. Registration
+        // has no company context yet, so this is the explicit scoped exception
+        // needed to copy their canonical grants into the new company.
+        IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(
+            x => roleIds.Contains(x.RoleId),
+            withDefaultFilter: false);
         var companyRolePermissions = new List<RolePermission>();
         foreach (Roles role in rolesToCreate)
         {
@@ -298,6 +359,120 @@ public class RoleServices : IRoleService
         if (companyRolePermissions.Count > 0)
             await _rolePermissionRepository.AddMany(companyRolePermissions);
         return existingCompanyRoles.Values.Concat(rolesToCreate).OrderBy(x => x.RoleType).ToList();
+    }
+
+    // Registration must not depend on an operational migration having already
+    // populated the global role templates. When they are missing, restore the
+    // same canonical templates and grants that the seed migration creates.
+    private async Task<List<Roles>> EnsureDefaultRoleTemplatesAsync(List<Roles> templates)
+    {
+        var missingTemplates = DefaultRoleTemplates
+            .Where(definition => templates.All(role => role.RoleType != definition.RoleType))
+            .Select(definition => new Roles
+            {
+                RolesId = Guid.NewGuid().ToString(),
+                RoleType = definition.RoleType,
+                CompanyId = null!,
+                Titles = definition.Title,
+                Description = definition.Description,
+                HasAppAccess = true,
+                IsNotEditable = definition.IsNotEditable,
+                IsDefault = true,
+                IsDeleted = false,
+                UserRoles = [],
+                CreatedDate = DateTime.UtcNow,
+                UpdatedDate = DateTime.UtcNow,
+                CreatedBy = string.Empty,
+                UpdatedBy = string.Empty,
+            })
+            .ToList();
+
+        if (missingTemplates.Count == 0)
+            return templates;
+
+        await _RolesRepository.AddMany(missingTemplates);
+        await AddDefaultTemplatePermissionsAsync(missingTemplates);
+        return templates.Concat(missingTemplates).OrderBy(role => role.RoleType).ToList();
+    }
+
+    private async Task AddDefaultTemplatePermissionsAsync(IEnumerable<Roles> templates)
+    {
+        var modulePermissions = (await _modulePermissionRepository.GetAll()).ToList();
+        if (modulePermissions.Count == 0)
+            return;
+
+        var modules = (await _moduleRepository.GetAll()).ToDictionary(module => module.ModuleId, module => module.ModuleConstant);
+        var permissions = (await _permissionRepository.GetAll()).ToDictionary(permission => permission.PermissionId, permission => permission.PermissionConstant);
+        var modulePermissionIds = modulePermissions
+            .Where(modulePermission => modules.ContainsKey(modulePermission.ModuleId) && permissions.ContainsKey(modulePermission.PermissionId))
+            .ToDictionary(
+                modulePermission => (modules[modulePermission.ModuleId], permissions[modulePermission.PermissionId]),
+                modulePermission => modulePermission.ModulePermissionId);
+
+        var grants = new List<RolePermission>();
+        foreach (var template in templates)
+        {
+            IEnumerable<int> permissionIds = template.RoleType switch
+            {
+                (int)EnumsHelper.Roles.Administrator => modulePermissions.Select(permission => permission.ModulePermissionId),
+                (int)EnumsHelper.Roles.HR or (int)EnumsHelper.Roles.HRExecutive => ResolveModulePermissionIds(modulePermissionIds, HrManagerPermissions()),
+                (int)EnumsHelper.Roles.Employee => ResolveModulePermissionIds(modulePermissionIds, EmployeePermissions()),
+                _ => [],
+            };
+
+            grants.AddRange(permissionIds.Distinct().Select(modulePermissionId => new RolePermission
+            {
+                RoleId = template.RolesId,
+                ModulePermissionId = modulePermissionId,
+                HasAccess = true,
+                IsAccessible = true,
+                CreatedDate = DateTime.UtcNow,
+            }));
+        }
+
+        if (grants.Count > 0)
+            await _rolePermissionRepository.AddMany(grants);
+    }
+
+    private static IEnumerable<int> ResolveModulePermissionIds(
+        IReadOnlyDictionary<(string Module, string Permission), int> modulePermissionIds,
+        IEnumerable<(string Module, string Permission)> requiredPermissions) =>
+        requiredPermissions
+            .Where(required => modulePermissionIds.ContainsKey(required))
+            .Select(required => modulePermissionIds[required]);
+
+    private static IEnumerable<(string Module, string Permission)> FullAccess(string module)
+    {
+        yield return (module, PermissionConst.View);
+        yield return (module, PermissionConst.Create);
+        yield return (module, PermissionConst.Edit);
+        yield return (module, PermissionConst.Delete);
+    }
+
+    private static IEnumerable<(string Module, string Permission)> HrManagerPermissions()
+    {
+        foreach (var permission in FullAccess(AppModule.Employees)) yield return permission;
+        foreach (var permission in FullAccess(AppModule.Attendance)) yield return permission;
+        foreach (var permission in FullAccess(AppModule.LeaveManagement)) yield return permission;
+        foreach (var permission in FullAccess(AppModule.Calendar)) yield return permission;
+        foreach (var permission in FullAccess(AppModule.NoticeBoard)) yield return permission;
+        foreach (var permission in FullAccess(AppModule.Jobs)) yield return permission;
+        foreach (var permission in FullAccess(AppModule.Applications)) yield return permission;
+        yield return (AppModule.ProcessLog, PermissionConst.View);
+        yield return (AppModule.PayRoll, PermissionConst.Create);
+        yield return (AppModule.PayRoll, PermissionConst.Edit);
+        yield return (AppModule.PayRoll, PermissionConst.Delete);
+        foreach (var permission in FullAccess(AppModule.PayrollSettings)) yield return permission;
+        yield return (AppModule.Policy, PermissionConst.View);
+    }
+
+    private static IEnumerable<(string Module, string Permission)> EmployeePermissions()
+    {
+        yield return (AppModule.Employees, PermissionConst.Create);
+        foreach (var permission in FullAccess(AppModule.Calendar)) yield return permission;
+        yield return (AppModule.NoticeBoard, PermissionConst.Create);
+        yield return (AppModule.PayRoll, PermissionConst.Edit);
+        yield return (AppModule.PayrollSettings, PermissionConst.Edit);
     }
 
     //Get default roles with their permission

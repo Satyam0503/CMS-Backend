@@ -196,4 +196,29 @@ public static class DefaultCompanySeeds
                 : (perLang != null && perLang.TryGetValue(lang, out var translated) ? translated : englishLabel),
         }).ToList();
     }
+
+    /// <summary>
+    /// Supplies catalog translations for legacy default data created before
+    /// multilingual titles were stored. Explicit company translations win.
+    /// </summary>
+    public static Dictionary<string, string> GetTitlesWithKnownTranslations(IEnumerable<MultilingualModel>? titles)
+    {
+        Dictionary<string, string> result = (titles ?? [])
+            .Where(title => !string.IsNullOrWhiteSpace(title.Language))
+            .GroupBy(title => title.Language, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last().Label, StringComparer.OrdinalIgnoreCase);
+
+        if (!result.TryGetValue(Languages.English, out string? englishLabel) ||
+            !Translations.TryGetValue(englishLabel, out Dictionary<string, string>? translations))
+        {
+            return result;
+        }
+
+        foreach ((string language, string label) in translations)
+        {
+            result.TryAdd(language, label);
+        }
+
+        return result;
+    }
 }
