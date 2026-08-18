@@ -816,6 +816,15 @@
     ctx.scale(dpr, dpr);
   }
 
+  function hexToRgba(hex, alpha) {
+    hex = hex.replace(/^#/, '');
+    if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+    var r = parseInt(hex.substring(0, 2), 16);
+    var g = parseInt(hex.substring(2, 4), 16);
+    var b = parseInt(hex.substring(4, 6), 16);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+  }
+
   function getDomainColor(domain) {
     return getComputedStyle(document.documentElement).getPropertyValue('--c-' + domain).trim();
   }
@@ -955,28 +964,26 @@
       var rows = Math.ceil(ents.length / cols);
       var w = cols * NODE_W + (cols - 1) * GAP_H + PAD * 2;
       var h = PAD_TOP + rows * NODE_H + (rows - 1) * GAP_V + PAD;
-      var color = 'var(--c-' + dom + ')';
+      var cssColor = 'var(--c-' + dom + ')';
+      var hexColor = getDomainColor(dom);
 
       var group = document.createElement('div');
       group.className = 'domain-group';
       group.dataset.domain = dom;
       group.style.cssText = 'left:' + layout.x + 'px;top:' + layout.y + 'px;width:' + w + 'px;height:' + h + 'px;';
-      group.style.borderColor = color;
-      group.style.background = color;
-      group.style.backgroundColor = 'color-mix(in srgb, ' + color + ' calc(var(--domain-bg-alpha) * 100%), transparent)';
-      // Fallback for browsers without color-mix
-      group.style.opacity = '1';
+      group.style.borderColor = cssColor;
+      group.style.backgroundColor = hexToRgba(hexColor || '#888888', 0.07);
 
       var label = document.createElement('span');
       label.className = 'domain-group-label';
       label.textContent = DOMAIN_NAMES[dom];
-      label.style.color = color;
+      label.style.color = cssColor;
       group.appendChild(label);
 
       var count = document.createElement('span');
       count.className = 'domain-group-count';
       count.textContent = ents.length + (ents.length === 1 ? ' entity' : ' entities');
-      count.style.color = color;
+      count.style.color = cssColor;
       group.appendChild(count);
 
       nodesLayer.appendChild(group);
