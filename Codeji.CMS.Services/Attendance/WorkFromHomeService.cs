@@ -358,8 +358,13 @@ public sealed class WorkFromHomeService(
     public async Task<Result> CorrectInsufficientHours(string exceptionId, WorkFromHomeHoursCorrectionDto dto)
     {
         var exception = await exceptions.FirstOrDefault(x => x.Id == exceptionId && x.CompanyId == CompanyId);
-        if (exception is null || exception.ExceptionType != "WFH_INSUFFICIENT_HOURS")
-            return Fail("WFH_EXCEPTION_NOT_FOUND", "The WFH insufficient-hours exception was not found.");
+        // A WFH-owned row can also surface through the generic monthly
+        // validators (for example, a missing check-out).  It must still be
+        // corrected through the approved WFH request, never by overwriting the
+        // attendance row through the normal editor.
+        var supportedExceptionTypes = new[] { "WFH_INSUFFICIENT_HOURS", "MISSING_CHECKOUT", "INVALID_TIME_ORDER" };
+        if (exception is null || !supportedExceptionTypes.Contains(exception.ExceptionType, StringComparer.Ordinal))
+            return Fail("WFH_EXCEPTION_NOT_FOUND", "No correctable WFH attendance exception was found.");
         if (exception.Status != "PENDING_REVIEW" || exception.Version != dto.ExceptionVersion)
             return Fail("WFH_EXCEPTION_CHANGED", "This exception was already changed. Refresh and try again.");
         if (dto.CheckOutTime <= dto.CheckInTime)
@@ -369,28 +374,35 @@ public sealed class WorkFromHomeService(
 
         var employee = await ActiveEmployee(exception.UserId);
         if (employee is null) return Fail("WFH_EMPLOYEE_NOT_ELIGIBLE", "The employee is no longer active in this company.");
-        if (!exception.AttendanceDate.HasValue)
+        // Dedicated WFH exceptions carry AttendanceDate, while generic monthly
+        // validators (such as MISSING_CHECKOUT) carry their dates in
+        // AffectedDates. The UI corrects the first affected date, so use the
+        // same date here instead of rejecting an otherwise valid WFH record.
+        var attendanceDate = exception.AttendanceDate?.Date
+            ?? exception.AffectedDates?.Select(date => date.Date).FirstOrDefault();
+        if (!attendanceDate.HasValue || attendanceDate.Value == default)
             return Fail("WFH_EXCEPTION_DATE_MISSING", "The WFH exception does not have an affected attendance date.");
-        var attendanceDate = exception.AttendanceDate.Value.Date;
-        try { await attendanceEditGuard.EnsureEditableWorkingDayAsync(CompanyId, employee.UserId, attendanceDate); }
+        var dateToCorrect = attendanceDate.Value;
+        try { await attendanceEditGuard.EnsureEditableWorkingDayAsync(CompanyId, employee.UserId, dateToCorrect); }
         catch (InvalidOperationException ex) { return Fail("WFH_ATTENDANCE_NOT_EDITABLE", ex.Message); }
 
-        var request = await requests.FirstOrDefault(x => x.CompanyId == CompanyId && x.RequestId == exception.LeaveRequestId && x.UserId == employee.UserId && x.Status == "Approved");
-        if (request is null) return Fail("WFH_REQUEST_NOT_AVAILABLE", "The approved WFH request for this exception is no longer available.");
-        // Older exception rows can have no attendance id (or an id written before the
-        // attendance document was persisted).  The WFH request + employee + business
-        // date is the authoritative source-owned identity, so use it as a safe fallback.
+        // Generic monthly exceptions do not carry the WFH request id. Resolve the
+        // source-owned attendance row first, then use its immutable SourceId to find
+        // the approved request. This keeps the correction tied to its WFH source.
         var row = string.IsNullOrWhiteSpace(exception.ExistingAttendanceId)
             ? null
             : await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.AttendanceId == exception.ExistingAttendanceId && x.UserId == employee.UserId);
-        if (row is null || row.SourceType != "WFH_REQUEST" || row.SourceId != request.RequestId)
+        if (row is null || row.SourceType != "WFH_REQUEST" || string.IsNullOrWhiteSpace(row.SourceId))
         {
-            var endOfAttendanceDate = attendanceDate.AddDays(1);
-            row = await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.SourceType == "WFH_REQUEST" && x.SourceId == request.RequestId && x.Date >= attendanceDate && x.Date < endOfAttendanceDate);
+            var endOfAttendanceDate = dateToCorrect.AddDays(1);
+            row = await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.SourceType == "WFH_REQUEST" && x.Date >= dateToCorrect && x.Date < endOfAttendanceDate);
         }
-        if (row is null || row.SourceType != "WFH_REQUEST" || row.SourceId != request.RequestId)
-            return Fail("WFH_ATTENDANCE_CONFLICT", "No WFH attendance record matches this employee, request, and affected date. Refresh the exception list and verify the approved WFH request.");
-        if (dto.CheckInTime.Date != attendanceDate || dto.CheckOutTime.Date != attendanceDate)
+        if (row is null || row.SourceType != "WFH_REQUEST" || string.IsNullOrWhiteSpace(row.SourceId))
+            return Fail("WFH_ATTENDANCE_CONFLICT", "No WFH-owned attendance record matches this employee and affected date. Refresh the exception list and verify the approved WFH request.");
+
+        var request = await requests.FirstOrDefault(x => x.CompanyId == CompanyId && x.RequestId == row.SourceId && x.UserId == employee.UserId && x.Status == "Approved");
+        if (request is null) return Fail("WFH_REQUEST_NOT_AVAILABLE", "The approved WFH request linked to the attendance record is no longer available.");
+        if (dto.CheckInTime.Date != dateToCorrect || dto.CheckOutTime.Date != dateToCorrect)
             return Fail("WFH_CORRECTION_DATE_INVALID", "Both corrected times must be on the affected attendance date.");
 
         var policy = await ActivePolicy();
@@ -417,7 +429,7 @@ public sealed class WorkFromHomeService(
         exception.Version++;
         var resolved = await exceptions.Update(Builders<AttendancePayrollException>.Filter.Where(x => x.Id == exception.Id && x.Version == dto.ExceptionVersion), exception);
         if (!resolved.Success) return Fail("WFH_EXCEPTION_CHANGED", "Attendance was corrected, but the exception changed before it could be resolved. Recheck the exception.");
-        await InvalidateSummary(employee, attendanceDate);
+        await InvalidateSummary(employee, dateToCorrect);
         await Log(request, request.Status, request.Status, "HoursCorrected", "WFH_HOURS_CORRECTED", dto.Remarks);
         return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = $"WFH hours updated to {totalHours:0.##} hours and the exception was resolved." };
     }

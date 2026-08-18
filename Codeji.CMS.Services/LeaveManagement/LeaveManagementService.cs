@@ -762,7 +762,12 @@ public class LeaveManagementService : ILeaveManagementService
         bool isSelfWithdrawal = model.Status == EnumsHelper.LeaveRequestStatus.WithDrawn && existingLeaveRequest.EmployeeId == reviewedBy;
         if (existingLeaveRequest.EmployeeId == reviewedBy && !isSelfWithdrawal)
             return new Result { Success = false, Message = "LEAVE_SELF_APPROVAL_NOT_ALLOWED: A user cannot approve their own leave request." };
-        if (model.Status == EnumsHelper.LeaveRequestStatus.WithDrawn && !isSelfWithdrawal)
+        // This action is exposed only through the protected Leave Management
+        // review endpoint. HR/Admin may therefore cancel an approved leave to
+        // correct a source-owned attendance exception; self-service callers
+        // can still withdraw only their own request.
+        if (model.Status == EnumsHelper.LeaveRequestStatus.WithDrawn && !isSelfWithdrawal &&
+            _httpContextAccessor.HttpContext?.Request.Path.StartsWithSegments("/api/LeaveManagement/LeaveRequest") != true)
             return new Result { Success = false, Message = "Only the employee who submitted this leave request can withdraw it." };
         if (model.ExpectedVersion.HasValue && model.ExpectedVersion.Value != existingLeaveRequest.Version)
             return new Result { Success = false, Message = "LEAVE_REQUEST_VERSION_CONFLICT: The leave request was changed by another reviewer. Refresh and try again." };
