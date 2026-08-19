@@ -10,10 +10,14 @@ public class AttendancePenaltyController : ControllerBase
 {
     private readonly IAttendancePenaltyService _service; private readonly IHttpContextAccessor _context;
     public AttendancePenaltyController(IAttendancePenaltyService service,IHttpContextAccessor context){_service=service;_context=context;}
-    [HttpGet("policy"),ModulePermission(AppModule.Attendance,Permission.View)]
-    public Task<AttendancePenaltyPolicyDto> GetPolicy([FromQuery]DateTime? effectiveOn=null)=>_service.GetPolicy(CurrentContext.CompanyId(_context),effectiveOn);
-    [HttpPost("policy"),ModulePermission(AppModule.Attendance,Permission.Edit)]
-    public Task<Result> SavePolicy(AttendancePenaltyPolicyDto dto)=>_service.SavePolicy(CurrentContext.CompanyId(_context),CurrentContext.UserId(_context),dto);
+    // Payroll penalty limits are employee-specific. The route selects the target
+    // employee; CompanyId and actor are always taken from the authenticated token.
+    [HttpGet("employees/{employeeUserId}/policy"),ModulePermission(AppModule.Employees,Permission.Edit)]
+    public Task<Result<AttendancePenaltyPolicyDto>> GetEmployeePolicy(string employeeUserId,[FromQuery]DateTime? effectiveOn=null)=>
+        _service.GetEmployeePolicy(CurrentContext.CompanyId(_context),employeeUserId,effectiveOn);
+    [HttpPost("employees/{employeeUserId}/policy"),ModulePermission(AppModule.Employees,Permission.Edit)]
+    public Task<Result> SaveEmployeePolicy(string employeeUserId,AttendancePenaltyPolicyDto dto)=>
+        _service.SaveEmployeePolicy(CurrentContext.CompanyId(_context),CurrentContext.UserId(_context),employeeUserId,dto);
     [HttpPost("exceptions/recalculate"),ModulePermission(AppModule.Attendance,Permission.Edit)]
     public Task<Result<AttendancePayrollException>> Recalculate(AttendanceMonthRequestDto dto)=>_service.Recalculate(CurrentContext.CompanyId(_context),dto.PayrollMonth);
     [HttpPost("exceptions/search"),ModulePermission(AppModule.Attendance,Permission.View)]

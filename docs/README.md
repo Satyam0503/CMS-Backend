@@ -27,6 +27,7 @@ This is the authoritative documentation index for the Codeji CMS backend. Each b
 | Attendance | [Attendance module current flow and audit](./attendance-module-current-flow-and-audit.md) |
 | Leave management | [Leave management current flow](./leave-management-current-flow.md) |
 | Work from home | [Work from home module](./work-from-home-module.md) |
+| Office schedules and shift assignment | [Office schedule and shift management](./office-schedule-shifts.md) |
 | Calendar and holidays | [Calendar module current flow](./calendar-module-current-flow.md) |
 | Payroll | [Payroll module current flow](./payroll-module-current-flow.md) |
 | Recruitment | [Recruitment current flow and working context](./recruitment-current-flow-and-working-context.md) |
@@ -37,7 +38,7 @@ This is the authoritative documentation index for the Codeji CMS backend. Each b
 
 ## Supporting design references
 
-These are focused specifications or impact analyses, not duplicate module overviews: attendance bulk marking and status settings, employee-specific leave allocation, half-day/WFH segments, payroll LHD/ED impact, notification and company registration, dashboard design, and public career API behaviour.
+These are focused specifications or impact analyses, not duplicate module overviews: attendance bulk marking and status settings, employee-specific leave allocation, half-day/WFH segments, payroll LHD/ED impact, notification and company registration, dashboard design, and public career API behaviour. For user-facing styling and responsive layout, use the [project design and UI guide](./project-design-and-ui.md); for the manager/delivery overview, use [Project complete documentation](./Project%20complete%20ducumentation.md).
 
 ## Test evidence
 

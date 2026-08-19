@@ -5,6 +5,8 @@ namespace Codeji.CMS.DTO.Attendance;
 public sealed class OfficeScheduleSettingsDto
 {
     public string? ScheduleId { get; set; }
+    public bool IsDefault { get; set; }
+    public bool IsActive { get; set; } = true;
     [Required, MaxLength(100)] public string Name { get; set; } = "Standard Office Schedule";
     [Required] public string StandardCheckIn { get; set; } = "09:00";
     [Required] public string StandardCheckOut { get; set; } = "18:00";

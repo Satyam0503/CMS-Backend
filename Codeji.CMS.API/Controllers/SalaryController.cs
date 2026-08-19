@@ -2,10 +2,12 @@ using Microsoft.AspNetCore.Mvc;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Salary;
 using Codeji.CMS.Services.Interfaces;
+using Codeji.CMS.Services.Exceptions;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
+using MongoDB.Driver;
 
 
 namespace Codeji.CMS.API.Controllers
@@ -30,8 +32,19 @@ namespace Codeji.CMS.API.Controllers
 
         public async Task<IActionResult> CreateSalary([FromBody] CreateSalaryDto dto)
         {
-            var salary = await _salaryService.CreateSalaryAsync(CurrentContext.CompanyId(_httpContextAccessor), dto);
-            return Ok(new { success = true, data = SalaryResponseDto.MapFromModel(salary) });
+            try
+            {
+                var salary = await _salaryService.CreateSalaryAsync(CurrentContext.CompanyId(_httpContextAccessor), dto);
+                return Ok(new { success = true, data = SalaryResponseDto.MapFromModel(salary) });
+            }
+            catch (SalaryEffectiveDateConflictException ex)
+            {
+                return Conflict(new { success = false, message = ex.Message });
+            }
+            catch (MongoWriteException ex) when (ex.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+            {
+                return Conflict(new { success = false, message = "A salary structure already exists for this employee on the selected effective date." });
+            }
         }
 
         [HttpGet("active/{userId}")]

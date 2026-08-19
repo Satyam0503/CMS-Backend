@@ -158,3 +158,53 @@ npm test -- --run src/app/modules/attendance/AttendanceCalendarLayout.test.ts
 ```
 
 Also manually verify desktop, a narrow viewport, light/dark mode, loading/empty/error states, keyboard navigation, and the API authorization result. Typechecking alone cannot prove browser layout or backend access behaviour.
+
+## Cross-module form and control contract
+
+All modules use the same visual grammar for input fields, labels, switches,
+checkboxes, date pickers, tabs, and actions. This is a product requirement, not
+an optional styling preference.
+
+| Control | Required layout behaviour |
+|---|---|
+| Text/select/date/time field | visible label, full available column width, aligned label/notch and helper text, no overlapping adornment |
+| Boolean setting | descriptive label on the left; checkbox/switch and state text aligned in one compact action group on the right |
+| Filter bar | controls share a row on wide screens; wrap as complete controls on smaller screens without orphaning an icon button |
+| Primary mutation | one clear save/submit action per form scope; disable while pending and preserve entered values on failure |
+| Destructive mutation | compact icon or text action with accessible name, confirmation when appropriate, and an error beside the affected item |
+| Tabs | clear selected state, deliberate gap/divider, keyboard navigation, no clipped labels |
+
+Avoid explanatory paragraphs when a concise label, helper text, tooltip, or
+inline status will communicate the rule. Long operational guidance belongs in a
+collapsible help area or documentation, not between every field.
+
+### Responsive composition rules
+
+Use CSS Grid/Stack breakpoints rather than hard-coded screen widths:
+
+- Large screens may use multiple columns only when each field remains readable.
+- Medium screens reduce the number of columns before labels or controls collide.
+- Small screens use one-column forms, full-width primary actions where useful,
+  and compact secondary/icon actions with adequate touch targets.
+- Preserve data-table/calendar structure with an intentional inner horizontal
+  scroll; do not let the entire page acquire an inaccessible horizontal overflow.
+- An expanded accordion/card must appear directly after its own trigger row and
+  retain focus/scroll context for keyboard users.
+
+### Domain UI vocabulary
+
+Use **Punch in** and **Punch out** for attendance times visible to users. Keep
+the existing `CheckInTime`/`CheckOutTime` API field names unless a versioned
+contract change is made. Display the employee's effective shift and assignment
+source in attendance views where it explains validation or filtering; do not
+expose IDs, tenant keys, or another employee's assignment data.
+
+### Frontend implementation checklist
+
+1. Start from the shared primitives and theme tokens.
+2. Verify 320px-class mobile, tablet, and desktop layouts for the modified flow.
+3. Test loading, empty, denied, validation, and server-error states.
+4. Keep request ownership and permission enforcement in the API; client gating
+   is only a usability aid.
+5. Re-test keyboard focus, screen-reader names, and reduced-motion behaviour
+   after adding an animation or icon-only action.

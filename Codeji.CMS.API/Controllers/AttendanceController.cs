@@ -107,6 +107,24 @@ public class AdminAttendanceController : ControllerBase
         return Ok(new { items = allData });
     }
 
+    [HttpPost("effective-schedules")]
+    [ModulePermission(AppModule.Attendance, Permission.ViewAll)]
+    public async Task<IActionResult> GetEffectiveSchedules(
+        [FromBody] EffectiveOfficeSchedulesRequest request,
+        [FromServices] IEffectiveOfficeScheduleService effectiveSchedules)
+    {
+        if (request is null || request.AttendanceDate == default)
+            return BadRequest(new { success = false, message = "ATTENDANCE_DATE_REQUIRED" });
+        if (request.UserIds is null || request.UserIds.Count == 0 || request.UserIds.Count > 1000)
+            return BadRequest(new { success = false, message = "EMPLOYEE_SELECTION_INVALID" });
+
+        // The effective-schedule service independently scopes every employee,
+        // department, assignment and schedule to this authenticated company.
+        var items = await effectiveSchedules.ResolveManyAsync(
+            CurrentContext.CompanyId(_context), request.UserIds, request.AttendanceDate, HttpContext.RequestAborted);
+        return Ok(new { items });
+    }
+
     [HttpGet("export/monthly")]
     [ModulePermission(AppModule.Attendance, Permission.ViewAll)]
     public async Task<IActionResult> ExportMonthly([FromQuery] int year, [FromQuery] int month)

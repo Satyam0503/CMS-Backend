@@ -202,7 +202,7 @@ This is a deliberate safety guard so the system does not silently destroy an exi
 
 ## 7. How the employee marks attendance while working from home
 
-Once the request is approved, the employee can clock in and out through the WFH screen.
+Once the request is approved, the employee can clock in and out through the WFH screen. The employee sees one action only: **Clock in** before a check-in is stored; the same action becomes **Clock out** after it is stored; and it becomes a completed status after check-out. It is shown only for an approved WFH request that covers the company business date.
 
 ### 7.1 Check-in
 
@@ -219,12 +219,16 @@ The check-in stores:
 - the WFH attendance row reference; and
 - a remark that the check-in came from the employee WFH portal.
 
+The browser does not decide whether the request covers today. It asks the timing endpoint, which resolves the authenticated employee's company time zone and business date.
+
 ### 7.2 Check-out
 
 Check-out requires:
 
 - a prior check-in; and
 - a valid check-out window.
+
+The action is disabled while the request is being saved so duplicate clicks cannot submit duplicate clock events.
 
 When the employee checks out, the system:
 
@@ -258,6 +262,8 @@ The UI pulls the authoritative availability context from the backend and shows:
 - next availability date if the limit is already used;
 - office hours and timing windows;
 - the current worked hours for today.
+
+Clock endpoints are self-service only. They derive both company and employee from the access token, require that the request belongs to that same employee and company, and update only the matching WFH-owned attendance row or segment. They never accept a company or employee identifier from the client.
 
 ## 9. What HR/Admin and managers see
 
@@ -354,6 +360,41 @@ The current implementation is designed around these rules:
 - WFH is workflow-driven, not manually editable attendance.
 - approved WFH creates protected attendance rows;
 - manual attendance edits do not overwrite WFH-owned rows;
+
+## 14. Frontend clocking and responsive layout
+
+The WFH page presents clocking as a single progressive employee action, not two
+competing buttons:
+
+```text
+Approved WFH for today + no punch in -> Clock in
+Approved WFH for today + punch in    -> Clock out
+Approved WFH for today + punch out   -> Completed
+```
+
+The action is rendered only from server-provided, token-scoped WFH context. The
+client disables it while a request is in flight to prevent accidental duplicate
+punches, refreshes the context after success, and displays a repairable
+server-side error if the shift window, approval status, or source ownership
+prevents clocking.
+
+On mobile, policy context, request state, and the action stack in that order;
+the primary action remains visible without covering request history. Wide
+layouts may place request details and quota/history side by side. Shared button,
+alert, date, and status components are used so WFH remains visually consistent
+with Leave Management and Attendance.
+
+### WFH UI checks
+
+- No approved request: no clock action appears.
+- Approved request for today: exactly one action appears and changes from Clock
+  in to Clock out only after a successful response.
+- Repeated taps and a refreshed browser cannot create duplicate punches.
+- A user cannot clock another employee's request by altering an ID or request
+  payload.
+- The action remains clear, reachable, and keyboard-operable on narrow screens.
+
+### Additional operational invariants
 - weekly quota is enforced per Monday–Sunday week;
 - monthly lock and holiday/weekly-off checks are enforced;
 - the employee clocking flow uses server time and policy windows.

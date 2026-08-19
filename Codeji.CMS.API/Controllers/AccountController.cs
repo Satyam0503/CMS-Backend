@@ -128,6 +128,7 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("account/login")]
         [AllowAnonymous]
+        
         public async Task<Result<TokenResponseDto>> Login([FromBody] LoginModel model)
         {
             Result<TokenResponseDto> result = new();

@@ -5,6 +5,7 @@ using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
+using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Repository.Entities.RolePermissions;
@@ -283,6 +284,8 @@ public class EmployeeServiceBulkImportTests
             fixture.NotificationService.Object,
             fixture.NotificationPreferenceRepository.Object,
             fixture.UserSecurityTokenRepository.Object,
+            fixture.OfficeScheduleRepository.Object,
+            fixture.EmployeeScheduleAssignmentRepository.Object,
             fixture.Logger.Object);
 
         return fixture;
@@ -316,6 +319,8 @@ public class EmployeeServiceBulkImportTests
         public Mock<INotificationService> NotificationService { get; } = new();
         public Mock<IMongoDbRepository<NotificationPreference>> NotificationPreferenceRepository { get; } = new();
         public Mock<IMongoDbRepository<UserSecurityToken>> UserSecurityTokenRepository { get; } = new();
+        public Mock<IMongoDbRepository<CompanyOfficeSchedule>> OfficeScheduleRepository { get; } = new();
+        public Mock<IMongoDbRepository<EmployeeScheduleAssignment>> EmployeeScheduleAssignmentRepository { get; } = new();
         public Mock<ILogger<EmployeeService>> Logger { get; } = new();
     }
 }

@@ -3,6 +3,9 @@ using System.ComponentModel.DataAnnotations;
 public class AttendancePenaltyPolicyDto
 {
     public string? Id { get; set; }
+    /// <summary>Returned employee identity. The API route, not this field, selects the employee.</summary>
+    public string? UserId { get; set; }
+    public string? EmployeeId { get; set; }
     public string Name { get; set; } = "Combined LHD + ED monthly allowance";
     [Range(0, 31)] public int CombinedLhdEdMonthlyLimit { get; set; } = 2;
     public bool IsEnabled { get; set; } = true;

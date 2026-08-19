@@ -3,6 +3,7 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Interfaces;
+using Codeji.CMS.Services.Exceptions;
 using Codeji.CMS.Services.Interfaces;
 using Microsoft.Extensions.Logging;
 
@@ -32,15 +33,14 @@ namespace Codeji.CMS.Services
             var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.Status && !x.IsDeleted && x.UserId == dto.UserId.ToString());
             if (employee == null) throw new InvalidOperationException("Employee does not belong to the authenticated company.");
             dto.EmployeeId = employee.EmployeeId;
-            // mark previous active salary inactive
-            var activeSalary = await _repository.GetActiveSalaryAsync(companyId, dto.UserId);
-            if (activeSalary != null)
+            var effectiveFrom = dto.EffectiveFrom.Date;
+            var salaryHistory = await _repository.GetSalaryHistoryAsync(companyId, dto.UserId);
+            if (salaryHistory.Any(salary => salary.EffectiveFrom.Date == effectiveFrom))
             {
-                activeSalary.Status = false;
-                activeSalary.EffectiveTo = dto.EffectiveFrom.AddDays(-1);
-                activeSalary.UpdatedAt = DateTime.UtcNow;
-                await _repository.UpdateAsync(activeSalary);
+                throw new SalaryEffectiveDateConflictException();
             }
+
+            var activeSalary = await _repository.GetActiveSalaryAsync(companyId, dto.UserId);
 
             var (gross, net, ctc) = SalaryCalculator.Calculate(dto);
 
@@ -60,7 +60,7 @@ namespace Codeji.CMS.Services
                 GrossSalary = gross,
                 NetSalary = net,
                 Ctc = ctc,
-                EffectiveFrom = dto.EffectiveFrom,
+                EffectiveFrom = effectiveFrom,
                 Status = true,
                 PaymentFrequency = dto.PaymentFrequency,
                 Currency = dto.Currency,
@@ -69,6 +69,15 @@ namespace Codeji.CMS.Services
             };
 
             await _repository.AddAsync(newSalary);
+
+            // Insert first so a duplicate-key race cannot deactivate the current salary.
+            if (activeSalary != null)
+            {
+                activeSalary.Status = false;
+                activeSalary.EffectiveTo = effectiveFrom.AddDays(-1);
+                activeSalary.UpdatedAt = DateTime.UtcNow;
+                await _repository.UpdateAsync(activeSalary);
+            }
 
             return newSalary;
         }

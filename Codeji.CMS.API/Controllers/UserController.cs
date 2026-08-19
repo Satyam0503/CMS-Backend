@@ -4,6 +4,7 @@ using Codeji.CMS.API.App_Start;
 using Codeji.CMS.API.Notification;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
+using Codeji.CMS.DTO.Attendance;
 using Codeji.CMS.DTO.Dashboard;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.RequestModels;
@@ -12,6 +13,7 @@ using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Account.Interface;
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Enums;
@@ -30,11 +32,15 @@ public class UserController : BaseApiController
     readonly IAccountServices _accountServices;
     private readonly IEmployeeService _employeeService;
     private readonly IHttpContextAccessor _httpContextAccessor;
-    public UserController(IHttpContextAccessor httpContextAccessor, IEmployeeService employeeService, IAccountServices accountServices)
+    private readonly IOfficeScheduleAssignmentService _officeScheduleAssignments;
+    private readonly IOfficeScheduleSettingsService _officeScheduleSettings;
+    public UserController(IHttpContextAccessor httpContextAccessor, IEmployeeService employeeService, IAccountServices accountServices, IOfficeScheduleAssignmentService officeScheduleAssignments, IOfficeScheduleSettingsService officeScheduleSettings)
     {
         _httpContextAccessor = httpContextAccessor;
         _employeeService = employeeService;
         _accountServices = accountServices;
+        _officeScheduleAssignments = officeScheduleAssignments;
+        _officeScheduleSettings = officeScheduleSettings;
     }
 
     [Route("InviteNewEmployee")]
@@ -110,6 +116,24 @@ public class UserController : BaseApiController
         string currentUserId = CurrentContext.UserId(_httpContextAccessor);
         return await _employeeService.EditEmployee(ToSelfEditRequest(user), currentUserId);
     }
+
+    [Route("OfficeScheduleAssignment/{userId}")]
+    [HttpGet]
+    [ModulePermission(AppModule.Employees, Permission.View)]
+    public Task<Result<EmployeeOfficeScheduleAssignmentDto>> GetOfficeScheduleAssignment(string userId, CancellationToken cancellationToken) =>
+        _officeScheduleAssignments.GetEmployeeAsync(CurrentContext.CompanyId(_httpContextAccessor), userId, cancellationToken);
+
+    [Route("AvailableOfficeSchedules")]
+    [HttpGet]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public Task<Result<OfficeScheduleSettingsDto>> GetAvailableOfficeSchedules(CancellationToken cancellationToken) =>
+        _officeScheduleSettings.GetAllAsync(CurrentContext.CompanyId(_httpContextAccessor), cancellationToken);
+
+    [Route("OfficeScheduleAssignment/{userId}")]
+    [HttpPut]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public Task<Result<EmployeeOfficeScheduleAssignmentDto>> SetOfficeScheduleAssignment(string userId, SetOfficeScheduleAssignmentRequest request, CancellationToken cancellationToken) =>
+        _officeScheduleAssignments.SetEmployeeAsync(CurrentContext.CompanyId(_httpContextAccessor), CurrentContext.UserId(_httpContextAccessor), userId, request, cancellationToken);
 
     [Route("EmployeeIdSequence")]
     [HttpGet]

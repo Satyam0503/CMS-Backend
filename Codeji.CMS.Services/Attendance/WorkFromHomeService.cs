@@ -417,7 +417,7 @@ public sealed class WorkFromHomeService(
         row.TotalHours = totalHours;
         row.RemarkCode = "WFH_HOURS_CORRECTED";
         row.Remarks = $"HR/Admin corrected WFH hours: {Clean(dto.Remarks)}";
-        var saved = await attendance.Update(Builders<AttendanceModel>.Filter.Where(x => x.AttendanceId == row.AttendanceId && x.SourceType == "WFH_REQUEST" && x.SourceId == request.RequestId), row);
+        var saved = await attendance.Update(Builders<AttendanceModel>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.AttendanceId == row.AttendanceId && x.SourceType == "WFH_REQUEST" && x.SourceId == request.RequestId), row);
         if (!saved.Success) return Fail("WFH_ATTENDANCE_UPDATE_FAILED", "The WFH attendance record could not be updated.");
 
         exception.Status = "RESOLVED";
@@ -474,8 +474,8 @@ public sealed class WorkFromHomeService(
             else { segment!.CheckOutTime = now; segment.TotalHours = Math.Max(0, (decimal)(now - checkInTime.Value).TotalHours); segment.Remarks = $"Checked out through employee WFH portal ({requestId})"; segment.UpdatedAtUtc = now; }
         }
         var result = row is not null
-            ? await attendance.Update(Builders<AttendanceModel>.Filter.Where(x => x.AttendanceId == row.AttendanceId && x.SourceType == "WFH_REQUEST" && x.SourceId == requestId), row)
-            : await attendanceSegments.Update(Builders<AttendanceDaySegment>.Filter.Where(x => x.AttendanceDaySegmentId == segment!.AttendanceDaySegmentId && x.SourceType == "WFH_REQUEST" && x.SourceId == requestId), segment!);
+            ? await attendance.Update(Builders<AttendanceModel>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == UserId && x.AttendanceId == row.AttendanceId && x.SourceType == "WFH_REQUEST" && x.SourceId == requestId), row)
+            : await attendanceSegments.Update(Builders<AttendanceDaySegment>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == UserId && x.AttendanceDaySegmentId == segment!.AttendanceDaySegmentId && x.SourceType == "WFH_REQUEST" && x.SourceId == requestId), segment!);
         if (result.Success) await Log(request, request.Status, request.Status, checkIn ? "CheckIn" : "CheckOut", null, null);
         return result;
     }

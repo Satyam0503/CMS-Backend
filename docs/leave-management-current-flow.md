@@ -211,3 +211,57 @@ Reconciliation still refuses to overwrite manual or WFH attendance. It records
 - [Employee profile and attendance calendar](employee-profile-current-flow.md)
 - [Calendar module](calendar-module-current-flow.md)
 - [End-to-end Leave/Attendance/Payroll flow](leave-attendance-payroll-end-to-end-flow.md)
+
+## Leave-management frontend and layout contract
+
+The Leave Management workspace is the HR/Admin configuration and review surface;
+the Profile Leave Tracker is the employee's self-service surface. They share
+the same server-side ownership rules but must not expose the same controls.
+
+### Policy and balance visibility
+
+- Inactive policies are retained for history/audit, but are excluded from new
+  employee allocation, balance overview cards, policy selection, and leave
+  application unless an explicit history view is requested.
+- A policy can be visible in an HR history table while still being unavailable
+  to a new leave request. The UI displays that state clearly instead of
+  presenting an inactive policy as selectable.
+- Employee balance cards render only policies allocated to that employee in the
+  current company. The overview must refresh after allocation/update rather
+  than relying on stale modal state.
+
+### Responsive screen structure
+
+The Leave Management page follows one readable order: page context and summary,
+tab navigation, local search/filter controls, then the active table or employee
+balance cards. Search and filter controls share a single responsive row when
+space allows; on a narrow screen they wrap in a predictable order without
+leaving an isolated filter button below a full-width search field.
+
+Tabs use an explicit gap/divider and retain an accessible active state. Dense
+policy/employee cards keep their header, action menu, and balance columns
+aligned; a horizontal inner scroll is preferable to clipped values. Modals stack
+fields on mobile, use shared form components, and surface server validation near
+the affected field.
+
+### Security and lifecycle invariants
+
+- The browser never sends an authoritative company ID or assumes that a policy,
+  employee, balance, request, or reviewer belongs to the current tenant.
+- Services derive tenant context and re-check every supplied identifier.
+- An approval creates attendance through reconciliation, not through a visual
+  status change in the Leave UI. Leave-owned rows remain protected from manual
+  attendance edits.
+- Active leave/WFH overlap validation occurs before approval. A user cannot use
+  a layout or client-state race to obtain overlapping active records.
+
+### UI verification
+
+1. Mark a policy inactive and confirm it disappears from new-request/balance
+   overview selection while history remains auditable.
+2. Check desktop, tablet, and phone widths: search and filter stay reachable,
+   tab spacing is visible, and no card/table action is clipped.
+3. Confirm a profile user cannot reach HR configuration or another employee's
+   data by changing a route, ID, or browser request.
+4. Approve/reject/withdraw a request and verify the UI refreshes from the
+   persisted API response, including reconciliation or conflict state.
