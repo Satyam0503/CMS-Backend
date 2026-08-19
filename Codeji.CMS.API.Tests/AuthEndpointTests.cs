@@ -21,15 +21,16 @@ public class AuthEndpointTests : ApiTestBase
     [Fact]
     public async Task Login_WithInvalidCredentials_Returns401()
     {
+        // This API always answers 200 OK and signals failure via the response body's
+        // Success flag (the Result<T> convention used across every endpoint), so a rejected
+        // login is asserted there rather than via the HTTP status code.
         var response = await Client.PostAsJsonAsync("api/account/login", new
         {
             email = "nonexistent@test.com",
             password = "WrongPass123!"
         });
-        Assert.True(
-            response.StatusCode == HttpStatusCode.Unauthorized ||
-            response.StatusCode == HttpStatusCode.BadRequest,
-            $"Expected 401/400, got {response.StatusCode}");
+        var body = await response.Content.ReadFromJsonAsync<ResultBody>(JsonOptions);
+        Assert.False(body?.Success, "Expected login with invalid credentials to fail");
     }
 
     [Fact]
@@ -39,7 +40,8 @@ public class AuthEndpointTests : ApiTestBase
         {
             refreshToken = "invalid-refresh-token-value"
         });
-        Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ResultBody>(JsonOptions);
+        Assert.False(body?.Success, "Expected refresh with an invalid token to fail");
     }
 
     [Fact]

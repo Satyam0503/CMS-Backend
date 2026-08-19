@@ -9,7 +9,7 @@ public abstract class ApiTestBase : IClassFixture<TestWebAppFactory>
     protected readonly HttpClient Client;
     protected readonly TestWebAppFactory Factory;
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    protected static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
@@ -64,3 +64,7 @@ public abstract class ApiTestBase : IClassFixture<TestWebAppFactory>
     private record LoginResponse(bool Success, LoginMethodResult? MethodResult);
     private record LoginMethodResult(string Token, string RefreshToken);
 }
+
+// Minimal shape shared by every Result/Result<T> response body in this API - just enough
+// to assert success/failure without depending on a specific endpoint's payload type.
+public record ResultBody(bool Success);
