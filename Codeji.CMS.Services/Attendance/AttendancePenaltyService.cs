@@ -10,8 +10,8 @@ using MongoDB.Driver;
 
 public interface IAttendancePenaltyService
 {
-    Task<AttendancePenaltyPolicyDto> GetPolicy(string companyId, DateTime? effectiveOn = null);
-    Task<Result> SavePolicy(string companyId, string userId, AttendancePenaltyPolicyDto dto);
+    Task<Result<AttendancePenaltyPolicyDto>> GetEmployeePolicy(string companyId, string employeeUserId, DateTime? effectiveOn = null);
+    Task<Result> SaveEmployeePolicy(string companyId, string actorUserId, string employeeUserId, AttendancePenaltyPolicyDto dto);
     Task<Result<AttendancePayrollException>> Recalculate(string companyId, DateTime month);
     Task<Result<AttendancePayrollException>> GetExceptions(string companyId, AttendanceExceptionFilterDto filter);
     Task<Result> Review(string companyId, string reviewerId, string id, AttendanceExceptionReviewDto dto);
@@ -38,37 +38,88 @@ public class AttendancePenaltyService : IAttendancePenaltyService
     public AttendancePenaltyService(IMongoDbRepository<AttendancePenaltyPolicy> policies, IMongoDbRepository<AttendancePayrollException> exceptions, IMongoDbRepository<MonthlyAttendanceSummary> summaries, IMongoDbRepository<AttendanceModel> attendance, IMongoDbRepository<AttendanceDaySegment> segments, IMongoDbRepository<AttendanceStatusSetting> statusSettings, IMongoDbRepository<EmpUser> employees, IMongoDbRepository<WeeklyOffSetting> weeklyOffs, IMongoDbRepository<CalendarEntity> calendar, IMongoDbRepository<AttendanceNotificationOutbox> notificationOutbox, IAttendanceRepository attendanceRepository, IAttendanceMutationValidator mutationValidator, IAttendanceAuditWriter auditWriter)
     { _policies=policies; _exceptions=exceptions; _summaries=summaries; _attendance=attendance; _segments=segments; _statusSettings=statusSettings; _employees=employees; _weeklyOffs=weeklyOffs; _calendar=calendar; _notificationOutbox=notificationOutbox; _attendanceRepository=attendanceRepository; _mutationValidator=mutationValidator; _auditWriter=auditWriter; }
 
-    public async Task<AttendancePenaltyPolicyDto> GetPolicy(string companyId, DateTime? effectiveOn=null)
+    public async Task<Result<AttendancePenaltyPolicyDto>> GetEmployeePolicy(string companyId, string employeeUserId, DateTime? effectiveOn=null)
     {
+        if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(employeeUserId))
+            return new Result<AttendancePenaltyPolicyDto> { Success = false, Message = "Company and employee are required." };
+
+        var employee = await _employees.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == employeeUserId && !x.IsDeleted);
+        if (employee is null)
+            return new Result<AttendancePenaltyPolicyDto> { Success = false, Message = "Employee was not found in the current company." };
+
         var on=(effectiveOn ?? DateTime.UtcNow).Date;
-        var policy=(await _policies.GetAll(x=>x.CompanyId==companyId && x.IsEnabled && x.EffectiveFrom<=on && (!x.EffectiveTo.HasValue || x.EffectiveTo>=on))).OrderByDescending(x=>x.Version).FirstOrDefault();
-        // Loading the settings screen must not write to the database.  Apart from
-        // making a GET unexpectedly fail for a new company, concurrent page loads
-        // could race on the unique company/version index.  The returned defaults
-        // are persisted only when the administrator saves the policy.
-        if(policy==null) policy=new AttendancePenaltyPolicy{CompanyId=companyId,EffectiveFrom=new DateTime(on.Year,on.Month,1)};
-        return new AttendancePenaltyPolicyDto{Id=policy.Id,Name=policy.Name,CombinedLhdEdMonthlyLimit=policy.CombinedLhdEdMonthlyLimit,IsEnabled=policy.IsEnabled,RequiresHrApproval=policy.RequiresHrApproval,DefaultDecision=policy.DefaultDecision,EffectiveFrom=policy.EffectiveFrom,EffectiveTo=policy.EffectiveTo,Version=policy.Version};
+        var policy = await GetEffectiveEmployeePolicy(companyId, employeeUserId, on);
+        var dto = policy is null
+            ? new AttendancePenaltyPolicyDto { UserId = employee.UserId, EmployeeId = employee.EmployeeId, EffectiveFrom = new DateTime(on.Year, on.Month, 1) }
+            : ToDto(policy);
+        return new Result<AttendancePenaltyPolicyDto> { Success = true, MethodResult = dto };
     }
 
-    public async Task<Result> SavePolicy(string companyId,string userId,AttendancePenaltyPolicyDto dto)
+    public async Task<Result> SaveEmployeePolicy(string companyId,string actorUserId,string employeeUserId,AttendancePenaltyPolicyDto dto)
     {
         var result=new Result();
+        if (dto is null) { result.Message = "Employee policy is required."; return result; }
+        if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(actorUserId) || string.IsNullOrWhiteSpace(employeeUserId))
+        {
+            result.Message = "Company, actor, and employee are required.";
+            return result;
+        }
+        var employee = await _employees.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == employeeUserId && !x.IsDeleted);
+        if (employee is null) { result.Message = "Employee was not found in the current company."; return result; }
+        if (dto.CombinedLhdEdMonthlyLimit < 0 || dto.CombinedLhdEdMonthlyLimit > 31) { result.Message = "Monthly limit must be between 0 and 31."; return result; }
         if(dto.EffectiveTo.HasValue && dto.EffectiveTo.Value.Date<dto.EffectiveFrom.Date){result.Message="Effective-to date must be on or after effective-from date.";return result;}
-        var versions=(await _policies.GetAll(x=>x.CompanyId==companyId)).OrderByDescending(x=>x.Version).ToList();
-        var previous=versions.FirstOrDefault(x=>!x.EffectiveTo.HasValue && x.EffectiveFrom<dto.EffectiveFrom.Date);
-        if(previous!=null){previous.EffectiveTo=dto.EffectiveFrom.Date.AddDays(-1);previous.UpdatedBy=userId;previous.UpdatedDate=DateTime.UtcNow;await _policies.Update(Builders<AttendancePenaltyPolicy>.Filter.Eq(x=>x.Id,previous.Id),previous);}
-        // Automatic financial decisions are intentionally unsupported: every exceeded-limit
-        // penalty must remain auditable and require an explicit HR/Admin review.
-        var policy=new AttendancePenaltyPolicy{CompanyId=companyId,Name=dto.Name.Trim(),CombinedLhdEdMonthlyLimit=dto.CombinedLhdEdMonthlyLimit,IsEnabled=dto.IsEnabled,RequiresHrApproval=true,DefaultDecision="REVIEW_REQUIRED",EffectiveFrom=dto.EffectiveFrom.Date,EffectiveTo=dto.EffectiveTo?.Date,Version=(versions.FirstOrDefault()?.Version??0)+1,CreatedBy=userId};
-        result=await _policies.AddOne(policy);return result;
+        var versions=(await _policies.GetAll(x=>x.CompanyId==companyId && x.UserId==employeeUserId && !x.IsDeleted, withDefaultFilter:false)).OrderByDescending(x=>x.Version).ToList();
+        // An update is identified by its server-issued policy id, not by a value
+        // the client can change such as EffectiveFrom. This lets HR update every
+        // field while retaining optimistic-concurrency protection.
+        var existing = !string.IsNullOrWhiteSpace(dto.Id)
+            ? versions.FirstOrDefault(x => x.Id == dto.Id)
+            : versions.FirstOrDefault(x => x.EffectiveFrom.Date == dto.EffectiveFrom.Date);
+        if (!string.IsNullOrWhiteSpace(dto.Id) && existing is null)
+        {
+            result.Message = "Employee policy was not found in the current company.";
+            return result;
+        }
+        var requestedEnd = dto.EffectiveTo?.Date ?? DateTime.MaxValue.Date;
+        if (versions.Where(x => existing is null || x.Id != existing.Id)
+            .Any(x => x.EffectiveFrom.Date <= requestedEnd && (x.EffectiveTo?.Date ?? DateTime.MaxValue.Date) >= dto.EffectiveFrom.Date))
+        {
+            result.Message = "The effective dates overlap an existing policy for this employee.";
+            return result;
+        }
+        var policy = existing ?? new AttendancePenaltyPolicy
+        {
+            CompanyId=companyId, UserId=employee.UserId, EmployeeId=employee.EmployeeId,
+            EffectiveFrom=dto.EffectiveFrom.Date, Version=(versions.FirstOrDefault()?.Version??0)+1,
+            CreatedBy=actorUserId, CreatedDate=DateTime.UtcNow
+        };
+        if (existing is not null && (dto.Version <= 0 || existing.Version != dto.Version))
+        {
+            result.Message = "This employee policy was changed by another user. Refresh and try again.";
+            return result;
+        }
+        policy.Name=string.IsNullOrWhiteSpace(dto.Name) ? "Combined LHD + ED monthly allowance" : dto.Name.Trim();
+        policy.CombinedLhdEdMonthlyLimit=dto.CombinedLhdEdMonthlyLimit; policy.IsEnabled=dto.IsEnabled;
+        // Automatic payroll deductions remain prohibited. Every exceeded limit is
+        // reviewed by HR/Admin and captured as an auditable exception.
+        policy.RequiresHrApproval=true; policy.DefaultDecision="REVIEW_REQUIRED";
+        policy.EffectiveFrom=dto.EffectiveFrom.Date; policy.EffectiveTo=dto.EffectiveTo?.Date; policy.UpdatedBy=actorUserId; policy.UpdatedDate=DateTime.UtcNow;
+        if (existing is null) return await _policies.AddOne(policy);
+        policy.Version++;
+        var tenantScoped = Builders<AttendancePenaltyPolicy>.Filter.And(
+            Builders<AttendancePenaltyPolicy>.Filter.Eq(x => x.CompanyId, companyId),
+            Builders<AttendancePenaltyPolicy>.Filter.Eq(x => x.UserId, employeeUserId),
+            Builders<AttendancePenaltyPolicy>.Filter.Eq(x => x.Id, policy.Id),
+            Builders<AttendancePenaltyPolicy>.Filter.Eq(x => x.Version, dto.Version));
+        return await _policies.Update(tenantScoped, policy);
     }
 
     public async Task<Result<AttendancePayrollException>> Recalculate(string companyId,DateTime month)
     {
-        var start=new DateTime(month.Year,month.Month,1);var end=start.AddMonths(1).AddDays(-1);var policy=await GetPolicy(companyId,end);
+        var start=new DateTime(month.Year,month.Month,1);var end=start.AddMonths(1).AddDays(-1);
         var lastCompletedDate=CalendarDateHelpers.GetLastCompletedBusinessDate(DateTime.UtcNow).ToDateTime(TimeOnly.MinValue);
         var employees=(await _employees.GetAll(x=>x.CompanyId==companyId)).ToList();var output=new List<AttendancePayrollException>();
-        foreach(var emp in employees){if(!AttendancePayrollRules.TryGetEligiblePeriod(emp,start,end,out var from,out var to)){var stale=await _exceptions.FirstOrDefault(x=>x.CompanyId==companyId&&x.UserId==emp.UserId&&x.EmployeeId==emp.EmployeeId&&x.PayrollMonth==start&&x.ExceptionType=="LHD_ED_LIMIT_EXCEEDED"&&x.Status=="PENDING_REVIEW");if(stale!=null){stale.Status="CANCELLED";stale.Resolution="Employee is not eligible for this attendance month.";stale.UpdatedDate=DateTime.UtcNow;stale.Version++;await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x=>x.Id,stale.Id),stale);}continue;}var reviewTo=to.Date<lastCompletedDate?to.Date:lastCompletedDate;var records=reviewTo<from.Date?new List<AttendanceModel>():(await _attendance.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<reviewTo.AddDays(1))).Where(a=>a.Status is "LHD" or "ED" or "LHD+ED").ToList();var lhd=records.Count(x=>x.Status is "LHD" or "LHD+ED");var ed=records.Count(x=>x.Status is "ED" or "LHD+ED");var combined=lhd+ed;var exceeded=AttendancePayrollRules.ExceededOccurrences(lhd,ed,policy.CombinedLhdEdMonthlyLimit);var existing=await _exceptions.FirstOrDefault(x=>x.CompanyId==companyId&&x.UserId==emp.UserId&&x.EmployeeId==emp.EmployeeId&&x.PayrollMonth==start&&x.ExceptionType=="LHD_ED_LIMIT_EXCEEDED");
+        foreach(var emp in employees){var policy=await GetEffectiveEmployeePolicy(companyId,emp.UserId,end);if(policy is null){await CancelPendingLhdEdException(companyId,emp,start,"No active employee payroll penalty policy applies to this month.");continue;}if(!AttendancePayrollRules.TryGetEligiblePeriod(emp,start,end,out var from,out var to)){await CancelPendingLhdEdException(companyId,emp,start,"Employee is not eligible for this attendance month.");continue;}var reviewTo=to.Date<lastCompletedDate?to.Date:lastCompletedDate;var records=reviewTo<from.Date?new List<AttendanceModel>():(await _attendance.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<reviewTo.AddDays(1))).Where(a=>a.Status is "LHD" or "ED" or "LHD+ED").ToList();var lhd=records.Count(x=>x.Status is "LHD" or "LHD+ED");var ed=records.Count(x=>x.Status is "ED" or "LHD+ED");var combined=lhd+ed;var exceeded=AttendancePayrollRules.ExceededOccurrences(lhd,ed,policy.CombinedLhdEdMonthlyLimit);var existing=await _exceptions.FirstOrDefault(x=>x.CompanyId==companyId&&x.UserId==emp.UserId&&x.EmployeeId==emp.EmployeeId&&x.PayrollMonth==start&&x.ExceptionType=="LHD_ED_LIMIT_EXCEEDED");
             if(exceeded==0){if(existing!=null&&existing.Status=="PENDING_REVIEW"){existing.Status="CANCELLED";existing.UpdatedDate=DateTime.UtcNow;await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x=>x.Id,existing.Id),existing);}continue;}
             var item=existing??new AttendancePayrollException{CompanyId=companyId,UserId=emp.UserId,EmployeeId=emp.EmployeeId,PayrollMonth=start,PolicyId=policy.Id!,PolicyVersion=policy.Version};item.LhdCount=lhd;item.EdCount=ed;item.CombinedOccurrenceCount=combined;item.AllowedOccurrenceCount=policy.CombinedLhdEdMonthlyLimit;item.ExceededOccurrenceCount=exceeded;item.AffectedAttendanceRecordIds=records.Select(x=>x.AttendanceId!).Where(x=>x!=null).ToList();item.AffectedDates=records.Select(x=>x.Date.Date).Distinct().ToList();
             if(existing==null)
@@ -84,6 +135,32 @@ public class AttendancePenaltyService : IAttendancePenaltyService
         await RefreshValidationExceptions(companyId, start, end);
         return new Result<AttendancePayrollException>{MethodResults=output,TotalRecords=output.Count};
     }
+
+    private async Task<AttendancePenaltyPolicy?> GetEffectiveEmployeePolicy(string companyId, string employeeUserId, DateTime effectiveOn)
+    {
+        var on = effectiveOn.Date;
+        return (await _policies.GetAll(x => x.CompanyId == companyId && x.UserId == employeeUserId && x.IsEnabled && !x.IsDeleted && x.EffectiveFrom <= on && (!x.EffectiveTo.HasValue || x.EffectiveTo >= on), withDefaultFilter: false))
+            .OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.Version).FirstOrDefault();
+    }
+
+    private async Task CancelPendingLhdEdException(string companyId, EmpUser employee, DateTime payrollMonth, string reason)
+    {
+        var stale = await _exceptions.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.EmployeeId == employee.EmployeeId && x.PayrollMonth == payrollMonth && x.ExceptionType == "LHD_ED_LIMIT_EXCEEDED" && x.Status == "PENDING_REVIEW");
+        if (stale is null) return;
+        stale.Status = "CANCELLED"; stale.Resolution = reason; stale.UpdatedDate = DateTime.UtcNow; stale.Version++;
+        await _exceptions.Update(Builders<AttendancePayrollException>.Filter.And(
+            Builders<AttendancePayrollException>.Filter.Eq(x => x.CompanyId, companyId),
+            Builders<AttendancePayrollException>.Filter.Eq(x => x.Id, stale.Id),
+            Builders<AttendancePayrollException>.Filter.Eq(x => x.Version, stale.Version - 1)), stale);
+    }
+
+    private static AttendancePenaltyPolicyDto ToDto(AttendancePenaltyPolicy policy) => new()
+    {
+        Id = policy.Id, UserId = policy.UserId, EmployeeId = policy.EmployeeId, Name = policy.Name,
+        CombinedLhdEdMonthlyLimit = policy.CombinedLhdEdMonthlyLimit, IsEnabled = policy.IsEnabled,
+        RequiresHrApproval = policy.RequiresHrApproval, DefaultDecision = policy.DefaultDecision,
+        EffectiveFrom = policy.EffectiveFrom, EffectiveTo = policy.EffectiveTo, Version = policy.Version
+    };
 
     private async Task QueueMonthlyLhdEdWarning(string companyId, string userId, DateTime monthStart, int limit, int occurrences)
     {

@@ -15,4 +15,5 @@ public class InviteEmployeeDto
     public string? JobRoleId { get; set; }
     public string? Gender { get; set; }
     public string? ReportingManager { get; set; }
+    public string? ScheduleId { get; set; }
 }

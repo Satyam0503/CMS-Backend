@@ -85,6 +85,22 @@ CMS-React/src/app/modules/attendance/
 
 The attendance grid uses two synchronized panes: the employee list and the date grid. Their vertical scroll positions must remain synchronized; the date grid separately owns horizontal scrolling so employee names remain visible.
 
+### Shift, Leave, and WFH UI locations
+
+```text
+CMS-React/src/app/modules/
+├── admin/companymaster/               # Department, job-title and office-schedule screens
+├── employees/                         # Employee profile, individual shift override and self-service context
+├── attendance/                        # Shift-aware report, punch editor, filters and exceptions
+└── leaves/                            # Leave policies, balances, requests and WFH experience
+```
+
+Feature-specific page code may own composition, but shared controls belong in
+`src/app/shared/components/ui/` and the authenticated shell belongs in
+`src/_themes/layout/`. A layout correction that changes shared field, button,
+switch, tab, or responsive behavior should be made in the smallest shared layer
+that covers all affected screens rather than copied into each module.
+
 ## Request and data flow
 
 ```text
@@ -125,3 +141,13 @@ npm test -- --run src/app/modules/attendance/AttendanceCalendarLayout.test.ts
 ```
 
 Build and unit-test results do not replace browser, authorization, tenant-isolation, or isolated database validation.
+
+## Documentation ownership
+
+`docs/README.md` is the documentation index. The primary operational references
+are `attendance-module-current-flow-and-audit.md`,
+`leave-management-current-flow.md`, `wfh-end-to-end-flow.md`, and
+`office-schedule-shifts.md`. `project-design-and-ui.md` owns shared frontend
+design/layout conventions. The manager-facing
+`Project complete ducumentation.md` summarizes these modules for delivery and
+governance; it is not a substitute for their implementation-level references.

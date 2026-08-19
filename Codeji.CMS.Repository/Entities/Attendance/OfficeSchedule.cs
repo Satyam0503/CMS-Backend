@@ -3,6 +3,11 @@ using Codeji.CMS.Repository.Entities;
 
 namespace Codeji.CMS.Repository.Entities.Attendance;
 
+/// <summary>
+/// A company-owned attendance shift. <see cref="BaseClass.CompanyId"/> is the
+/// tenant boundary and must be populated from the authenticated server context,
+/// never from a client request.
+/// </summary>
 public sealed class CompanyOfficeSchedule : BaseClass
 {
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
@@ -33,6 +38,10 @@ public sealed class CompanyOfficeSchedule : BaseClass
     public long Version { get; set; }
 }
 
+/// <summary>
+/// Company-owned department-to-shift assignment. Both the department and shift
+/// must be resolved within the inherited <see cref="BaseClass.CompanyId"/>.
+/// </summary>
 public sealed class DepartmentScheduleAssignment : BaseClass
 {
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
@@ -44,6 +53,10 @@ public sealed class DepartmentScheduleAssignment : BaseClass
     public bool IsActive { get; set; }
 }
 
+/// <summary>
+/// Company-owned employee-to-shift override. The employee and shift must belong
+/// to the inherited <see cref="BaseClass.CompanyId"/>.
+/// </summary>
 public sealed class EmployeeScheduleAssignment : BaseClass
 {
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))]

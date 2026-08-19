@@ -3046,3 +3046,93 @@ QA, security, operations, HR, payroll, or support and receive evidence in return
 1442. Was the reliability roadmap updated?
 1443. Was the testing roadmap updated?
 1444. Was the ownership register updated?
+
+## 127. Current Attendance, Leave, Shift, WFH, and Frontend Experience Model
+
+This section connects the operational modules that are most often changed
+together. It is a manager-facing summary; the linked module guides remain the
+implementation references.
+
+### 127.1 Attendance and shift ownership
+
+Attendance is evaluated against an effective shift for each employee and
+business date. The order is individual employee override, department assignment,
+then the active company default shift. This supports a standard department
+schedule while allowing an HR-authorized individual exception without copying
+department data into every employee record.
+
+Each shift is tenant-owned and contains its punch windows, standard times,
+break/grace/required-work rules, effective dates, activity/default state, and
+version. HR can add, expand, save, make default, and—only when safe—delete
+non-default shifts. A deletion is blocked if a current employee or department
+assignment depends on it. The server validates every schedule, employee, and
+department ID within the authenticated company.
+
+Attendance records retain the applied schedule ID/version so a later change to
+a shift does not silently rewrite historical attendance. The main report may be
+filtered by shifts available to the current company. User-facing screens say
+**Punch in** and **Punch out**; existing service fields remain compatible with
+`CheckInTime` and `CheckOutTime`.
+
+### 127.2 Leave and WFH lifecycle
+
+Leave policies, balances, requests, and decisions are company-scoped. Inactive
+policies remain auditable but are excluded from new allocations and applications.
+Approval creates a source-owned attendance row through reconciliation; it is not
+only a visual leave-status change. Manual attendance cannot overwrite rows owned
+by Leave or WFH.
+
+Approved WFH is a policy-controlled workflow. For an approved request covering
+today, the employee receives exactly one progressive action: Clock in, then
+Clock out, then a completed state. The API derives employee and company from the
+session and updates only the matching WFH-owned record. This prevents an
+employee from clocking a different person's request or turning WFH into a
+general manual attendance path.
+
+### 127.3 Frontend design and layout standards
+
+The React application uses a common shell, theme tokens, and shared UI
+primitives. Every module should follow the same visual rhythm:
+
+```text
+Page context -> local filters/actions -> summary -> primary data/form -> history or exceptions
+```
+
+Forms use aligned outlined fields, visible labels, consistent helper text, and
+one clear save action per form scope. Switches and checkboxes are compact action
+groups with adequate spacing. On wide screens controls share rows; on smaller
+screens they stack before collision. Dense tables and calendars use intentional
+inner horizontal scrolling rather than unreadable compressed columns. Expandable
+shift content appears directly below the selected shift row.
+
+The browser improves discoverability through disabled states, permission-gated
+actions, success/error feedback, and responsive layout. It never supplies
+tenant authority or replaces authorization, workflow validation, concurrency
+controls, or source ownership in the API.
+
+### 127.4 Delivery and acceptance checklist
+
+1. Verify a second company cannot read, assign, update, delete, or filter by
+   another company's shift, employee, policy, balance, request, WFH record, or
+   attendance row.
+2. Verify an employee override, department assignment, and company default in
+   that exact precedence order.
+3. Verify duplicate schedule prevention and exactly one default schedule per
+   company.
+4. Verify an inactive leave policy is visible only where history requires it.
+5. Verify leave/WFH reconciliation, source protection, payroll exceptions, and
+   month-lock behavior.
+6. Verify the affected pages at mobile, tablet, and desktop widths with loading,
+   empty, error, keyboard, and permission-denied states.
+7. Record API authorization, cross-tenant negative tests, database/index
+   behavior, and browser verification separately; a successful build alone is
+   not production acceptance.
+
+### 127.5 Primary reading path
+
+- [Project layout](project-layout.md)
+- [Project design and UI guide](project-design-and-ui.md)
+- [Office Schedule and Shift Management](office-schedule-shifts.md)
+- [Attendance Module](attendance-module-current-flow-and-audit.md)
+- [Leave Management](leave-management-current-flow.md)
+- [WFH End-to-End Flow](wfh-end-to-end-flow.md)

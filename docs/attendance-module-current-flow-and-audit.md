@@ -487,3 +487,78 @@ Reports should use persisted attendance records and locked summaries, not browse
 - [Calendar Module Current Flow](calendar-module-current-flow.md)
 - [Business Modules](modules.md)
 - [Work From Home module](work-from-home-module.md)
+
+## 19. Effective shift, punch time, and responsive attendance experience
+
+### 19.1 Effective-shift resolution
+
+Every attendance operation resolves one effective office schedule for the
+attendance business date. The precedence is deliberately stable:
+
+```text
+Individual employee assignment
+        -> department assignment
+        -> active company default schedule
+```
+
+The employee assignment is an override, not a duplicate copy of the department
+schedule. Every candidate schedule, assignment, employee, and department is
+validated inside the authenticated company. An assignment from a different
+company is not considered a fallback; it is an authorization/data-integrity
+failure.
+
+The resolved schedule name, time range, assignment source, ID, and version are
+returned to the attendance UI where applicable. The persisted attendance record
+retains its schedule snapshot, so a later schedule edit does not rewrite a
+historical workday.
+
+### 19.2 Punch-in and punch-out rules
+
+The product uses **Punch in** and **Punch out** in employee-facing UI. Existing
+API/storage contract names `CheckInTime` and `CheckOutTime` remain unchanged for
+backward compatibility.
+
+- The effective schedule supplies allowed punch-in and punch-out windows.
+- The React editor can show compact, shift-specific time options across the
+  allowed ranges, while still allowing valid time entry under the screen's
+  existing workflow.
+- The server normalizes and validates the submitted time against the same
+  resolved schedule. Frontend presets never replace server validation.
+- A rejected value must name the relevant bound (for example, the allowed
+  punch-in time) without leaking data from another employee or company.
+
+### 19.3 WFH attendance and clocking
+
+For an approved WFH request covering the company business date, the employee's
+WFH screen exposes one self-service action: **Clock in**, then **Clock out**
+after the first punch, then a completed state. This action updates only the
+matching `WFH_REQUEST`-owned attendance row/segment for the token-derived
+employee. It is not a general attendance override and is not visible for an
+unapproved, expired, or other employee's WFH request.
+
+### 19.4 Attendance report layout
+
+The report uses a compact filter bar: employee search, shift, date range/period,
+and export remain tied to the data grid they affect. The shift filter contains
+only schedules visible to the authenticated company. Cards show the employee's
+effective shift and time range so an HR user can understand why a punch window
+was accepted or rejected.
+
+On narrow screens, controls wrap in a deliberate order and retain usable touch
+targets; filters must not overlap cards or hide behind a long export button.
+Employee cards/grid columns may scroll horizontally when necessary rather than
+shrinking content into unreadable text. Modals use a single-column field layout
+on mobile and preserve the effective-shift context above the punch controls.
+
+### 19.5 Shift-aware verification
+
+- Give an employee a department shift and verify attendance uses that window.
+- Add an employee override and verify it supersedes the department shift only
+  for that employee and effective date.
+- Try punch times before/after each allowed window through the UI and API;
+  confirm the service rejects them consistently.
+- Filter attendance by each shift and verify results are tenant-scoped.
+- Approve WFH, clock in and out as the employee, and confirm HR sees a
+  `WFH_REQUEST`-owned row rather than a manual row.
+- Verify all of the above at desktop and mobile widths, including keyboard and
+  screen-reader labels for filters and icon-only actions.

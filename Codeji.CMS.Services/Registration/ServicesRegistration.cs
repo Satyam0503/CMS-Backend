@@ -50,6 +50,7 @@ public static class ServicesRegistration
         services.AddScoped<IEffectiveOfficeScheduleService, EffectiveOfficeScheduleService>();
         services.AddScoped<IAttendanceStatusCalculationService, AttendanceStatusCalculationService>();
         services.AddScoped<IOfficeScheduleSettingsService, OfficeScheduleSettingsService>();
+        services.AddScoped<IOfficeScheduleAssignmentService, OfficeScheduleAssignmentService>();
         services.AddScoped<IAttendanceMutationValidator, AttendanceMutationValidator>();
         services.AddScoped<IAttendanceInitializationService, AttendanceInitializationService>();
         services.AddScoped<IAttendanceAuditWriter, AttendanceAuditWriter>();

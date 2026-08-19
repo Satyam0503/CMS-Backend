@@ -13,6 +13,7 @@ using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
+using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Repository.Entities.RolePermissions;
@@ -58,6 +59,8 @@ namespace Codeji.CMS.Services.Employees
         readonly INotificationService _notificationService;
         readonly IMongoDbRepository<UserSecurityToken> _userSecurityTokenRepository;
         readonly ILogger<EmployeeService> _logger;
+        readonly IMongoDbRepository<CompanyOfficeSchedule> _officeScheduleRepository;
+        readonly IMongoDbRepository<EmployeeScheduleAssignment> _employeeScheduleAssignmentRepository;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
@@ -83,6 +86,8 @@ namespace Codeji.CMS.Services.Employees
             INotificationService notificationService,
             IMongoDbRepository<NotificationPreference> notificationPreferenceRepository,
             IMongoDbRepository<UserSecurityToken> userSecurityTokenRepository,
+            IMongoDbRepository<CompanyOfficeSchedule> officeScheduleRepository,
+            IMongoDbRepository<EmployeeScheduleAssignment> employeeScheduleAssignmentRepository,
             ILogger<EmployeeService> logger
             )
         {
@@ -111,6 +116,8 @@ namespace Codeji.CMS.Services.Employees
             _notificationService = notificationService;
             _notificationPreferenceRepository = notificationPreferenceRepository;
             _userSecurityTokenRepository = userSecurityTokenRepository;
+            _officeScheduleRepository = officeScheduleRepository;
+            _employeeScheduleAssignmentRepository = employeeScheduleAssignmentRepository;
             _logger = logger;
         }
 
@@ -125,6 +132,12 @@ namespace Codeji.CMS.Services.Employees
             }
 
             string companyId = currentUser.CompanyId;
+            if (!string.IsNullOrWhiteSpace(model.ScheduleId) && !await _officeScheduleRepository.Exist(x =>
+                x.CompanyId == companyId && x.ScheduleId == model.ScheduleId && x.IsActive && !x.IsDeleted))
+            {
+                result.Message = "Selected shift is not available in the current company.";
+                return result;
+            }
             if (!TryNormalizeEmployeeName(model.FirstName, "First name", out string firstName, out string firstNameError))
             {
                 result.Message = firstNameError;
@@ -250,6 +263,19 @@ namespace Codeji.CMS.Services.Employees
                 }
                 result.Message = "Unable to create employee.";
                 return result;
+            }
+            // No row is needed for the default: EffectiveOfficeScheduleService
+            // resolves the active company default. Persist an override only when
+            // HR selected a specific shift during employee creation.
+            if (!string.IsNullOrWhiteSpace(model.ScheduleId))
+            {
+                await _employeeScheduleAssignmentRepository.AddOne(new EmployeeScheduleAssignment
+                {
+                    AssignmentId = Guid.NewGuid().ToString(), CompanyId = companyId,
+                    UserId = employee.UserId, ScheduleId = model.ScheduleId,
+                    EffectiveFrom = DateTime.UtcNow.Date, IsActive = true,
+                    CreatedBy = currentUserId, CreatedDate = DateTime.UtcNow
+                });
             }
 
             if (res.Success)

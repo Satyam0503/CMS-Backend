@@ -10,6 +10,10 @@ public class AttendanceResponseDto
     public string Remarks { get; set; }
     public string? SourceType { get; set; }
     public string? SourceId { get; set; }
+    // Snapshot of the tenant-scoped effective shift used when this attendance
+    // row was marked. It supports historical shift filtering without resolving
+    // a later employee/department reassignment against past attendance.
+    public string? ScheduleId { get; set; }
     // A half-day leave/WFH is stored as a segment so the other half can retain
     // its attendance.  Calendar clients use this flag to give that segment
     // precedence over the compatibility daily AttendanceModel row.

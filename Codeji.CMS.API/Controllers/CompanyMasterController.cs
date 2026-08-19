@@ -23,11 +23,13 @@ public class CompanyMasterController : BaseApiController
     readonly ICompanyMasterService _companyMasterService;
     readonly IHttpContextAccessor _httpContextAccessor;
     readonly IOfficeScheduleSettingsService _officeScheduleSettings;
-    public CompanyMasterController(ICompanyMasterService companyService, IHttpContextAccessor httpContextAccessor, IOfficeScheduleSettingsService officeScheduleSettings)
+    readonly IOfficeScheduleAssignmentService _officeScheduleAssignments;
+    public CompanyMasterController(ICompanyMasterService companyService, IHttpContextAccessor httpContextAccessor, IOfficeScheduleSettingsService officeScheduleSettings, IOfficeScheduleAssignmentService officeScheduleAssignments)
     {
         _companyMasterService = companyService;
         _httpContextAccessor = httpContextAccessor;
         _officeScheduleSettings = officeScheduleSettings;
+        _officeScheduleAssignments = officeScheduleAssignments;
     }
 
     [HttpGet]
@@ -36,11 +38,35 @@ public class CompanyMasterController : BaseApiController
     public Task<Result<OfficeScheduleSettingsDto>> GetOfficeSchedule(CancellationToken cancellationToken) =>
         _officeScheduleSettings.GetAsync(CurrentContext.CompanyId(_httpContextAccessor), cancellationToken);
 
+    [HttpGet]
+    [Route("OfficeSchedules")]
+    [Authorize(Policy = "AdminOnly")]
+    public Task<Result<OfficeScheduleSettingsDto>> GetOfficeSchedules(CancellationToken cancellationToken) =>
+        _officeScheduleSettings.GetAllAsync(CurrentContext.CompanyId(_httpContextAccessor), cancellationToken);
+
     [HttpPut]
     [Route("OfficeSchedule")]
     [Authorize(Policy = "AdminOnly")]
     public Task<Result<OfficeScheduleSettingsDto>> SaveOfficeSchedule(OfficeScheduleSettingsDto request, CancellationToken cancellationToken) =>
         _officeScheduleSettings.SaveAsync(CurrentContext.CompanyId(_httpContextAccessor), CurrentContext.UserId(_httpContextAccessor), request, cancellationToken);
+
+    [HttpDelete]
+    [Route("OfficeSchedule/{scheduleId}")]
+    [Authorize(Policy = "AdminOnly")]
+    public Task<Result> DeleteOfficeSchedule(string scheduleId, CancellationToken cancellationToken) =>
+        _officeScheduleSettings.DeleteAsync(CurrentContext.CompanyId(_httpContextAccessor), CurrentContext.UserId(_httpContextAccessor), scheduleId, cancellationToken);
+
+    [HttpGet]
+    [Route("DepartmentOfficeScheduleAssignments")]
+    [Authorize(Policy = "AdminOnly")]
+    public Task<Result<DepartmentOfficeScheduleAssignmentDto>> GetDepartmentOfficeScheduleAssignments(CancellationToken cancellationToken) =>
+        _officeScheduleAssignments.GetDepartmentsAsync(CurrentContext.CompanyId(_httpContextAccessor), cancellationToken);
+
+    [HttpPut]
+    [Route("DepartmentOfficeScheduleAssignment/{departmentId}")]
+    [Authorize(Policy = "AdminOnly")]
+    public Task<Result<DepartmentOfficeScheduleAssignmentDto>> SetDepartmentOfficeScheduleAssignment(string departmentId, SetOfficeScheduleAssignmentRequest request, CancellationToken cancellationToken) =>
+        _officeScheduleAssignments.SetDepartmentAsync(CurrentContext.CompanyId(_httpContextAccessor), CurrentContext.UserId(_httpContextAccessor), departmentId, request, cancellationToken);
 
     // company department actions
 
