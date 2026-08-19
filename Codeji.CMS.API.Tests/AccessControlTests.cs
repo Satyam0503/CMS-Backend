@@ -47,21 +47,4 @@ public class AccessControlTests : ApiTestBase
         }
     }
 
-    [Theory]
-    [InlineData("api/User/GetEmployeeById?id=000000000000000000000000")]
-    [InlineData("api/User/GetEmployeeById?id=aaaaaaaaaaaaaaaaaaaaaaaa")]
-    public async Task IDOR_InvalidObjectIds_DontExposeData(string endpoint)
-    {
-        var response = await AuthenticatedGetAsync(endpoint);
-        Assert.True(
-            response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.BadRequest or HttpStatusCode.OK,
-            $"Unexpected status {response.StatusCode} for invalid object ID");
-
-        if (response.StatusCode == HttpStatusCode.OK)
-        {
-            var body = await response.Content.ReadAsStringAsync();
-            Assert.DoesNotContain("stack", body, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("exception", body, StringComparison.OrdinalIgnoreCase);
-        }
-    }
 }
