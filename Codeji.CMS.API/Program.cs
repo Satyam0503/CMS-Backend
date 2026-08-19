@@ -40,9 +40,17 @@ using Codeji.CMS.Services.Interface;
 using System.Threading.RateLimiting;
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-BsonSerializer.RegisterSerializer(
-new EnumSerializer<NotificationPreferenceType>(BsonType.String)
-);
+try
+{
+    BsonSerializer.RegisterSerializer(
+        new EnumSerializer<NotificationPreferenceType>(BsonType.String)
+    );
+}
+catch (BsonSerializationException)
+{
+    // Already registered - happens when multiple WebApplicationFactory instances re-run
+    // Program's top-level statements in the same test process; the registry is process-wide.
+}
 
 // Add services to the container
 builder.Services.AddControllers();
