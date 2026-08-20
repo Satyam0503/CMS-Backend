@@ -22,3 +22,5 @@ Codeji.CMS.API/Uploads/*
 
 # Locally generated QA and test documentation
 /docs/test-reports/
+# ASP.NET configuration containing secrets
+Codeji.CMS.API/appsettings.json
