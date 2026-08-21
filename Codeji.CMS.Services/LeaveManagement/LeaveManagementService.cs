@@ -416,7 +416,7 @@ public class LeaveManagementService : ILeaveManagementService
         }
 
         if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequest.UserId, requestStartDateTime, requestEndDateTime))
-            return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: The leave request overlaps an active Work From Home request." };
+            return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: Leave cannot be applied because an active Work From Home request already exists for one or more selected dates. Withdraw or cancel the WFH request first, then apply for leave." };
 
         // check if employee already has approved leave on request date
         var nowDate = DateTime.UtcNow.Date;
@@ -767,7 +767,8 @@ public class LeaveManagementService : ILeaveManagementService
         // correct a source-owned attendance exception; self-service callers
         // can still withdraw only their own request.
         if (model.Status == EnumsHelper.LeaveRequestStatus.WithDrawn && !isSelfWithdrawal &&
-            _httpContextAccessor.HttpContext?.Request.Path.StartsWithSegments("/api/LeaveManagement/LeaveRequest") != true)
+            _httpContextAccessor.HttpContext?.Request.Path.StartsWithSegments("/api/LeaveManagement/LeaveRequest") != true &&
+            _httpContextAccessor.HttpContext?.Request.Path.StartsWithSegments("/api/wfh/attendance-exceptions") != true)
             return new Result { Success = false, Message = "Only the employee who submitted this leave request can withdraw it." };
         if (model.ExpectedVersion.HasValue && model.ExpectedVersion.Value != existingLeaveRequest.Version)
             return new Result { Success = false, Message = "LEAVE_REQUEST_VERSION_CONFLICT: The leave request was changed by another reviewer. Refresh and try again." };
@@ -823,7 +824,7 @@ public class LeaveManagementService : ILeaveManagementService
             if (string.IsNullOrWhiteSpace(mappedStatus) || !await ValidateAttendanceStatusMapping(companyId, mappedStatus))
                 return new Result { Success = false, Message = existingLeaveRequest.IsHalfDay ? "Select an active leave attendance status for half-day leave before approval." : "Select an active leave attendance status for full-day leave before approval." };
             if (await HasActiveWorkFromHomeOverlap(companyId, existingLeaveRequest.EmployeeId, existingLeaveRequest.StartDate, existingLeaveRequest.EndDate))
-                return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: This leave request overlaps an active Work From Home request." };
+                return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: Leave cannot be approved because an active Work From Home request already exists for one or more selected dates. Withdraw or cancel the WFH request first." };
         }
 
         var now = DateTime.UtcNow;

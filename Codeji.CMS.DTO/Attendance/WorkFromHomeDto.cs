@@ -59,6 +59,13 @@ public class WorkFromHomeHoursCorrectionDto
     public int ExceptionVersion { get; set; }
 }
 
+public class WorkFromHomeConflictResolutionDto
+{
+    [Required] public string Resolution { get; set; } = string.Empty;
+    [Required, MinLength(3)] public string Remarks { get; set; } = string.Empty;
+    [Range(1, int.MaxValue)] public int ExceptionVersion { get; set; }
+}
+
 public class EmployeeWfhContextDto
 {
     public bool IsFeatureEnabled { get; set; }
