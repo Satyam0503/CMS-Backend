@@ -71,7 +71,8 @@ public sealed class WorkFromHomeService(
     IMongoDbRepository<UserNotifications> userNotifications,
     INotificationService notificationService,
     IPriorityTaskQueue priorityQueue,
-    IMiddlewareService mail) : IWorkFromHomeService
+    IMiddlewareService mail,
+    IMongoClient mongoClient) : IWorkFromHomeService
 {
     private string CompanyId => CurrentContext.CompanyId(context);
     private string UserId => CurrentContext.UserId(context);
@@ -364,9 +365,9 @@ public sealed class WorkFromHomeService(
         // attendance row through the normal editor.
         var supportedExceptionTypes = new[] { "WFH_INSUFFICIENT_HOURS", "MISSING_CHECKOUT", "INVALID_TIME_ORDER" };
         if (exception is null || !supportedExceptionTypes.Contains(exception.ExceptionType, StringComparer.Ordinal))
-            return Fail("WFH_EXCEPTION_NOT_FOUND", "No correctable WFH attendance exception was found.");
+            return Fail("WFH_EXCEPTION_NOT_FOUND", "No correctable WFH attendance exception was found.", StatusCodes.Status404NotFound);
         if (exception.Status != "PENDING_REVIEW" || exception.Version != dto.ExceptionVersion)
-            return Fail("WFH_EXCEPTION_CHANGED", "This exception was already changed. Refresh and try again.");
+            return Fail("WFH_EXCEPTION_CHANGED", "This exception was already changed. Refresh and try again.", StatusCodes.Status409Conflict);
         if (dto.CheckOutTime <= dto.CheckInTime)
             return Fail("WFH_INVALID_HOURS", "Check-out time must be later than check-in time.");
         if (string.IsNullOrWhiteSpace(dto.Remarks))
@@ -392,21 +393,25 @@ public sealed class WorkFromHomeService(
         var row = string.IsNullOrWhiteSpace(exception.ExistingAttendanceId)
             ? null
             : await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.AttendanceId == exception.ExistingAttendanceId && x.UserId == employee.UserId);
-        if (row is null || row.SourceType != "WFH_REQUEST" || string.IsNullOrWhiteSpace(row.SourceId))
+        if (row is null || row.SourceType != "WFH_REQUEST" || string.IsNullOrWhiteSpace(row.SourceId) ||
+            (!string.IsNullOrWhiteSpace(exception.LeaveRequestId) && row.SourceId != exception.LeaveRequestId))
         {
             var endOfAttendanceDate = dateToCorrect.AddDays(1);
-            row = await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.SourceType == "WFH_REQUEST" && x.Date >= dateToCorrect && x.Date < endOfAttendanceDate);
+            row = await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.SourceType == "WFH_REQUEST" && x.Date >= dateToCorrect && x.Date < endOfAttendanceDate &&
+                (string.IsNullOrWhiteSpace(exception.LeaveRequestId) || x.SourceId == exception.LeaveRequestId));
         }
         if (row is null || row.SourceType != "WFH_REQUEST" || string.IsNullOrWhiteSpace(row.SourceId))
             return Fail("WFH_ATTENDANCE_CONFLICT", "No WFH-owned attendance record matches this employee and affected date. Refresh the exception list and verify the approved WFH request.");
 
         var request = await requests.FirstOrDefault(x => x.CompanyId == CompanyId && x.RequestId == row.SourceId && x.UserId == employee.UserId && x.Status == "Approved");
         if (request is null) return Fail("WFH_REQUEST_NOT_AVAILABLE", "The approved WFH request linked to the attendance record is no longer available.");
-        if (dto.CheckInTime.Date != dateToCorrect || dto.CheckOutTime.Date != dateToCorrect)
-            return Fail("WFH_CORRECTION_DATE_INVALID", "Both corrected times must be on the affected attendance date.");
-
         var policy = await ActivePolicy();
         if (policy is null) return Fail("WFH_POLICY_DISABLED", "WFH policy is disabled.");
+        var schedule = await effectiveSchedules.ResolveAsync(CompanyId, employee, dateToCorrect);
+        var timeZoneId = schedule?.TimeZoneId ?? policy.TimeZoneId;
+        if (CompanyDate(dto.CheckInTime, timeZoneId) != dateToCorrect || CompanyDate(dto.CheckOutTime, timeZoneId) != dateToCorrect)
+            return Fail("WFH_CORRECTION_DATE_INVALID", "Both corrected times must be on the affected attendance date.");
+
         var minimum = request.DurationType == "FullDay" ? policy.FullDayMinimumHours : policy.HalfDayMinimumHours;
         var totalHours = Math.Round((decimal)(dto.CheckOutTime - dto.CheckInTime).TotalHours, 2, MidpointRounding.AwayFromZero);
         if (totalHours < minimum)
@@ -417,9 +422,6 @@ public sealed class WorkFromHomeService(
         row.TotalHours = totalHours;
         row.RemarkCode = "WFH_HOURS_CORRECTED";
         row.Remarks = $"HR/Admin corrected WFH hours: {Clean(dto.Remarks)}";
-        var saved = await attendance.Update(Builders<AttendanceModel>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.AttendanceId == row.AttendanceId && x.SourceType == "WFH_REQUEST" && x.SourceId == request.RequestId), row);
-        if (!saved.Success) return Fail("WFH_ATTENDANCE_UPDATE_FAILED", "The WFH attendance record could not be updated.");
-
         exception.Status = "RESOLVED";
         exception.Resolution = $"WFH hours corrected to {totalHours:0.##} hour(s) by HR/Admin.";
         exception.ReviewedBy = UserId;
@@ -427,8 +429,28 @@ public sealed class WorkFromHomeService(
         exception.UpdatedBy = UserId;
         exception.UpdatedDate = DateTime.UtcNow;
         exception.Version++;
-        var resolved = await exceptions.Update(Builders<AttendancePayrollException>.Filter.Where(x => x.Id == exception.Id && x.Version == dto.ExceptionVersion), exception);
-        if (!resolved.Success) return Fail("WFH_EXCEPTION_CHANGED", "Attendance was corrected, but the exception changed before it could be resolved. Recheck the exception.");
+        try
+        {
+            using var session = await mongoClient.StartSessionAsync();
+            await session.WithTransactionAsync(async (_, cancellationToken) =>
+            {
+                var attendanceWrite = await attendance.GetCollection().ReplaceOneAsync(session,
+                    Builders<AttendanceModel>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.AttendanceId == row.AttendanceId && x.SourceType == "WFH_REQUEST" && x.SourceId == request.RequestId), row, cancellationToken: cancellationToken);
+                if (attendanceWrite.MatchedCount != 1) throw new InvalidOperationException("WFH_ATTENDANCE_UPDATE_FAILED");
+                var exceptionWrite = await exceptions.GetCollection().ReplaceOneAsync(session,
+                    Builders<AttendancePayrollException>.Filter.Where(x => x.Id == exception.Id && x.CompanyId == CompanyId && x.Status == "PENDING_REVIEW" && x.Version == dto.ExceptionVersion), exception, cancellationToken: cancellationToken);
+                if (exceptionWrite.MatchedCount != 1) throw new InvalidOperationException("WFH_EXCEPTION_CHANGED");
+                return true;
+            });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "WFH_ATTENDANCE_UPDATE_FAILED")
+        {
+            return Fail("WFH_ATTENDANCE_UPDATE_FAILED", "The WFH attendance record could not be updated.");
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "WFH_EXCEPTION_CHANGED")
+        {
+            return Fail("WFH_EXCEPTION_CHANGED", "This exception was already changed. Refresh and try again.", StatusCodes.Status409Conflict);
+        }
         await InvalidateSummary(employee, dateToCorrect);
         await Log(request, request.Status, request.Status, "HoursCorrected", "WFH_HOURS_CORRECTED", dto.Remarks);
         return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = $"WFH hours updated to {totalHours:0.##} hours and the exception was resolved." };
@@ -743,10 +765,17 @@ public sealed class WorkFromHomeService(
         catch (TimeZoneNotFoundException) { return DateTime.UtcNow; }
         catch (InvalidTimeZoneException) { return DateTime.UtcNow; }
     }
+    private static DateTime CompanyDate(DateTime value, string? timeZoneId)
+    {
+        var utc = value.Kind == DateTimeKind.Utc ? value : value.ToUniversalTime();
+        try { return TimeZoneInfo.ConvertTimeFromUtc(utc, TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(timeZoneId) ? "UTC" : timeZoneId)).Date; }
+        catch (TimeZoneNotFoundException) { return utc.Date; }
+        catch (InvalidTimeZoneException) { return utc.Date; }
+    }
     private static string ReasonLabel(string? code) => (code ?? "OTHER").Trim().ToUpperInvariant() switch { "PERSONAL" => "Personal", "MEDICAL" => "Medical", "FAMILY" => "Family", "HOME_MAINTENANCE" => "Home maintenance", "TRAVEL_DISRUPTION" => "Travel disruption", "OPERATIONAL" => "Operational", "MANAGER_INSTRUCTION" => "Manager instruction", _ => "Other" };
     private static string DurationLabel(string? duration) => duration switch { "FirstHalf" => "First half", "SecondHalf" => "Second half", _ => "Full day" };
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim()[..Math.Min(value.Trim().Length, 500)];
-    private static Result Fail(string code, string message) => new() { Success = false, Message = $"{code}: {message}" };
+    private static Result Fail(string code, string message, int statusCode = StatusCodes.Status400BadRequest) => new() { Success = false, StatusCode = statusCode, Message = $"{code}: {message}" };
     private static Result<T> Fail<T>(string code, string message) => new() { Success = false, Message = $"{code}: {message}" };
     private static Result<T> Ok<T>(T value) => new() { Success = true, MethodResult = value };
     private static WorkFromHomePolicyDto Map(WorkFromHomePolicy x) => new() { IsEnabled=x.IsEnabled, MaxDaysPerMonth=x.MaxDaysPerMonth, MaxDaysPerWeek=x.MaxDaysPerWeek, MaxConsecutiveDays=x.MaxConsecutiveDays, MinimumAdvanceNoticeHours=x.MinimumAdvanceNoticeHours, AllowBackdatedRequest=x.AllowBackdatedRequest, MaximumBackdatedDays=x.MaximumBackdatedDays, AllowHalfDay=x.AllowHalfDay, AllowMixedDay=x.AllowMixedDay, ManagerApprovalRequired=x.ManagerApprovalRequired, AllowManagerSelfApproval=x.AllowManagerSelfApproval, AllowOnWeeklyOff=x.AllowOnWeeklyOff, AllowOnHoliday=x.AllowOnHoliday, RequireReason=x.RequireReason, RequireAttachment=x.RequireAttachment, ApplyToAllEmployees=x.ApplyToAllEmployees, ApplicableDepartments=x.ApplicableDepartments, ApplicableEmployeeIds=x.ApplicableEmployeeIds, ExcludedEmployeeIds=x.ExcludedEmployeeIds, ApplicableEmploymentTypes=x.ApplicableEmploymentTypes, EffectiveFrom=x.EffectiveFrom, EffectiveTo=x.EffectiveTo, AllowedCheckInFrom=x.AllowedCheckInFrom, AllowedCheckInUntil=x.AllowedCheckInUntil, AllowedCheckOutFrom=x.AllowedCheckOutFrom, AllowedCheckOutUntil=x.AllowedCheckOutUntil, OfficeStartTime=x.OfficeStartTime, OfficeEndTime=x.OfficeEndTime, TimeZoneId=x.TimeZoneId, FullDayMinimumHours=x.FullDayMinimumHours, HalfDayMinimumHours=x.HalfDayMinimumHours, FullDayAttendanceStatusCode=x.FullDayAttendanceStatusCode, HalfDayAttendanceStatusCode=x.HalfDayAttendanceStatusCode, MixedAttendanceStatusCode=x.MixedAttendanceStatusCode, WfhWfoAttendanceStatusCode=x.WfhWfoAttendanceStatusCode, WfhHdAttendanceStatusCode=x.WfhHdAttendanceStatusCode, WfhSlAttendanceStatusCode=x.WfhSlAttendanceStatusCode, WfhClAttendanceStatusCode=x.WfhClAttendanceStatusCode };
