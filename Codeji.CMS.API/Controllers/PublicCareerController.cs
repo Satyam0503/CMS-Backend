@@ -2,6 +2,7 @@ using Codeji.CMS.DTO.PublicCareers;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Codeji.CMS.API.Controllers;
 
@@ -53,6 +54,7 @@ public class PublicCareerController : ControllerBase
     }
 
     [HttpPost("jobs/{publicJobId}/applications")]
+    [EnableRateLimiting("career-sensitive")]
     public async Task<IActionResult> Apply(string publicJobId, [FromBody] PublicJobApplicationRequest request)
     {
         var result = await _publicCareerService.Apply(publicJobId, request);
@@ -60,6 +62,7 @@ public class PublicCareerController : ControllerBase
     }
 
     [HttpPost("applications/{applicationReference}/resume")]
+    [EnableRateLimiting("career-sensitive")]
     public async Task<IActionResult> UploadResume(string applicationReference, [FromForm] string token, [FromForm] IFormFile resume)
     {
         var result = await _publicCareerService.UploadResume(applicationReference, token, resume);

@@ -9,6 +9,7 @@ using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 // For more information on enabling Web API for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
 
 namespace Codeji.CMS.API.Controllers
@@ -66,6 +67,7 @@ namespace Codeji.CMS.API.Controllers
         [Route("UploadResume")]
         //[FilesExtensions([".pdf"])]
         [AllowAnonymous]
+        [EnableRateLimiting("career-sensitive")]
         // [CustomAuthorize(Module = "Applicant", Role = ["Edit"])]
         public async Task<Result> UploadResume([FromForm] ResumeApplicantModel model, string email)
         {

@@ -284,14 +284,22 @@ namespace Codeji.CMS.Services.Employees
                 result.Success = true;
                 result.MethodResult = model;
             }
-            // set default notification preferences for new employee
-            var notificationPreferences = new NotificationPreference()
+            // Employee creation must remain successful if a non-critical
+            // notification or invitation delivery dependency is unavailable.
+            try
             {
-                UserId = userId,
-                Preferences = _middlewareService.GetDefaultNotificationPreferences(),
-            };
-            await _notificationPreferenceRepository.AddOne(notificationPreferences);
-            await SendInvitationLink(currentUserId, employee);
+                var notificationPreferences = new NotificationPreference()
+                {
+                    UserId = userId,
+                    Preferences = _middlewareService.GetDefaultNotificationPreferences(),
+                };
+                await _notificationPreferenceRepository.AddOne(notificationPreferences);
+                await SendInvitationLink(currentUserId, employee);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Employee {UserId} was created, but invitation setup failed.", userId);
+            }
             return result;
         }
 

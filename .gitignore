@@ -16,6 +16,8 @@ Codeji.CMS.API/Uploads/*
 **/.build-check/
 .tmp/
 **/.tmp/
+.verification/
+**/.verification/
 
 # Runtime logs
 *.log

@@ -3,7 +3,7 @@ using MongoDB.Bson.Serialization.Attributes;
 
 namespace Codeji.CMS.Repository.Entities.Company
 {
-    public class Company
+    public class Company : Codeji.CMS.GenericRepository.Interfaces.ISupportAuditing, Codeji.CMS.GenericRepository.Interfaces.ISupportSoftDelete
     {
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
         public string CompanyId { get; set; }
@@ -23,6 +23,7 @@ namespace Codeji.CMS.Repository.Entities.Company
         public string Country { get; set; }
         public string State { get; set; }
         public string Address { get; set; }
+        public string CreatedBy { get; set; }
         public DateTime? CreatedDate { get; set; } = DateTime.UtcNow;
         public string UpdatedBy { get; set; }
         public DateTime? UpdatedDate { get; set; }

@@ -12,6 +12,5 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         public string FileName { get; set; }
         public string ResumeUrl { get; set; }
 
-        public IFormFile File { get; set; }
     }
 }
