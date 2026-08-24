@@ -70,7 +70,6 @@ stages:
               command: "test"
               projects: "**/*Tests/*.csproj"
               arguments: '--configuration $(buildConfiguration) --no-build --collect:"XPlat Code Coverage"'
-            continueOnError: true
 
           - task: DotNetCoreCLI@2
             displayName: "Publish API (zipped)"

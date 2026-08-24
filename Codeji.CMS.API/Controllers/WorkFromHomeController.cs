@@ -25,7 +25,18 @@ public class WorkFromHomeController(IWorkFromHomeService service) : ControllerBa
     [HttpPost("requests/{id}/check-in")] public Task<Result> CheckIn(string id) => service.CheckIn(id);
     [HttpPost("requests/{id}/check-out")] public Task<Result> CheckOut(string id) => service.CheckOut(id);
     [HttpGet("requests/{id}/timing")] public Task<Result<WorkFromHomeTimingDto>> Timing(string id) => service.GetTiming(id);
-    [HttpPatch("attendance-exceptions/{id}/hours"), ModulePermission(AppModule.Attendance, Permission.Edit)] public Task<Result> CorrectHours(string id, WorkFromHomeHoursCorrectionDto dto) => service.CorrectInsufficientHours(id, dto);
+    [HttpPatch("attendance-exceptions/{id}/hours"), ModulePermission(AppModule.Attendance, Permission.Edit)]
+    public async Task<IActionResult> CorrectHours(string id, WorkFromHomeHoursCorrectionDto dto)
+    {
+        var result = await service.CorrectInsufficientHours(id, dto);
+        return result.Success ? Ok(result) : StatusCode(result.StatusCode, result);
+    }
+    [HttpPatch("attendance-exceptions/{id}/resolve-conflict"), ModulePermission(AppModule.Attendance, Permission.Edit)]
+    public async Task<IActionResult> ResolveConflict(string id, WorkFromHomeConflictResolutionDto dto)
+    {
+        var result = await service.ResolveAttendanceConflict(id, dto);
+        return result.Success ? Ok(result) : StatusCode(result.StatusCode, result);
+    }
 
     [HttpGet("/api/attendance/remark-options"), ModulePermission(AppModule.Attendance, Permission.View)] public Task<Result<IEnumerable<AttendanceRemarkOptionDto>>> RemarkOptions() => service.GetRemarkOptions();
     [HttpPost("/api/attendance/remark-options"), ModulePermission(AppModule.Attendance, Permission.Edit)] public Task<Result> SaveRemarkOption(AttendanceRemarkOptionDto dto) => service.SaveRemarkOption(dto);

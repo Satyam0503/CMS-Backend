@@ -16,9 +16,13 @@ Codeji.CMS.API/Uploads/*
 **/.build-check/
 .tmp/
 **/.tmp/
+.verification/
+**/.verification/
 
 # Runtime logs
 *.log
 
 # Locally generated QA and test documentation
 /docs/test-reports/
+# ASP.NET configuration containing secrets
+Codeji.CMS.API/appsettings.json

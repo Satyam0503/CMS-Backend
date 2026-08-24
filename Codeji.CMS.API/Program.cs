@@ -67,6 +67,16 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
                 AutoReplenishment = true
             }));
+    options.AddPolicy("account-sensitive", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 8,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
 });
 // .AddJsonOptions(options =>
 // {
@@ -136,13 +146,6 @@ builder.Services.AddHostedService<Codeji.CMS.Services.CareerPortal.CareerNotific
 builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceOutboxWorker>();
 builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceReminderHostedService>();
 builder.Services.AddHttpContextAccessor();
-// Register Attendance Repository
-builder.Services.AddScoped<IAttendanceRepository, AttendanceRepository>();
-
-// Register Service Layer
-builder.Services.AddScoped<IAdminAttendanceService, AdminAttendanceService>();
-
-
 // MongoDB Configuration
 ConfigurationManager configuration = builder.Configuration;
 var mongoConnection = configuration.GetConnectionString("mongodb")
@@ -224,8 +227,8 @@ builder.Services.AddAntiforgery(options =>
 // SignalR Configuration
 builder.Services.AddSignalR(options =>
 {
-    options.MaximumReceiveMessageSize = null;
-    options.EnableDetailedErrors = true;
+    options.MaximumReceiveMessageSize = 64 * 1024;
+    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
 });
 
 // to track users presence in application 

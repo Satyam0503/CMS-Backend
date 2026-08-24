@@ -113,7 +113,7 @@ public class EmployeeServiceBulkImportTests
         Assert.Equal(0, result.MethodResult.CreatedCount);
         Assert.Equal(1, result.MethodResult.FailedCount);
         Assert.Equal("Failed", result.MethodResult.Results[0].Status);
-        Assert.Contains("already exists", result.MethodResult.Results[0].Message);
+        Assert.Equal("Duplicate email.", result.MethodResult.Results[0].Message);
     }
 
     [Fact]
@@ -217,6 +217,9 @@ public class EmployeeServiceBulkImportTests
             .ReturnsAsync([
                 new Roles { RolesId = "role-1", CompanyId = "company-1", Titles = "Employee", IsDeleted = false, UserRoles = [] }
             ]);
+        fixture.RolesRepository
+            .Setup(x => x.Exist(It.IsAny<System.Linq.Expressions.Expression<Func<Roles, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(true);
 
         fixture.DepartmentRepository
             .Setup(x => x.GetAll(It.IsAny<System.Linq.Expressions.Expression<Func<Department, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
@@ -229,6 +232,9 @@ public class EmployeeServiceBulkImportTests
                     Titles = [new MultilingualModel { Language = "en", Label = "Engineering" }]
                 }
             ]);
+        fixture.DepartmentRepository
+            .Setup(x => x.Exist(It.IsAny<System.Linq.Expressions.Expression<Func<Department, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(true);
 
         fixture.JobTitlesRepository
             .Setup(x => x.GetAll(It.IsAny<System.Linq.Expressions.Expression<Func<JobTitles, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
@@ -237,10 +243,21 @@ public class EmployeeServiceBulkImportTests
                 {
                     JobTitleId = "job-1",
                     CompanyId = "company-1",
+                    DepartmentId = "dept-1",
                     IsActive = true,
                     Titles = [new MultilingualModel { Language = "en", Label = "Developer" }]
                 }
             ]);
+        fixture.JobTitlesRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<JobTitles, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(new JobTitles
+            {
+                JobTitleId = "job-1",
+                CompanyId = "company-1",
+                DepartmentId = "dept-1",
+                IsActive = true,
+                Titles = [new MultilingualModel { Language = "en", Label = "Developer" }]
+            });
 
         fixture.JobTitlesRepository
             .Setup(x => x.AddOne(It.IsAny<JobTitles>()))
@@ -248,7 +265,7 @@ public class EmployeeServiceBulkImportTests
 
         fixture.CompanyRepository
             .Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<Company, bool>>>(), It.IsAny<bool>()))
-            .ReturnsAsync(new Company { CompanyId = "company-1", CompanyName = "Codeji", DefaultLanguage = "en", ApplicationLanguage = [], Status = true });
+            .ReturnsAsync(new Company { CompanyId = "company-1", CompanyName = "Codeji", DefaultLanguage = "en", ApplicationLanguage = [], Status = true, AutoGenerateEmployeeId = false });
 
         fixture.MailTemplateRepository
             .Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<MailTemplate, bool>>>(), It.IsAny<bool>()))

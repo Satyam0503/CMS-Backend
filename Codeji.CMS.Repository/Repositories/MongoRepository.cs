@@ -26,9 +26,9 @@ namespace Codeji.CMS.Repository.Repositories
         private readonly IMongoCollection<TEntity> _dbSet = null;
         private readonly IHttpContextAccessor _httpContextAccessor;
         //private IMongoDbContext _mongoDbContext;
-        public MongoRepository(IMongoDbCacheService _cacheService, IHttpContextAccessor httpContextAccessor)
+        public MongoRepository(IMongoDbCacheService cacheService, IHttpContextAccessor httpContextAccessor, IMongoClient mongoClient)
         {
-            MongoDbContext _mongoDbContext = new MongoDbContext(_cacheService, typeof(TEntity).Name);
+            MongoDbContext _mongoDbContext = new MongoDbContext(cacheService, mongoClient, typeof(TEntity).Name);
             // Attendance was introduced with the physical collection name "Attendance"
             // while the generic repository normally derives "AttendanceModel" from the
             // CLR type. Keep every attendance consumer (calendar, validation and payroll)

@@ -463,7 +463,14 @@ public class AttendancePenaltyService : IAttendancePenaltyService
             var recordedDates=records.Select(x=>x.Date.Date).Concat(daySegments.Select(x=>x.Date.Date)).Distinct().ToHashSet();
 
             await UpsertValidationException(companyId,emp,start,"MISSING_ATTENDANCE",expectedDates.Where(x=>!recordedDates.Contains(x)).ToList());
-            await UpsertValidationException(companyId,emp,start,"MISSING_CHECKOUT",records.Where(x=>rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date)).Distinct().ToList());
+            // WFH has its own correction workflow. A WFH row is not exceptional
+            // when it is created on approval; it becomes one only after the
+            // business day is complete and a required check-out is still absent.
+            // Keep this source-linked so it can be corrected against the exact
+            // WFH request/attendance row rather than a month-wide generic issue.
+            var wfhMissingCheckout = records.Where(x => x.SourceType == "WFH_REQUEST" && rules.TryGetValue(x.Status, out var rule) && rule.RequiresTime && !x.CheckOutTime.HasValue).ToList();
+            await UpsertWfhInsufficientHoursExceptions(companyId, emp, start, wfhMissingCheckout);
+            await UpsertValidationException(companyId,emp,start,"MISSING_CHECKOUT",records.Where(x=>x.SourceType != "WFH_REQUEST"&&rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date)).Distinct().ToList());
             await UpsertValidationException(companyId,emp,start,"DUPLICATE_ATTENDANCE",records.GroupBy(x=>x.Date.Date).Where(x=>x.Count()>1).Select(x=>x.Key).ToList());
             await UpsertValidationException(companyId,emp,start,"INVALID_TIME_ORDER",records.Where(x=>x.CheckInTime.HasValue&&x.CheckOutTime.HasValue&&x.CheckOutTime<x.CheckInTime).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>x.CheckInTime.HasValue&&x.CheckOutTime.HasValue&&x.CheckOutTime<x.CheckInTime).Select(x=>x.Date.Date)).Distinct().ToList());
             await UpsertValidationException(companyId,emp,start,"UNKNOWN_OR_INACTIVE_STATUS",records.Where(x=>!rules.TryGetValue(x.Status,out var rule)||!rule.IsActive).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>!rules.TryGetValue(x.Status,out var rule)||!rule.IsActive).Select(x=>x.Date.Date)).Distinct().ToList());
@@ -476,6 +483,38 @@ public class AttendancePenaltyService : IAttendancePenaltyService
         if(dates.Count==0){if(item!=null&&item.Status=="PENDING_REVIEW"){item.Status="RESOLVED";item.Resolution="Underlying attendance issue corrected.";item.UpdatedDate=DateTime.UtcNow;item.Version++;await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x=>x.Id,item.Id),item);}return;}
         if(item==null){item=new AttendancePayrollException{CompanyId=companyId,UserId=employee.UserId,EmployeeId=employee.EmployeeId,PayrollMonth=month,ExceptionType=type,Severity="BLOCKING",AffectedDates=dates};await _exceptions.AddOne(item);return;}
         item.AffectedDates=dates;item.Status="PENDING_REVIEW";item.Resolution=null;item.UpdatedDate=DateTime.UtcNow;item.Version++;await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x=>x.Id,item.Id),item);
+    }
+
+    private async Task UpsertWfhInsufficientHoursExceptions(string companyId, EmpUser employee, DateTime month, IEnumerable<AttendanceModel> rows)
+    {
+        foreach (var row in rows)
+        {
+            var existing = await _exceptions.FirstOrDefault(x =>
+                x.CompanyId == companyId && x.UserId == employee.UserId && x.EmployeeId == employee.EmployeeId &&
+                x.PayrollMonth == month && x.ExceptionType == "WFH_INSUFFICIENT_HOURS" &&
+                x.AttendanceDate == row.Date.Date && x.LeaveRequestId == row.SourceId);
+
+            if (existing is not null)
+                continue;
+
+            await _exceptions.AddOne(new AttendancePayrollException
+            {
+                CompanyId = companyId,
+                UserId = employee.UserId,
+                EmployeeId = employee.EmployeeId,
+                PayrollMonth = month,
+                AttendanceDate = row.Date.Date,
+                AffectedDates = [row.Date.Date],
+                ExceptionType = "WFH_INSUFFICIENT_HOURS",
+                Severity = "BLOCKING",
+                Status = "PENDING_REVIEW",
+                LeaveRequestId = row.SourceId,
+                ExistingAttendanceId = row.AttendanceId,
+                ExistingStatus = row.Status,
+                SourceVersion = row.SourceVersion,
+                Reason = "Approved WFH attendance is missing a required check-out after the attendance day completed."
+            });
+        }
     }
 
     private async Task ResolveIneligibleValidationExceptions(string companyId, EmpUser employee, DateTime month)

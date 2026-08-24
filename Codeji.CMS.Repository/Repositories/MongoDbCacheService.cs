@@ -15,14 +15,13 @@ namespace Codeji.CMS.GenericRepository.Repositories
     {
         private readonly MongoDbSettings _settings;
 
-        public MongoDbCacheService(IConfiguration configuration)
+        public MongoDbCacheService(IConfiguration configuration, IMongoClient client)
         {
             var connection = configuration.GetConnectionString("mongodb")
                 ?? throw new InvalidOperationException("ConnectionStrings:mongodb is not configured.");
 
             _settings = new MongoDbSettings { Connection = connection };
 
-            var client = new MongoClient(_settings.Connection);
             var database = client.GetDatabase(_settings.DatabaseName);
             _settings.Collections = database.ListCollectionNamesAsync().Result.ToList();
         }

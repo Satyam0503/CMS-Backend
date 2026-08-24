@@ -23,6 +23,7 @@ using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Text.Json;
 using System.ComponentModel.DataAnnotations;
 
@@ -128,6 +129,7 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("account/login")]
         [AllowAnonymous]
+        [EnableRateLimiting("account-sensitive")]
         
         public async Task<Result<TokenResponseDto>> Login([FromBody] LoginModel model)
         {
@@ -228,6 +230,7 @@ namespace Codeji.CMS.API.Controllers
         [AllowAnonymous]
         [HttpPost]
         [Route("account/ResetPassword")]
+        [EnableRateLimiting("account-sensitive")]
         public async Task<Result> ResetPassword([FromBody] JsonElement body)
         {
             Result result = new();
@@ -246,6 +249,7 @@ namespace Codeji.CMS.API.Controllers
         [AllowAnonymous]
         [HttpPost]
         [Route("applicant/applyJob")]
+        [EnableRateLimiting("career-sensitive")]
         public async Task<Result> RegisterApplicants([FromBody] ApplicantAddEditModel applicantRegisterModel)
         {
             Result result = new();
