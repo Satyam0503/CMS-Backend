@@ -256,7 +256,7 @@ public sealed class WorkFromHomeService(
         {
             var policy = await ActivePolicy();
             var employee = await ActiveEmployee(request.UserId);
-            if (await HasActiveLeaveOverlap(request.UserId, request.FromDate, request.ToDate))
+            if (await HasActiveLeaveOverlap(request.UserId, request.FromDate, request.ToDate, request.DurationType))
             {
                 request.Status = previous;
                 request.Version++;
@@ -536,10 +536,14 @@ public sealed class WorkFromHomeService(
         var day = companyNow.Date;
         if (day < request.FromDate.Date || day > request.ToDate.Date) return Fail("WFH_DATE_NOT_COVERED", "Today is not covered by this request.");
         var checkInFrom = schedule?.CheckInAllowedFrom ?? policy.AllowedCheckInFrom;
-        var checkInUntil = schedule?.CheckInAllowedUntil ?? policy.AllowedCheckInUntil;
         var checkOutUntil = schedule?.CheckOutAllowedUntil ?? policy.AllowedCheckOutUntil;
-        if (checkIn && ((checkInFrom.HasValue && companyNow.TimeOfDay < checkInFrom) || (checkInUntil.HasValue && companyNow.TimeOfDay > checkInUntil))) return Fail("WFH_CHECKIN_NOT_OPEN", "Check-in is outside the effective office schedule window.");
-        if (!checkIn && checkOutUntil.HasValue && companyNow.TimeOfDay > checkOutUntil) return Fail("WFH_CHECK_OUT_WINDOW_CLOSED", "Check-out is outside the effective office schedule window.");
+        // A WFH request has already been approved for this employee and business
+        // date. The ordinary office check-in cutoff (typically 10:00) classifies a
+        // late arrival; it must not prevent the employee from recording a real
+        // late WFH start. Keep the early boundary, and close WFH check-in only when
+        // the working day itself has ended.
+        var wfhCheckInUntil = checkOutUntil ?? schedule?.EndTime ?? policy.OfficeEndTime;
+        if (checkIn && ((checkInFrom.HasValue && companyNow.TimeOfDay < checkInFrom) || (wfhCheckInUntil.HasValue && companyNow.TimeOfDay > wfhCheckInUntil))) return Fail("WFH_CHECKIN_NOT_OPEN", "Check-in is outside the effective WFH attendance window.");
         var segmentName = request.DurationType == "FirstHalf" ? "FIRST_HALF" : request.DurationType == "SecondHalf" ? "SECOND_HALF" : null;
         var row = segmentName is null ? await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == UserId && x.Date >= day && x.Date < day.AddDays(1)) : null;
         var segment = segmentName is null ? null : await attendanceSegments.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == UserId && x.Date >= day && x.Date < day.AddDays(1) && x.Segment == segmentName);
@@ -558,6 +562,10 @@ public sealed class WorkFromHomeService(
             if (checkOutTime.HasValue) return Fail("WFH_DUPLICATE_CHECK_OUT", "Check-out was already recorded.");
             var requiredMinutes = request.DurationType == "FullDay" ? schedule?.RequiredWorkingMinutes ?? (int)(policy.FullDayMinimumHours * 60) : Math.Max(1, (schedule?.RequiredWorkingMinutes ?? (int)(policy.HalfDayMinimumHours * 60)) / 2);
             var workedMinutes = Math.Max(0, (int)(now - checkInTime.Value).TotalMinutes - (schedule?.BreakMinutes ?? 0));
+            // A late but approved WFH check-in can legitimately require work past
+            // the normal office punch-out cutoff. The required verified hours are
+            // the authoritative checkout guard for WFH, rather than a cutoff that
+            // would make a late start impossible to complete.
             if (workedMinutes < requiredMinutes) return Fail("WFH_CHECK_OUT_TOO_EARLY", $"Check-out is available after {requiredMinutes} verified working minutes. {Math.Max(0, requiredMinutes - workedMinutes)} minute(s) remain.");
             if (row is not null) { row.CheckOutTime = now; row.TotalHours = Math.Max(0, (decimal)(now - checkInTime.Value).TotalHours); row.Remarks = $"Checked out through employee WFH portal ({requestId})"; }
             else { segment!.CheckOutTime = now; segment.TotalHours = Math.Max(0, (decimal)(now - checkInTime.Value).TotalHours); segment.Remarks = $"Checked out through employee WFH portal ({requestId})"; segment.UpdatedAtUtc = now; }
@@ -648,12 +656,15 @@ public sealed class WorkFromHomeService(
         if (policy.MaximumBackdatedDays is int max && dto.FromDate.Date < DateTime.UtcNow.Date.AddDays(-max)) return ("WFH_BACKDATED_LIMIT", "The backdated request exceeds the policy limit.");
         if (policy.MinimumAdvanceNoticeHours > 0 && dto.FromDate.ToUniversalTime() < DateTime.UtcNow.AddHours(policy.MinimumAdvanceNoticeHours)) return ("WFH_ADVANCE_NOTICE_REQUIRED", "The required advance notice was not met.");
         if (policy.RequireReason && string.IsNullOrWhiteSpace(dto.ReasonText)) return ("WFH_REASON_REQUIRED", "A reason is required.");
-        if (dto.DurationType is not ("FullDay" or "FirstHalf" or "SecondHalf" or "Mixed" or "WfhHd" or "WfhSl" or "WfhCl")) return ("WFH_INVALID_DURATION", "Invalid WFH duration.");
+        // WFH+SL and WFH+CL used to be accepted as labels only: they did not
+        // create or debit a real leave request. Keep the API truthful by allowing
+        // only durations that have an unambiguous attendance ownership model.
+        if (dto.DurationType is not ("FullDay" or "FirstHalf" or "SecondHalf" or "Mixed")) return ("WFH_INVALID_DURATION", "Invalid WFH duration. Submit a real half-day leave for the other half of the day.");
         if (dto.DurationType is "FirstHalf" or "SecondHalf" && !policy.AllowHalfDay) return ("WFH_HALF_DAY_NOT_ALLOWED", "Half day WFH is not allowed.");
-        if (dto.DurationType is "Mixed" or "WfhHd" or "WfhSl" or "WfhCl" && !policy.AllowMixedDay) return ("WFH_MIXED_DAY_NOT_ALLOWED", "Mixed WFH combinations are not allowed.");
+        if (dto.DurationType == "Mixed" && !policy.AllowMixedDay) return ("WFH_MIXED_DAY_NOT_ALLOWED", "Mixed WFH/WFO is not allowed.");
         if (!IsEffectiveFor(policy, dto.FromDate.Date) || !IsEffectiveFor(policy, dto.ToDate.Date)) return ("WFH_POLICY_NOT_EFFECTIVE", "The selected date is outside the effective WFH policy period.");
         if (await requests.Exist(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && (x.Status == "Pending" || x.Status == "Approved" || x.Status == "Returned") && dto.FromDate.Date <= x.ToDate.Date && dto.ToDate.Date >= x.FromDate.Date)) return ("WFH_OVERLAPPING_REQUEST", "The request overlaps an existing WFH request.");
-        if (await HasActiveLeaveOverlap(employee.UserId, dto.FromDate.Date, dto.ToDate.Date)) return ("WFH_LEAVE_OVERLAP", "The request overlaps an active leave request.");
+        if (await HasActiveLeaveOverlap(employee.UserId, dto.FromDate.Date, dto.ToDate.Date, dto.DurationType)) return ("WFH_LEAVE_OVERLAP", "The request overlaps leave for the same half or a full day.");
         foreach (var week in Days(dto.FromDate, dto.ToDate).Select(StartOfWeek).Distinct())
         {
             var usedDates = WeeklyUsage(await requests.GetAll(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && (x.Status == "Pending" || x.Status == "Approved" || x.Status == "Returned") && x.FromDate < week.AddDays(7) && x.ToDate >= week), week);
@@ -673,13 +684,30 @@ public sealed class WorkFromHomeService(
         return null;
     }
 
-    private async Task<bool> HasActiveLeaveOverlap(string userId, DateTime fromDate, DateTime toDate)
+    private async Task<bool> HasActiveLeaveOverlap(string userId, DateTime fromDate, DateTime toDate, string wfhDurationType)
     {
         var activeLeaves = await leaveRequests.GetAll(request =>
             request.CompanyId == CompanyId && request.EmployeeId == userId &&
             (request.Status == EnumsHelper.LeaveRequestStatus.Pending || request.Status == EnumsHelper.LeaveRequestStatus.Accepted) &&
             request.StartDate <= toDate && request.EndDate >= fromDate);
-        return activeLeaves.Any();
+        return activeLeaves.Any(leave => LeaveConflictsWithWfh(leave, wfhDurationType));
+    }
+
+    // Full-day requests own both halves. A half-day leave and WFH can coexist only
+    // when they explicitly occupy opposite attendance segments.
+    private static bool LeaveConflictsWithWfh(LeaveRequest leave, string wfhDurationType)
+    {
+        if (!leave.IsHalfDay)
+            return true;
+
+        var wfhSegment = wfhDurationType switch
+        {
+            "FirstHalf" => "FIRST_HALF",
+            "SecondHalf" => "SECOND_HALF",
+            _ => null
+        };
+
+        return wfhSegment is null || string.Equals(leave.HalfDayPeriod, wfhSegment, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<(string Code, string Message)?> ValidateWorkingDay(EmpUser employee, WorkFromHomePolicy policy, DateTime date)

@@ -415,8 +415,8 @@ public class LeaveManagementService : ILeaveManagementService
             return result;
         }
 
-        if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequest.UserId, requestStartDateTime, requestEndDateTime))
-            return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: Leave cannot be applied because an active Work From Home request already exists for one or more selected dates. Withdraw or cancel the WFH request first, then apply for leave." };
+        if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequest.UserId, requestStartDateTime, requestEndDateTime, leaveRequest.IsHalfDay, leaveRequest.HalfDayPeriod))
+            return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: Leave overlaps Work From Home for the same half or a full day." };
 
         // check if employee already has approved leave on request date
         var nowDate = DateTime.UtcNow.Date;
@@ -529,8 +529,8 @@ public class LeaveManagementService : ILeaveManagementService
             return result;
         }
 
-        if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequestDto.UserId, requestStartDateTime, requestEndDateTime))
-            return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: The leave request overlaps an active Work From Home request." };
+        if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequestDto.UserId, requestStartDateTime, requestEndDateTime, leaveRequestDto.IsHalfDay, leaveRequestDto.HalfDayPeriod))
+            return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: Leave overlaps Work From Home for the same half or a full day." };
 
         var totalAdvanceNoticeDays = (requestStartDateTime - DateTime.UtcNow.Date).TotalDays + 1;
         if (leavePolicyEntity.MinNoticeDays > 0 && leavePolicyEntity.MinNoticeDays > totalAdvanceNoticeDays)
@@ -823,8 +823,8 @@ public class LeaveManagementService : ILeaveManagementService
                     : policyForDecision.FullDayAttendanceStatusCode ?? policyForDecision.AttendanceStatusCode;
             if (string.IsNullOrWhiteSpace(mappedStatus) || !await ValidateAttendanceStatusMapping(companyId, mappedStatus))
                 return new Result { Success = false, Message = existingLeaveRequest.IsHalfDay ? "Select an active leave attendance status for half-day leave before approval." : "Select an active leave attendance status for full-day leave before approval." };
-            if (await HasActiveWorkFromHomeOverlap(companyId, existingLeaveRequest.EmployeeId, existingLeaveRequest.StartDate, existingLeaveRequest.EndDate))
-                return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: Leave cannot be approved because an active Work From Home request already exists for one or more selected dates. Withdraw or cancel the WFH request first." };
+            if (await HasActiveWorkFromHomeOverlap(companyId, existingLeaveRequest.EmployeeId, existingLeaveRequest.StartDate, existingLeaveRequest.EndDate, existingLeaveRequest.IsHalfDay, existingLeaveRequest.HalfDayPeriod))
+                return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: Leave cannot be approved because it overlaps Work From Home for the same half or a full day." };
         }
 
         var now = DateTime.UtcNow;
@@ -1090,13 +1090,30 @@ public class LeaveManagementService : ILeaveManagementService
         return await _attendanceStatusRepo.Exist(x => x.CompanyId == companyId && x.Code == normalized && x.IsActive && !x.RequiresTime && x.IsAvailableForLeaveManagement);
     }
 
-    private async Task<bool> HasActiveWorkFromHomeOverlap(string companyId, string userId, DateTime startDate, DateTime endDate)
+    private async Task<bool> HasActiveWorkFromHomeOverlap(string companyId, string userId, DateTime startDate, DateTime endDate, bool leaveIsHalfDay, string? leaveHalfDayPeriod)
     {
         var requests = await _workFromHomeRequests.GetAll(request =>
             request.CompanyId == companyId && request.UserId == userId &&
             (request.Status == "Pending" || request.Status == "Approved" || request.Status == "Returned") &&
             request.FromDate <= endDate && request.ToDate >= startDate);
-        return requests.Any();
+        return requests.Any(wfh => LeaveConflictsWithWorkFromHome(leaveIsHalfDay, leaveHalfDayPeriod, wfh.DurationType));
+    }
+
+    // Full-day and mixed WFH statuses own the entire date. Opposite explicit halves
+    // are allowed so an approved half-day leave can coexist with half-day WFH.
+    private static bool LeaveConflictsWithWorkFromHome(bool leaveIsHalfDay, string? leaveHalfDayPeriod, string wfhDurationType)
+    {
+        if (!leaveIsHalfDay)
+            return true;
+
+        var wfhSegment = wfhDurationType switch
+        {
+            "FirstHalf" => "FIRST_HALF",
+            "SecondHalf" => "SECOND_HALF",
+            _ => null
+        };
+
+        return wfhSegment is null || string.Equals(leaveHalfDayPeriod, wfhSegment, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<Result> SyncWorkFromHomePolicy(string companyId, LeavePolicy leavePolicy, WorkFromHomePolicySettingsRequest settings)
