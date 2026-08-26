@@ -17,4 +17,6 @@ public class GetAllEmployeeResponseModel
     public string? FullProfileUrl { get; set; }
     public string Gender { get; set; }
     public bool IsVerified { get; set; }
+    public string EmploymentStatus { get; set; } = "Active";
+    public DateTime? LastWorkingDate { get; set; }
 }

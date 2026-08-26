@@ -196,6 +196,123 @@ public class UserController : BaseApiController
         return data;
     }
 
+    [Route("InitiateEmployeeExit")]
+    [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public Task<Result> InitiateEmployeeExit([FromBody] InitiateEmployeeExitRequest request) =>
+        _employeeService.InitiateEmployeeExit(request);
+
+    // Any authenticated employee may submit only their own resignation. This is
+    // intentionally separate from the Employees.Edit protected HR action.
+    [Route("SubmitOwnResignation")]
+    [HttpPost]
+    public Task<Result> SubmitOwnResignation([FromBody] InitiateEmployeeExitRequest request) =>
+        _employeeService.SubmitOwnResignation(request);
+
+    [Route("EmployeeExit/{employeeUserId}")]
+    [HttpGet]
+    public Task<Result<EmployeeExitCaseDto>> GetEmployeeExitCase(string employeeUserId) =>
+        _employeeService.GetEmployeeExitCase(employeeUserId);
+
+    [Route("EmployeeExitManagement/{employeeUserId}")]
+    [HttpGet]
+    public Task<Result<EmployeeExitCaseDto>> GetEmployeeExitCaseForManagement(string employeeUserId) =>
+        _employeeService.GetEmployeeExitCaseForManagement(employeeUserId);
+
+    [Route("CompleteEmployeeExit")]
+    [HttpPost]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result> CompleteEmployeeExit([FromBody] CompleteEmployeeExitRequest request) =>
+        _employeeService.CompleteEmployeeExit(request);
+
+    [Route("ReviewEmployeeExit")]
+    [HttpPost]
+    public Task<Result> ReviewEmployeeExit([FromBody] ReviewEmployeeExitRequest request) =>
+        _employeeService.ReviewEmployeeExit(request);
+
+    [Route("WithdrawOwnEmployeeExit")]
+    [HttpPost]
+    public Task<Result> WithdrawOwnEmployeeExit([FromBody] CancelEmployeeExitRequest request) =>
+        _employeeService.WithdrawOwnEmployeeExit(request);
+
+    [Route("CancelEmployeeExit")]
+    [HttpPost]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result> CancelEmployeeExit([FromBody] CancelEmployeeExitRequest request) =>
+        _employeeService.CancelEmployeeExit(request);
+
+    [Route("UpdateEmployeeExitDate")]
+    [HttpPost]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result> UpdateEmployeeExitDate([FromBody] UpdateEmployeeExitDateRequest request) =>
+        _employeeService.UpdateEmployeeExitDate(request);
+
+    [Route("EmployeeExitPolicy")]
+    [HttpPost]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result> UpsertEmployeeExitPolicy([FromBody] UpsertEmployeeExitPolicyRequest request) =>
+        _employeeService.UpsertEmployeeExitPolicy(request);
+
+    [Route("EmployeeExitPolicy/{policyId}")]
+    [HttpGet]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result<EmployeeExitPolicy>> GetEmployeeExitPolicy(string policyId) =>
+        _employeeService.GetEmployeeExitPolicy(policyId);
+
+    [Route("EmployeeExitClearanceTemplate/{templateId}")]
+    [HttpGet]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result<EmployeeExitClearanceTemplate>> GetEmployeeExitClearanceTemplate(string templateId) =>
+        _employeeService.GetEmployeeExitClearanceTemplate(templateId);
+
+    [Route("EmployeeExitPolicies")]
+    [HttpGet]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result<EmployeeExitPolicy>> GetEmployeeExitPolicies() =>
+        _employeeService.GetEmployeeExitPolicies();
+
+    [Route("EmployeeExitClearanceTemplates")]
+    [HttpGet]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result<EmployeeExitClearanceTemplate>> GetEmployeeExitClearanceTemplates() =>
+        _employeeService.GetEmployeeExitClearanceTemplates();
+
+    [Route("EmployeeExitClearanceTemplate")]
+    [HttpPost]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result> UpsertEmployeeExitClearanceTemplate([FromBody] UpsertEmployeeExitClearanceTemplateRequest request) =>
+        _employeeService.UpsertEmployeeExitClearanceTemplate(request);
+
+    [Route("ApproveEmployeeFinalSettlement")]
+    [HttpPost]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result> ApproveEmployeeFinalSettlement([FromBody] ApproveEmployeeFinalSettlementRequest request) =>
+        _employeeService.ApproveEmployeeFinalSettlement(request);
+
+    [Route("CompleteEmployeeExitClearance")]
+    [HttpPost]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result> CompleteEmployeeExitClearance([FromBody] CompleteEmployeeExitClearanceRequest request) =>
+        _employeeService.CompleteEmployeeExitClearance(request, false);
+
+    [Route("WaiveEmployeeExitClearance")]
+    [HttpPost]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result> WaiveEmployeeExitClearance([FromBody] CompleteEmployeeExitClearanceRequest request) =>
+        _employeeService.CompleteEmployeeExitClearance(request, true);
+
+    [Route("RejoinEmployee")]
+    [HttpPost]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result> RejoinEmployee([FromBody] RejoinEmployeeRequest request) =>
+        _employeeService.RejoinEmployee(request);
+
+    [Route("ExceptionalCompleteEmployeeExit")]
+    [HttpPost]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result> ExceptionalCompleteEmployeeExit([FromBody] ExceptionalCompleteEmployeeExitRequest request) =>
+        _employeeService.ExceptionalCompleteEmployeeExit(request);
+
     // Department options are part of the Employee Directory.  Do not route this through
     // Dashboard.ViewAll: callers only need the same Employees.View permission as the grid.
     [Route("GetDirectoryDepartments")]

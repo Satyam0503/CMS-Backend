@@ -24,6 +24,11 @@ public class EmpUser : BaseClass
     public string EmergencyContact { get; set; }
     public string DateOfJoining { get; set; }
     public string? ExitDate { get; set; }
+    // The legacy ExitDate is retained for compatibility. The exit aggregate is the
+    // authoritative workflow record; these fields are the read-model used by login
+    // and directory queries.
+    public string? EmploymentStatus { get; set; }
+    public DateTime? LastWorkingDate { get; set; }
     public int? EmploymentType { get; set; } = null;
     public bool Status { get; set; }
     public bool IsEmailVerified { get; set; }

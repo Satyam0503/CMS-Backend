@@ -35,6 +35,7 @@ public static class ServicesRegistration
         services.AddScoped<IRoleService, RoleServices>();
         services.AddScoped<ICompanyService, CompanyService>();
         services.AddScoped<IEmployeeService, EmployeeService>();
+        services.AddScoped<IEmployeeExitOutboxProcessor, EmployeeExitOutboxProcessor>();
         services.AddScoped<IJobVacancy, JobVacancyService>();
         services.AddScoped<ICompanyMasterService, CompanyMasterService>();
         services.AddScoped<IDashboardService, DashboardServices>();

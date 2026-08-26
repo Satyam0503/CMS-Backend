@@ -31,6 +31,8 @@ using static Codeji.CMS.Utility.Enums.EnumsHelper;
 using Codeji.CMS.Services.Attendance;
 using MongoDB.Driver;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.Leave;
+using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Repositories;
 using Codeji.CMS.Repository.Interfaces;
 using Codeji.CMS.Services.Interfaces;
@@ -145,6 +147,7 @@ builder.Services.AddHostedService<LeaveAccrualHostedService>();
 builder.Services.AddHostedService<Codeji.CMS.Services.CareerPortal.CareerNotificationWorker>();
 builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceOutboxWorker>();
 builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceReminderHostedService>();
+builder.Services.AddHostedService<EmployeeExitOutboxWorker>();
 builder.Services.AddHttpContextAccessor();
 // MongoDB Configuration
 ConfigurationManager configuration = builder.Configuration;
@@ -215,7 +218,9 @@ builder.Services.AddAuthorization(option =>
     {
         policy.Requirements.Add(new RoleRequirement(EnumsHelper.Roles.Administrator));
     });
+    option.AddPolicy("HrExitOverride", policy => policy.Requirements.Add(new AnyRoleRequirement(EnumsHelper.Roles.Administrator, EnumsHelper.Roles.HR, EnumsHelper.Roles.HRExecutive)));
 });
+builder.Services.AddSingleton<IAuthorizationHandler, AnyRoleHandler>();
 
 // Antiforgery
 builder.Services.AddAntiforgery(options =>
@@ -238,6 +243,15 @@ builder.Services.AddSingleton<IEmployeePresenceService, EmployeePresenceService>
 // mogodb repositories
 builder.Services.AddScoped<IMongoDbRepository<EmpUser>, MongoRepository<EmpUser>>();
 builder.Services.AddScoped<IMongoDbRepository<EmpPayRoll>, MongoRepository<EmpPayRoll>>();
+builder.Services.AddScoped<IMongoDbRepository<RefreshToken>, MongoRepository<RefreshToken>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeExit>, MongoRepository<EmployeeExit>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeExitPolicy>, MongoRepository<EmployeeExitPolicy>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeExitClearanceTemplate>, MongoRepository<EmployeeExitClearanceTemplate>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeFinalSettlement>, MongoRepository<EmployeeFinalSettlement>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeExitAttendanceCutoff>, MongoRepository<EmployeeExitAttendanceCutoff>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeExitOutbox>, MongoRepository<EmployeeExitOutbox>>();
+builder.Services.AddScoped<IMongoDbRepository<LeaveRequest>, MongoRepository<LeaveRequest>>();
+builder.Services.AddScoped<IMongoDbRepository<WorkFromHomeRequest>, MongoRepository<WorkFromHomeRequest>>();
 // salary 
 builder.Services.AddScoped<MongoDbContext>();
 builder.Services.AddScoped<ISalaryRepository, SalaryRepository>();

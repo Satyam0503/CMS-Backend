@@ -15,7 +15,8 @@ public sealed class AttendanceEditGuard(
     IMongoDbRepository<EmpPayRoll> payrolls,
     IMongoDbRepository<MonthlyAttendanceSummary> summaries,
     IMongoDbRepository<WeeklyOffSetting> weeklyOffs,
-    IMongoDbRepository<CalendarEntity> calendar) : IAttendanceEditGuard
+    IMongoDbRepository<CalendarEntity> calendar,
+    IMongoDbRepository<EmployeeExitAttendanceCutoff> exitCutoffs) : IAttendanceEditGuard
 {
     public async Task EnsureEditableWorkingDayAsync(string companyId, string userId, DateTime date)
     {
@@ -23,6 +24,10 @@ public sealed class AttendanceEditGuard(
             x.CompanyId == companyId && x.UserId == userId && !x.IsDeleted, withDefaultFilter: false)).FirstOrDefault()
             ?? throw new InvalidOperationException("Employee was not found for attendance update.");
         var month = new DateTime(date.Year, date.Month, 1);
+        var cutoff = (await exitCutoffs.GetAll(x => x.CompanyId == companyId && x.EmployeeUserId == userId && !x.IsDeleted, withDefaultFilter: false))
+            .OrderByDescending(x => x.LastWorkingDate).FirstOrDefault();
+        if (cutoff is not null && date.Date > cutoff.LastWorkingDate.Date)
+            throw new InvalidOperationException($"Attendance after {cutoff.LastWorkingDate:yyyy-MM-dd} is locked because the employee exit has completed.");
         // A correction is only valid while the employee's attendance period remains open.
         // Payroll generation and attendance locking are both finalisation boundaries.
         if ((await payrolls.GetAll(x => x.CompanyId == employee.CompanyId && x.EmployeeId == employee.EmployeeId && x.PayMonth == month && x.IsProcessed, withDefaultFilter: false)).Any())

@@ -16,6 +16,11 @@ public class RoleRequirement : IAuthorizationRequirement
     }
 }
 
+public sealed class AnyRoleRequirement(params Roles[] roleTypes) : IAuthorizationRequirement
+{
+    public IReadOnlyCollection<Roles> RoleTypes { get; } = roleTypes;
+}
+
 // Authorization handler to validate authorization logic
 
 public class RoleHandler : AuthorizationHandler<RoleRequirement>
@@ -50,5 +55,19 @@ public class RoleHandler : AuthorizationHandler<RoleRequirement>
         }
         context.Succeed(requirement);
         return;
+    }
+}
+
+public sealed class AnyRoleHandler(IHttpContextAccessor httpContextAccessor) : AuthorizationHandler<AnyRoleRequirement>
+{
+    protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, AnyRoleRequirement requirement)
+    {
+        var httpContext = httpContextAccessor.HttpContext;
+        var roleService = httpContext?.RequestServices.GetService(typeof(IRoleService)) as IRoleService;
+        var roleId = CurrentContext.UserRoleId(httpContextAccessor);
+        var companyId = CurrentContext.CompanyId(httpContextAccessor);
+        if (roleService is null || string.IsNullOrWhiteSpace(roleId) || string.IsNullOrWhiteSpace(companyId)) return;
+        if ((await Task.WhenAll(requirement.RoleTypes.Select(role => roleService.IsRoleTypeMatch(roleId, role, companyId)))).Any(x => x))
+            context.Succeed(requirement);
     }
 }
