@@ -17,6 +17,7 @@ using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Security.Claims;
 
 namespace Codeji.CMS.Services.Tests;
 
@@ -92,6 +93,70 @@ public class EmployeeServiceBulkImportTests
         Assert.Equal(2, result.MethodResult.FailedCount);
         Assert.Contains(result.MethodResult.Results, r => r.RowNumber == 2 && r.Message.Contains("Duplicate employee ID in request"));
         Assert.Contains(result.MethodResult.Results, r => r.RowNumber == 3 && r.Message.Contains("Duplicate email in request"));
+    }
+
+    [Fact]
+    public async Task SubmitOwnResignation_AnotherEmployeesIdentity_IsRejectedBeforeAnyWrite()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false);
+        SetExitContext(fixture, "employee-1");
+
+        var result = await fixture.Service.SubmitOwnResignation(new InitiateEmployeeExitRequest
+        {
+            EmployeeUserId = "another-employee",
+            ExitType = "Resigned",
+            LastWorkingDate = DateTime.UtcNow.Date.AddDays(30)
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal("SELF_EXIT_ONLY", result.Message);
+        fixture.EmployeeRepository.Verify(x => x.AddOne(It.IsAny<EmpUser>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task InitiateEmployeeExit_SelfTarget_IsRejectedBeforeAnyWrite()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false);
+        SetExitContext(fixture, "employee-1");
+
+        var result = await fixture.Service.InitiateEmployeeExit(new InitiateEmployeeExitRequest
+        {
+            EmployeeUserId = "employee-1",
+            ExitType = "Terminated",
+            LastWorkingDate = DateTime.UtcNow.Date.AddDays(1)
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal("SELF_EXIT_NOT_ALLOWED", result.Message);
+        fixture.EmployeeRepository.Verify(x => x.AddOne(It.IsAny<EmpUser>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitOwnResignation_TerminationType_IsRejectedBeforeAnyWrite()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false);
+        SetExitContext(fixture, "employee-1");
+
+        var result = await fixture.Service.SubmitOwnResignation(new InitiateEmployeeExitRequest
+        {
+            EmployeeUserId = "employee-1",
+            ExitType = "Terminated",
+            LastWorkingDate = DateTime.UtcNow.Date.AddDays(30)
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal("SELF_SUBMISSION_MUST_BE_RESIGNATION", result.Message);
+        fixture.EmployeeRepository.Verify(x => x.AddOne(It.IsAny<EmpUser>()), Times.Never);
+    }
+
+    private static void SetExitContext(EmployeeServiceFixture fixture, string userId)
+    {
+        var context = new DefaultHttpContext();
+        context.User = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim("user_id", userId),
+            new Claim("company_id", "company-1")
+        ], "test"));
+        fixture.HttpContextAccessor.SetupGet(x => x.HttpContext).Returns(context);
     }
 
     [Fact]

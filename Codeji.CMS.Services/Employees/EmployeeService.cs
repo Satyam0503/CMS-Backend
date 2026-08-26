@@ -15,6 +15,7 @@ using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.Leave;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.BackgroundTasks;
@@ -61,6 +62,17 @@ namespace Codeji.CMS.Services.Employees
         readonly ILogger<EmployeeService> _logger;
         readonly IMongoDbRepository<CompanyOfficeSchedule> _officeScheduleRepository;
         readonly IMongoDbRepository<EmployeeScheduleAssignment> _employeeScheduleAssignmentRepository;
+        readonly IMongoDbRepository<EmployeeExit> _employeeExitRepository;
+        readonly IMongoDbRepository<EmployeeExitPolicy>? _employeeExitPolicyRepository;
+        readonly IMongoDbRepository<EmployeeExitClearanceTemplate>? _employeeExitClearanceTemplateRepository;
+        readonly IMongoDbRepository<EmployeeFinalSettlement>? _employeeFinalSettlementRepository;
+        readonly IMongoDbRepository<EmpPayRoll>? _employeePayrollRepository;
+        readonly IMongoDbRepository<LeaveRequest>? _leaveRequestRepository;
+        readonly IMongoDbRepository<WorkFromHomeRequest>? _workFromHomeRequestRepository;
+        readonly IMongoDbRepository<EmployeeExitAttendanceCutoff>? _employeeExitAttendanceCutoffRepository;
+        readonly IMongoDbRepository<EmployeeExitOutbox>? _employeeExitOutboxRepository;
+        readonly IMongoDbRepository<RefreshToken>? _refreshTokenRepository;
+        readonly IMongoClient? _mongoClient;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
@@ -88,7 +100,18 @@ namespace Codeji.CMS.Services.Employees
             IMongoDbRepository<UserSecurityToken> userSecurityTokenRepository,
             IMongoDbRepository<CompanyOfficeSchedule> officeScheduleRepository,
             IMongoDbRepository<EmployeeScheduleAssignment> employeeScheduleAssignmentRepository,
-            ILogger<EmployeeService> logger
+            ILogger<EmployeeService> logger,
+            IMongoDbRepository<EmployeeExit>? employeeExitRepository = null,
+            IMongoDbRepository<RefreshToken>? refreshTokenRepository = null,
+            IMongoDbRepository<EmployeeExitPolicy>? employeeExitPolicyRepository = null
+            , IMongoDbRepository<EmployeeExitClearanceTemplate>? employeeExitClearanceTemplateRepository = null
+            , IMongoDbRepository<EmployeeFinalSettlement>? employeeFinalSettlementRepository = null
+            , IMongoDbRepository<EmpPayRoll>? employeePayrollRepository = null
+            , IMongoDbRepository<LeaveRequest>? leaveRequestRepository = null
+            , IMongoDbRepository<WorkFromHomeRequest>? workFromHomeRequestRepository = null
+            , IMongoDbRepository<EmployeeExitAttendanceCutoff>? employeeExitAttendanceCutoffRepository = null
+            , IMongoDbRepository<EmployeeExitOutbox>? employeeExitOutboxRepository = null
+            , IMongoClient? mongoClient = null
             )
         {
             _employeeRepository = employeeRepository;
@@ -118,6 +141,17 @@ namespace Codeji.CMS.Services.Employees
             _userSecurityTokenRepository = userSecurityTokenRepository;
             _officeScheduleRepository = officeScheduleRepository;
             _employeeScheduleAssignmentRepository = employeeScheduleAssignmentRepository;
+            _employeeExitRepository = employeeExitRepository!;
+            _refreshTokenRepository = refreshTokenRepository;
+            _employeeExitPolicyRepository = employeeExitPolicyRepository;
+            _employeeExitClearanceTemplateRepository = employeeExitClearanceTemplateRepository;
+            _employeeFinalSettlementRepository = employeeFinalSettlementRepository;
+            _employeePayrollRepository = employeePayrollRepository;
+            _leaveRequestRepository = leaveRequestRepository;
+            _workFromHomeRequestRepository = workFromHomeRequestRepository;
+            _employeeExitAttendanceCutoffRepository = employeeExitAttendanceCutoffRepository;
+            _employeeExitOutboxRepository = employeeExitOutboxRepository;
+            _mongoClient = mongoClient;
             _logger = logger;
         }
 
@@ -823,13 +857,22 @@ namespace Codeji.CMS.Services.Employees
             int totalRecords = 0;
             if (filters == null)
             {
-                employeeList = (await _employeeRepository.GetAll(x => x.CompanyId == companyId)).ToList();
+                employeeList = (await _employeeRepository.GetAll(x => x.CompanyId == companyId && !x.IsDeleted && (x.EmploymentStatus == null || x.EmploymentStatus == "" || x.EmploymentStatus == "Active"))).ToList();
                 totalRecords = employeeList.Count;
             }
             else
             {
+                var requestedEmploymentStatus = filters.EmploymentStatus;
+                var includeAllStatuses = requestedEmploymentStatus == "All";
+                var includeNoticePeriod = requestedEmploymentStatus == "NoticePeriod";
+                var includeExEmployees = requestedEmploymentStatus == "ExEmployees";
                 Expression<Func<EmpUser, bool>> whereCondition = x =>
                 x.CompanyId == companyId &&
+                !x.IsDeleted &&
+                (includeAllStatuses ||
+                 (includeNoticePeriod && x.EmploymentStatus == "NoticePeriod") ||
+                 (includeExEmployees && (x.EmploymentStatus == "Resigned" || x.EmploymentStatus == "Terminated")) ||
+                 (!includeNoticePeriod && !includeExEmployees && (x.EmploymentStatus == null || x.EmploymentStatus == "" || x.EmploymentStatus == "Active"))) &&
                 ((filters.DepartmentId == null || filters.DepartmentId.Count == 0) || filters.DepartmentId.Contains(x.Department)) &&
                 ((filters.Gender == null || filters.Gender.Count == 0) || filters.Gender.Contains(x.Gender)) &&
                 (string.IsNullOrEmpty(filters.Name)
@@ -881,6 +924,8 @@ namespace Codeji.CMS.Services.Employees
                             DateOfJoining = emp.DateOfJoining,
                             FullProfileUrl = Common.GetEmployeeImageUrl(emp.ProfileUrl),
                             IsVerified = emp.IsEmailVerified,
+                            EmploymentStatus = NormalizeEmploymentStatus(emp),
+                            LastWorkingDate = emp.LastWorkingDate,
                         }).ToList();
             return new Result<GetAllEmployeeResponseModel>()
             {
@@ -888,6 +933,454 @@ namespace Codeji.CMS.Services.Employees
                 MethodResults = data,
                 TotalRecords = totalRecords
             };
+        }
+
+        public async Task<Result> InitiateEmployeeExit(InitiateEmployeeExitRequest request)
+            => await InitiateEmployeeExitCore(request, false);
+
+        public async Task<Result> SubmitOwnResignation(InitiateEmployeeExitRequest request)
+            => await InitiateEmployeeExitCore(request, true);
+
+        private async Task<Result> InitiateEmployeeExitCore(InitiateEmployeeExitRequest request, bool isSelfSubmission)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeUserId)
+                || request.ExitType is not ("Resigned" or "Terminated") || request.LastWorkingDate == default)
+                return new Result { Success = false, Message = "EXIT_REQUEST_INVALID" };
+            if (isSelfSubmission && request.EmployeeUserId != actorUserId)
+                return new Result { Success = false, Message = "SELF_EXIT_ONLY" };
+            if (!isSelfSubmission && request.EmployeeUserId == actorUserId)
+                return new Result { Success = false, Message = "SELF_EXIT_NOT_ALLOWED" };
+            if (isSelfSubmission && request.ExitType != "Resigned")
+                return new Result { Success = false, Message = "SELF_SUBMISSION_MUST_BE_RESIGNATION" };
+
+            var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == request.EmployeeUserId && !x.IsDeleted);
+            if (employee is null) return new Result { Success = false, Message = "EMPLOYEE_NOT_FOUND" };
+            if (NormalizeEmploymentStatus(employee) is "Resigned" or "Terminated" or "NoticePeriod")
+                return new Result { Success = false, Message = "EXIT_ALREADY_OPEN_OR_COMPLETED" };
+            if (DateTime.TryParse(employee.DateOfJoining, out var joined) && request.LastWorkingDate.Date < joined.Date)
+                return new Result { Success = false, Message = "EXIT_BEFORE_JOINING" };
+            if (isSelfSubmission && !await MeetsNoticePolicy(employee, request.LastWorkingDate.Date))
+                return new Result { Success = false, Message = "EXIT_NOTICE_PERIOD_NOT_MET" };
+
+            var lastWorkingDate = request.LastWorkingDate.Date;
+            // Employee resignations must be reviewed before they affect employment;
+            // HR-initiated terminations enter notice immediately.
+            var status = isSelfSubmission ? "PendingManagerApproval" : "NoticePeriod";
+            var exit = new EmployeeExit
+            {
+                CompanyId = companyId, CreatedBy = actorUserId, EmployeeUserId = employee.UserId,
+                ExitType = request.ExitType, Status = status, InitiatedAtUtc = DateTime.UtcNow,
+                ReportingManagerUserId = employee.ReportingManager,
+                LastWorkingDate = lastWorkingDate, Reason = request.Reason?.Trim(), Notes = request.Notes?.Trim(),
+                AuditHistory = [new EmployeeExitAuditEvent { Action = isSelfSubmission ? "ResignationSubmitted" : "ExitInitiated", ActorUserId = actorUserId, Notes = request.Notes?.Trim() }]
+            };
+            var create = await _employeeExitRepository.AddOne(exit);
+            if (!create.Success) return create;
+            employee.EmploymentStatus = status == "NoticePeriod" ? status : "Active"; employee.LastWorkingDate = lastWorkingDate;
+            employee.ExitDate = lastWorkingDate.ToString("yyyy-MM-dd"); employee.Status = true;
+            employee.UpdatedBy = actorUserId; employee.UpdatedDate = DateTime.UtcNow;
+            Expression<Func<EmpUser, bool>> updateEmployee = x => x.CompanyId == companyId && x.UserId == employee.UserId && !x.IsDeleted;
+            return await _employeeRepository.Update(updateEmployee, employee);
+        }
+
+        public async Task<Result> ReviewEmployeeExit(ReviewEmployeeExitRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || request.Action is not ("Approve" or "Reject") || string.IsNullOrWhiteSpace(request.EmployeeExitId))
+                return new Result { Success = false, Message = "EXIT_REVIEW_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
+            if (exit.EmployeeUserId == actorUserId) return new Result { Success = false, Message = "SELF_EXIT_REVIEW_FORBIDDEN" };
+            var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == actorUserId && !x.IsDeleted);
+            var isHr = actor is not null && (await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.Administrator, companyId)
+                || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HR, companyId)
+                || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HRExecutive, companyId));
+            var isAssignedManager = exit.Status == "PendingManagerApproval" && exit.ReportingManagerUserId == actorUserId;
+            if (!isHr && !isAssignedManager) return new Result { Success = false, Message = "EXIT_REVIEW_FORBIDDEN" };
+            if (exit.Status is not ("PendingManagerApproval" or "PendingHrApproval")) return new Result { Success = false, Message = "EXIT_REVIEW_NOT_ALLOWED_IN_STATE" };
+            exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.Version++;
+            exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = request.Action, ActorUserId = actorUserId, Notes = request.Notes?.Trim() });
+            if (request.Action == "Reject") { exit.Status = "Rejected"; exit.IsActive = false; exit.RejectedAtUtc = DateTime.UtcNow; exit.RejectionReason = request.Notes?.Trim(); }
+            else if (exit.Status == "PendingManagerApproval" && !isHr) exit.Status = "PendingHrApproval";
+            else
+            {
+                exit.Status = "NoticePeriod"; exit.ApprovedByUserId = actorUserId; exit.ApprovedAtUtc = DateTime.UtcNow;
+                await PopulateExitClearances(exit);
+            }
+            Expression<Func<EmployeeExit, bool>> update = x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive;
+            return await _employeeExitRepository.Update(update, exit);
+        }
+
+        public Task<Result> WithdrawOwnEmployeeExit(CancelEmployeeExitRequest request) =>
+            CloseEmployeeExit(request, "Withdrawn", true);
+
+        public Task<Result> CancelEmployeeExit(CancelEmployeeExitRequest request) =>
+            CloseEmployeeExit(request, "Cancelled", false);
+
+        private async Task<Result> CloseEmployeeExit(CancelEmployeeExitRequest request, string status, bool selfOnly)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId)) return new Result { Success = false, Message = "EXIT_CANCEL_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
+            if (selfOnly && exit.EmployeeUserId != actorUserId) return new Result { Success = false, Message = "EXIT_WITHDRAW_FORBIDDEN" };
+            if (!selfOnly)
+            {
+                var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == actorUserId && !x.IsDeleted);
+                var isHr = actor is not null && (await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.Administrator, companyId)
+                    || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HR, companyId)
+                    || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HRExecutive, companyId));
+                if (!isHr) return new Result { Success = false, Message = "EXIT_CANCEL_FORBIDDEN" };
+            }
+            if (selfOnly && exit.Status is not ("PendingManagerApproval" or "PendingHrApproval")) return new Result { Success = false, Message = "EXIT_WITHDRAW_NOT_ALLOWED_IN_STATE" };
+            exit.Status = status; exit.IsActive = false; exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow;
+            exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = status, ActorUserId = actorUserId, Notes = request.Reason?.Trim() });
+            Expression<Func<EmployeeExit, bool>> update = x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive;
+            return await _employeeExitRepository.Update(update, exit);
+        }
+
+        private async Task<bool> IsHrExitActor(string companyId, string actorUserId)
+        {
+            var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == actorUserId && !x.IsDeleted);
+            return actor is not null && (await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.Administrator, companyId)
+                || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HR, companyId)
+                || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HRExecutive, companyId));
+        }
+
+        public async Task<Result> UpdateEmployeeExitDate(UpdateEmployeeExitDateRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (!await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_OVERRIDE_FORBIDDEN" };
+            if (request is null || request.LastWorkingDate == default) return new Result { Success = false, Message = "EXIT_DATE_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version || exit.Status is not ("PendingManagerApproval" or "PendingHrApproval" or "NoticePeriod")) return new Result { Success = false, Message = "EXIT_DATE_CHANGE_NOT_ALLOWED" };
+            var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == exit.EmployeeUserId && !x.IsDeleted);
+            if (employee is null || DateTime.TryParse(employee.DateOfJoining, out var joined) && request.LastWorkingDate.Date < joined.Date) return new Result { Success = false, Message = "EXIT_BEFORE_JOINING" };
+            if (!request.OverrideNoticePolicy && !await MeetsNoticePolicy(employee, request.LastWorkingDate.Date))
+                return new Result { Success = false, Message = "EXIT_NOTICE_PERIOD_NOT_MET" };
+            if (request.OverrideNoticePolicy && string.IsNullOrWhiteSpace(request.Reason))
+                return new Result { Success = false, Message = "EXIT_NOTICE_OVERRIDE_REASON_REQUIRED" };
+            exit.LastWorkingDate = request.LastWorkingDate.Date; exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow;
+            exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = request.OverrideNoticePolicy ? "LastWorkingDateNoticeOverride" : "LastWorkingDateUpdated", ActorUserId = actorUserId, Notes = request.Reason?.Trim() });
+            Expression<Func<EmployeeExit, bool>> update = x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive;
+            var result = await _employeeExitRepository.Update(update, exit);
+            if (!result.Success) return result;
+            employee.LastWorkingDate = exit.LastWorkingDate; employee.ExitDate = exit.LastWorkingDate.ToString("yyyy-MM-dd"); employee.UpdatedBy = actorUserId; employee.UpdatedDate = DateTime.UtcNow;
+            Expression<Func<EmpUser, bool>> updateEmployee = x => x.CompanyId == companyId && x.UserId == employee.UserId && !x.IsDeleted;
+            return await _employeeRepository.Update(updateEmployee, employee);
+        }
+
+        public async Task<Result> UpsertEmployeeExitPolicy(UpsertEmployeeExitPolicyRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (_employeeExitPolicyRepository is null || request is null || request.MinimumNoticeDays < 0 || (!string.IsNullOrWhiteSpace(request.DepartmentId) && !string.IsNullOrWhiteSpace(request.RoleId)))
+                return new Result { Success = false, Message = "EXIT_POLICY_INVALID" };
+            var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == actorUserId && !x.IsDeleted);
+            var isHr = actor is not null && (await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.Administrator, companyId) || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HR, companyId) || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HRExecutive, companyId));
+            if (!isHr) return new Result { Success = false, Message = "EXIT_POLICY_FORBIDDEN" };
+            var existing = string.IsNullOrWhiteSpace(request.EmployeeExitPolicyId) ? null : await _employeeExitPolicyRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitPolicyId == request.EmployeeExitPolicyId && !x.IsDeleted);
+            var policy = existing ?? new EmployeeExitPolicy { CompanyId = companyId, CreatedBy = actorUserId };
+            policy.DepartmentId = request.DepartmentId?.Trim(); policy.RoleId = request.RoleId?.Trim(); policy.MinimumNoticeDays = request.MinimumNoticeDays; policy.IsActive = request.IsActive; policy.UpdatedBy = actorUserId; policy.UpdatedDate = DateTime.UtcNow;
+            if (existing is null) return await _employeeExitPolicyRepository.AddOne(policy);
+            Expression<Func<EmployeeExitPolicy, bool>> update = x => x.CompanyId == companyId && x.EmployeeExitPolicyId == policy.EmployeeExitPolicyId && !x.IsDeleted;
+            return await _employeeExitPolicyRepository.Update(update, policy);
+        }
+
+        public async Task<Result<EmployeeExitPolicy>> GetEmployeeExitPolicy(string policyId)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (_employeeExitPolicyRepository is null || string.IsNullOrWhiteSpace(policyId)) return new Result<EmployeeExitPolicy> { Success = false, Message = "EXIT_POLICY_NOT_FOUND" };
+            var policy = await _employeeExitPolicyRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitPolicyId == policyId && !x.IsDeleted);
+            return policy is null ? new Result<EmployeeExitPolicy> { Success = false, Message = "EXIT_POLICY_NOT_FOUND" } : new Result<EmployeeExitPolicy> { Success = true, MethodResult = policy };
+        }
+
+        public async Task<Result<EmployeeExitClearanceTemplate>> GetEmployeeExitClearanceTemplate(string templateId)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (_employeeExitClearanceTemplateRepository is null || string.IsNullOrWhiteSpace(templateId)) return new Result<EmployeeExitClearanceTemplate> { Success = false, Message = "EXIT_CLEARANCE_TEMPLATE_NOT_FOUND" };
+            var template = await _employeeExitClearanceTemplateRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitClearanceTemplateId == templateId && !x.IsDeleted);
+            return template is null ? new Result<EmployeeExitClearanceTemplate> { Success = false, Message = "EXIT_CLEARANCE_TEMPLATE_NOT_FOUND" } : new Result<EmployeeExitClearanceTemplate> { Success = true, MethodResult = template };
+        }
+
+        public async Task<Result<EmployeeExitPolicy>> GetEmployeeExitPolicies()
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var policies = _employeeExitPolicyRepository is null ? [] : (await _employeeExitPolicyRepository.GetAll(x => x.CompanyId == companyId && !x.IsDeleted)).ToList();
+            return new Result<EmployeeExitPolicy> { Success = true, MethodResults = policies };
+        }
+
+        public async Task<Result<EmployeeExitClearanceTemplate>> GetEmployeeExitClearanceTemplates()
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var templates = _employeeExitClearanceTemplateRepository is null ? [] : (await _employeeExitClearanceTemplateRepository.GetAll(x => x.CompanyId == companyId && !x.IsDeleted)).ToList();
+            return new Result<EmployeeExitClearanceTemplate> { Success = true, MethodResults = templates };
+        }
+
+        public async Task<Result> UpsertEmployeeExitClearanceTemplate(UpsertEmployeeExitClearanceTemplateRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (_employeeExitClearanceTemplateRepository is null || request is null || string.IsNullOrWhiteSpace(request.Category) || request.DueDaysBeforeLastWorkingDate < 0)
+                return new Result { Success = false, Message = "EXIT_CLEARANCE_TEMPLATE_INVALID" };
+            var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == actorUserId && !x.IsDeleted);
+            var isHr = actor is not null && (await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.Administrator, companyId) || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HR, companyId) || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HRExecutive, companyId));
+            if (!isHr) return new Result { Success = false, Message = "EXIT_CLEARANCE_TEMPLATE_FORBIDDEN" };
+            var existing = string.IsNullOrWhiteSpace(request.EmployeeExitClearanceTemplateId) ? null : await _employeeExitClearanceTemplateRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitClearanceTemplateId == request.EmployeeExitClearanceTemplateId && !x.IsDeleted);
+            var template = existing ?? new EmployeeExitClearanceTemplate { CompanyId = companyId, CreatedBy = actorUserId };
+            template.Category = request.Category.Trim(); template.OwnerRole = request.OwnerRole?.Trim(); template.IsMandatory = request.IsMandatory; template.DueDaysBeforeLastWorkingDate = request.DueDaysBeforeLastWorkingDate; template.IsActive = request.IsActive; template.UpdatedBy = actorUserId; template.UpdatedDate = DateTime.UtcNow;
+            if (existing is null) return await _employeeExitClearanceTemplateRepository.AddOne(template);
+            Expression<Func<EmployeeExitClearanceTemplate, bool>> update = x => x.CompanyId == companyId && x.EmployeeExitClearanceTemplateId == template.EmployeeExitClearanceTemplateId && !x.IsDeleted;
+            return await _employeeExitClearanceTemplateRepository.Update(update, template);
+        }
+
+        public async Task<Result> ApproveEmployeeFinalSettlement(ApproveEmployeeFinalSettlementRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (_employeeFinalSettlementRepository is null || request is null) return new Result { Success = false, Message = "FINAL_SETTLEMENT_INVALID" };
+            var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == actorUserId && !x.IsDeleted);
+            var isHr = actor is not null && (await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.Administrator, companyId) || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HR, companyId) || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HRExecutive, companyId));
+            if (!isHr) return new Result { Success = false, Message = "FINAL_SETTLEMENT_FORBIDDEN" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
+            var settlement = await _employeeFinalSettlementRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && !x.IsDeleted)
+                ?? new EmployeeFinalSettlement { CompanyId = companyId, CreatedBy = actorUserId, EmployeeExitId = exit.EmployeeExitId, EmployeeUserId = exit.EmployeeUserId };
+            settlement.Status = "Approved"; settlement.ApprovedByUserId = actorUserId; settlement.ApprovedAtUtc = DateTime.UtcNow; settlement.UpdatedBy = actorUserId; settlement.UpdatedDate = DateTime.UtcNow;
+            var saved = string.IsNullOrWhiteSpace(settlement.EmployeeFinalSettlementId) ? await _employeeFinalSettlementRepository.AddOne(settlement) : await _employeeFinalSettlementRepository.Update(Builders<EmployeeFinalSettlement>.Filter.Eq(x => x.EmployeeFinalSettlementId, settlement.EmployeeFinalSettlementId), settlement);
+            if (!saved.Success) return saved;
+            exit.Version++; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "FinalSettlementApproved", ActorUserId = actorUserId });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version), exit);
+        }
+
+        public async Task<Result> CompleteEmployeeExitClearance(CompleteEmployeeExitClearanceRequest request, bool waive)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (!await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_CLEARANCE_FORBIDDEN" };
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId) || string.IsNullOrWhiteSpace(request.ClearanceId)) return new Result { Success = false, Message = "EXIT_CLEARANCE_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
+            var clearance = exit.Clearances.SingleOrDefault(x => x.ClearanceId == request.ClearanceId);
+            if (clearance is null || clearance.Status != "Pending") return new Result { Success = false, Message = "EXIT_CLEARANCE_NOT_ACTIONABLE" };
+            if (waive && string.IsNullOrWhiteSpace(request.Notes)) return new Result { Success = false, Message = "EXIT_CLEARANCE_WAIVER_REASON_REQUIRED" };
+            clearance.Status = waive ? "Waived" : "Completed"; clearance.EvidenceUrl = request.EvidenceUrl?.Trim(); clearance.OverrideReason = waive ? request.Notes?.Trim() : null; clearance.CompletedByUserId = actorUserId; clearance.CompletedAtUtc = DateTime.UtcNow;
+            exit.Version++; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = waive ? "ClearanceWaived" : "ClearanceCompleted", ActorUserId = actorUserId, Notes = request.Notes?.Trim() });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+        }
+
+        public async Task<Result> RejoinEmployee(RejoinEmployeeRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (!await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "REJOIN_FORBIDDEN" };
+            if (request is null || string.IsNullOrWhiteSpace(request.Reason)) return new Result { Success = false, Message = "REJOIN_REASON_REQUIRED" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version || exit.Status is not ("Resigned" or "Terminated")) return new Result { Success = false, Message = "REJOIN_NOT_ALLOWED" };
+            var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == exit.EmployeeUserId && !x.IsDeleted);
+            if (employee is null) return new Result { Success = false, Message = "EMPLOYEE_NOT_FOUND" };
+            employee.Status = true; employee.EmploymentStatus = "Active"; employee.LastWorkingDate = null; employee.ExitDate = null; employee.UpdatedBy = actorUserId; employee.UpdatedDate = DateTime.UtcNow;
+            Expression<Func<EmpUser, bool>> updateEmployee = x => x.CompanyId == companyId && x.UserId == employee.UserId && !x.IsDeleted && !x.Status;
+            var result = await _employeeRepository.Update(updateEmployee, employee);
+            if (!result.Success) return result;
+            exit.Version++; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "Rejoined", ActorUserId = actorUserId, Notes = request.Reason.Trim() });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version), exit);
+        }
+
+        public async Task<Result> ExceptionalCompleteEmployeeExit(ExceptionalCompleteEmployeeExitRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (!await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_EXCEPTION_FORBIDDEN" };
+            if (request is null || string.IsNullOrWhiteSpace(request.Reason)) return new Result { Success = false, Message = "EXIT_EXCEPTION_REASON_REQUIRED" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version || DateTime.UtcNow.Date < exit.LastWorkingDate.Date) return new Result { Success = false, Message = "EXIT_EXCEPTION_NOT_ALLOWED" };
+            var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == exit.EmployeeUserId && !x.IsDeleted);
+            if (employee is null) return new Result { Success = false, Message = "EMPLOYEE_NOT_FOUND" };
+            exit.Status = exit.ExitType; exit.IsActive = false; exit.CompletedAtUtc = DateTime.UtcNow; exit.Version++; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "ExceptionalCompletion", ActorUserId = actorUserId, Notes = request.Reason.Trim() });
+            var saved = await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+            if (!saved.Success) return saved;
+            employee.Status = false; employee.EmploymentStatus = exit.ExitType; employee.UpdatedBy = actorUserId; employee.UpdatedDate = DateTime.UtcNow;
+            return await _employeeRepository.Update(Builders<EmpUser>.Filter.Where(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.Status), employee);
+        }
+
+        public async Task<Result<EmployeeExitCaseDto>> GetEmployeeExitCase(string employeeUserId)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (string.IsNullOrWhiteSpace(employeeUserId)) return new Result<EmployeeExitCaseDto> { Success = false, Message = "EXIT_REQUEST_INVALID" };
+            // A caller may always see their own case. Other cases retain the controller's
+            // Employees.View authorization when this endpoint is later surfaced to managers.
+            if (employeeUserId != actorUserId) return new Result<EmployeeExitCaseDto> { Success = false, Message = "EXIT_CASE_FORBIDDEN" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeUserId == employeeUserId && !x.IsDeleted);
+            if (exit is null) return new Result<EmployeeExitCaseDto> { Success = false, Message = "EXIT_CASE_NOT_FOUND" };
+            return new Result<EmployeeExitCaseDto> { Success = true, MethodResult = new EmployeeExitCaseDto
+            {
+                EmployeeExitId = exit.EmployeeExitId, EmployeeUserId = exit.EmployeeUserId, ExitType = exit.ExitType, Status = exit.Status,
+                LastWorkingDate = exit.LastWorkingDate, Reason = exit.Reason, Notes = exit.Notes, InitiatedAtUtc = exit.InitiatedAtUtc, CompletedAtUtc = exit.CompletedAtUtc, Version = exit.Version,
+                Clearances = exit.Clearances.Select(x => new EmployeeExitClearanceDto { ClearanceId = x.ClearanceId, Category = x.Category, Status = x.Status, IsMandatory = x.IsMandatory, DueAtUtc = x.DueAtUtc }).ToList(),
+                AuditHistory = exit.AuditHistory.Select(x => new EmployeeExitAuditEventDto { Action = x.Action, ActorUserId = x.ActorUserId, AtUtc = x.AtUtc, Notes = x.Notes }).ToList(),
+                PermittedActions = exit.Status is "PendingManagerApproval" or "PendingHrApproval" ? ["Withdraw"] : []
+            }};
+        }
+
+        public async Task<Result<EmployeeExitCaseDto>> GetEmployeeExitCaseForManagement(string employeeUserId)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeUserId == employeeUserId && !x.IsDeleted);
+            if (exit is null) return new Result<EmployeeExitCaseDto> { Success = false, Message = "EXIT_CASE_NOT_FOUND" };
+            if (exit.EmployeeUserId == actorUserId) return new Result<EmployeeExitCaseDto> { Success = false, Message = "EXIT_CASE_FORBIDDEN" };
+            var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == actorUserId && !x.IsDeleted);
+            var isHr = actor is not null && (await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.Administrator, companyId)
+                || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HR, companyId)
+                || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HRExecutive, companyId));
+            var isAssignedManager = exit.Status == "PendingManagerApproval" && exit.ReportingManagerUserId == actorUserId;
+            if (!isHr && !isAssignedManager) return new Result<EmployeeExitCaseDto> { Success = false, Message = "EXIT_CASE_FORBIDDEN" };
+            var actions = new List<string>();
+            if (isAssignedManager) actions.AddRange(["Approve", "Reject"]);
+            if (isHr)
+            {
+                if (exit.Status is "PendingManagerApproval" or "PendingHrApproval") actions.AddRange(["Approve", "Reject", "Cancel"]);
+                if (exit.Status == "NoticePeriod") actions.AddRange(["UpdateLastWorkingDate", "Complete", "ExceptionalComplete"]);
+                if (exit.IsActive) actions.Add("WaiveClearance");
+                if (exit.Status is "Resigned" or "Terminated") actions.Add("Rejoin");
+            }
+            return new Result<EmployeeExitCaseDto> { Success = true, MethodResult = new EmployeeExitCaseDto
+            {
+                EmployeeExitId = exit.EmployeeExitId, EmployeeUserId = exit.EmployeeUserId, ExitType = exit.ExitType, Status = exit.Status, Version = exit.Version,
+                LastWorkingDate = exit.LastWorkingDate, Reason = exit.Reason, Notes = exit.Notes, InitiatedAtUtc = exit.InitiatedAtUtc, CompletedAtUtc = exit.CompletedAtUtc,
+                Clearances = exit.Clearances.Select(x => new EmployeeExitClearanceDto { ClearanceId = x.ClearanceId, Category = x.Category, Status = x.Status, IsMandatory = x.IsMandatory, DueAtUtc = x.DueAtUtc }).ToList(),
+                AuditHistory = exit.AuditHistory.Select(x => new EmployeeExitAuditEventDto { Action = x.Action, ActorUserId = x.ActorUserId, AtUtc = x.AtUtc, Notes = x.Notes }).ToList(),
+                PermittedActions = actions
+            }};
+        }
+
+        public async Task<Result> CompleteEmployeeExit(CompleteEmployeeExitRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (!await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_COMPLETION_FORBIDDEN" };
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeUserId)) return new Result { Success = false, Message = "EXIT_REQUEST_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeUserId == request.EmployeeUserId && x.Status == "NoticePeriod" && !x.IsDeleted);
+            if (exit is null) return new Result { Success = false, Message = "OPEN_EXIT_NOT_FOUND" };
+            if (DateTime.UtcNow.Date < exit.LastWorkingDate.Date) return new Result { Success = false, Message = "LAST_WORKING_DATE_NOT_REACHED" };
+            if (exit.Clearances.Any(x => x.IsMandatory && x.Status is not ("Completed" or "Waived"))) return new Result { Success = false, Message = "MANDATORY_CLEARANCE_PENDING" };
+            if (_employeeFinalSettlementRepository is not null)
+            {
+                var settlement = await _employeeFinalSettlementRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Status == "Approved" && !x.IsDeleted);
+                if (settlement is null) return new Result { Success = false, Message = "FINAL_SETTLEMENT_PENDING" };
+            }
+            if (_employeePayrollRepository is not null)
+            {
+                var payroll = await _employeePayrollRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == exit.EmployeeUserId && x.PayMonth.Month == exit.LastWorkingDate.Month && x.PayMonth.Year == exit.LastWorkingDate.Year && x.IsProcessed);
+                if (payroll is null) return new Result { Success = false, Message = "FINAL_PAYROLL_PENDING" };
+            }
+            var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == request.EmployeeUserId && !x.IsDeleted);
+            if (employee is null) return new Result { Success = false, Message = "EMPLOYEE_NOT_FOUND" };
+            var completedAt = DateTime.UtcNow;
+            exit.Status = exit.ExitType; exit.CompletedAtUtc = completedAt; exit.Notes = request.Notes?.Trim() ?? exit.Notes; exit.UpdatedBy = actorUserId; exit.UpdatedDate = completedAt; exit.Version++;
+            exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "ExitCompleted", ActorUserId = actorUserId, Notes = request.Notes?.Trim() });
+            Expression<Func<EmployeeExit, bool>> updateExit = x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Status == "NoticePeriod" && !x.IsDeleted;
+            exit.IsActive = false;
+            employee.EmploymentStatus = exit.ExitType; employee.Status = false; employee.UpdatedBy = actorUserId; employee.UpdatedDate = DateTime.UtcNow;
+            Expression<Func<EmpUser, bool>> completeEmployee = x => x.CompanyId == companyId && x.UserId == employee.UserId && x.Status;
+            var outboxEvent = new EmployeeExitOutbox
+            {
+                CompanyId = companyId, CreatedBy = actorUserId, EmployeeExitId = exit.EmployeeExitId,
+                EventType = "EmployeeExitCompleted", RecipientUserId = exit.ReportingManagerUserId ?? actorUserId,
+                Title = "Employee exit completed", Body = $"The offboarding of {employee.FirstName} {employee.LastName} has been completed.", NextAttemptAtUtc = completedAt
+            };
+            var cutoff = new EmployeeExitAttendanceCutoff { CompanyId = companyId, CreatedBy = actorUserId, EmployeeExitId = exit.EmployeeExitId, EmployeeUserId = employee.UserId, LastWorkingDate = exit.LastWorkingDate.Date, LockedAtUtc = completedAt, LockedByUserId = actorUserId };
+            var committedTransactionally = false;
+            if (_mongoClient is not null)
+            {
+                try
+                {
+                    using var session = await _mongoClient.StartSessionAsync();
+                    await session.WithTransactionAsync(async (_, cancellationToken) =>
+                    {
+                        var exitWrite = await _employeeExitRepository.GetCollection().ReplaceOneAsync(session, Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Status == "NoticePeriod" && x.IsActive && !x.IsDeleted), exit, cancellationToken: cancellationToken);
+                        if (exitWrite.MatchedCount != 1) throw new InvalidOperationException("EXIT_CASE_CHANGED_OR_NOT_FOUND");
+                        var employeeWrite = await _employeeRepository.GetCollection().ReplaceOneAsync(session, Builders<EmpUser>.Filter.Where(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.Status && !x.IsDeleted), employee, cancellationToken: cancellationToken);
+                        if (employeeWrite.MatchedCount != 1) throw new InvalidOperationException("EMPLOYEE_COMPLETION_FAILED");
+                        if (_refreshTokenRepository is not null) await _refreshTokenRepository.GetCollection().UpdateManyAsync(session, Builders<RefreshToken>.Filter.Where(x => x.UserId == employee.UserId && !x.IsRevoked), Builders<RefreshToken>.Update.Set(x => x.IsRevoked, true).Set(x => x.RevokedAt, completedAt), cancellationToken: cancellationToken);
+                        if (_employeeExitOutboxRepository is not null) await _employeeExitOutboxRepository.GetCollection().InsertOneAsync(session, outboxEvent, cancellationToken: cancellationToken);
+                        if (_employeeExitAttendanceCutoffRepository is not null) await _employeeExitAttendanceCutoffRepository.GetCollection().InsertOneAsync(session, cutoff, cancellationToken: cancellationToken);
+                        if (_leaveRequestRepository is not null) await _leaveRequestRepository.GetCollection().UpdateManyAsync(session, Builders<LeaveRequest>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeId == employee.EmployeeId && x.EndDate > exit.LastWorkingDate && (x.Status == EnumsHelper.LeaveRequestStatus.Pending || x.Status == EnumsHelper.LeaveRequestStatus.Accepted)), Builders<LeaveRequest>.Update.Set(x => x.Status, EnumsHelper.LeaveRequestStatus.WithDrawn).Set(x => x.Comment, "Cancelled by employee exit").Set(x => x.UpdatedBy, actorUserId).Set(x => x.UpdatedDate, completedAt), cancellationToken: cancellationToken);
+                        if (_workFromHomeRequestRepository is not null) await _workFromHomeRequestRepository.GetCollection().UpdateManyAsync(session, Builders<WorkFromHomeRequest>.Filter.Where(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.ToDate > exit.LastWorkingDate && (x.Status == "Pending" || x.Status == "Approved")), Builders<WorkFromHomeRequest>.Update.Set(x => x.Status, "Cancelled").Set(x => x.RevokedByUserId, actorUserId).Set(x => x.RevokedAt, completedAt), cancellationToken: cancellationToken);
+                        return true;
+                    });
+                    committedTransactionally = true;
+                }
+                catch (MongoCommandException ex) when (ex.Code == 20) { }
+                catch (InvalidOperationException ex) { return new Result { Success = false, Message = ex.Message }; }
+                catch (Exception) { return new Result { Success = false, Message = "EXIT_COMPLETION_TRANSACTION_FAILED" }; }
+            }
+            if (!committedTransactionally)
+            {
+                var exitResult = await _employeeExitRepository.Update(updateExit, exit);
+                if (!exitResult.Success) return exitResult;
+            }
+            var completion = committedTransactionally ? new Result { Success = true } : await _employeeRepository.Update(completeEmployee, employee);
+            if (completion.Success && _refreshTokenRepository is not null)
+            {
+                Expression<Func<RefreshToken, bool>> activeSessions = x => x.UserId == employee.UserId && !x.IsRevoked;
+                await _refreshTokenRepository.UpdateMany(activeSessions, Builders<RefreshToken>.Update
+                    .Set(x => x.IsRevoked, true)
+                    .Set(x => x.RevokedAt, DateTime.UtcNow));
+            }
+            if (completion.Success && !committedTransactionally)
+            {
+                if (_employeeExitOutboxRepository is not null)
+                    await _employeeExitOutboxRepository.AddOne(outboxEvent);
+                if (_employeeExitAttendanceCutoffRepository is not null)
+                {
+                    var existingCutoff = await _employeeExitAttendanceCutoffRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && !x.IsDeleted);
+                    if (existingCutoff is null)
+                        await _employeeExitAttendanceCutoffRepository.AddOne(cutoff);
+                }
+                if (_leaveRequestRepository is not null)
+                    await _leaveRequestRepository.UpdateMany(Builders<LeaveRequest>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeId == employee.EmployeeId && x.EndDate > exit.LastWorkingDate && (x.Status == EnumsHelper.LeaveRequestStatus.Pending || x.Status == EnumsHelper.LeaveRequestStatus.Accepted)),
+                        Builders<LeaveRequest>.Update.Set(x => x.Status, EnumsHelper.LeaveRequestStatus.WithDrawn).Set(x => x.Comment, "Cancelled by employee exit").Set(x => x.UpdatedBy, actorUserId).Set(x => x.UpdatedDate, DateTime.UtcNow));
+                if (_workFromHomeRequestRepository is not null)
+                    await _workFromHomeRequestRepository.UpdateMany(Builders<WorkFromHomeRequest>.Filter.Where(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.ToDate > exit.LastWorkingDate && (x.Status == "Pending" || x.Status == "Approved")),
+                        Builders<WorkFromHomeRequest>.Update.Set(x => x.Status, "Cancelled").Set(x => x.RevokedByUserId, actorUserId).Set(x => x.RevokedAt, DateTime.UtcNow));
+            }
+            return completion;
+        }
+
+        private static string NormalizeEmploymentStatus(EmpUser employee) => employee.EmploymentStatus switch { "NoticePeriod" or "Resigned" or "Terminated" => employee.EmploymentStatus, _ => "Active" };
+
+        private async Task<bool> MeetsNoticePolicy(EmpUser employee, DateTime lastWorkingDate)
+        {
+            if (_employeeExitPolicyRepository is null) return true;
+            var policies = await _employeeExitPolicyRepository.GetAll(x => x.CompanyId == employee.CompanyId && x.IsActive && !x.IsDeleted);
+            var policy = policies.FirstOrDefault(x => x.DepartmentId == employee.Department)
+                ?? policies.FirstOrDefault(x => x.RoleId == employee.RoleId)
+                ?? policies.FirstOrDefault(x => string.IsNullOrWhiteSpace(x.DepartmentId) && string.IsNullOrWhiteSpace(x.RoleId));
+            return policy is null || lastWorkingDate >= DateTime.UtcNow.Date.AddDays(policy.MinimumNoticeDays);
+        }
+
+        private async Task PopulateExitClearances(EmployeeExit exit)
+        {
+            if (_employeeExitClearanceTemplateRepository is null || exit.Clearances.Count > 0) return;
+            var templates = await _employeeExitClearanceTemplateRepository.GetAll(x => x.CompanyId == exit.CompanyId && x.IsActive && !x.IsDeleted);
+            exit.Clearances = templates.Select(template => new EmployeeExitClearance
+            {
+                Category = template.Category,
+                OwnerRole = template.OwnerRole,
+                OwnerUserId = template.OwnerRole == "ReportingManager" ? exit.ReportingManagerUserId ?? string.Empty : string.Empty,
+                IsMandatory = template.IsMandatory,
+                DueAtUtc = exit.LastWorkingDate.Date.AddDays(-template.DueDaysBeforeLastWorkingDate)
+            }).ToList();
+            if (exit.Clearances.Count > 0)
+                exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "ClearancesGenerated", ActorUserId = CurrentContext.UserId(_httpContextAccessor) });
         }
 
         public async Task<Result<DepartmentEmpResponseDto>> GetDirectoryDepartments()

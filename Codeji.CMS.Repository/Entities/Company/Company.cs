@@ -3,6 +3,9 @@ using MongoDB.Bson.Serialization.Attributes;
 
 namespace Codeji.CMS.Repository.Entities.Company
 {
+    // Company documents evolve independently across tenants. Retired branding fields
+    // (for example AppTheme) must not prevent authentication or tenant reads.
+    [BsonIgnoreExtraElements]
     public class Company : Codeji.CMS.GenericRepository.Interfaces.ISupportAuditing, Codeji.CMS.GenericRepository.Interfaces.ISupportSoftDelete
     {
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]

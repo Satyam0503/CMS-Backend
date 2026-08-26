@@ -7,5 +7,6 @@
         public List<string> Gender { get; set; }
         public int PageNo { get; set; }
         public int Records { get; set; }
+        public string? EmploymentStatus { get; set; }
     }
 }
