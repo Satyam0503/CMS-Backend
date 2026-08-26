@@ -435,6 +435,9 @@ public sealed class WorkFromHomeService(
         row.TotalHours = totalHours;
         row.RemarkCode = "WFH_HOURS_CORRECTED";
         row.Remarks = $"HR/Admin corrected WFH hours: {Clean(dto.Remarks)}";
+        var saved = await attendance.Update(Builders<AttendanceModel>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.AttendanceId == row.AttendanceId && x.SourceType == "WFH_REQUEST" && x.SourceId == request.RequestId), row);
+        if (!saved.Success) return Fail("WFH_ATTENDANCE_UPDATE_FAILED", "The WFH attendance record could not be updated.");
+
         exception.Status = "RESOLVED";
         exception.Resolution = $"WFH hours corrected to {totalHours:0.##} hour(s) by HR/Admin.";
         exception.ReviewedBy = UserId;
