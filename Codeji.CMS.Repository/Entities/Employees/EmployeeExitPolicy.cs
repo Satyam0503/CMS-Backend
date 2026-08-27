@@ -10,5 +10,12 @@ public sealed class EmployeeExitPolicy : BaseClass
     public string? DepartmentId { get; set; }
     public string? RoleId { get; set; }
     public int MinimumNoticeDays { get; set; } = 30;
+    public int Version { get; set; } = 1;
+    public bool RequireManagerReview { get; set; } = true;
+    public bool RequireHrReview { get; set; } = true;
+    public bool AllowJointDiscussion { get; set; } = true;
+    public bool RequireResignationEvidence { get; set; }
+    public bool RequireEmployeeAcknowledgement { get; set; }
+    public bool EnableFormerEmployeePortal { get; set; }
     public bool IsActive { get; set; } = true;
 }

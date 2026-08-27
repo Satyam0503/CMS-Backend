@@ -17,6 +17,7 @@ namespace Codeji.CMS.Utility.Constraints
         public const string PayrollSettings = "Payroll_Settings";
         public const string CareerProfile = "Career_Profile";
         public const string WorkFromHome = "Work_From_Home";
+        public const string Offboarding = "Offboarding";
     }
 
     public static class Permission
@@ -37,6 +38,12 @@ namespace Codeji.CMS.Utility.Constraints
         public const string Revoke = "Revoke";
         public const string PolicyView = "PolicyView";
         public const string PolicyEdit = "PolicyEdit";
+        public const string Submit = "Submit";
+        public const string Review = "Review";
+        public const string Approve = "Approve";
+        public const string Complete = "Complete";
+        public const string Evidence = "Evidence";
+        public const string Download = "Download";
     }
 
     public static class ConstraintHelper

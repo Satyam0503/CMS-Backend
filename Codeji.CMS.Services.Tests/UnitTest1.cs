@@ -16,6 +16,7 @@ using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using MongoDB.Driver;
 using Moq;
 using System.Security.Claims;
 
@@ -147,6 +148,50 @@ public class EmployeeServiceBulkImportTests
         Assert.False(result.Success);
         Assert.Equal("SELF_SUBMISSION_MUST_BE_RESIGNATION", result.Message);
         fixture.EmployeeRepository.Verify(x => x.AddOne(It.IsAny<EmpUser>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CompleteEmployeeExit_RequiresVerifiedResignationEvidence_WhenPolicySnapshotsIt()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false); SetExitContext(fixture, "hr-user");
+        fixture.RoleService.Setup(x => x.VerifyUserAccess(It.IsAny<string>(), It.IsAny<string[]>(), "hr-user", "company-1", null)).ReturnsAsync(true);
+        fixture.EmployeeExitRepository.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeExit, bool>>>(), It.IsAny<bool>())).ReturnsAsync(new EmployeeExit { CompanyId = "company-1", EmployeeExitId = "exit-1", EmployeeUserId = "employee-1", Status = "NoticePeriod", IsActive = true, LastWorkingDate = DateTime.UtcNow.Date.AddDays(-1), PolicySnapshot = new EmployeeExitPolicySnapshot { RequireResignationEvidence = true } });
+
+        var result = await fixture.Service.CompleteEmployeeExit(new CompleteEmployeeExitRequest { EmployeeUserId = "employee-1" });
+
+        Assert.False(result.Success); Assert.Equal("RESIGNATION_EVIDENCE_PENDING", result.Message);
+    }
+
+    [Fact]
+    public async Task CompleteEmployeeExit_RequiresAcknowledgement_WhenPolicySnapshotsIt()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false); SetExitContext(fixture, "hr-user");
+        fixture.RoleService.Setup(x => x.VerifyUserAccess(It.IsAny<string>(), It.IsAny<string[]>(), "hr-user", "company-1", null)).ReturnsAsync(true);
+        fixture.EmployeeExitRepository.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeExit, bool>>>(), It.IsAny<bool>())).ReturnsAsync(new EmployeeExit { CompanyId = "company-1", EmployeeExitId = "exit-1", EmployeeUserId = "employee-1", Status = "NoticePeriod", IsActive = true, LastWorkingDate = DateTime.UtcNow.Date.AddDays(-1), PolicySnapshot = new EmployeeExitPolicySnapshot { RequireEmployeeAcknowledgement = true }, PostExitAccess = new EmployeeExitPostExitAccess { AcknowledgementStatus = "Pending" } });
+
+        var result = await fixture.Service.CompleteEmployeeExit(new CompleteEmployeeExitRequest { EmployeeUserId = "employee-1" });
+
+        Assert.False(result.Success); Assert.Equal("EMPLOYEE_ACKNOWLEDGEMENT_PENDING", result.Message);
+    }
+
+    [Fact]
+    public async Task ResolveFormerEmployeeRequest_UpdatesTenantCaseAndWritesAuditEvent()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false); SetExitContext(fixture, "hr-user");
+        fixture.RoleService.Setup(x => x.VerifyUserAccess(It.IsAny<string>(), It.IsAny<string[]>(), "hr-user", "company-1", null)).ReturnsAsync(true);
+        var exit = new EmployeeExit
+        {
+            CompanyId = "company-1", EmployeeExitId = "exit-1", Version = 4,
+            FormerEmployeeRequests = [new EmployeeExitFormerEmployeeRequest { RequestId = "request-1", Type = "RelievingLetter", Details = "Please issue it." }]
+        };
+        fixture.EmployeeExitRepository.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeExit, bool>>>(), It.IsAny<bool>())).ReturnsAsync(exit);
+        fixture.EmployeeExitRepository.Setup(x => x.Update(It.IsAny<FilterDefinition<EmployeeExit>>(), It.IsAny<EmployeeExit>())).ReturnsAsync(new Result { Success = true });
+
+        var result = await fixture.Service.ResolveEmployeeExitFormerEmployeeRequest(new ResolveEmployeeExitFormerEmployeeRequest { EmployeeExitId = "exit-1", RequestId = "request-1", Version = 4, Status = "Issued", Notes = "Document published to the portal." });
+
+        Assert.True(result.Success); Assert.Equal("Issued", exit.FormerEmployeeRequests[0].Status); Assert.Equal("hr-user", exit.FormerEmployeeRequests[0].ResolvedByUserId);
+        Assert.Contains(exit.AuditHistory, x => x.Action == "FormerEmployeeRequestIssued");
+        fixture.EmployeeExitRepository.Verify(x => x.Update(It.IsAny<FilterDefinition<EmployeeExit>>(), exit), Times.Once);
     }
 
     private static void SetExitContext(EmployeeServiceFixture fixture, string userId)
@@ -368,7 +413,8 @@ public class EmployeeServiceBulkImportTests
             fixture.UserSecurityTokenRepository.Object,
             fixture.OfficeScheduleRepository.Object,
             fixture.EmployeeScheduleAssignmentRepository.Object,
-            fixture.Logger.Object);
+            fixture.Logger.Object,
+            employeeExitRepository: fixture.EmployeeExitRepository.Object);
 
         return fixture;
     }
@@ -404,5 +450,6 @@ public class EmployeeServiceBulkImportTests
         public Mock<IMongoDbRepository<CompanyOfficeSchedule>> OfficeScheduleRepository { get; } = new();
         public Mock<IMongoDbRepository<EmployeeScheduleAssignment>> EmployeeScheduleAssignmentRepository { get; } = new();
         public Mock<ILogger<EmployeeService>> Logger { get; } = new();
+        public Mock<IMongoDbRepository<EmployeeExit>> EmployeeExitRepository { get; } = new();
     }
 }

@@ -1,6 +1,7 @@
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Employees;
+using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Employees;
@@ -13,10 +14,12 @@ public interface IEmployeeExitOutboxProcessor
 /// <summary>Claims exit events atomically and retries actual in-app notification delivery.</summary>
 public sealed class EmployeeExitOutboxProcessor(
     IMongoDbRepository<EmployeeExitOutbox> outbox,
+    IMongoDbRepository<EmployeeExit> exits,
     INotificationService notifications) : IEmployeeExitOutboxProcessor
 {
     public async Task ProcessPendingAsync(CancellationToken cancellationToken = default)
     {
+        await QueueDueRemindersAsync(cancellationToken);
         for (var processed = 0; processed < 25 && !cancellationToken.IsCancellationRequested; processed++)
         {
             var now = DateTime.UtcNow;
@@ -50,6 +53,46 @@ public sealed class EmployeeExitOutboxProcessor(
                 var error = ex.Message.Length > 1000 ? ex.Message[..1000] : ex.Message;
                 await collection.UpdateOneAsync(x => x.EmployeeExitOutboxId == item.EmployeeExitOutboxId,
                     Builders<EmployeeExitOutbox>.Update.Set(x => x.Status, state).Set(x => x.LastError, error).Set(x => x.NextAttemptAtUtc, DateTime.UtcNow.Add(delay)), cancellationToken: cancellationToken);
+            }
+        }
+    }
+
+    private async Task QueueDueRemindersAsync(CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var dueCases = await exits.GetCollection().Find(x => x.IsActive && !x.IsDeleted && x.Reminders.Any(r => r.Status == "Pending" && r.DueAtUtc <= now)).Limit(25).ToListAsync(cancellationToken);
+        foreach (var exit in dueCases)
+        {
+            foreach (var reminder in exit.Reminders.Where(r => r.Status == "Pending" && r.DueAtUtc <= now && !string.IsNullOrWhiteSpace(r.RecipientUserId)))
+            {
+                // Claim the embedded reminder before writing the outbox event.  This makes concurrent
+                // workers harmless: only the worker that changes Pending to Queued may enqueue it.
+                var claim = await exits.GetCollection().UpdateOneAsync(
+                    Builders<EmployeeExit>.Filter.And(
+                        Builders<EmployeeExit>.Filter.Eq(x => x.CompanyId, exit.CompanyId),
+                        Builders<EmployeeExit>.Filter.Eq(x => x.EmployeeExitId, exit.EmployeeExitId),
+                        Builders<EmployeeExit>.Filter.ElemMatch(x => x.Reminders, r => r.ReminderId == reminder.ReminderId && r.Status == "Pending" && r.DueAtUtc <= now)),
+                    new BsonDocument("$set", new BsonDocument
+                    {
+                        { "Reminders.$[reminder].Status", "Queued" },
+                        { "Reminders.$[reminder].LastError", BsonNull.Value }
+                    }),
+                    new UpdateOptions { ArrayFilters = [new BsonDocumentArrayFilterDefinition<BsonDocument>(new BsonDocument { { "reminder.ReminderId", reminder.ReminderId }, { "reminder.Status", "Pending" } })] },
+                    cancellationToken);
+                if (claim.ModifiedCount != 1) continue;
+
+                var queued = await outbox.AddOne(new EmployeeExitOutbox { CompanyId = exit.CompanyId, CreatedBy = "system", EmployeeExitId = exit.EmployeeExitId, EventType = "ExitReminder", RecipientUserId = reminder.RecipientUserId!, Title = "Offboarding reminder", Body = reminder.Trigger });
+                var finalStatus = queued.Success ? "Sent" : "Failed";
+                await exits.GetCollection().UpdateOneAsync(
+                    Builders<EmployeeExit>.Filter.And(Builders<EmployeeExit>.Filter.Eq(x => x.CompanyId, exit.CompanyId), Builders<EmployeeExit>.Filter.Eq(x => x.EmployeeExitId, exit.EmployeeExitId)),
+                    new BsonDocument("$set", new BsonDocument
+                    {
+                        { "Reminders.$[reminder].Status", finalStatus },
+                        { "Reminders.$[reminder].SentAtUtc", queued.Success ? new BsonDateTime(now) : BsonNull.Value },
+                        { "Reminders.$[reminder].LastError", queued.Success ? BsonNull.Value : new BsonString(queued.Message ?? "Outbox enqueue failed.") }
+                    }),
+                    new UpdateOptions { ArrayFilters = [new BsonDocumentArrayFilterDefinition<BsonDocument>(new BsonDocument("reminder.ReminderId", reminder.ReminderId))] },
+                    cancellationToken);
             }
         }
     }

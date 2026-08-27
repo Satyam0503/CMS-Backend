@@ -965,6 +965,7 @@ namespace Codeji.CMS.Services.Employees
                 return new Result { Success = false, Message = "EXIT_NOTICE_PERIOD_NOT_MET" };
 
             var lastWorkingDate = request.LastWorkingDate.Date;
+            var policy = await GetApplicableExitPolicy(employee);
             // Employee resignations must be reviewed before they affect employment;
             // HR-initiated terminations enter notice immediately.
             var status = isSelfSubmission ? "PendingManagerApproval" : "NoticePeriod";
@@ -974,8 +975,11 @@ namespace Codeji.CMS.Services.Employees
                 ExitType = request.ExitType, Status = status, InitiatedAtUtc = DateTime.UtcNow,
                 ReportingManagerUserId = employee.ReportingManager,
                 LastWorkingDate = lastWorkingDate, Reason = request.Reason?.Trim(), Notes = request.Notes?.Trim(),
+                PolicyVersionId = policy?.EmployeeExitPolicyId, PolicyVersion = policy?.Version,
+                PolicySnapshot = policy is null ? null : new EmployeeExitPolicySnapshot { MinimumNoticeDays = policy.MinimumNoticeDays, RequireManagerReview = policy.RequireManagerReview, RequireHrReview = policy.RequireHrReview, AllowJointDiscussion = policy.AllowJointDiscussion, RequireResignationEvidence = policy.RequireResignationEvidence, RequireEmployeeAcknowledgement = policy.RequireEmployeeAcknowledgement, EnableFormerEmployeePortal = policy.EnableFormerEmployeePortal },
                 AuditHistory = [new EmployeeExitAuditEvent { Action = isSelfSubmission ? "ResignationSubmitted" : "ExitInitiated", ActorUserId = actorUserId, Notes = request.Notes?.Trim() }]
             };
+            RescheduleExitReminders(exit, actorUserId);
             var create = await _employeeExitRepository.AddOne(exit);
             if (!create.Success) return create;
             employee.EmploymentStatus = status == "NoticePeriod" ? status : "Active"; employee.LastWorkingDate = lastWorkingDate;
@@ -989,27 +993,45 @@ namespace Codeji.CMS.Services.Employees
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
-            if (request is null || request.Action is not ("Approve" or "Reject") || string.IsNullOrWhiteSpace(request.EmployeeExitId))
+            if (request is null || request.Action is not ("Approve" or "Discuss" or "JointDiscussion") || string.IsNullOrWhiteSpace(request.EmployeeExitId))
                 return new Result { Success = false, Message = "EXIT_REVIEW_INVALID" };
             var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
             if (exit is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             if (exit.EmployeeUserId == actorUserId) return new Result { Success = false, Message = "SELF_EXIT_REVIEW_FORBIDDEN" };
-            var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == actorUserId && !x.IsDeleted);
-            var isHr = actor is not null && (await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.Administrator, companyId)
-                || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HR, companyId)
-                || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HRExecutive, companyId));
+            var isHr = await IsHrExitActor(companyId, actorUserId);
             var isAssignedManager = exit.Status == "PendingManagerApproval" && exit.ReportingManagerUserId == actorUserId;
             if (!isHr && !isAssignedManager) return new Result { Success = false, Message = "EXIT_REVIEW_FORBIDDEN" };
             if (exit.Status is not ("PendingManagerApproval" or "PendingHrApproval")) return new Result { Success = false, Message = "EXIT_REVIEW_NOT_ALLOWED_IN_STATE" };
+            if (request.Action is "Discuss" or "JointDiscussion" && string.IsNullOrWhiteSpace(request.Notes))
+                return new Result { Success = false, Message = "EXIT_DISCUSSION_NOTE_REQUIRED" };
             exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.Version++;
             exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = request.Action, ActorUserId = actorUserId, Notes = request.Notes?.Trim() });
-            if (request.Action == "Reject") { exit.Status = "Rejected"; exit.IsActive = false; exit.RejectedAtUtc = DateTime.UtcNow; exit.RejectionReason = request.Notes?.Trim(); }
+            if (request.Action is "Discuss" or "JointDiscussion")
+            {
+                exit.Status = "DiscussionRequested";
+                if (request.ProposedLastWorkingDate.HasValue) exit.LastWorkingDate = request.ProposedLastWorkingDate.Value.Date;
+            }
             else if (exit.Status == "PendingManagerApproval" && !isHr) exit.Status = "PendingHrApproval";
             else
             {
                 exit.Status = "NoticePeriod"; exit.ApprovedByUserId = actorUserId; exit.ApprovedAtUtc = DateTime.UtcNow;
                 await PopulateExitClearances(exit);
             }
+            Expression<Func<EmployeeExit, bool>> update = x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive;
+            return await _employeeExitRepository.Update(update, exit);
+        }
+
+        public async Task<Result> RespondToEmployeeExitDiscussion(RespondToEmployeeExitDiscussionRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId)) return new Result { Success = false, Message = "EXIT_DISCUSSION_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
+            if (exit.EmployeeUserId != actorUserId || exit.Status != "DiscussionRequested") return new Result { Success = false, Message = "EXIT_DISCUSSION_RESPONSE_FORBIDDEN" };
+            exit.Status = "PendingManagerApproval"; exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow;
+            if (request.ProposedLastWorkingDate.HasValue) exit.LastWorkingDate = request.ProposedLastWorkingDate.Value.Date;
+            exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "DiscussionResponded", ActorUserId = actorUserId, Notes = request.Notes?.Trim() });
             Expression<Func<EmployeeExit, bool>> update = x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive;
             return await _employeeExitRepository.Update(update, exit);
         }
@@ -1030,11 +1052,16 @@ namespace Codeji.CMS.Services.Employees
             if (selfOnly && exit.EmployeeUserId != actorUserId) return new Result { Success = false, Message = "EXIT_WITHDRAW_FORBIDDEN" };
             if (!selfOnly)
             {
-                var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == actorUserId && !x.IsDeleted);
-                var isHr = actor is not null && (await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.Administrator, companyId)
-                    || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HR, companyId)
-                    || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HRExecutive, companyId));
-                if (!isHr) return new Result { Success = false, Message = "EXIT_CANCEL_FORBIDDEN" };
+                if (!await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_CANCEL_FORBIDDEN" };
+            }
+            if (selfOnly && exit.Status == "NoticePeriod")
+            {
+                if (exit.Withdrawal is not null && exit.Withdrawal.Status == "Pending") return new Result { Success = false, Message = "EXIT_WITHDRAWAL_ALREADY_PENDING" };
+                exit.Withdrawal = new EmployeeExitWithdrawal { RequestedByUserId = actorUserId, Reason = request.Reason?.Trim() ?? string.Empty };
+                exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow;
+                exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "WithdrawalRequested", ActorUserId = actorUserId, Notes = request.Reason?.Trim() });
+                Expression<Func<EmployeeExit, bool>> requestUpdate = x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive;
+                return await _employeeExitRepository.Update(requestUpdate, exit);
             }
             if (selfOnly && exit.Status is not ("PendingManagerApproval" or "PendingHrApproval")) return new Result { Success = false, Message = "EXIT_WITHDRAW_NOT_ALLOWED_IN_STATE" };
             exit.Status = status; exit.IsActive = false; exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow;
@@ -1043,12 +1070,24 @@ namespace Codeji.CMS.Services.Employees
             return await _employeeExitRepository.Update(update, exit);
         }
 
+        public async Task<Result> DecideEmployeeExitWithdrawal(DecideEmployeeExitWithdrawalRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId)) return new Result { Success = false, Message = "EXIT_WITHDRAWAL_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit?.Withdrawal is null || exit.Withdrawal.Status != "Pending" || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
+            var isManager = exit.ReportingManagerUserId == actorUserId;
+            if (!isManager && !await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_WITHDRAWAL_REVIEW_FORBIDDEN" };
+            exit.Withdrawal.Status = request.Approve ? "Approved" : "Declined"; exit.Withdrawal.DecidedByUserId = actorUserId; exit.Withdrawal.DecidedAtUtc = DateTime.UtcNow; exit.Withdrawal.DecisionNotes = request.Notes?.Trim();
+            exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow;
+            exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = request.Approve ? "WithdrawalApproved" : "WithdrawalDeclined", ActorUserId = actorUserId, Notes = request.Notes?.Trim() });
+            if (request.Approve) { exit.Status = "Withdrawn"; exit.IsActive = false; }
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+        }
+
         private async Task<bool> IsHrExitActor(string companyId, string actorUserId)
         {
-            var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == actorUserId && !x.IsDeleted);
-            return actor is not null && (await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.Administrator, companyId)
-                || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HR, companyId)
-                || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HRExecutive, companyId));
+            return await _roleService.VerifyUserAccess(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, [Codeji.CMS.Utility.Constraints.Permission.Edit, Codeji.CMS.Utility.Constraints.Permission.Override], actorUserId, companyId);
         }
 
         public async Task<Result> UpdateEmployeeExitDate(UpdateEmployeeExitDateRequest request)
@@ -1066,6 +1105,7 @@ namespace Codeji.CMS.Services.Employees
             if (request.OverrideNoticePolicy && string.IsNullOrWhiteSpace(request.Reason))
                 return new Result { Success = false, Message = "EXIT_NOTICE_OVERRIDE_REASON_REQUIRED" };
             exit.LastWorkingDate = request.LastWorkingDate.Date; exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow;
+            RescheduleExitReminders(exit, actorUserId);
             exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = request.OverrideNoticePolicy ? "LastWorkingDateNoticeOverride" : "LastWorkingDateUpdated", ActorUserId = actorUserId, Notes = request.Reason?.Trim() });
             Expression<Func<EmployeeExit, bool>> update = x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive;
             var result = await _employeeExitRepository.Update(update, exit);
@@ -1075,18 +1115,49 @@ namespace Codeji.CMS.Services.Employees
             return await _employeeRepository.Update(updateEmployee, employee);
         }
 
+        public async Task<Result> RequestEmployeeExitNoticeAdjustment(RequestEmployeeExitNoticeAdjustmentRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId) || string.IsNullOrWhiteSpace(request.Reason) || request.RequestedLastWorkingDate == default
+                || request.Type is not ("EmployeeEarlyRelease" or "CompanyEarlyRelease" or "FullWaiver" or "PartialWaiver" or "Buyout" or "Recovery" or "NoticeExtension")) return new Result { Success = false, Message = "EXIT_NOTICE_ADJUSTMENT_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version || exit.Status is not ("PendingManagerApproval" or "PendingHrApproval" or "NoticePeriod")) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
+            if (exit.EmployeeUserId != actorUserId && !await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_NOTICE_ADJUSTMENT_FORBIDDEN" };
+            var policyNoticeDays = exit.PolicySnapshot?.MinimumNoticeDays ?? 0;
+            var servedDays = Math.Max(0, (request.RequestedLastWorkingDate.Date - exit.InitiatedAtUtc.Date).Days);
+            var adjustment = new EmployeeExitNoticeAdjustment { Type = request.Type, RequestedByUserId = actorUserId, CurrentLastWorkingDate = exit.LastWorkingDate, RequestedLastWorkingDate = request.RequestedLastWorkingDate.Date, RequiredNoticeDays = policyNoticeDays, ServedNoticeDays = servedDays, ShortfallDays = Math.Max(0, policyNoticeDays - servedDays), WaivedDays = Math.Max(0, request.WaivedDays), RecoveryAmount = request.RecoveryAmount, Reason = request.Reason.Trim() };
+            exit.NoticeAdjustments.Add(adjustment); exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow;
+            exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "NoticeAdjustmentRequested", ActorUserId = actorUserId, Notes = adjustment.Type });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+        }
+
+        public async Task<Result> DecideEmployeeExitNoticeAdjustment(DecideEmployeeExitNoticeAdjustmentRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (!await IsHrExitActor(companyId, actorUserId) || request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId) || string.IsNullOrWhiteSpace(request.NoticeAdjustmentId)) return new Result { Success = false, Message = "EXIT_NOTICE_ADJUSTMENT_FORBIDDEN" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            var adjustment = exit?.NoticeAdjustments.FirstOrDefault(x => x.NoticeAdjustmentId == request.NoticeAdjustmentId && x.Status == "Pending");
+            if (exit is null || adjustment is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
+            adjustment.Status = request.Approve ? "Approved" : "Declined"; adjustment.DecisionByUserId = actorUserId; adjustment.DecidedAtUtc = DateTime.UtcNow;
+            if (request.Approve) exit.LastWorkingDate = adjustment.RequestedLastWorkingDate;
+            exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow;
+            exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = request.Approve ? "NoticeAdjustmentApproved" : "NoticeAdjustmentDeclined", ActorUserId = actorUserId, Notes = request.Reason?.Trim() });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+        }
+
         public async Task<Result> UpsertEmployeeExitPolicy(UpsertEmployeeExitPolicyRequest request)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (_employeeExitPolicyRepository is null || request is null || request.MinimumNoticeDays < 0 || (!string.IsNullOrWhiteSpace(request.DepartmentId) && !string.IsNullOrWhiteSpace(request.RoleId)))
                 return new Result { Success = false, Message = "EXIT_POLICY_INVALID" };
-            var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == actorUserId && !x.IsDeleted);
-            var isHr = actor is not null && (await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.Administrator, companyId) || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HR, companyId) || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HRExecutive, companyId));
-            if (!isHr) return new Result { Success = false, Message = "EXIT_POLICY_FORBIDDEN" };
+            if (!await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_POLICY_FORBIDDEN" };
             var existing = string.IsNullOrWhiteSpace(request.EmployeeExitPolicyId) ? null : await _employeeExitPolicyRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitPolicyId == request.EmployeeExitPolicyId && !x.IsDeleted);
             var policy = existing ?? new EmployeeExitPolicy { CompanyId = companyId, CreatedBy = actorUserId };
-            policy.DepartmentId = request.DepartmentId?.Trim(); policy.RoleId = request.RoleId?.Trim(); policy.MinimumNoticeDays = request.MinimumNoticeDays; policy.IsActive = request.IsActive; policy.UpdatedBy = actorUserId; policy.UpdatedDate = DateTime.UtcNow;
+            policy.DepartmentId = request.DepartmentId?.Trim(); policy.RoleId = request.RoleId?.Trim(); policy.MinimumNoticeDays = request.MinimumNoticeDays;
+            policy.RequireManagerReview = request.RequireManagerReview; policy.RequireHrReview = request.RequireHrReview; policy.AllowJointDiscussion = request.AllowJointDiscussion;
+            policy.RequireResignationEvidence = request.RequireResignationEvidence; policy.RequireEmployeeAcknowledgement = request.RequireEmployeeAcknowledgement; policy.EnableFormerEmployeePortal = request.EnableFormerEmployeePortal;
+            if (existing is not null) policy.Version++; policy.IsActive = request.IsActive; policy.UpdatedBy = actorUserId; policy.UpdatedDate = DateTime.UtcNow;
             if (existing is null) return await _employeeExitPolicyRepository.AddOne(policy);
             Expression<Func<EmployeeExitPolicy, bool>> update = x => x.CompanyId == companyId && x.EmployeeExitPolicyId == policy.EmployeeExitPolicyId && !x.IsDeleted;
             return await _employeeExitPolicyRepository.Update(update, policy);
@@ -1128,9 +1199,7 @@ namespace Codeji.CMS.Services.Employees
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (_employeeExitClearanceTemplateRepository is null || request is null || string.IsNullOrWhiteSpace(request.Category) || request.DueDaysBeforeLastWorkingDate < 0)
                 return new Result { Success = false, Message = "EXIT_CLEARANCE_TEMPLATE_INVALID" };
-            var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == actorUserId && !x.IsDeleted);
-            var isHr = actor is not null && (await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.Administrator, companyId) || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HR, companyId) || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HRExecutive, companyId));
-            if (!isHr) return new Result { Success = false, Message = "EXIT_CLEARANCE_TEMPLATE_FORBIDDEN" };
+            if (!await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_CLEARANCE_TEMPLATE_FORBIDDEN" };
             var existing = string.IsNullOrWhiteSpace(request.EmployeeExitClearanceTemplateId) ? null : await _employeeExitClearanceTemplateRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitClearanceTemplateId == request.EmployeeExitClearanceTemplateId && !x.IsDeleted);
             var template = existing ?? new EmployeeExitClearanceTemplate { CompanyId = companyId, CreatedBy = actorUserId };
             template.Category = request.Category.Trim(); template.OwnerRole = request.OwnerRole?.Trim(); template.IsMandatory = request.IsMandatory; template.DueDaysBeforeLastWorkingDate = request.DueDaysBeforeLastWorkingDate; template.IsActive = request.IsActive; template.UpdatedBy = actorUserId; template.UpdatedDate = DateTime.UtcNow;
@@ -1144,9 +1213,7 @@ namespace Codeji.CMS.Services.Employees
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (_employeeFinalSettlementRepository is null || request is null) return new Result { Success = false, Message = "FINAL_SETTLEMENT_INVALID" };
-            var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == actorUserId && !x.IsDeleted);
-            var isHr = actor is not null && (await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.Administrator, companyId) || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HR, companyId) || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HRExecutive, companyId));
-            if (!isHr) return new Result { Success = false, Message = "FINAL_SETTLEMENT_FORBIDDEN" };
+            if (!await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "FINAL_SETTLEMENT_FORBIDDEN" };
             var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
             if (exit is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             var settlement = await _employeeFinalSettlementRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && !x.IsDeleted)
@@ -1156,6 +1223,20 @@ namespace Codeji.CMS.Services.Employees
             if (!saved.Success) return saved;
             exit.Version++; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "FinalSettlementApproved", ActorUserId = actorUserId });
             return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version), exit);
+        }
+
+        public async Task<Result> UpdateEmployeeFinalSettlementPayment(UpdateEmployeeFinalSettlementPaymentRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (_employeeFinalSettlementRepository is null || request is null || request.Status is not ("PaymentInitiated" or "Paid" or "PaymentFailed" or "Disputed") || request.PaidAmount < 0 || !await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "FINAL_SETTLEMENT_PAYMENT_FORBIDDEN" };
+            var settlement = await _employeeFinalSettlementRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted);
+            if (settlement is null || settlement.Status is not ("Approved" or "PaymentInitiated" or "PaymentFailed" or "Disputed")) return new Result { Success = false, Message = "FINAL_SETTLEMENT_NOT_APPROVED" };
+            settlement.Status = request.Status; settlement.PaidAmount = request.PaidAmount; settlement.PaymentReference = request.PaymentReference?.Trim(); settlement.PaymentMethod = request.PaymentMethod?.Trim(); settlement.UpdatedBy = actorUserId; settlement.UpdatedDate = DateTime.UtcNow; settlement.Version++;
+            if (request.Status == "PaymentInitiated") settlement.PaymentInitiatedAtUtc = DateTime.UtcNow;
+            if (request.Status == "Paid") settlement.PaidAtUtc = DateTime.UtcNow;
+            if (request.Status == "PaymentFailed") settlement.PaymentFailureReason = request.Reason?.Trim();
+            if (request.Status == "Disputed") settlement.DisputeReason = request.Reason?.Trim();
+            return await _employeeFinalSettlementRepository.Update(Builders<EmployeeFinalSettlement>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeFinalSettlementId == settlement.EmployeeFinalSettlementId), settlement);
         }
 
         public async Task<Result> CompleteEmployeeExitClearance(CompleteEmployeeExitClearanceRequest request, bool waive)
@@ -1174,6 +1255,177 @@ namespace Codeji.CMS.Services.Employees
             return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
         }
 
+        public async Task<Result> UpsertEmployeeExitHandoverTask(UpsertEmployeeExitHandoverTaskRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId) || string.IsNullOrWhiteSpace(request.Title)) return new Result { Success = false, Message = "EXIT_HANDOVER_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version || exit.Status != "NoticePeriod") return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
+            if (exit.ReportingManagerUserId != actorUserId && !await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_HANDOVER_FORBIDDEN" };
+            var task = string.IsNullOrWhiteSpace(request.HandoverTaskId) ? null : exit.HandoverTasks.FirstOrDefault(x => x.HandoverTaskId == request.HandoverTaskId);
+            if (task is null) { task = new EmployeeExitHandoverTask(); exit.HandoverTasks.Add(task); }
+            task.Title = request.Title.Trim(); task.Details = request.Details?.Trim(); task.AssigneeUserId = request.AssigneeUserId?.Trim() ?? exit.EmployeeUserId; task.DueAtUtc = request.DueAtUtc;
+            exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "HandoverTaskUpdated", ActorUserId = actorUserId, Notes = task.Title });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+        }
+
+        public async Task<Result> ReviewEmployeeExitHandoverTask(ReviewEmployeeExitHandoverTaskRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || request.Action is not ("Submit" or "Approve" or "ChangesRequested" or "Blocked" or "Waived")) return new Result { Success = false, Message = "EXIT_HANDOVER_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            var task = exit?.HandoverTasks.FirstOrDefault(x => x.HandoverTaskId == request.HandoverTaskId);
+            if (exit is null || task is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
+            if (request.Action == "Submit") { if (task.AssigneeUserId != actorUserId) return new Result { Success = false, Message = "EXIT_HANDOVER_FORBIDDEN" }; task.Status = "Submitted"; task.SubmittedByUserId = actorUserId; task.SubmittedAtUtc = DateTime.UtcNow; }
+            else { if (exit.ReportingManagerUserId != actorUserId && !await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_HANDOVER_FORBIDDEN" }; task.Status = request.Action; task.ReviewNotes = request.Notes?.Trim(); if (request.Action == "Approve") { task.ApprovedByUserId = actorUserId; task.ApprovedAtUtc = DateTime.UtcNow; } }
+            exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "Handover" + request.Action, ActorUserId = actorUserId, Notes = request.Notes?.Trim() });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+        }
+
+        public async Task<Result> UpsertEmployeeExitAsset(UpsertEmployeeExitAssetRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId) || string.IsNullOrWhiteSpace(request.AssetType) || request.RecoveryAmount < 0) return new Result { Success = false, Message = "EXIT_ASSET_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version || exit.Status != "NoticePeriod" || !await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_ASSET_FORBIDDEN" };
+            var asset = string.IsNullOrWhiteSpace(request.AssetExitId) ? null : exit.Assets.FirstOrDefault(x => x.AssetExitId == request.AssetExitId);
+            if (asset is null) { asset = new EmployeeExitAsset(); exit.Assets.Add(asset); }
+            asset.AssetType = request.AssetType.Trim(); asset.AssetIdentifier = request.AssetIdentifier?.Trim(); asset.Status = request.Status; asset.TrackingReference = request.TrackingReference?.Trim(); asset.RecoveryAmount = request.RecoveryAmount; asset.Notes = request.Notes?.Trim();
+            if (request.Status == "Verified") { asset.VerifiedByUserId = actorUserId; asset.VerifiedAtUtc = DateTime.UtcNow; }
+            exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "AssetUpdated", ActorUserId = actorUserId, Notes = asset.AssetType });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+        }
+
+        public async Task<Result> UpsertEmployeeExitAccessItem(UpsertEmployeeExitAccessItemRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId) || string.IsNullOrWhiteSpace(request.System) || request.Mode is not ("Immediate" or "Scheduled" or "AtLwd" or "Manual" or "Phased")) return new Result { Success = false, Message = "EXIT_ACCESS_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version || !await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_ACCESS_FORBIDDEN" };
+            var item = string.IsNullOrWhiteSpace(request.AccessItemId) ? null : exit.AccessItems.FirstOrDefault(x => x.AccessItemId == request.AccessItemId);
+            if (item is null) { item = new EmployeeExitAccessItem(); exit.AccessItems.Add(item); }
+            item.System = request.System.Trim(); item.Mode = request.Mode; item.Status = request.Status; item.ScheduledAtUtc = request.ScheduledAtUtc; item.ExternalReference = request.ExternalReference?.Trim(); item.Notes = request.Notes?.Trim(); if (request.Status == "Revoked") item.CompletedAtUtc = DateTime.UtcNow;
+            exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "AccessItemUpdated", ActorUserId = actorUserId, Notes = item.System });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+        }
+
+        public async Task<Result> UpsertEmployeeExitFinanceItem(UpsertEmployeeExitFinanceItemRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId) || string.IsNullOrWhiteSpace(request.Category) || request.Amount < 0 || request.Direction is not ("PayableToEmployee" or "ReceivableFromEmployee" or "Informational")) return new Result { Success = false, Message = "EXIT_FINANCE_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version || !await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_FINANCE_FORBIDDEN" };
+            var item = string.IsNullOrWhiteSpace(request.FinanceItemId) ? null : exit.FinanceItems.FirstOrDefault(x => x.FinanceItemId == request.FinanceItemId);
+            if (item is null) { item = new EmployeeExitFinanceItem(); exit.FinanceItems.Add(item); }
+            item.Category = request.Category.Trim(); item.Direction = request.Direction; item.Amount = request.Amount; item.Status = request.Status; item.Reference = request.Reference?.Trim(); item.Notes = request.Notes?.Trim();
+            exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "FinanceItemUpdated", ActorUserId = actorUserId, Notes = item.Category });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+        }
+
+        public async Task<Result> UpsertEmployeeExitBenefitItem(UpsertEmployeeExitBenefitItemRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId) || string.IsNullOrWhiteSpace(request.Category)) return new Result { Success = false, Message = "EXIT_BENEFIT_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version || !await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_BENEFIT_FORBIDDEN" };
+            var item = string.IsNullOrWhiteSpace(request.BenefitItemId) ? null : exit.BenefitItems.FirstOrDefault(x => x.BenefitItemId == request.BenefitItemId);
+            if (item is null) { item = new EmployeeExitBenefitItem(); exit.BenefitItems.Add(item); }
+            item.Category = request.Category.Trim(); item.Status = request.Status; item.EffectiveEndDate = request.EffectiveEndDate; item.Reference = request.Reference?.Trim(); item.Notes = request.Notes?.Trim();
+            exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "BenefitItemUpdated", ActorUserId = actorUserId, Notes = item.Category });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+        }
+
+        public async Task<Result> AddEmployeeExitEvidence(AddEmployeeExitEvidenceRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId) || string.IsNullOrWhiteSpace(request.Category) || request.Type is not ("UploadedFile" or "Email" or "SystemRecord" or "ExternalReference" or "GeneratedDocument" or "SignedAcknowledgement")) return new Result { Success = false, Message = "EXIT_EVIDENCE_INVALID" };
+            if (request.Visibility is not ("EmployeeOnly" or "EmployeeManagerHR" or "HROnly" or "HRAndFinance" or "HRAndIT")) return new Result { Success = false, Message = "EXIT_EVIDENCE_VISIBILITY_INVALID" };
+            if (request.Type == "Email" && (string.IsNullOrWhiteSpace(request.EmailMessageId) || string.IsNullOrWhiteSpace(request.EmailSubject) || !request.EmailSentAtUtc.HasValue || request.EmailSentAtUtc > DateTime.UtcNow.AddMinutes(5))) return new Result { Success = false, Message = "EXIT_EVIDENCE_EMAIL_METADATA_REQUIRED" };
+            if (request.Type is "SystemRecord" or "ExternalReference" && string.IsNullOrWhiteSpace(request.ExternalReference)) return new Result { Success = false, Message = "EXIT_EVIDENCE_REFERENCE_REQUIRED" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.Version != request.Version || (exit.EmployeeUserId != actorUserId && !await IsHrExitActor(companyId, actorUserId))) return new Result { Success = false, Message = "EXIT_EVIDENCE_FORBIDDEN" };
+            if (request.Type == "UploadedFile" && (string.IsNullOrWhiteSpace(request.StorageKey) || string.IsNullOrWhiteSpace(request.FileName) || string.IsNullOrWhiteSpace(request.ContentType))) return new Result { Success = false, Message = "EXIT_EVIDENCE_FILE_METADATA_REQUIRED" };
+            if (!string.IsNullOrWhiteSpace(request.Sha256) && exit.Evidence.Any(x => x.Sha256 == request.Sha256.Trim() && x.Status != "Archived")) return new Result { Success = false, Message = "EXIT_EVIDENCE_DUPLICATE" };
+            exit.Evidence.Add(new EmployeeExitEvidence { Category = request.Category.Trim(), Type = request.Type, Visibility = request.Visibility, StorageKey = request.StorageKey?.Trim(), FileName = request.FileName?.Trim(), ContentType = request.ContentType?.Trim(), Sha256 = request.Sha256?.Trim(), ExternalReference = request.ExternalReference?.Trim(), EmailMessageId = request.EmailMessageId?.Trim(), EmailSubject = request.EmailSubject?.Trim(), EmailSentAtUtc = request.EmailSentAtUtc, UploadedByUserId = actorUserId });
+            exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "EvidenceAdded", ActorUserId = actorUserId, Notes = request.Category });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+        }
+
+        public async Task<Result> VerifyEmployeeExitEvidence(VerifyEmployeeExitEvidenceRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId) || string.IsNullOrWhiteSpace(request.EvidenceId) || !await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_EVIDENCE_FORBIDDEN" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            var evidence = exit?.Evidence.FirstOrDefault(x => x.EvidenceId == request.EvidenceId);
+            if (exit is null || evidence is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
+            evidence.Status = request.Verified ? "Verified" : "NeedsCorrection"; evidence.VerifiedByUserId = actorUserId; evidence.VerifiedAtUtc = DateTime.UtcNow;
+            exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = request.Verified ? "EvidenceVerified" : "EvidenceNeedsCorrection", ActorUserId = actorUserId, Notes = evidence.Category });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+        }
+
+        public async Task<Result> SupersedeEmployeeExitEvidence(SupersedeEmployeeExitEvidenceRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || !await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_EVIDENCE_FORBIDDEN" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            var evidence = exit?.Evidence.FirstOrDefault(x => x.EvidenceId == request.EvidenceId);
+            if (exit is null || evidence is null || exit.Version != request.Version || evidence.Status is "Archived" or "Superseded") return new Result { Success = false, Message = "EXIT_EVIDENCE_NOT_ACTIONABLE" };
+            evidence.Status = "Superseded"; exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "EvidenceSuperseded", ActorUserId = actorUserId, Notes = evidence.Category });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+        }
+
+        public async Task<Result> UpdateEmployeeExitPostExitContact(UpdateEmployeeExitPostExitContactRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.PersonalEmail) || !request.PersonalEmail.Contains('@')) return new Result { Success = false, Message = "EXIT_POST_EXIT_CONTACT_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && x.IsActive && !x.IsDeleted);
+            if (exit is null || exit.EmployeeUserId != actorUserId || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_POST_EXIT_CONTACT_FORBIDDEN" };
+            exit.PostExitAccess ??= new EmployeeExitPostExitAccess(); exit.PostExitAccess.PersonalEmail = request.PersonalEmail.Trim(); exit.PostExitAccess.Mobile = request.Mobile?.Trim();
+            exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "PostExitContactUpdated", ActorUserId = actorUserId });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && x.IsActive), exit);
+        }
+
+        public async Task<Result> AcknowledgeEmployeeExit(AcknowledgeEmployeeExitRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            var exit = request is null ? null : await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted);
+            if (exit is null || exit.EmployeeUserId != actorUserId || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_ACKNOWLEDGEMENT_FORBIDDEN" };
+            exit.PostExitAccess ??= new EmployeeExitPostExitAccess(); exit.PostExitAccess.AcknowledgementStatus = "Acknowledged"; exit.PostExitAccess.AcknowledgedAtUtc = DateTime.UtcNow; exit.PostExitAccess.AcknowledgementNotes = request.Notes?.Trim();
+            exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "ExitAcknowledged", ActorUserId = actorUserId, Notes = request.Notes?.Trim() });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version), exit);
+        }
+
+        public async Task<Result> CreateEmployeeExitFormerEmployeeRequest(CreateEmployeeExitFormerEmployeeRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.Details) || request.Type is not ("RelievingLetter" or "ExperienceLetter" or "FnFStatement" or "TaxDocument" or "Correction" or "Other")) return new Result { Success = false, Message = "FORMER_EMPLOYEE_REQUEST_INVALID" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted);
+            if (exit is null || exit.EmployeeUserId != actorUserId || exit.Version != request.Version) return new Result { Success = false, Message = "FORMER_EMPLOYEE_REQUEST_FORBIDDEN" };
+            exit.FormerEmployeeRequests.Add(new EmployeeExitFormerEmployeeRequest { Type = request.Type, Details = request.Details.Trim() }); exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "FormerEmployeeRequestCreated", ActorUserId = actorUserId, Notes = request.Type });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version), exit);
+        }
+
+        public async Task<Result> ResolveEmployeeExitFormerEmployeeRequest(ResolveEmployeeExitFormerEmployeeRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId) || string.IsNullOrWhiteSpace(request.RequestId) || request.Status is not ("InProgress" or "Issued" or "Closed"))
+                return new Result { Success = false, Message = "FORMER_EMPLOYEE_REQUEST_RESOLUTION_INVALID" };
+            if (!await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "FORMER_EMPLOYEE_REQUEST_RESOLUTION_FORBIDDEN" };
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted);
+            var formerEmployeeRequest = exit?.FormerEmployeeRequests.FirstOrDefault(x => x.RequestId == request.RequestId);
+            if (exit is null || formerEmployeeRequest is null || exit.Version != request.Version)
+                return new Result { Success = false, Message = "FORMER_EMPLOYEE_REQUEST_CHANGED_OR_NOT_FOUND" };
+            if (formerEmployeeRequest.Status is "Issued" or "Closed") return new Result { Success = false, Message = "FORMER_EMPLOYEE_REQUEST_ALREADY_FINALIZED" };
+
+            formerEmployeeRequest.Status = request.Status;
+            formerEmployeeRequest.ResolvedByUserId = actorUserId;
+            formerEmployeeRequest.ResolvedAtUtc = DateTime.UtcNow;
+            formerEmployeeRequest.ResolutionNotes = request.Notes?.Trim();
+            exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow;
+            exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "FormerEmployeeRequest" + request.Status, ActorUserId = actorUserId, Notes = formerEmployeeRequest.Type });
+            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version), exit);
+        }
+
         public async Task<Result> RejoinEmployee(RejoinEmployeeRequest request)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -1188,7 +1440,9 @@ namespace Codeji.CMS.Services.Employees
             Expression<Func<EmpUser, bool>> updateEmployee = x => x.CompanyId == companyId && x.UserId == employee.UserId && !x.IsDeleted && !x.Status;
             var result = await _employeeRepository.Update(updateEmployee, employee);
             if (!result.Success) return result;
-            exit.Version++; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "Rejoined", ActorUserId = actorUserId, Notes = request.Reason.Trim() });
+            exit.Status = "Rejoined"; exit.IsActive = false;
+            if (exit.PostExitAccess is not null) exit.PostExitAccess.Enabled = false;
+            exit.Version++; exit.UpdatedBy = actorUserId; exit.UpdatedDate = DateTime.UtcNow; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "Rejoined", ActorUserId = actorUserId, Notes = request.Reason.Trim() });
             return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version), exit);
         }
 
@@ -1224,9 +1478,34 @@ namespace Codeji.CMS.Services.Employees
                 EmployeeExitId = exit.EmployeeExitId, EmployeeUserId = exit.EmployeeUserId, ExitType = exit.ExitType, Status = exit.Status,
                 LastWorkingDate = exit.LastWorkingDate, Reason = exit.Reason, Notes = exit.Notes, InitiatedAtUtc = exit.InitiatedAtUtc, CompletedAtUtc = exit.CompletedAtUtc, Version = exit.Version,
                 Clearances = exit.Clearances.Select(x => new EmployeeExitClearanceDto { ClearanceId = x.ClearanceId, Category = x.Category, Status = x.Status, IsMandatory = x.IsMandatory, DueAtUtc = x.DueAtUtc }).ToList(),
+                HandoverTasks = exit.HandoverTasks.Select(x => new EmployeeExitHandoverTaskDto { HandoverTaskId = x.HandoverTaskId, Title = x.Title, Details = x.Details, AssigneeUserId = x.AssigneeUserId, DueAtUtc = x.DueAtUtc, Status = x.Status }).ToList(), Assets = exit.Assets.Select(x => new EmployeeExitAssetDto { AssetExitId = x.AssetExitId, AssetType = x.AssetType, AssetIdentifier = x.AssetIdentifier, Status = x.Status, TrackingReference = x.TrackingReference, RecoveryAmount = x.RecoveryAmount, Notes = x.Notes }).ToList(), AccessItems = exit.AccessItems.Select(x => new EmployeeExitAccessItemDto { AccessItemId = x.AccessItemId, System = x.System, Mode = x.Mode, Status = x.Status, ScheduledAtUtc = x.ScheduledAtUtc, ExternalReference = x.ExternalReference, Notes = x.Notes }).ToList(), FinanceItems = exit.FinanceItems.Select(x => new EmployeeExitFinanceItemDto { FinanceItemId = x.FinanceItemId, Category = x.Category, Direction = x.Direction, Amount = x.Amount, Status = x.Status, Reference = x.Reference, Notes = x.Notes }).ToList(), BenefitItems = exit.BenefitItems.Select(x => new EmployeeExitBenefitItemDto { BenefitItemId = x.BenefitItemId, Category = x.Category, Status = x.Status, EffectiveEndDate = x.EffectiveEndDate, Reference = x.Reference, Notes = x.Notes }).ToList(), Evidence = exit.Evidence.Select(x => new EmployeeExitEvidenceDetailDto { EvidenceId = x.EvidenceId, Category = x.Category, Type = x.Type, Status = x.Status, Visibility = x.Visibility, FileName = x.FileName, ContentType = x.ContentType, UploadedAtUtc = x.UploadedAtUtc }).ToList(),
+                FormerEmployeeRequests = exit.FormerEmployeeRequests.Select(x => new FormerEmployeePortalRequestDto { RequestId = x.RequestId, Type = x.Type, Status = x.Status, Details = x.Details, RequestedAtUtc = x.RequestedAtUtc }).ToList(),
                 AuditHistory = exit.AuditHistory.Select(x => new EmployeeExitAuditEventDto { Action = x.Action, ActorUserId = x.ActorUserId, AtUtc = x.AtUtc, Notes = x.Notes }).ToList(),
-                PermittedActions = exit.Status is "PendingManagerApproval" or "PendingHrApproval" ? ["Withdraw"] : []
+                PermittedActions = exit.Status switch { "PendingManagerApproval" or "PendingHrApproval" => ["Withdraw"], "DiscussionRequested" => ["RespondDiscussion"], _ => [] },
+                PendingHandoverCount = exit.HandoverTasks.Count(x => x.Status is not ("Approved" or "Waived")), PendingAssetCount = exit.Assets.Count(x => x.Status is not ("Verified" or "Waived" or "RecoveredFinancially")), PendingAccessCount = exit.AccessItems.Count(x => x.Status is not ("Revoked" or "Waived")), PendingFinanceCount = exit.FinanceItems.Count(x => x.Status is not ("Completed" or "Waived")), PendingBenefitCount = exit.BenefitItems.Count(x => x.Status is not ("Completed" or "Waived"))
             }};
+        }
+
+        public async Task<Result<EmployeeExitCaseDto>> GetEmployeeExitCaseForEvidence(string employeeExitId)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == employeeExitId && !x.IsDeleted);
+            if (exit is null) return new Result<EmployeeExitCaseDto> { Success = false, Message = "EXIT_CASE_NOT_FOUND" };
+            return exit.EmployeeUserId == actorUserId ? await GetEmployeeExitCase(exit.EmployeeUserId) : await GetEmployeeExitCaseForManagement(exit.EmployeeUserId);
+        }
+
+        public async Task<Result<EmployeeExitEvidenceDto>> GetEmployeeExitEvidence(string employeeExitId, string evidenceId)
+        {
+            var access = await GetEmployeeExitCaseForEvidence(employeeExitId);
+            if (!access.Success) return new Result<EmployeeExitEvidenceDto> { Success = false, Message = access.Message };
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == employeeExitId && !x.IsDeleted);
+            var evidence = exit?.Evidence.FirstOrDefault(x => x.EvidenceId == evidenceId && x.Status != "Archived");
+            if (evidence is not null && evidence.Visibility is "EmployeeOnly" && exit!.EmployeeUserId != actorUserId) return new Result<EmployeeExitEvidenceDto> { Success = false, Message = "EXIT_EVIDENCE_FORBIDDEN" };
+            if (evidence is not null && evidence.Visibility is "HROnly" or "HRAndFinance" or "HRAndIT" && !await IsHrExitActor(companyId, actorUserId)) return new Result<EmployeeExitEvidenceDto> { Success = false, Message = "EXIT_EVIDENCE_FORBIDDEN" };
+            if (evidence is not null && exit!.EmployeeUserId != actorUserId && !await _roleService.VerifyUserAccess(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, [Codeji.CMS.Utility.Constraints.Permission.Download], actorUserId, companyId)) return new Result<EmployeeExitEvidenceDto> { Success = false, Message = "EXIT_EVIDENCE_DOWNLOAD_FORBIDDEN" };
+            return evidence is null ? new Result<EmployeeExitEvidenceDto> { Success = false, Message = "EXIT_EVIDENCE_NOT_FOUND" } : new Result<EmployeeExitEvidenceDto> { Success = true, MethodResult = new EmployeeExitEvidenceDto { EvidenceId = evidence.EvidenceId, StorageKey = evidence.StorageKey, FileName = evidence.FileName, ContentType = evidence.ContentType } };
         }
 
         public async Task<Result<EmployeeExitCaseDto>> GetEmployeeExitCaseForManagement(string employeeUserId)
@@ -1236,17 +1515,14 @@ namespace Codeji.CMS.Services.Employees
             var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeUserId == employeeUserId && !x.IsDeleted);
             if (exit is null) return new Result<EmployeeExitCaseDto> { Success = false, Message = "EXIT_CASE_NOT_FOUND" };
             if (exit.EmployeeUserId == actorUserId) return new Result<EmployeeExitCaseDto> { Success = false, Message = "EXIT_CASE_FORBIDDEN" };
-            var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == actorUserId && !x.IsDeleted);
-            var isHr = actor is not null && (await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.Administrator, companyId)
-                || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HR, companyId)
-                || await _roleService.IsRoleTypeMatch(actor.RoleId, EnumsHelper.Roles.HRExecutive, companyId));
+            var isHr = await IsHrExitActor(companyId, actorUserId);
             var isAssignedManager = exit.Status == "PendingManagerApproval" && exit.ReportingManagerUserId == actorUserId;
             if (!isHr && !isAssignedManager) return new Result<EmployeeExitCaseDto> { Success = false, Message = "EXIT_CASE_FORBIDDEN" };
             var actions = new List<string>();
-            if (isAssignedManager) actions.AddRange(["Approve", "Reject"]);
+            if (isAssignedManager) actions.AddRange(["Approve", "Discuss", "JointDiscussion"]);
             if (isHr)
             {
-                if (exit.Status is "PendingManagerApproval" or "PendingHrApproval") actions.AddRange(["Approve", "Reject", "Cancel"]);
+                if (exit.Status is "PendingManagerApproval" or "PendingHrApproval") actions.AddRange(["Approve", "Discuss", "JointDiscussion", "Cancel"]);
                 if (exit.Status == "NoticePeriod") actions.AddRange(["UpdateLastWorkingDate", "Complete", "ExceptionalComplete"]);
                 if (exit.IsActive) actions.Add("WaiveClearance");
                 if (exit.Status is "Resigned" or "Terminated") actions.Add("Rejoin");
@@ -1256,8 +1532,11 @@ namespace Codeji.CMS.Services.Employees
                 EmployeeExitId = exit.EmployeeExitId, EmployeeUserId = exit.EmployeeUserId, ExitType = exit.ExitType, Status = exit.Status, Version = exit.Version,
                 LastWorkingDate = exit.LastWorkingDate, Reason = exit.Reason, Notes = exit.Notes, InitiatedAtUtc = exit.InitiatedAtUtc, CompletedAtUtc = exit.CompletedAtUtc,
                 Clearances = exit.Clearances.Select(x => new EmployeeExitClearanceDto { ClearanceId = x.ClearanceId, Category = x.Category, Status = x.Status, IsMandatory = x.IsMandatory, DueAtUtc = x.DueAtUtc }).ToList(),
+                HandoverTasks = exit.HandoverTasks.Select(x => new EmployeeExitHandoverTaskDto { HandoverTaskId = x.HandoverTaskId, Title = x.Title, Details = x.Details, AssigneeUserId = x.AssigneeUserId, DueAtUtc = x.DueAtUtc, Status = x.Status }).ToList(), Assets = exit.Assets.Select(x => new EmployeeExitAssetDto { AssetExitId = x.AssetExitId, AssetType = x.AssetType, AssetIdentifier = x.AssetIdentifier, Status = x.Status, TrackingReference = x.TrackingReference, RecoveryAmount = x.RecoveryAmount, Notes = x.Notes }).ToList(), AccessItems = exit.AccessItems.Select(x => new EmployeeExitAccessItemDto { AccessItemId = x.AccessItemId, System = x.System, Mode = x.Mode, Status = x.Status, ScheduledAtUtc = x.ScheduledAtUtc, ExternalReference = x.ExternalReference, Notes = x.Notes }).ToList(), FinanceItems = exit.FinanceItems.Select(x => new EmployeeExitFinanceItemDto { FinanceItemId = x.FinanceItemId, Category = x.Category, Direction = x.Direction, Amount = x.Amount, Status = x.Status, Reference = x.Reference, Notes = x.Notes }).ToList(), BenefitItems = exit.BenefitItems.Select(x => new EmployeeExitBenefitItemDto { BenefitItemId = x.BenefitItemId, Category = x.Category, Status = x.Status, EffectiveEndDate = x.EffectiveEndDate, Reference = x.Reference, Notes = x.Notes }).ToList(), Evidence = exit.Evidence.Select(x => new EmployeeExitEvidenceDetailDto { EvidenceId = x.EvidenceId, Category = x.Category, Type = x.Type, Status = x.Status, Visibility = x.Visibility, FileName = x.FileName, ContentType = x.ContentType, UploadedAtUtc = x.UploadedAtUtc }).ToList(),
+                FormerEmployeeRequests = exit.FormerEmployeeRequests.Select(x => new FormerEmployeePortalRequestDto { RequestId = x.RequestId, Type = x.Type, Status = x.Status, Details = x.Details, RequestedAtUtc = x.RequestedAtUtc }).ToList(),
                 AuditHistory = exit.AuditHistory.Select(x => new EmployeeExitAuditEventDto { Action = x.Action, ActorUserId = x.ActorUserId, AtUtc = x.AtUtc, Notes = x.Notes }).ToList(),
-                PermittedActions = actions
+                PermittedActions = actions,
+                PendingHandoverCount = exit.HandoverTasks.Count(x => x.Status is not ("Approved" or "Waived")), PendingAssetCount = exit.Assets.Count(x => x.Status is not ("Verified" or "Waived" or "RecoveredFinancially")), PendingAccessCount = exit.AccessItems.Count(x => x.Status is not ("Revoked" or "Waived")), PendingFinanceCount = exit.FinanceItems.Count(x => x.Status is not ("Completed" or "Waived")), PendingBenefitCount = exit.BenefitItems.Count(x => x.Status is not ("Completed" or "Waived"))
             }};
         }
 
@@ -1270,7 +1549,14 @@ namespace Codeji.CMS.Services.Employees
             var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeUserId == request.EmployeeUserId && x.Status == "NoticePeriod" && !x.IsDeleted);
             if (exit is null) return new Result { Success = false, Message = "OPEN_EXIT_NOT_FOUND" };
             if (DateTime.UtcNow.Date < exit.LastWorkingDate.Date) return new Result { Success = false, Message = "LAST_WORKING_DATE_NOT_REACHED" };
+            if (exit.PolicySnapshot?.RequireResignationEvidence == true && !exit.Evidence.Any(x => x.Category == "Resignation" && x.Status == "Verified")) return new Result { Success = false, Message = "RESIGNATION_EVIDENCE_PENDING" };
+            if (exit.PolicySnapshot?.RequireEmployeeAcknowledgement == true && exit.PostExitAccess?.AcknowledgementStatus != "Acknowledged") return new Result { Success = false, Message = "EMPLOYEE_ACKNOWLEDGEMENT_PENDING" };
             if (exit.Clearances.Any(x => x.IsMandatory && x.Status is not ("Completed" or "Waived"))) return new Result { Success = false, Message = "MANDATORY_CLEARANCE_PENDING" };
+            if (exit.HandoverTasks.Any(x => x.Status is not ("Approved" or "Waived"))) return new Result { Success = false, Message = "HANDOVER_PENDING" };
+            if (exit.Assets.Any(x => x.Status is not ("Verified" or "Waived" or "RecoveredFinancially"))) return new Result { Success = false, Message = "ASSET_CLEARANCE_PENDING" };
+            if (exit.AccessItems.Any(x => x.Status is not ("Revoked" or "Waived"))) return new Result { Success = false, Message = "ACCESS_DEACTIVATION_PENDING" };
+            if (exit.FinanceItems.Any(x => x.Status is not ("Completed" or "Waived"))) return new Result { Success = false, Message = "FINANCE_CLEARANCE_PENDING" };
+            if (exit.BenefitItems.Any(x => x.Status is not ("Completed" or "Waived"))) return new Result { Success = false, Message = "BENEFIT_CLEARANCE_PENDING" };
             if (_employeeFinalSettlementRepository is not null)
             {
                 var settlement = await _employeeFinalSettlementRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Status == "Approved" && !x.IsDeleted);
@@ -1359,12 +1645,26 @@ namespace Codeji.CMS.Services.Employees
 
         private async Task<bool> MeetsNoticePolicy(EmpUser employee, DateTime lastWorkingDate)
         {
-            if (_employeeExitPolicyRepository is null) return true;
+            var policy = await GetApplicableExitPolicy(employee);
+            return policy is null || lastWorkingDate >= DateTime.UtcNow.Date.AddDays(policy.MinimumNoticeDays);
+        }
+
+        private async Task<EmployeeExitPolicy?> GetApplicableExitPolicy(EmpUser employee)
+        {
+            if (_employeeExitPolicyRepository is null) return null;
             var policies = await _employeeExitPolicyRepository.GetAll(x => x.CompanyId == employee.CompanyId && x.IsActive && !x.IsDeleted);
-            var policy = policies.FirstOrDefault(x => x.DepartmentId == employee.Department)
+            return policies.FirstOrDefault(x => x.DepartmentId == employee.Department)
                 ?? policies.FirstOrDefault(x => x.RoleId == employee.RoleId)
                 ?? policies.FirstOrDefault(x => string.IsNullOrWhiteSpace(x.DepartmentId) && string.IsNullOrWhiteSpace(x.RoleId));
-            return policy is null || lastWorkingDate >= DateTime.UtcNow.Date.AddDays(policy.MinimumNoticeDays);
+        }
+
+        private static void RescheduleExitReminders(EmployeeExit exit, string actorUserId)
+        {
+            foreach (var reminder in exit.Reminders.Where(x => x.Status == "Pending")) reminder.Status = "Cancelled";
+            var offsets = new[] { 30, 15, 7, 3, 1, 0 };
+            foreach (var days in offsets.Where(days => exit.LastWorkingDate.Date.AddDays(-days) >= DateTime.UtcNow.Date))
+                exit.Reminders.Add(new EmployeeExitReminder { Trigger = days == 0 ? "LastWorkingDay" : $"LastWorkingDayMinus{days}", DueAtUtc = exit.LastWorkingDate.Date.AddDays(-days), RecipientUserId = exit.ReportingManagerUserId });
+            exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "RemindersRescheduled", ActorUserId = actorUserId });
         }
 
         private async Task PopulateExitClearances(EmployeeExit exit)

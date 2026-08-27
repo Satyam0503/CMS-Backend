@@ -34,13 +34,17 @@ public class UserController : BaseApiController
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IOfficeScheduleAssignmentService _officeScheduleAssignments;
     private readonly IOfficeScheduleSettingsService _officeScheduleSettings;
-    public UserController(IHttpContextAccessor httpContextAccessor, IEmployeeService employeeService, IAccountServices accountServices, IOfficeScheduleAssignmentService officeScheduleAssignments, IOfficeScheduleSettingsService officeScheduleSettings)
+    private readonly IEmployeeExitEvidenceStorage _employeeExitEvidenceStorage;
+    private readonly IFormerEmployeePortalService _formerEmployeePortalService;
+    public UserController(IHttpContextAccessor httpContextAccessor, IEmployeeService employeeService, IAccountServices accountServices, IOfficeScheduleAssignmentService officeScheduleAssignments, IOfficeScheduleSettingsService officeScheduleSettings, IEmployeeExitEvidenceStorage employeeExitEvidenceStorage, IFormerEmployeePortalService formerEmployeePortalService)
     {
         _httpContextAccessor = httpContextAccessor;
         _employeeService = employeeService;
         _accountServices = accountServices;
         _officeScheduleAssignments = officeScheduleAssignments;
         _officeScheduleSettings = officeScheduleSettings;
+        _employeeExitEvidenceStorage = employeeExitEvidenceStorage;
+        _formerEmployeePortalService = formerEmployeePortalService;
     }
 
     [Route("InviteNewEmployee")]
@@ -230,10 +234,20 @@ public class UserController : BaseApiController
     public Task<Result> ReviewEmployeeExit([FromBody] ReviewEmployeeExitRequest request) =>
         _employeeService.ReviewEmployeeExit(request);
 
+    [Route("RespondToEmployeeExitDiscussion")]
+    [HttpPost]
+    public Task<Result> RespondToEmployeeExitDiscussion([FromBody] RespondToEmployeeExitDiscussionRequest request) =>
+        _employeeService.RespondToEmployeeExitDiscussion(request);
+
     [Route("WithdrawOwnEmployeeExit")]
     [HttpPost]
     public Task<Result> WithdrawOwnEmployeeExit([FromBody] CancelEmployeeExitRequest request) =>
         _employeeService.WithdrawOwnEmployeeExit(request);
+
+    [Route("DecideEmployeeExitWithdrawal")]
+    [HttpPost]
+    public Task<Result> DecideEmployeeExitWithdrawal([FromBody] DecideEmployeeExitWithdrawalRequest request) =>
+        _employeeService.DecideEmployeeExitWithdrawal(request);
 
     [Route("CancelEmployeeExit")]
     [HttpPost]
@@ -246,6 +260,17 @@ public class UserController : BaseApiController
     [Authorize(Policy = "HrExitOverride")]
     public Task<Result> UpdateEmployeeExitDate([FromBody] UpdateEmployeeExitDateRequest request) =>
         _employeeService.UpdateEmployeeExitDate(request);
+
+    [Route("RequestEmployeeExitNoticeAdjustment")]
+    [HttpPost]
+    public Task<Result> RequestEmployeeExitNoticeAdjustment([FromBody] RequestEmployeeExitNoticeAdjustmentRequest request) =>
+        _employeeService.RequestEmployeeExitNoticeAdjustment(request);
+
+    [Route("DecideEmployeeExitNoticeAdjustment")]
+    [HttpPost]
+    [Authorize(Policy = "HrExitOverride")]
+    public Task<Result> DecideEmployeeExitNoticeAdjustment([FromBody] DecideEmployeeExitNoticeAdjustmentRequest request) =>
+        _employeeService.DecideEmployeeExitNoticeAdjustment(request);
 
     [Route("EmployeeExitPolicy")]
     [HttpPost]
@@ -289,6 +314,11 @@ public class UserController : BaseApiController
     public Task<Result> ApproveEmployeeFinalSettlement([FromBody] ApproveEmployeeFinalSettlementRequest request) =>
         _employeeService.ApproveEmployeeFinalSettlement(request);
 
+    [Route("UpdateEmployeeFinalSettlementPayment")]
+    [HttpPost]
+    public Task<Result> UpdateEmployeeFinalSettlementPayment([FromBody] UpdateEmployeeFinalSettlementPaymentRequest request) =>
+        _employeeService.UpdateEmployeeFinalSettlementPayment(request);
+
     [Route("CompleteEmployeeExitClearance")]
     [HttpPost]
     [Authorize(Policy = "HrExitOverride")]
@@ -300,6 +330,107 @@ public class UserController : BaseApiController
     [Authorize(Policy = "HrExitOverride")]
     public Task<Result> WaiveEmployeeExitClearance([FromBody] CompleteEmployeeExitClearanceRequest request) =>
         _employeeService.CompleteEmployeeExitClearance(request, true);
+
+    [Route("EmployeeExitHandoverTask")]
+    [HttpPost]
+    public Task<Result> UpsertEmployeeExitHandoverTask([FromBody] UpsertEmployeeExitHandoverTaskRequest request) =>
+        _employeeService.UpsertEmployeeExitHandoverTask(request);
+
+    [Route("ReviewEmployeeExitHandoverTask")]
+    [HttpPost]
+    public Task<Result> ReviewEmployeeExitHandoverTask([FromBody] ReviewEmployeeExitHandoverTaskRequest request) =>
+        _employeeService.ReviewEmployeeExitHandoverTask(request);
+
+    [Route("EmployeeExitAsset")]
+    [HttpPost]
+    public Task<Result> UpsertEmployeeExitAsset([FromBody] UpsertEmployeeExitAssetRequest request) =>
+        _employeeService.UpsertEmployeeExitAsset(request);
+
+    [Route("EmployeeExitAccessItem")]
+    [HttpPost]
+    public Task<Result> UpsertEmployeeExitAccessItem([FromBody] UpsertEmployeeExitAccessItemRequest request) =>
+        _employeeService.UpsertEmployeeExitAccessItem(request);
+
+    [Route("EmployeeExitFinanceItem")]
+    [HttpPost]
+    public Task<Result> UpsertEmployeeExitFinanceItem([FromBody] UpsertEmployeeExitFinanceItemRequest request) =>
+        _employeeService.UpsertEmployeeExitFinanceItem(request);
+
+    [Route("EmployeeExitBenefitItem")]
+    [HttpPost]
+    public Task<Result> UpsertEmployeeExitBenefitItem([FromBody] UpsertEmployeeExitBenefitItemRequest request) =>
+        _employeeService.UpsertEmployeeExitBenefitItem(request);
+
+    [Route("EmployeeExitEvidence")]
+    [HttpPost]
+    public Task<Result> AddEmployeeExitEvidence([FromBody] AddEmployeeExitEvidenceRequest request) =>
+        _employeeService.AddEmployeeExitEvidence(request);
+
+    [Route("EmployeeExitEvidenceUpload")]
+    [HttpPost]
+    public async Task<Result> UploadEmployeeExitEvidence([FromForm] string employeeExitId, [FromForm] string category, [FromForm] string visibility, [FromForm] IFormFile file)
+    {
+        var access = await _employeeService.GetEmployeeExitCaseForEvidence(employeeExitId);
+        if (!access.Success || access.MethodResult is null) return new Result { Success = false, Message = "EXIT_EVIDENCE_FORBIDDEN" };
+        var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        try
+        {
+            var stored = await _employeeExitEvidenceStorage.SaveAsync(companyId, employeeExitId, file);
+            return await _employeeService.AddEmployeeExitEvidence(new AddEmployeeExitEvidenceRequest { EmployeeExitId = employeeExitId, Version = access.MethodResult.Version, Category = category, Type = "UploadedFile", Visibility = visibility, StorageKey = stored.StorageKey, FileName = file.FileName, ContentType = file.ContentType, Sha256 = stored.Sha256 });
+        }
+        catch (InvalidOperationException ex) { return new Result { Success = false, Message = ex.Message }; }
+    }
+
+    [Route("EmployeeExitEvidence/{employeeExitId}/{evidenceId}/download")]
+    [HttpGet]
+    public async Task<IActionResult> DownloadEmployeeExitEvidence(string employeeExitId, string evidenceId)
+    {
+        var evidence = await _employeeService.GetEmployeeExitEvidence(employeeExitId, evidenceId);
+        if (!evidence.Success || evidence.MethodResult is null || string.IsNullOrWhiteSpace(evidence.MethodResult.StorageKey)) return NotFound();
+        var stored = await _employeeExitEvidenceStorage.OpenReadAsync(evidence.MethodResult.StorageKey);
+        if (stored is null) return NotFound();
+        return File(stored.Value.Content, evidence.MethodResult.ContentType ?? stored.Value.ContentType, evidence.MethodResult.FileName ?? stored.Value.FileName);
+    }
+
+    [Route("VerifyEmployeeExitEvidence")]
+    [HttpPost]
+    public Task<Result> VerifyEmployeeExitEvidence([FromBody] VerifyEmployeeExitEvidenceRequest request) =>
+        _employeeService.VerifyEmployeeExitEvidence(request);
+
+    [Route("SupersedeEmployeeExitEvidence")]
+    [HttpPost]
+    public Task<Result> SupersedeEmployeeExitEvidence([FromBody] SupersedeEmployeeExitEvidenceRequest request) =>
+        _employeeService.SupersedeEmployeeExitEvidence(request);
+
+    [Route("EmployeeExitPostExitContact")]
+    [HttpPost]
+    public Task<Result> UpdateEmployeeExitPostExitContact([FromBody] UpdateEmployeeExitPostExitContactRequest request) =>
+        _employeeService.UpdateEmployeeExitPostExitContact(request);
+
+    [Route("AcknowledgeEmployeeExit")]
+    [HttpPost]
+    public Task<Result> AcknowledgeEmployeeExit([FromBody] AcknowledgeEmployeeExitRequest request) =>
+        _employeeService.AcknowledgeEmployeeExit(request);
+
+    [Route("EmployeeExitFormerEmployeeRequest")]
+    [HttpPost]
+    public Task<Result> CreateEmployeeExitFormerEmployeeRequest([FromBody] CreateEmployeeExitFormerEmployeeRequest request) =>
+        _employeeService.CreateEmployeeExitFormerEmployeeRequest(request);
+
+    [Route("EmployeeExitFormerEmployeeRequestResolve")]
+    [HttpPost]
+    public Task<Result> ResolveEmployeeExitFormerEmployeeRequest([FromBody] ResolveEmployeeExitFormerEmployeeRequest request) =>
+        _employeeService.ResolveEmployeeExitFormerEmployeeRequest(request);
+
+    [Route("EmployeeExitFormerEmployeePortalInvite")]
+    [HttpPost]
+    public Task<Result<FormerEmployeePortalInviteDto>> CreateFormerEmployeePortalInvite([FromBody] CreateFormerEmployeePortalInviteRequest request) =>
+        _formerEmployeePortalService.CreateInvite(request);
+
+    [Route("EmployeeExitFormerEmployeePortalRevoke")]
+    [HttpPost]
+    public Task<Result> RevokeFormerEmployeePortalAccess([FromBody] RevokeFormerEmployeePortalAccessRequest request) =>
+        _formerEmployeePortalService.RevokeAccess(request);
 
     [Route("RejoinEmployee")]
     [HttpPost]
