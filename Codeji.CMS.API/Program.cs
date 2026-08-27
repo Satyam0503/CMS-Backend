@@ -250,6 +250,9 @@ builder.Services.AddScoped<IMongoDbRepository<EmployeeExitClearanceTemplate>, Mo
 builder.Services.AddScoped<IMongoDbRepository<EmployeeFinalSettlement>, MongoRepository<EmployeeFinalSettlement>>();
 builder.Services.AddScoped<IMongoDbRepository<EmployeeExitAttendanceCutoff>, MongoRepository<EmployeeExitAttendanceCutoff>>();
 builder.Services.AddScoped<IMongoDbRepository<EmployeeExitOutbox>, MongoRepository<EmployeeExitOutbox>>();
+builder.Services.AddScoped<IMongoDbRepository<FormerEmployeeAccessToken>, MongoRepository<FormerEmployeeAccessToken>>();
+builder.Services.AddSingleton<IEmployeeExitEvidenceStorage, PrivateEmployeeExitEvidenceStorage>();
+builder.Services.AddScoped<IFormerEmployeePortalService, FormerEmployeePortalService>();
 builder.Services.AddScoped<IMongoDbRepository<LeaveRequest>, MongoRepository<LeaveRequest>>();
 builder.Services.AddScoped<IMongoDbRepository<WorkFromHomeRequest>, MongoRepository<WorkFromHomeRequest>>();
 // salary 
