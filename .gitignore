@@ -45,3 +45,6 @@ build-lifecycle-validation.txt
 !/docs/hrms/*.md
 # ASP.NET configuration containing secrets
 Codeji.CMS.API/appsettings.json
+
+# Local planning and progress spreadsheets
+*.xlsx
