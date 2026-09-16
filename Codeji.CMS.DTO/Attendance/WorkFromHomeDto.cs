@@ -127,8 +127,6 @@ public class WorkFromHomePolicyDto
     public string MixedAttendanceStatusCode { get; set; } = "WFH+WFO";
     public string? WfhWfoAttendanceStatusCode { get; set; } = "WFH+WFO";
     public string? WfhHdAttendanceStatusCode { get; set; } = "WFH-HD";
-    public string? WfhSlAttendanceStatusCode { get; set; } = "WFH+SL";
-    public string? WfhClAttendanceStatusCode { get; set; } = "WFH+CL";
 }
 
 public class WorkFromHomeEmployeeAllocationDto
@@ -150,7 +148,20 @@ public class WorkFromHomeResponseDto : WorkFromHomeRequestDto
     public string ApproverUserId { get; set; } = string.Empty;
     public int Version { get; set; }
     public string? ReviewRemarksText { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? Department { get; set; }
     public DateTime? CreatedDate { get; set; }
     public string? ReviewedByUserId { get; set; }
     public DateTime? ReviewedAt { get; set; }
+}
+
+public class WorkFromHomeRequestFilterDto
+{
+    [Range(1, int.MaxValue)] public int PageNo { get; set; } = 1;
+    [Range(1, 100)] public int PageSize { get; set; } = 25;
+    public string? EmployeeSearch { get; set; }
+    public string? Department { get; set; }
+    public string? Status { get; set; }
+    public DateTime? FromDate { get; set; }
+    public DateTime? ToDate { get; set; }
 }

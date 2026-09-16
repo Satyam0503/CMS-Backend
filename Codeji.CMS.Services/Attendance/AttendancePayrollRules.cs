@@ -1,4 +1,5 @@
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.Employees;
 
 public static class AttendancePayrollRules
 {
@@ -11,11 +12,15 @@ public static class AttendancePayrollRules
         eligibleTo = monthEnd.Date;
         if (!DateTime.TryParse(employee.DateOfJoining, out var joining) || joining.Date > monthEnd.Date) return false;
         eligibleFrom = joining.Date > monthStart.Date ? joining.Date : monthStart.Date;
-        if (DateTime.TryParse(employee.ExitDate, out var exit))
+        var exitDate = EmploymentPeriod.GetLastWorkingDate(employee);
+        if (exitDate.HasValue)
         {
-            if (exit.Date < monthStart.Date) return false;
-            eligibleTo = exit.Date < monthEnd.Date ? exit.Date : monthEnd.Date;
+            if (exitDate.Value < monthStart.Date) return false;
+            eligibleTo = exitDate.Value < monthEnd.Date ? exitDate.Value : monthEnd.Date;
         }
         return eligibleFrom <= eligibleTo;
     }
+
+    public static bool IsEligibleForPayrollMonth(EmpUser employee, DateTime monthStart) =>
+        EmploymentPeriod.IsPayrollIncludedForMonth(employee, monthStart);
 }

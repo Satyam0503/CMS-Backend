@@ -29,6 +29,9 @@ public sealed class PublicCompanyProfile : BaseClass
     public string? WorkCultureHtml { get; set; }
     public string? HiringProcessHtml { get; set; }
     public string? DiversityStatementHtml { get; set; }
+    // This is intentionally company-owned rather than a browser preference: it
+    // controls the public careers experience for every visitor.
+    public string CareerTheme { get; set; } = "glass";
     public bool IsPublished { get; set; }
 }
 

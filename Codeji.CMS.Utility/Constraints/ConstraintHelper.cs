@@ -44,6 +44,16 @@ namespace Codeji.CMS.Utility.Constraints
         public const string Complete = "Complete";
         public const string Evidence = "Evidence";
         public const string Download = "Download";
+        // Offboarding operation permissions are intentionally separate: a company can
+        // delegate IT, finance, policy administration and case completion independently.
+        public const string PolicyManage = "PolicyManage";
+        public const string CaseManage = "CaseManage";
+        public const string AssetManage = "AssetManage";
+        public const string AccessManage = "AccessManage";
+        public const string FinanceManage = "FinanceManage";
+        public const string BenefitsManage = "BenefitsManage";
+        public const string EvidenceManage = "EvidenceManage";
+        public const string PortalManage = "PortalManage";
     }
 
     public static class ConstraintHelper

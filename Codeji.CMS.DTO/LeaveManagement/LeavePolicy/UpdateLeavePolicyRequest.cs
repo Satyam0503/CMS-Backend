@@ -28,4 +28,5 @@ public class UpdateLeavePolicyRequest
     [EnumDataType(typeof(LeavePolicyType), ErrorMessage = "Invalid leave policy type value")]
     public LeavePolicyType PolicyType { get; set; } = LeavePolicyType.Leave;
     public WorkFromHomePolicySettingsRequest? WorkFromHome { get; set; }
+    public LifecycleLeavePolicySettingsRequest? Lifecycle { get; set; }
 }

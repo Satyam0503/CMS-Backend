@@ -38,5 +38,19 @@ public class LeaveRequest : BaseClass
     public string? AssignedReviewerUserId { get; set; }
     public string? AssignedReviewerSource { get; set; }
     public DateTime? AssignedAtUtc { get; set; }
+    public List<LeaveRequestEvidence> Evidence { get; set; } = [];
 
+}
+
+public sealed class LeaveRequestEvidence
+{
+    [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
+    public string EvidenceId { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = "application/octet-stream";
+    public long SizeBytes { get; set; }
+    public string StorageKey { get; set; } = string.Empty;
+    public string Sha256 { get; set; } = string.Empty;
+    public string UploadedBy { get; set; } = string.Empty;
+    public DateTime UploadedAtUtc { get; set; } = DateTime.UtcNow;
 }

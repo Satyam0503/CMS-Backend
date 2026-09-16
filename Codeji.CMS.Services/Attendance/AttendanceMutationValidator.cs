@@ -4,6 +4,7 @@ using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.Employees;
 using MongoDB.Bson;
 
 namespace Codeji.CMS.Services.Attendance;
@@ -54,8 +55,18 @@ public sealed class AttendanceMutationValidator(
     IEffectiveOfficeScheduleService schedules,
     IAttendanceStatusCalculationService statusCalculation,
     IMongoDbRepository<EmpUser> employees,
-    IMongoDbRepository<AttendanceStatusSetting> statuses) : IAttendanceMutationValidator
+    IMongoDbRepository<AttendanceStatusSetting> statuses,
+    IMongoDbRepository<AttendanceDaySegment> attendanceSegments) : IAttendanceMutationValidator
 {
+    // These statuses carry business records beyond a single attendance row:
+    // leave balance/history or an approved WFH request. They must never be
+    // manufactured through the generic HR/Admin attendance editor.
+    private static readonly HashSet<string> WorkflowOwnedStatusCodes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "SL", "CL", "EL", "UL", "COMP-OFF", "WFH", "WFH+WFO", "WFH-HD",
+        "WFH+SL", "WFH+CL", "CL-HALF", "SL-HALF"
+    };
+
     public async Task<Result<PreparedAttendanceMutation>> PrepareAsync(AttendanceMutationRequest request, CancellationToken cancellationToken = default)
     {
         var result = new Result<PreparedAttendanceMutation> { Success = false };
@@ -65,11 +76,16 @@ public sealed class AttendanceMutationValidator(
         var date = DateTime.SpecifyKind(request.AttendanceDate.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
         if (DateOnly.FromDateTime(date) > DateOnly.FromDateTime(IndiaTime.Today))
             return Fail(result, "ATTENDANCE_FUTURE_DATE_NOT_ALLOWED");
-        var employee = (await employees.GetAll(x => x.CompanyId == request.CompanyId && x.UserId == request.TargetUserId && x.Status && !x.IsDeleted, withDefaultFilter: false)).FirstOrDefault();
+        // A completed exit disables new access, but it must not make valid historical
+        // attendance (including the final payroll month) impossible to repair.
+        var employee = (await employees.GetAll(x => x.CompanyId == request.CompanyId && x.UserId == request.TargetUserId && !x.IsDeleted, withDefaultFilter: false)).FirstOrDefault();
         if (employee is null) return Fail(result, "ATTENDANCE_TARGET_UNAVAILABLE");
         if (DateTime.TryParse(employee.DateOfJoining, out var joined) && date.Date < joined.Date)
             return Fail(result, $"Attendance cannot be marked before the employee's joining date of {joined:dd-MMM-yyyy}.");
-        if (DateTime.TryParse(employee.ExitDate, out var exited) && date.Date > exited.Date) return Fail(result, "ATTENDANCE_AFTER_EXIT");
+        var lastWorkingDate = employee.LastWorkingDate ?? (DateTime.TryParse(employee.ExitDate, out var exited) ? exited.Date : (DateTime?)null);
+        if (lastWorkingDate.HasValue && date.Date > lastWorkingDate.Value.Date) return Fail(result, "ATTENDANCE_AFTER_EXIT");
+        if (!EmploymentPeriod.WasEmployedOn(employee, date)) return Fail(result, "ATTENDANCE_TARGET_UNAVAILABLE");
+        if (!EmploymentPeriod.IsAttendanceExpectedOn(employee, date)) return Fail(result, "ATTENDANCE_NOT_EXPECTED_FOR_LIFECYCLE");
 
         try { await editGuard.EnsureEditableWorkingDayAsync(request.CompanyId, request.TargetUserId, date); }
         catch (InvalidOperationException ex) { return Fail(result, ex.Message); }
@@ -77,6 +93,9 @@ public sealed class AttendanceMutationValidator(
         var code = request.StatusCode.Trim().ToUpperInvariant();
         var status = (await statuses.GetAll(x => x.CompanyId == request.CompanyId && x.Code == code && x.IsActive, withDefaultFilter: false)).FirstOrDefault();
         if (status is null) return Fail(result, "ATTENDANCE_STATUS_INVALID");
+        if ((string.IsNullOrWhiteSpace(request.SourceType) || string.Equals(request.SourceType, "ADMIN_MANUAL", StringComparison.OrdinalIgnoreCase)) &&
+            WorkflowOwnedStatusCodes.Contains(code))
+            return Fail(result, "ATTENDANCE_WORKFLOW_STATUS_REQUIRES_LEAVE_OR_WFH_REQUEST");
 
         DateTime? checkIn = null, checkOut = null;
         CompanyOfficeSchedule? schedule = null;
@@ -118,6 +137,19 @@ public sealed class AttendanceMutationValidator(
         }
 
         var existing = await attendance.GetByUserAndDateAsync(request.CompanyId, request.TargetUserId, date);
+        // A split day is owned by its leave/WFH workflow even when there is no
+        // compatibility AttendanceModel row.  Generic manual editing cannot
+        // replace one half of that source-owned day with a full-day status.
+        var sourceOwnedSegment = (await attendanceSegments.GetAll(x =>
+                x.CompanyId == request.CompanyId &&
+                x.UserId == request.TargetUserId &&
+                x.Date >= date &&
+                x.Date < date.AddDays(1)))
+            .FirstOrDefault(x => x.SourceType is "LEAVE" or "WFH_REQUEST");
+        if (sourceOwnedSegment is not null)
+            return Fail(result, string.Equals(sourceOwnedSegment.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase)
+                ? "ATTENDANCE_SOURCE_OWNED_LEAVE"
+                : "ATTENDANCE_SOURCE_OWNED_WFH");
         if (existing is not null)
         {
             if (string.Equals(existing.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase)) return Fail(result, "ATTENDANCE_SOURCE_OWNED_LEAVE");
@@ -229,12 +261,13 @@ public sealed class AttendanceMutationValidator(
             "ATTENDANCE_TARGET_UNAVAILABLE" => "The selected employee is not available in this company.",
             "ATTENDANCE_BEFORE_JOINING" => "Attendance cannot be marked before the employee's joining date.",
             "ATTENDANCE_AFTER_EXIT" => "Attendance cannot be marked after the employee's exit date.",
+            "ATTENDANCE_NOT_EXPECTED_FOR_LIFECYCLE" => "Normal attendance is not expected for this employee on the selected date because of their current leave, sabbatical, suspension, or temporary absence status.",
             "ATTENDANCE_STATUS_INVALID" => "The selected attendance status is not available for this company.",
             "ATTENDANCE_TIMING_REQUIRED" => "Check-in and check-out times are required for the selected attendance status.",
             "ATTENDANCE_STATUS_DOES_NOT_ACCEPT_TIMING" => "Check-in and check-out times are not applicable for the selected attendance status.",
             "ATTENDANCE_VERSION_CONFLICT" => "Attendance was updated by another user. Refresh and try again.",
             "ATTENDANCE_SOURCE_OWNED_LEAVE" => "This attendance is managed by an approved leave request.",
-            "ATTENDANCE_SOURCE_OWNED_WFH" => "This attendance is managed by an approved work-from-home request.",
+            "ATTENDANCE_SOURCE_OWNED_WFH" => "This date includes attendance managed by an approved work-from-home request. Recalculate the monthly exceptions, then use Edit on the WFH hours exception to correct only the WFH half; the generic correction cannot overwrite source-owned time.",
             _ => message
         };
         return result;

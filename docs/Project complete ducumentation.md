@@ -48,6 +48,24 @@
 - Durable notification records are created before realtime delivery is attempted.
 - Email success depends on provider configuration and should be verified through email logs.
 - A frontend permission check improves usability but never replaces backend authorization.
+- Employee offboarding is an action-based, versioned workflow. Clients cannot safely
+  change an exit status through a generic status update.
+- An employee resignation normally starts in manager/HR review; an HR-initiated
+  termination can enter the notice period directly.
+- Completing an exit is gated by the last working date, verified evidence, employee
+  acknowledgement where configured, clearance items, handover, assets, access,
+  finance, benefits, and approved final settlement.
+- Exit completion deactivates the employee, revokes active refresh sessions, creates
+  an attendance cutoff, writes an outbox event, and cancels future leave and WFH
+  requests after the last working date.
+- The former-employee portal is deliberately post-employment. It requires a
+  completed resignation or termination, verified personal email, company and case
+  enablement, and uses one-time links or email OTPs rather than an HRMS identity.
+- Public career engagement uses an anonymous visitor token and a verified subscriber
+  session for saved jobs, follows, preferences, and job alerts.
+- The effective office schedule is resolved on the server using employee,
+  department, and company precedence. Attendance stores the applied schedule
+  context so later schedule edits do not rewrite history.
 
 ---
 
@@ -3136,3 +3154,475 @@ controls, or source ownership in the API.
 - [Attendance Module](attendance-module-current-flow-and-audit.md)
 - [Leave Management](leave-management-current-flow.md)
 - [WFH End-to-End Flow](wfh-end-to-end-flow.md)
+
+---
+
+# Part XIII: Current Implementation Addendum
+
+**Verification date:** 2026-09-03
+
+This addendum records behavior verified against the current backend services,
+controllers, DTOs, React API clients, migrations, and focused tests. It is the
+operational companion to the higher-level sections above. Where this addendum
+mentions an implementation detail, source code and deployed configuration remain
+authoritative for the target environment.
+
+## 128. Employee Offboarding: Current End-to-End Flow
+
+Offboarding is a controlled employee lifecycle, not an employee delete operation.
+The exit case keeps the employee, workflow, evidence, financial, and audit context
+together while the employee is still active. The case is company-scoped and carries
+an expected `Version` value. Mutating calls must send the version read by the client;
+a stale version is rejected so a second reviewer cannot overwrite a newer decision.
+
+### 128.1 Exit initiation
+
+There are two supported entry patterns:
+
+1. An employee submits their own resignation through
+   `POST api/User/SubmitOwnResignation`. The server derives the authenticated
+   employee and company, validates that the employee is active, validates the last
+   working date against joining date and notice policy, and creates a case for
+   manager/HR review.
+2. HR or an authorized administrator initiates an exit through the employee
+   management flow. An HR-initiated termination can place the employee into the
+   notice period immediately, subject to the configured policy and service checks.
+
+The server rejects an already open or completed exit, a last working date before
+joining, an invalid exit type, and an invalid or past date. The employee record is
+not deactivated when a resignation is merely submitted. A self-submitted case keeps
+the employee active while its review is pending.
+
+The initial case stores the employee user ID, employee ID, company ID, exit type,
+last working date, reason/notes, reporting manager, the applicable policy version,
+and an initial audit event. Reminder records are scheduled relative to the last
+working date, including 30, 15, 7, 3, 1, and 0 day offsets when those dates remain
+in the future.
+
+### 128.2 Review and discussion
+
+The management queue is exposed through the employee exit management endpoints,
+including `GET api/User/EmployeeExitQueue` and
+`GET api/User/EmployeeExitManagement/{userId}`. The employee can read their own
+case through `GET api/User/EmployeeExit/{userId}` and history through
+`GET api/User/EmployeeExitHistory/{userId}`.
+
+The review actions are action-specific. Current actions include approve, reject,
+discussion, joint discussion, and a response to a discussion. The service checks
+that the reviewer is the assigned reporting manager or has the required
+Offboarding permission. The employee cannot review their own case.
+
+The normal state path is:
+
+```text
+PendingManagerApproval
+  -> PendingHrApproval
+  -> NoticePeriod
+  -> Resigned or Terminated
+```
+
+Discussion branches temporarily to `DiscussionRequested`; the employee response
+returns the case to review. A review action does not directly deactivate the
+employee. Approval records the actor and time, snapshots the relevant policy, and
+creates configured clearance items for the notice-period work.
+
+### 128.3 Withdrawal and notice changes
+
+Before approval, an employee can withdraw their own pending resignation with
+`POST api/User/WithdrawOwnEmployeeExit`. A withdrawal closes the active case and
+restores the employee's active employment state. During `NoticePeriod`, the same
+request becomes a withdrawal request requiring manager or HR decision; the employee
+does not silently reverse an approved notice period.
+
+HR can cancel cases in permitted review states. Both withdrawal and cancellation
+record the actor, reason, previous state, resulting state, and timestamp. A second
+pending withdrawal is rejected.
+
+The last working date can be changed only in allowed states and only by an
+authorized actor. A date must not precede the joining date or violate the notice
+period unless the caller has the override permission and supplies an explicit
+reason. Notice adjustment requests support early release, company or employee
+waiver, partial waiver, buyout, recovery, and notice extension. An adjustment
+stores the requested date, required and served days, shortfall, waived days,
+recovery amount, type, reason, decision, and decision actor. HR decides the request;
+the employee decides an offered notice buyout or recovery term where the flow
+requires employee confirmation.
+
+### 128.4 Policy and clearance configuration
+
+Exit policies are company-scoped and may be targeted to a department, role, or
+company-wide default. A policy stores minimum notice days and gates such as:
+
+- manager review and HR review;
+- discussion and joint discussion;
+- resignation evidence;
+- employee acknowledgement;
+- former-employee portal access;
+- handover;
+- asset clearance;
+- access revocation;
+- finance clearance;
+- benefits clearance;
+- final settlement.
+
+HR manages these policies through `api/User/EmployeeExitPolicy` and the related
+collection endpoints. Clearance templates are also company-scoped. A template has
+a category, owner, mandatory flag, policy gate, due-day offset, effective range,
+scope, and active state. When the case enters its notice period, applicable active
+templates are expanded into case-level clearance items with due dates. Later
+template changes do not rewrite the case's historical policy snapshot.
+
+### 128.5 Operational work items
+
+During `NoticePeriod`, the case can contain independently tracked work:
+
+- **Handover:** tasks have an assignee, details, due date, and states such as
+  submitted, approved, changes requested, blocked, or waived. The assignee submits;
+  the reporting manager or HR reviews.
+- **Assets:** HR records type, identifier, status, tracking reference, recovery
+  amount, and notes. Verified, waived, and financially recovered assets satisfy the
+  corresponding completion gate.
+- **Access:** HR records the system, mode such as immediate, scheduled, at last
+  working date, manual, or phased, status, schedule, and external reference.
+  Revocation is recorded rather than inferred from a screen state.
+- **Finance:** HR records payable, receivable, or informational items, amount,
+  status, reference, and notes.
+- **Benefits:** HR records benefit category, end date, status, reference, and notes.
+
+These operations are company- and case-scoped. They use the case version and append
+an audit event. A pending work item blocks final completion unless it is completed
+or explicitly waived according to the policy and actor permissions.
+
+### 128.6 Evidence and documents
+
+Evidence can be an uploaded file, email metadata, system record, external reference,
+generated document, or signed acknowledgement. Visibility is explicit, including
+employee-only, employee/manager/HR, HR-only, HR/Finance, and HR/IT audiences.
+Uploaded evidence requires storage key, filename, and content type. Email evidence
+requires message ID, subject, and a valid sent timestamp. Duplicate active evidence
+identified by the same SHA-256 value is rejected.
+
+HR verifies evidence or marks it as needing correction. An item can be superseded
+without deleting the audit history. Evidence downloads require the case's visibility
+rule and the appropriate Offboarding download permission. Private evidence storage
+must not expose a server filesystem path or an unscoped download URL.
+
+The employee can update a post-exit personal email and acknowledge the exit when the
+case permits it. If the policy requires verified resignation evidence or employee
+acknowledgement, completion remains blocked until the required state is present.
+
+### 128.7 Final settlement and completion
+
+Final settlement is calculated only after the last working date. The calculation
+uses the employee's last-working-month payroll where available and records its
+source payroll ID/month. It includes salary payable, bonuses, deductions, approved
+notice recovery, and other configured settlement amounts. HR approves the calculated
+settlement before marking payment as initiated, paid, failed, or disputed.
+
+Completion is rejected when any required gate remains open. The service checks the
+last working date, verified resignation evidence, acknowledgement, mandatory
+clearances, handover, assets, access, finance, benefits, and approved settlement.
+On successful completion it:
+
+1. changes the case to `Resigned` or `Terminated` and records completion time;
+2. marks the employee inactive and updates employment/exit dates;
+3. revokes the employee's active refresh tokens;
+4. creates an employee-exit attendance cutoff at the last working date;
+5. creates an outbox event for downstream notification processing;
+6. withdraws pending or accepted leave after the last working date;
+7. cancels approved or pending WFH requests after the last working date; and
+8. retains the case audit trail for later support, payroll, and former-employee use.
+
+Where MongoDB transactions are available, employee, exit, token, cutoff, outbox,
+leave, and WFH updates are committed transactionally. The fallback path uses guarded
+updates and idempotent checks. A completion failure must be investigated using the
+case version, audit history, cutoff, outbox, employee state, and downstream records.
+
+### 128.8 Rejoin and exceptional completion
+
+HR can rejoin an employee whose completed case is `Resigned` or `Terminated` when a
+reason is supplied. Rejoin restores active employment fields, disables former
+employee access, and closes the old case as `Rejoined`.
+
+Exceptional completion is an HR override available only on or after the last
+working date and requires a reason. It is not a bypass for missing permissions or a
+way to ignore tenant scope. The action is separately audited so support can
+distinguish a normal gated completion from an exception.
+
+## 129. Former-Employee Portal
+
+The former-employee portal is a restricted post-employment surface. It does not
+create an HRMS user, issue a company-wide JWT, or grant access to internal modules.
+It is available only when all of the following are true:
+
+- the company has enabled the portal;
+- the exit case is completed as `Resigned` or `Terminated`;
+- the case policy allows portal access;
+- the former employee has a personal email;
+- the personal email is verified; and
+- the case-level access flag remains enabled.
+
+### 129.1 Invitation and one-time redemption
+
+An authorized HR/administrator calls the former-employee invite endpoint with the
+case ID, current case version, and validity between 1 and 168 hours. The service
+serializes invitation rotation with an optimistic version update, revokes earlier
+links and sessions, generates a random token, stores only its hash, and emails the
+link. The bearer token is not returned in the administrator response or placed in a
+notification payload.
+
+If delivery fails, the token is revoked and the case-level portal gate is closed so
+an undelivered invitation cannot leave usable access behind. The email log records
+the provider result; a successful API call alone is not proof that the message
+reached the recipient.
+
+The public redemption route is `POST api/public/former-employee/redeem`. A valid
+unexpired, unused token is consumed once and exchanged for a seven-day portal
+session. Expired, revoked, reused, or over-attempted tokens fail. Public portal
+endpoints are rate-limited.
+
+### 129.2 OTP and session behavior
+
+The public OTP request route does not enumerate whether an email is eligible. For a
+verified eligible email, the service invalidates earlier unused OTPs, creates a
+six-digit code valid for ten minutes, stores a hash, and sends the code. A provider
+failure invalidates that OTP and returns a delivery failure rather than leaving a
+usable code behind.
+
+OTP verification requires the email and six numeric digits, enforces attempt and
+expiry limits, confirms the case and company are still enabled, and returns a
+seven-day session. Logout is idempotent and revokes the matching session server-side.
+HR can disable case access or company access; disabling access revokes active links
+and sessions. Portal requests and document visibility remain limited to the former
+employee's own exit case.
+
+## 130. Attendance, Leave, WFH, and Payroll Contract Updates
+
+### 130.1 Attendance
+
+Admin attendance creation and update normalize the business date to UTC, validate
+times as `HH:mm`, resolve the effective company schedule, and reclassify status from
+the authoritative timing when a custom clock time is supplied. The service checks
+source ownership, locks, employee/company identity, and expected version before
+writing. Manual HR edits cannot overwrite leave- or WFH-owned attendance.
+
+Attendance date-range responses retain daily rows and append day-segment rows for
+split schedules or partial-day workflows. A matching segment takes precedence in the
+calendar presentation. Monthly export includes employees, working dates, weekly
+offs, holidays, attendance statuses, and segment information in a formatted Excel
+report. The export route is `GET api/admin/attendance/export/monthly?year=YYYY&month=MM`.
+
+### 130.2 Leave policies and reconciliation
+
+Leave policy creation normalizes names/codes, validates attendance mappings, and
+keeps Work From Home as paid work rather than unpaid leave. A WFH policy is synced
+to the dedicated WFH policy model and a company cannot create conflicting typed WFH
+policies. Normal leave policy eligibility synchronizes employee balances: `null`
+means no eligible employees, while an empty list means all active employees.
+
+Approval and withdrawal are state transitions with downstream reconciliation.
+Approval creates or updates source-owned attendance and adjusts the applicable
+balance. Withdrawal/rejection reverses the downstream state where the workflow owns
+it. The reconciliation hosted service repairs or completes eligible pending work
+after transient failures; it must remain idempotent.
+
+### 130.3 WFH
+
+The WFH API is rooted at `api/wfh`. Employee context is server-derived and includes
+policy enablement, employee eligibility, weekly limit, used and remaining quota,
+next available date, same-day cutoff, effective office schedule, and clock windows.
+HR can allocate each active employee from 0 to 31 days per week. A zero allocation
+is an explicit exclusion, not an absent override.
+
+Requests support full day, first half, second half, and mixed duration. The service
+validates effective policy dates, schedule, notice, quota, weekly offs, holidays,
+overlap, leave ownership, lock state, and approver configuration. A request is
+`Pending` when manager approval is required and `Approved` when direct approval is
+configured. Approval reconciles source-linked attendance; a conflicting leave or
+attendance owner prevents application rather than being overwritten.
+
+For an approved request covering the current business date, check-in and check-out
+are progressive operations against that employee's own request. The service uses
+the effective schedule and records insufficient-hours exceptions for review. It
+does not accept an arbitrary employee ID from the browser as authority.
+
+### 130.4 Payroll and payslips
+
+Payroll upload validates required fields, employee IDs, duplicate rows, non-negative
+values, and processed-month protection. Missing optional earning/deduction values
+default to zero where the current import contract allows it. Uploading or editing a
+draft is distinct from processing/publishing the month.
+
+The monthly payroll processing action is the publication boundary. A payslip is
+generated only from a processed payroll snapshot for the exact employee, company,
+user, and first day of the requested month. A draft beside a processed historical
+row must not be selected arbitrarily. HR/admin payslip lookup is company-scoped;
+employee self-service is user- and company-scoped.
+
+Final settlement may use the last working month's payroll, but settlement approval
+and payment state remain separate from ordinary payroll publication. Payroll
+readiness must include attendance exceptions, locks, leave/WFH reconciliation, and
+source-owned records before a financial result is treated as final.
+
+## 131. Authentication, Authorization, and Tenant Rules
+
+The browser stores the returned access and refresh tokens in the existing auth state
+and local storage helper. On startup, React requests signed-user details and loads
+the user profile, language preference, role/module data, and authenticated shell.
+Login validation is performed in the browser for usability, while the API remains
+authoritative. Unverified login responses can offer a resend-verification action;
+password reset responses avoid disclosing whether an email exists.
+
+Protected APIs derive company and user identity from the authenticated context.
+Request fields such as company ID, employee ID, approver, recipient, and owner are
+validated against that context and the required relationship. Role names alone do
+not grant access. Runtime permission checks resolve module, permission, role, and
+company relationships; the frontend sidebar and button checks are only usability
+features.
+
+Offboarding permissions include the standard module actions plus operational
+permissions for policy, case, asset, access, finance, benefits, evidence, and
+former-employee portal management. Existing companies receive these canonical
+permission/module links through idempotent migrations. Migrations add missing
+records and links without silently changing existing company role grants.
+
+Completion, invitation rotation, OTP verification, former-employee access changes,
+and mutable workflow actions all require tenant scope and, where applicable, an
+expected version. A cross-company identifier must behave as not found or forbidden,
+not as a successful lookup.
+
+## 132. Public Career and Engagement Flow
+
+Public recruitment pages are intentionally anonymous and expose only active,
+published company/job data. The current engagement layer adds:
+
+- public job discovery by company code or across public jobs;
+- public company profiles and job locations;
+- anonymous visitor preferences and subscribe-popup suppression;
+- email subscription with verification and unsubscribe;
+- a verified subscriber session for preferences;
+- saved jobs keyed by visitor token and subscriber session;
+- company follow/unfollow and follow status;
+- job alerts with search text, locations, and skills; and
+- best-effort career analytics that must not break the browsing journey.
+
+Subscriber actions use `X-Career-Session` where a verified session is required.
+Visitor tokens identify a browser but do not replace subscription verification.
+Public analytics accepts only permitted public job/company identifiers and should
+remain non-blocking from the page's point of view. Public company profile responses
+must remain smaller than internal company-management responses and must respect
+active/published filters.
+
+## 133. Notifications, Email, and Background Reliability
+
+Business persistence comes first. Notification records and recipient mappings are
+created before SignalR delivery is attempted, so an offline user can see the event
+later. SignalR is an acceleration path, not the source of truth. Chat and realtime
+failures must not roll back a completed business decision.
+
+Email delivery is provider-dependent. The application records an email log with
+recipient, sender context, subject/category, and provider result where the flow uses
+the shared email helper. A business operation must not be reported as complete only
+because an email call was made. Support should correlate the business record, email
+log, queue/outbox state, and provider response.
+
+Background processors handle exit outbox events, attendance reconciliation and
+reminders, career notifications, and other scheduled work. Queue payloads must
+carry company, actor, recipient, and target IDs because a hosted service cannot
+depend on an HTTP request context. Processors should guard state transitions and
+support retries without creating duplicate notifications or duplicate financial
+effects.
+
+## 134. Current Error and Conflict Contract
+
+The shared `Result`/`Result<T>` response contains `Success`, `Message`, `StatusCode`,
+and either `MethodResult` or `MethodResults`. Some business failures are returned
+inside an HTTP-success response, so clients must inspect both transport status and
+the application-level success flag. Structured validation errors may identify a
+field; message text is not a stable API code unless the endpoint documents it.
+
+Current workflow failure categories include:
+
+- `*_FORBIDDEN`: authentication succeeded but actor, permission, ownership, or
+  relationship rules reject the action;
+- `*_NOT_FOUND`: the company-scoped record does not exist or is intentionally hidden;
+- `*_INVALID`: request shape or business values are invalid;
+- `*_PENDING`: a required review, evidence, clearance, settlement, or delivery step
+  remains incomplete;
+- `*_CHANGED_OR_NOT_FOUND`: the supplied expected version is stale or the record is
+  no longer actionable;
+- `*_DELIVERY_FAILED`: persistence succeeded or was attempted, but an email/provider
+  operation failed; and
+- `*_CONFLICT`: a lock, source owner, duplicate, overlap, or processed period
+  prevents mutation.
+
+Frontend error handling should preserve these distinctions in loading, empty,
+business-failure, network-failure, and permission-denied states. A retry must reload
+the case/version where a conflict is reported; blindly replaying an old mutation is
+unsafe.
+
+## 135. Current Verification Matrix
+
+The following checks are required for the current release shape:
+
+1. Submit resignation as an employee; verify active employment remains active while
+   manager/HR review is pending.
+2. Verify manager approval, discussion, employee response, HR approval, rejection,
+   withdrawal, and stale-version behavior.
+3. Verify notice-date adjustment types, HR decisions, employee offer decisions, and
+   required reasons for notice overrides.
+4. Verify policy scope precedence and that a policy snapshot remains attached to an
+   existing exit case after policy editing.
+5. Verify mandatory evidence, acknowledgement, clearance, handover, asset, access,
+   finance, benefits, and settlement gates block completion independently.
+6. Verify normal completion deactivates the employee, revokes refresh sessions,
+   creates the cutoff/outbox records, and cancels future leave/WFH after the date.
+7. Verify exceptional completion and rejoin require HR permission and an audit reason.
+8. Verify former-employee invitation rotation revokes earlier links, hides bearer
+   tokens from the admin response, and closes access after email delivery failure.
+9. Verify OTP responses do not enumerate unknown emails, expire after ten minutes,
+   enforce attempts, and issue only a limited portal session.
+10. Verify WFH allocation, schedule context, quota, timing, source ownership,
+    conflicts, exceptions, and progressive check-in/check-out behavior.
+11. Verify processed payroll cannot be overwritten, payslips require processed data,
+    and employee/company identity is included in lookup predicates.
+12. Verify public career routes expose only published data and subscriber-session
+    features cannot be used with an arbitrary visitor or company identity.
+13. Verify every protected scenario across two companies, including reads, updates,
+    downloads, notifications, queue work, payroll, evidence, and portal access.
+14. Verify mobile, tablet, and desktop flows for loading, empty, failure, stale
+    version, permission, and long-text states.
+
+## 136. Source Review Index
+
+The current implementation review for this addendum used these primary surfaces:
+
+- `Codeji.CMS.Services/Employees/EmployeeService.cs` for employee lifecycle,
+  offboarding, evidence, settlement, completion, and tenant-scoped mutations;
+- `Codeji.CMS.Services/Employees/FormerEmployeePortalService.cs` for invitation,
+  OTP, session, access revocation, and former-employee portal rules;
+- `Codeji.CMS.Services/Attendance/AttendanceMutationValidator.cs`,
+  `AttendanceService.cs`, `WorkFromHomeService.cs`, and
+  `LeaveAttendanceReconciliationService.cs` for attendance ownership and
+  reconciliation;
+- `Codeji.CMS.Services/LeaveManagement/LeaveManagementService.cs` for policy,
+  eligibility, leave mapping, and WFH policy synchronization;
+- `Codeji.CMS.Services/PayRoll/PayRollServices.cs` and `AutoPayRollServices.cs`
+  for import validation, processed-month protection, readiness, and payslip rules;
+- `Codeji.CMS.Services/CareerPortal/CareerEngagementService.cs` and
+  `PublicCompanyProfileService.cs` for public career engagement and filtering;
+- `Codeji.CMS.API/Controllers/UserController.cs`,
+  `WorkFromHomeController.cs`, `PublicFormerEmployeePortalController.cs`, and
+  public career controllers for route and authorization boundaries;
+- `CMS-React/src/app/modules/employees/employeeServices.ts`,
+  `leaves/leaveServices.ts`, `payroll/services.ts`, and
+  `careerPortal/services/careerPortalService.ts` for the current client contract;
+- `Codeji.CMS.Migrations/Migrations/AddOffboardingModuleAndPermissions.cs`,
+  `AddOffboardingOperationPermissions.cs`, and
+  `RepairOffboardingPermissionSeed.cs` for permission seeding and repair; and
+- focused API/service tests covering authorization, public analytics, payroll,
+  WFH dates, evidence storage, and cross-tenant behavior.
+
+The next maintenance update should review this addendum whenever an exit state,
+permission constant, public route, source-ownership rule, settlement gate, or
+provider/outbox behavior changes.

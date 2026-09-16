@@ -34,4 +34,17 @@ public class WorkFromHomeDateTests
 
         Assert.Equal(new DateTime(2026, 8, 7, 0, 0, 0, DateTimeKind.Utc), date);
     }
+
+    [Theory]
+    [InlineData("SecondHalf", 12, 59, false)]
+    [InlineData("SecondHalf", 13, 0, true)]
+    [InlineData("FirstHalf", 12, 59, true)]
+    [InlineData("FirstHalf", 13, 0, false)]
+    public void HalfDayClockIn_IsLimitedToTheRequestedAttendanceSegment(string durationType, int hour, int minute, bool expected)
+    {
+        var allowed = WorkFromHomeService.IsHalfDayClockInWithinRequestedSegment(
+            durationType, new TimeSpan(hour, minute, 0), new TimeSpan(9, 0, 0), 480, 8m);
+
+        Assert.Equal(expected, allowed);
+    }
 }

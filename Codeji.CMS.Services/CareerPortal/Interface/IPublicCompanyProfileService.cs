@@ -12,4 +12,5 @@ public interface IPublicCompanyProfileService
         string companyId,
         string userId,
         UpsertPublicCompanyProfileRequest request);
+    Task<Result> UpdateCompanyTheme(string companyId, string userId, string? appTheme);
 }

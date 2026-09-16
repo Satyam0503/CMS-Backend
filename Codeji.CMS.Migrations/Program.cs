@@ -51,6 +51,55 @@ if (args.Contains("inspect-attendance", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+if (args.Contains("inspect-lifecycle-policies", StringComparer.OrdinalIgnoreCase))
+{
+    var companies = db.GetCollection<BsonDocument>("Company");
+    var employees = db.GetCollection<BsonDocument>("Employee");
+    var lifecyclePolicies = db.GetCollection<BsonDocument>("EmployeeLifecyclePolicy");
+    var active = await lifecyclePolicies.CountDocumentsAsync(new BsonDocument { { "IsDeleted", false }, { "IsActive", true } });
+    var duplicateGroups = await lifecyclePolicies.Aggregate()
+        .Match(new BsonDocument { { "IsDeleted", false }, { "IsActive", true } })
+        .Group(new BsonDocument { { "_id", new BsonDocument { { "CompanyId", "$CompanyId" }, { "EventType", "$EventType" } } }, { "count", new BsonDocument("$sum", 1) } })
+        .Match(new BsonDocument("count", new BsonDocument("$gt", 1)))
+        .Count()
+        .FirstOrDefaultAsync();
+    var byEvent = await lifecyclePolicies.Aggregate()
+        .Match(new BsonDocument { { "IsDeleted", false }, { "IsActive", true } })
+        .Group(new BsonDocument { { "_id", "$EventType" }, { "count", new BsonDocument("$sum", 1) } })
+        .Sort(new BsonDocument("_id", 1))
+        .ToListAsync();
+    var companyCount = await companies.CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty);
+    var nonDeletedCompanyCount = await companies.CountDocumentsAsync(Builders<BsonDocument>.Filter.Ne("IsDeleted", true));
+    var employeeCompanyIds = await employees.Distinct<string>("CompanyId", FilterDefinition<BsonDocument>.Empty).ToListAsync();
+    var sampleCompanyFields = (await companies.Find(FilterDefinition<BsonDocument>.Empty).Limit(1).ToListAsync()).FirstOrDefault()?.Names.ToArray() ?? Array.Empty<string>();
+    var sampleCompany = (await companies.Find(FilterDefinition<BsonDocument>.Empty).Limit(1).ToListAsync()).FirstOrDefault();
+    var sampleCompanyId = sampleCompany?.GetValue("_id", BsonNull.Value);
+    Console.WriteLine($"{{\"activePolicies\":{active},\"duplicateActiveCompanyEventGroups\":{duplicateGroups?.Count ?? 0},\"eventCounts\":{byEvent.ToJson()},\"companyCount\":{companyCount},\"nonDeletedCompanyCount\":{nonDeletedCompanyCount},\"employeeCompanyCount\":{employeeCompanyIds.Count},\"sampleCompanyFields\":{System.Text.Json.JsonSerializer.Serialize(sampleCompanyFields)},\"sampleCompanyIdType\":\"{sampleCompanyId?.BsonType}\",\"sampleCompanyId\":\"{sampleCompanyId}\"}}");
+    return;
+}
+
+if (args.Contains("apply-lifecycle-policies", StringComparer.OrdinalIgnoreCase))
+{
+    var lifecycleMigrationIds = new[]
+    {
+        "2026-09-08-01-SeedEmployeeLifecyclePolicies",
+        "2026-09-08-02-SeedEmployeeLeaveLifecyclePolicies",
+        "2026-09-08-03-SeedWorkingLifecyclePolicy",
+        "2026-09-08-04-CorrectAbscondingLifecyclePolicy",
+        "2026-09-08-05-AddEmployeeLifecyclePolicyIndexes",
+    };
+    await db.GetCollection<BsonDocument>("Migration").DeleteManyAsync(
+        Builders<BsonDocument>.Filter.In("_id", lifecycleMigrationIds));
+    await new SeedEmployeeLifecyclePolicies().ExecuteAsync(db);
+    await new SeedEmployeeLeaveLifecyclePolicies().ExecuteAsync(db);
+    await new SeedWorkingLifecyclePolicy().ExecuteAsync(db);
+    await new CorrectAbscondingLifecyclePolicy().ExecuteAsync(db);
+    await new AddEmployeeLifecyclePolicyIndexes().ExecuteAsync(db);
+    await new SeedCompanyNotificationDefaults().ExecuteAsync(db);
+    Console.WriteLine("Lifecycle policy migrations applied.");
+    return;
+}
+
 if (args.Contains("repair-attendance-null-ids", StringComparer.OrdinalIgnoreCase))
 {
     var attendance = db.GetCollection<BsonDocument>("Attendance");

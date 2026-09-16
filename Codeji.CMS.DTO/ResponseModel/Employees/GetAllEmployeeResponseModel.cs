@@ -19,4 +19,11 @@ public class GetAllEmployeeResponseModel
     public bool IsVerified { get; set; }
     public string EmploymentStatus { get; set; } = "Active";
     public DateTime? LastWorkingDate { get; set; }
+    public string AvailabilityStatus { get; set; } = "Working";
+    public string AccountStatus { get; set; } = "Active";
+    public string PayrollStatus { get; set; } = "Active";
+    public string OffboardingStatus { get; set; } = "None";
+    public string FormerPortalStatus { get; set; } = "NotEligible";
+    public string AlumniStatus { get; set; } = "NotMember";
+    public int LifecycleVersion { get; set; }
 }

@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace Codeji.CMS.DTO.CareerPortal;
 
 public sealed class PublicCompanyProfileDto
@@ -24,6 +26,7 @@ public sealed class PublicCompanyProfileDto
     public string? WorkCultureHtml { get; init; }
     public string? HiringProcessHtml { get; init; }
     public string? DiversityStatementHtml { get; init; }
+    public string CareerTheme { get; init; } = "glass";
     public bool IsPublished { get; init; }
 }
 
@@ -50,7 +53,13 @@ public sealed class UpsertPublicCompanyProfileRequest
     public string? WorkCultureHtml { get; init; }
     public string? HiringProcessHtml { get; init; }
     public string? DiversityStatementHtml { get; init; }
+    public string? CareerTheme { get; init; }
     public bool IsPublished { get; init; }
+}
+
+public sealed class UpdateCompanyThemeRequest
+{
+    public string? AppTheme { get; init; }
 }
 
 public sealed class CareerSubscribeRequest
@@ -92,9 +101,13 @@ public sealed class JobAlertRequest
 
 public sealed class CareerAnalyticsRequest
 {
+    [Required, StringLength(40)]
     public string EventType { get; init; } = string.Empty;
+    [StringLength(256)]
     public string? VisitorToken { get; init; }
+    [StringLength(64)]
     public string? PublicJobId { get; init; }
+    [StringLength(64)]
     public string? PublicCompanyCode { get; init; }
 }
 

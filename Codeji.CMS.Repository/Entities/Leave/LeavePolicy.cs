@@ -17,6 +17,11 @@ public class LeavePolicy : BaseClass
     // Existing documents deserialize to Leave, preserving all historic leave behaviour.
     public LeavePolicyType PolicyType { get; set; } = LeavePolicyType.Leave;
     public WorkFromHomePolicySettings? WorkFromHome { get; set; }
+    /// <summary>
+    /// Optional lifecycle configuration owned by this leave policy. When enabled,
+    /// requests are approval-driven and do not consume an employee entitlement.
+    /// </summary>
+    public LifecycleLeavePolicySettings? Lifecycle { get; set; }
     public string Description { get; set; } = string.Empty;
     public bool Status { get; set; } = true;
     public bool Paid { get; set; } = true;
@@ -35,6 +40,17 @@ public class LeavePolicy : BaseClass
     // For WFH this records the selected employee user IDs. An empty list means
     // all active employees, matching the existing leave-policy convention.
     public List<string>? ApplicableTo { get; set; } = [];
+}
+
+public class LifecycleLeavePolicySettings
+{
+    public bool Enabled { get; set; }
+    public string EventType { get; set; } = string.Empty;
+    public bool RequiresHrApproval { get; set; } = true;
+    public bool RequiresReason { get; set; } = true;
+    public bool RequiresDocument { get; set; } = true;
+    public bool RequiresExpectedReturnDate { get; set; } = true;
+    public DateTime? EffectiveFromUtc { get; set; }
 }
 
 /// <summary>

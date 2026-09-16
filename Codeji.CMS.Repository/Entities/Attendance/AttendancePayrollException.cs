@@ -4,6 +4,7 @@ using MongoDB.Bson.Serialization.Attributes;
 public class AttendancePayrollException : BaseClass
 {
     [BsonId] public string Id { get; set; } = Guid.NewGuid().ToString();
+    [BsonIgnore] public string? EmployeeName { get; set; }
     public required string UserId { get; set; }
     public required string EmployeeId { get; set; }
     public required DateTime PayrollMonth { get; set; }

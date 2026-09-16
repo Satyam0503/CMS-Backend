@@ -4,7 +4,14 @@ public sealed class EmployeeOfficeScheduleAssignmentDto
 {
     public string UserId { get; set; } = string.Empty;
     public string? ScheduleId { get; set; }
+    // Kept separately from ScheduleId so the UI can show the resolved shift
+    // without accidentally turning an inherited department/default shift into
+    // a new employee-level override when it is saved unchanged.
+    public string? EmployeeOverrideScheduleId { get; set; }
     public string? ScheduleName { get; set; }
+    public string? StartTime { get; set; }
+    public string? EndTime { get; set; }
+    public List<int> WorkingDays { get; set; } = [];
     public string Source { get; set; } = "CompanyDefault";
 }
 

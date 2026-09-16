@@ -151,6 +151,20 @@ public sealed class PublicCompanyProfileService : IPublicCompanyProfileService
         profile.UpdatedBy = userId;
         profile.UpdatedDate = now;
 
+        // Career Profile edit permission is the delegated HR authorization path
+        // for company branding. Persist the choice on Company, never on the
+        // public profile, so authenticated and public surfaces share one source.
+        if (request.CareerTheme is not null)
+        {
+            company.AppTheme = NormalizeCareerTheme(request.CareerTheme);
+            await _companies.UpdateOneAsync(
+                c => c.CompanyId == companyId,
+                Builders<Company>.Update
+                    .Set(c => c.AppTheme, company.AppTheme)
+                    .Set(c => c.UpdatedBy, userId)
+                    .Set(c => c.UpdatedDate, now));
+        }
+
         if (existing is null) await _profiles.InsertOneAsync(profile);
         else await _profiles.ReplaceOneAsync(p => p.PublicCompanyProfileId == existing.PublicCompanyProfileId, profile);
 
@@ -237,6 +251,28 @@ public sealed class PublicCompanyProfileService : IPublicCompanyProfileService
 
     internal static string NormalizeCode(string? value) => Regex.Replace(value ?? string.Empty, @"\D", string.Empty);
 
+    internal static string NormalizeCareerTheme(string? value)
+    {
+        var theme = value?.Trim().ToLowerInvariant();
+        return theme is "glass" or "slate" or "dawn" or "blush" ? theme : "glass";
+    }
+
+    public async Task<Result> UpdateCompanyTheme(string companyId, string userId, string? appTheme)
+    {
+        var result = new Result();
+        var theme = NormalizeCareerTheme(appTheme);
+        var update = await _companies.UpdateOneAsync(
+            c => c.CompanyId == companyId && !c.IsDeleted,
+            Builders<Company>.Update
+                .Set(c => c.AppTheme, theme)
+                .Set(c => c.UpdatedBy, userId)
+                .Set(c => c.UpdatedDate, DateTime.UtcNow));
+        result.Success = update.MatchedCount == 1;
+        result.StatusCode = result.Success ? StatusCodes.Status200OK : StatusCodes.Status404NotFound;
+        result.Message = result.Success ? "Company theme updated." : "Company not found.";
+        return result;
+    }
+
     private async Task<Company> EnsureCompanyPortalAsync(Company company)
     {
         if (!Regex.IsMatch(company.PublicCompanyCode ?? string.Empty, @"^\d{6}$"))
@@ -303,6 +339,7 @@ public sealed class PublicCompanyProfileService : IPublicCompanyProfileService
         WorkCultureHtml = p?.WorkCultureHtml,
         HiringProcessHtml = p?.HiringProcessHtml,
         DiversityStatementHtml = p?.DiversityStatementHtml,
+        CareerTheme = NormalizeCareerTheme(c.AppTheme),
         IsPublished = p?.IsPublished ?? false
     };
 

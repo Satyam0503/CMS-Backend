@@ -58,6 +58,13 @@ namespace Codeji.CMS.API.Controllers
         public Task<Result<PublicCareerCompanyDto>> GetPublicCareerCompany(string publicCompanyCode) =>
             _companyService.GetPublicCareerCompany(publicCompanyCode);
 
+        [HttpGet("theme")]
+        public async Task<IActionResult> GetCurrentCompanyTheme()
+        {
+            var result = await _companyService.GetCompanyDetails(CurrentContext.CompanyId(_httpContextAccessor));
+            return StatusCode(result.StatusCode, new { result.Success, result.Message, appTheme = result.MethodResult?.AppTheme ?? "glass" });
+        }
+
         [HttpPost]
         [Route("UpdateCompanyDetails")]
         [Authorize(Policy = "AdminOnly")]
@@ -67,6 +74,16 @@ namespace Codeji.CMS.API.Controllers
             var result = await _companyService.UpdateCompanyDetails(model, companyId);
             return result;
         }
+
+        [HttpGet("NotificationPreferences")]
+        // [Authorize(Policy = "AdminOnly")]
+        public Task<Result<CompanyNotificationPreferencesDto>> GetCompanyNotificationPreferences() =>
+            _companyService.GetCompanyNotificationPreferences(CurrentContext.CompanyId(_httpContextAccessor));
+
+        [HttpPut("NotificationPreferences")]
+        [Authorize(Policy = "AdminOnly")]
+        public Task<Result<CompanyNotificationPreferencesDto>> UpdateCompanyNotificationPreferences([FromBody] CompanyNotificationPreferencesDto model) =>
+            _companyService.UpdateCompanyNotificationPreferences(CurrentContext.CompanyId(_httpContextAccessor), CurrentContext.UserId(_httpContextAccessor), model);
 
         // services related to company policies
         [HttpPost]

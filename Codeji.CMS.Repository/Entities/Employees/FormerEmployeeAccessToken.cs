@@ -16,4 +16,8 @@ public sealed class FormerEmployeeAccessToken : BaseClass
     public string? SessionTokenHash { get; set; }
     public DateTime? SessionExpiresAtUtc { get; set; }
     public DateTime? SessionRevokedAtUtc { get; set; }
+    public string? OtpHash { get; set; }
+    public DateTime? OtpExpiresAtUtc { get; set; }
+    public int OtpAttempts { get; set; }
+    public DateTime? OtpUsedAtUtc { get; set; }
 }

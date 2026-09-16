@@ -151,6 +151,38 @@ public class EmployeeServiceBulkImportTests
     }
 
     [Fact]
+    public async Task ReviewEmployeeExit_CombinedManagerAndHr_ApprovesBothStages()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false);
+        SetExitContext(fixture, "combined-reviewer");
+        fixture.RoleService.Setup(x => x.VerifyUserAccess(It.IsAny<string>(), It.IsAny<string[]>(), "combined-reviewer", "company-1", null)).ReturnsAsync(true);
+        var exit = new EmployeeExit
+        {
+            CompanyId = "company-1", EmployeeExitId = "exit-1", EmployeeUserId = "employee-1",
+            ReportingManagerUserId = "combined-reviewer", Status = "PendingManagerApproval", IsActive = true, Version = 3,
+            PolicySnapshot = new EmployeeExitPolicySnapshot { RequireManagerReview = true, RequireHrReview = true }
+        };
+        fixture.EmployeeExitRepository.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeExit, bool>>>(), It.IsAny<bool>())).ReturnsAsync(exit);
+        fixture.EmployeeExitRepository.Setup(x => x.Update(It.IsAny<FilterDefinition<EmployeeExit>>(), exit)).ReturnsAsync(new Result { Success = true });
+        fixture.EmployeeRepository.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmpUser, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(new EmpUser { CompanyId = "company-1", UserId = "employee-1", FirstName = "Test", LastName = "Employee", Email = "test@example.com", Status = true, EmploymentStatus = "Active", Lifecycle = new EmployeeLifecycleState() });
+        fixture.EmployeeRepository.Setup(x => x.Update(It.IsAny<FilterDefinition<EmpUser>>(), It.IsAny<EmpUser>()))
+            .ReturnsAsync(new Result { Success = true });
+
+        var result = await fixture.Service.ReviewEmployeeExit(new ReviewEmployeeExitRequest
+        {
+            EmployeeExitId = "exit-1", Version = 3, Action = "Approve", Notes = "Approved by combined reviewer."
+        });
+
+        Assert.True(result.Success);
+        Assert.Equal("NoticePeriod", exit.Status);
+        Assert.Equal("combined-reviewer", exit.ApprovedByUserId);
+        Assert.NotNull(exit.ManagerReviewedAtUtc);
+        Assert.NotNull(exit.HrReviewedAtUtc);
+        Assert.Contains(exit.AuditHistory, item => item.Action == "CombinedManagerHrApproval");
+    }
+
+    [Fact]
     public async Task CompleteEmployeeExit_RequiresVerifiedResignationEvidence_WhenPolicySnapshotsIt()
     {
         var fixture = CreateFixture(dbDuplicateExists: false); SetExitContext(fixture, "hr-user");
@@ -172,6 +204,33 @@ public class EmployeeServiceBulkImportTests
         var result = await fixture.Service.CompleteEmployeeExit(new CompleteEmployeeExitRequest { EmployeeUserId = "employee-1" });
 
         Assert.False(result.Success); Assert.Equal("EMPLOYEE_ACKNOWLEDGEMENT_PENDING", result.Message);
+    }
+
+    [Fact]
+    public async Task CompleteEmployeeExit_UsesCompatibilityPath_WhenMongoTransactionsAreUnavailable()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false); SetExitContext(fixture, "hr-user");
+        fixture.RoleService.Setup(x => x.VerifyUserAccess(It.IsAny<string>(), It.IsAny<string[]>(), "hr-user", "company-1", null)).ReturnsAsync(true);
+        var exit = new EmployeeExit
+        {
+            CompanyId = "company-1", EmployeeExitId = "exit-1", EmployeeUserId = "employee-1", ExitType = "Resigned",
+            Status = "NoticePeriod", IsActive = true, Version = 5, LastWorkingDate = DateTime.UtcNow.Date.AddDays(-1),
+            PostExitAccess = new EmployeeExitPostExitAccess { PersonalEmail = "former.employee@example.com", PersonalEmailVerified = true }
+        };
+        var employee = new EmpUser { CompanyId = "company-1", UserId = "employee-1", EmployeeId = "EMP001", FirstName = "Former", LastName = "Employee", Email = "former.employee@example.com", Status = true };
+        fixture.EmployeeExitRepository.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeExit, bool>>>(), It.IsAny<bool>())).ReturnsAsync(exit);
+        fixture.EmployeeRepository.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmpUser, bool>>>(), It.IsAny<bool>())).ReturnsAsync(employee);
+        fixture.EmployeeExitRepository.Setup(x => x.Update(It.IsAny<FilterDefinition<EmployeeExit>>(), exit)).ReturnsAsync(new Result { Success = true });
+        fixture.EmployeeRepository.Setup(x => x.Update(It.IsAny<FilterDefinition<EmpUser>>(), employee)).ReturnsAsync(new Result { Success = true });
+
+        var result = await fixture.Service.CompleteEmployeeExit(new CompleteEmployeeExitRequest { EmployeeExitId = "exit-1", Version = 5 });
+
+        Assert.True(result.Success);
+        Assert.False(exit.IsActive);
+        Assert.Equal("Resigned", employee.EmploymentStatus);
+        Assert.False(employee.Status);
+        fixture.EmployeeExitRepository.Verify(x => x.Update(It.IsAny<FilterDefinition<EmployeeExit>>(), exit), Times.Once);
+        fixture.EmployeeRepository.Verify(x => x.Update(It.IsAny<FilterDefinition<EmpUser>>(), employee), Times.Once);
     }
 
     [Fact]
@@ -297,6 +356,96 @@ public class EmployeeServiceBulkImportTests
         Assert.True(result.Success);
         Assert.Equal(1, result.MethodResult.CreatedCount);
         fixture.JobTitlesRepository.Verify(r => r.AddOne(It.Is<JobTitles>(j => j.Titles.Any(t => t.Label == "AI Engineer"))), Times.Once);
+    }
+
+    [Fact]
+    public async Task CalculateEmployeeFinalSettlement_UsesDraftPayrollForLastWorkedMonth()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false);
+        SetExitContext(fixture, "hr-user");
+        fixture.RoleService.Setup(x => x.VerifyUserAccess(It.IsAny<string>(), It.IsAny<string[]>(), "hr-user", "company-1", null)).ReturnsAsync(true);
+
+        var exit = new EmployeeExit
+        {
+            CompanyId = "company-1",
+            EmployeeExitId = "exit-1",
+            EmployeeUserId = "employee-1",
+            Status = "NoticePeriod",
+            IsActive = true,
+            Version = 5,
+            LastWorkingDate = DateTime.UtcNow.Date.AddDays(-1),
+            AuditHistory = []
+        };
+        fixture.EmployeeExitRepository.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeExit, bool>>>(), It.IsAny<bool>())).ReturnsAsync(exit);
+        fixture.EmployeeExitRepository.Setup(x => x.Update(It.IsAny<FilterDefinition<EmployeeExit>>(), It.IsAny<EmployeeExit>())).ReturnsAsync(new Result { Success = true });
+        fixture.EmployeeRepository.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmpUser, bool>>>(), It.IsAny<bool>())).ReturnsAsync(new EmpUser
+        {
+            CompanyId = "company-1", UserId = "employee-1", EmployeeId = "emp-1",
+            FirstName = "Former", LastName = "Employee", Email = "former.employee@example.com"
+        });
+
+        var payrollRepo = new Mock<IMongoDbRepository<EmpPayRoll>>();
+        var draftPayroll = new EmpPayRoll
+        {
+            Id = "payroll-1",
+            CompanyId = "company-1",
+            // Older generated payrolls can retain an obsolete user link. F&F must still
+            // find the tenant-scoped record through the stable employee identifier.
+            UserId = "stale-user-link",
+            EmployeeId = "emp-1",
+            PayMonth = new DateTime(2026, 9, 1),
+            PaidDate = new DateTime(2026, 9, 20),
+            BasicPay = 1000m,
+            Bonus = 100m,
+            PaidDays = 30f,
+            IsProcessed = false,
+            CreatedAt = new DateTime(2026, 9, 18, 9, 0, 0, DateTimeKind.Utc),
+            Allowance = new Allowance { HRA = 100m, LTA = 50m, OtherAllowance = 25m },
+            Deduction = new Deduction { IncomeTax = 10m, HealthInsurance = 20m, EPF = 30m, ESIC = 5m, LossOfPay = 0m }
+        };
+        payrollRepo.Setup(x => x.GetAll(It.IsAny<System.Linq.Expressions.Expression<Func<EmpPayRoll, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync([draftPayroll]);
+
+        var settlementRepo = new Mock<IMongoDbRepository<EmployeeFinalSettlement>>();
+        settlementRepo.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeFinalSettlement, bool>>>(), It.IsAny<bool>())).ReturnsAsync((EmployeeFinalSettlement?)null);
+        settlementRepo.Setup(x => x.AddOne(It.IsAny<EmployeeFinalSettlement>())).ReturnsAsync(new Result { Success = true });
+
+        var service = new EmployeeService(
+            fixture.EducationRepository.Object,
+            fixture.Mapper.Object,
+            fixture.CertificationRepository.Object,
+            fixture.SummaryRepository.Object,
+            fixture.EmployeeRepository.Object,
+            fixture.EmployeeIdSequenceRepository.Object,
+            fixture.RolesRepository.Object,
+            fixture.RoleService.Object,
+            fixture.EmployeeSkillsRepository.Object,
+            fixture.CompanyRepository.Object,
+            fixture.MailTemplateRepository.Object,
+            fixture.PriorityTaskQueue.Object,
+            fixture.MiddlewareService.Object,
+            fixture.HttpContextAccessor.Object,
+            fixture.DepartmentRepository.Object,
+            fixture.SkillsRepository.Object,
+            fixture.WorkHistoryRepository.Object,
+            fixture.UserNotificationRepository.Object,
+            fixture.NotificationsRepository.Object,
+            fixture.JobTitlesRepository.Object,
+            fixture.CustomAttributeRepository.Object,
+            fixture.CustomAttributeValueRepository.Object,
+            fixture.NotificationService.Object,
+            fixture.NotificationPreferenceRepository.Object,
+            fixture.UserSecurityTokenRepository.Object,
+            fixture.OfficeScheduleRepository.Object,
+            fixture.EmployeeScheduleAssignmentRepository.Object,
+            fixture.Logger.Object,
+            employeeExitRepository: fixture.EmployeeExitRepository.Object,
+            employeeFinalSettlementRepository: settlementRepo.Object,
+            employeePayrollRepository: payrollRepo.Object);
+
+        var result = await service.CalculateEmployeeFinalSettlement(new CalculateEmployeeFinalSettlementRequest { EmployeeExitId = "exit-1", Version = 5 });
+
+        Assert.True(result.Success);
+        settlementRepo.Verify(x => x.AddOne(It.Is<EmployeeFinalSettlement>(s => s.Status == "Calculated" && s.SourcePayrollId == "payroll-1" && s.NetPayable > 0)), Times.Once);
     }
 
     private static EmployeeServiceFixture CreateFixture(bool dbDuplicateExists)
@@ -449,7 +598,7 @@ public class EmployeeServiceBulkImportTests
         public Mock<IMongoDbRepository<UserSecurityToken>> UserSecurityTokenRepository { get; } = new();
         public Mock<IMongoDbRepository<CompanyOfficeSchedule>> OfficeScheduleRepository { get; } = new();
         public Mock<IMongoDbRepository<EmployeeScheduleAssignment>> EmployeeScheduleAssignmentRepository { get; } = new();
-        public Mock<ILogger<EmployeeService>> Logger { get; } = new();
         public Mock<IMongoDbRepository<EmployeeExit>> EmployeeExitRepository { get; } = new();
+        public Mock<ILogger<EmployeeService>> Logger { get; } = new();
     }
 }

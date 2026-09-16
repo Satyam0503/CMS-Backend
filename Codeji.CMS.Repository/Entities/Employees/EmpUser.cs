@@ -28,7 +28,10 @@ public class EmpUser : BaseClass
     // authoritative workflow record; these fields are the read-model used by login
     // and directory queries.
     public string? EmploymentStatus { get; set; }
+    /// <summary>Canonical date-only employment end date. ExitDate is retained for legacy consumers.</summary>
     public DateTime? LastWorkingDate { get; set; }
+    /// <summary>Additive lifecycle read model. EmployeeExit remains authoritative for exit workflow.</summary>
+    public EmployeeLifecycleState Lifecycle { get; set; } = new();
     public int? EmploymentType { get; set; } = null;
     public bool Status { get; set; }
     public bool IsEmailVerified { get; set; }

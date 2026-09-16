@@ -10,6 +10,22 @@ public static class IndiaTime
 
     public static DateTime Now => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, Zone);
     public static DateTime Today => Now.Date;
+    /// <summary>
+    /// Resolves a persisted date-only value to its intended India business date.
+    /// MongoDB returns dates as UTC instants, so an older value saved from an
+    /// IST midnight may otherwise appear to be the previous UTC calendar day.
+    /// </summary>
+    public static DateOnly ToBusinessDate(DateTime value)
+    {
+        var utc = value.Kind == DateTimeKind.Utc
+            ? value
+            : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+        return DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(utc, Zone));
+    }
+
+    public static DateTime ToStoredBusinessDate(DateOnly value) =>
+        DateTime.SpecifyKind(value.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+
     public static DateTime ToUtc(DateTime indiaLocalTime) => TimeZoneInfo.ConvertTimeToUtc(
         DateTime.SpecifyKind(indiaLocalTime, DateTimeKind.Unspecified), Zone);
 

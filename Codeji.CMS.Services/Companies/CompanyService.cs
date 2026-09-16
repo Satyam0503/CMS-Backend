@@ -22,6 +22,7 @@ using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
+using MongoDB.Bson;
 
 namespace Codeji.CMS.Services
 {
@@ -143,11 +144,7 @@ namespace Codeji.CMS.Services
                 Status = true,
             };
 
-            var notificationPreferenceSetting = new NotificationPreference()
-            {
-                UserId = user.UserId,
-                Preferences = _middlewareService.GetDefaultNotificationPreferences(),
-            };
+          
 
             result = await _companyRepo.AddOne(company);
             if (result.Success)
@@ -161,7 +158,6 @@ namespace Codeji.CMS.Services
                 {
                     return new Result { Success = false, StatusCode = StatusCodes.Status500InternalServerError, Message = "The company administrator account could not be created." };
                 }
-                await _notificationPreferenceRepo.AddOne(notificationPreferenceSetting);
                 await _attendanceStatusService.EnsureCompanyDefaults(companyId);
                 await SendCompanyUserVerificationEmail(user, company);
                 await SeedDefaultDepartmentsAndJobTitles(company, user.UserId);
@@ -417,6 +413,7 @@ namespace Codeji.CMS.Services
             company.DefaultLanguage = model.DefaultLanguage ?? company.DefaultLanguage;
             company.EmployeeIdPrefix = NormalizeEmployeeIdPrefix(model.EmployeeIdPrefix, company.CompanyName);
             company.AutoGenerateEmployeeId = model.AutoGenerateEmployeeId;
+                                                                                                                                                                        company.AppTheme = NormalizeAppTheme(model.AppTheme ?? company.AppTheme);
             company.CompanyLogo = model.CompanyLogo == null ? company.CompanyLogo : await UpdateCompanyLogo(model.CompanyLogo, companyId);
             await EnsureCareerPortal(company);
 
@@ -430,6 +427,12 @@ namespace Codeji.CMS.Services
             result.MethodResult = company;
             result.Success = true;
             return result;
+        }
+
+        private static string NormalizeAppTheme(string? value)
+        {
+            var theme = value?.Trim().ToLowerInvariant();
+            return theme is "glass" or "slate" or "dawn" or "blush" ? theme : "glass";
         }
 
         private async Task EnsureCareerPortal(Company company)
@@ -990,6 +993,31 @@ namespace Codeji.CMS.Services
                     ContentType = contentType
                 };
             return response;
+        }
+
+        public async Task<Result<CompanyNotificationPreferencesDto>> GetCompanyNotificationPreferences(string companyId)
+        {
+            var company = await _companyRepo.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
+            if (company is null) return new Result<CompanyNotificationPreferencesDto> { Success = false, StatusCode = 404, Message = "Company not found." };
+            var preferences = company.NotificationPreferences?.Count > 0 ? company.NotificationPreferences : _middlewareService.GetDefaultNotificationPreferences();
+    var c = company.NotificationConfiguration ?? new CompanyNotificationConfiguration();
+    return new Result<CompanyNotificationPreferencesDto>
+     { Success = true, MethodResult = new CompanyNotificationPreferencesDto 
+     { Preferences = preferences, Configuration = new CompanyNotificationConfigurationDto { Position = c.Position, AutoClose = c.AutoClose, Limit = c.Limit, NewestOnTop = c.NewestOnTop, PauseOnHover = c.PauseOnHover, ShowCloseButton = c.ShowCloseButton, CloseOnClick = c.CloseOnClick, Transition = c.Transition, Theme = c.Theme } } };
+        }
+
+        public async Task<Result<CompanyNotificationPreferencesDto>> UpdateCompanyNotificationPreferences(string companyId, string userId, CompanyNotificationPreferencesDto model)
+        {
+            Console.WriteLine($"Updating notification preferences for company {companyId} by user {userId}");
+            Console.WriteLine($"New preferences: {string.Join(", ", model.Preferences.Select(kv => $"{kv.Key}: {kv.Value}"))}");
+            Console.WriteLine($"New configuration: Position={model.Configuration.Position}, AutoClose={model.Configuration.AutoClose}, Limit={model.Configuration.Limit}, NewestOnTop={model.Configuration.NewestOnTop}, PauseOnHover={model.Configuration.PauseOnHover}, ShowCloseButton={model.Configuration.ShowCloseButton}, CloseOnClick={model.Configuration.CloseOnClick}, Transition={model.Configuration.Transition}, Theme={model.Configuration.Theme}");
+            var preferences = _middlewareService.GetDefaultNotificationPreferences();
+            foreach (var item in model.Preferences) preferences[item.Key] = item.Value;
+            var result = await _companyRepo.UpdateMany(Builders<Company>.Filter.Eq(x => x.CompanyId, companyId) & Builders<Company>.Filter.Eq(x => x.IsDeleted, false),
+        Builders<Company>.Update.Set(x => x.NotificationPreferences, preferences).Set(x => x.NotificationConfiguration, new CompanyNotificationConfiguration { Position = model.Configuration.Position, AutoClose = model.Configuration.AutoClose, Limit = model.Configuration.Limit, NewestOnTop = model.Configuration.NewestOnTop, PauseOnHover = model.Configuration.PauseOnHover, ShowCloseButton = model.Configuration.ShowCloseButton, CloseOnClick = model.Configuration.CloseOnClick, Transition = model.Configuration.Transition, Theme = model.Configuration.Theme }).Set(x => x.UpdatedBy, userId).Set(x => x.UpdatedDate, DateTime.UtcNow));
+            if (!result.Success) return new Result<CompanyNotificationPreferencesDto> { Success = false, StatusCode = 404, Message = "Company not found." };
+
+    return new Result<CompanyNotificationPreferencesDto> { Success = true, MethodResult = model };
         }
     }
 }

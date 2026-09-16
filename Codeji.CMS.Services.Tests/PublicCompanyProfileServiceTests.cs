@@ -39,4 +39,14 @@ public sealed class PublicCompanyProfileServiceTests
         Assert.Equal("123456", PublicCompanyProfileService.NormalizeCode("AB-12-34-56"));
         Assert.Equal(string.Empty, PublicCompanyProfileService.NormalizeCode(null));
     }
+
+    [Theory]
+    [InlineData("slate", "slate")]
+    [InlineData(" SLATE ", "slate")]
+    [InlineData("unsupported", "glass")]
+    [InlineData(null, "glass")]
+    public void NormalizeCareerTheme_AllowsOnlyPublicCareerThemes(string? value, string expected)
+    {
+        Assert.Equal(expected, PublicCompanyProfileService.NormalizeCareerTheme(value));
+    }
 }

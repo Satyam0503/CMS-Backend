@@ -1,6 +1,7 @@
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.PayRoll;
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.middlewares;
@@ -14,18 +15,26 @@ namespace Codeji.CMS.API.Controllers;
 public class AutoPayrollController : BaseApiController
 {
     readonly IAutoPayRollServices _autoPayRollServices;
+    readonly IAttendancePenaltyService _attendancePenaltyService;
     readonly IHttpContextAccessor _httpContextAccessor;
+    readonly ILogger<AutoPayrollController> _logger;
 
-    public AutoPayrollController(IHttpContextAccessor httpContextAccessor, IAutoPayRollServices autoPayRollServices)
+    public AutoPayrollController(
+        IHttpContextAccessor httpContextAccessor,
+        IAutoPayRollServices autoPayRollServices,
+        IAttendancePenaltyService attendancePenaltyService,
+        ILogger<AutoPayrollController> logger)
     {
         _httpContextAccessor = httpContextAccessor;
         _autoPayRollServices = autoPayRollServices;
+        _attendancePenaltyService = attendancePenaltyService;
+        _logger = logger;
     }
 
     [HttpPost]
     [Route("GeneratePayRollMonthly")]
     [ModulePermission(AppModule.PayrollSettings, [Permission.Create, Permission.Edit])]
-    public async Task<Result> GeneratePayRollForMonthly([FromBody] ProcessPayrollRequestDto model)
+    public async Task<ActionResult> GeneratePayRollForMonthly([FromBody] ProcessPayrollRequestDto model)
     {
         var result = new Result();
 
@@ -35,21 +44,35 @@ public class AutoPayrollController : BaseApiController
         {
             result.Success = false;
             result.Message = "Payroll can be processed only for a completed month.";
-            return result;
+            return Ok(result);
         }
 
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
 
         try
         {
-            result = await _autoPayRollServices.GeneratePayrollForMonthAsync(companyId, model.PayMonth);
+            // Payroll generation is a finalisation boundary. Validate and lock the exact
+            // selected month on the server so a browser cannot generate payroll from
+            // unreviewed or mutable attendance data.
+            var attendanceLock = await _attendancePenaltyService.ValidateAndLock(companyId, userId, requestPeriod);
+            if (!attendanceLock.Success)
+                return Ok(attendanceLock);
+
+            result = await _autoPayRollServices.GeneratePayrollForMonthAsync(companyId, requestPeriod);
         }
         catch (Exception ex)
         {
-            result.Success = false;
-            result.Message = $"Error processing payroll: {ex.Message}";
+            var correlationId = HttpContext.TraceIdentifier;
+            _logger.LogError(ex, "Payroll generation failed. CorrelationId: {CorrelationId}", correlationId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                code = "PAYROLL_GENERATION_FAILED",
+                message = "Unable to generate payroll. Please try again or contact support with the correlation ID.",
+                correlationId
+            });
         }
 
-        return result;
+        return Ok(result);
     }
 }

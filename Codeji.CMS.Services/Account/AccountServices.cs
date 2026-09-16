@@ -82,8 +82,18 @@ public class AccountServices : IAccountServices
         Result<TokenResponseDto> result = new();
         model.Email = model.Email.Trim();
         EmpUser? user = await FindSingleForAnonymousAuthAsync(_employeeRepository,
-            x => x.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase) && x.Status && !x.IsDeleted);
+            x => x.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase) && x.Status && !x.IsDeleted && (x.EmploymentStatus == null || x.EmploymentStatus == "" || x.EmploymentStatus == "Active" || x.EmploymentStatus == "NoticePeriod"));
         if (user == null)
+        {
+            result.Success = false;
+            result.StatusCode = CustomStatusCode.InvalidCredential;
+            return result;
+        }
+        // Account access is an independent lifecycle dimension. Legacy
+        // EmpUser.Status only represents the employee record and must not
+        // allow a Locked, TemporarilyDisabled, Suspended, or Closed account
+        // to authenticate.
+        if (user.Lifecycle is not null && !user.Lifecycle.CanLogin())
         {
             result.Success = false;
             result.StatusCode = CustomStatusCode.InvalidCredential;
@@ -411,6 +421,11 @@ public class AccountServices : IAccountServices
         EmpUser? empUser = await FindSingleForAnonymousAuthAsync(_employeeRepository,
             x => x.UserId == storedRefreshToken.UserId && x.Status && !x.IsDeleted);
         if (empUser == null)
+        {
+            result.StatusCode = CustomStatusCode.InvalidRefreshToken;
+            return result;
+        }
+        if (empUser.Lifecycle is not null && !empUser.Lifecycle.CanLogin())
         {
             result.StatusCode = CustomStatusCode.InvalidRefreshToken;
             return result;

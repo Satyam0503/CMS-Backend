@@ -19,6 +19,18 @@ public sealed class EmployeeFinalSettlement : BaseClass
     public DateTime? PaidAtUtc { get; set; }
     public string? PaymentFailureReason { get; set; }
     public string? DisputeReason { get; set; }
+    public decimal SalaryPayable { get; set; }
+    public decimal Reimbursements { get; set; }
+    public decimal LeaveEncashment { get; set; }
+    public decimal BonusesAndIncentives { get; set; }
+    public decimal Deductions { get; set; }
+    public decimal NoticeRecovery { get; set; }
+    public decimal OutstandingDues { get; set; }
+    public decimal NetPayable { get; set; }
+    /// <summary>Processed payroll used as the immutable automatic calculation source.</summary>
+    public string? SourcePayrollId { get; set; }
+    public DateTime? SourcePayrollMonth { get; set; }
+    public DateTime? CalculatedAtUtc { get; set; }
     public DateTime? ApprovedAtUtc { get; set; }
     public string? ApprovedByUserId { get; set; }
 }

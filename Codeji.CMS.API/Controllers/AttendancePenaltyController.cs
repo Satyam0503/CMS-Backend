@@ -27,6 +27,9 @@ public class AttendancePenaltyController : ControllerBase
     [HttpPost("exceptions/{id}/resolve-attendance"),ModulePermission(AppModule.Attendance,Permission.Edit)]
     public Task<Result<AttendanceExceptionResolutionResultDto>> ResolveAttendance(string id, AttendanceExceptionResolutionDto dto) =>
         _service.ResolveAttendanceException(CurrentContext.CompanyId(_context), CurrentContext.UserId(_context), id, dto);
+    [HttpPatch("exceptions/{id}/override"),ModulePermission(AppModule.Attendance,Permission.Edit)]
+    public Task<Result> Override(string id, AttendanceExceptionOverrideDto dto) =>
+        _service.OverrideException(CurrentContext.CompanyId(_context), CurrentContext.UserId(_context), id, dto);
     [HttpGet("month/lock-status"),ModulePermission(AppModule.Attendance,Permission.View)]
     public Task<AttendanceMonthLockStatusDto> GetMonthLockStatus([FromQuery]DateTime month)=>_service.GetMonthLockStatus(CurrentContext.CompanyId(_context),month);
     [HttpPost("month/validate-lock"),ModulePermission(AppModule.Attendance,Permission.Edit)]

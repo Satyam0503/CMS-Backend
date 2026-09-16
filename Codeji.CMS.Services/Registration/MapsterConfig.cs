@@ -59,6 +59,7 @@ public class MapsterConfig : IRegister
         config.NewConfig<LeavePolicy, LeavePolicyRequest>().TwoWays();
         config.NewConfig<LeavePolicy, UpdateLeavePolicyRequest>().TwoWays();
         config.NewConfig<WorkFromHomePolicySettings, WorkFromHomePolicySettingsRequest>().TwoWays();
+        config.NewConfig<LifecycleLeavePolicySettings, LifecycleLeavePolicySettingsRequest>().TwoWays();
         config.NewConfig<Policy, CreatePolicyRequestModel>().TwoWays();
         config.NewConfig<Policy, PolicyResponseModel>().TwoWays();
         config.NewConfig<AdminAttendanceCreateDto, AttendanceModel>()

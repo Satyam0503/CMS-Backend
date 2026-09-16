@@ -5,6 +5,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Calendar;
 using ClosedXML.Excel;
 using Codeji.CMS.Utility.Helpers;
+using Codeji.CMS.Services.Employees;
 
 
 namespace Codeji.CMS.Services.Attendance
@@ -292,6 +293,8 @@ private static string FormatAttendanceCell(AttendanceModel? daily, IReadOnlyColl
 
     if (DateOnly.FromDateTime(date) > DateOnly.FromDateTime(IndiaTime.Today)) return "Future date";
     if (DateTime.TryParse(employee.DateOfJoining, out var joiningDate) && date.Date < joiningDate.Date) return "Not eligible";
+    var lastWorkingDate = EmploymentPeriod.GetLastWorkingDate(employee);
+    if (lastWorkingDate.HasValue && date.Date > lastWorkingDate.Value) return "Not employed";
     if (!workingDates.Contains(DateOnly.FromDateTime(date)))
     {
         var isHoliday = holidays.Any(holiday => CalendarDateHelpers.MatchesDate(holiday, DateOnly.FromDateTime(date)));

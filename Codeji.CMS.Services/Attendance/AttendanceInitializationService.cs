@@ -2,6 +2,7 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.Employees;
 
 namespace Codeji.CMS.Services.Attendance;
 
@@ -42,15 +43,18 @@ public sealed class AttendanceInitializationService(
         var output = result.MethodResult;
         var summariesToInvalidate = new HashSet<(string UserId, DateTime Month)>();
         var workingDates = await calendar.GetWorkingDatesAsync(companyId, DateOnly.FromDateTime(start), DateOnly.FromDateTime(end), cancellationToken);
-        foreach (var employee in await employees.GetAll(x => x.CompanyId == companyId && x.Status && !x.IsDeleted))
+        foreach (var employee in (await employees.GetAll(x => x.CompanyId == companyId && !x.IsDeleted))
+            .Where(employee => EmploymentPeriod.IsEligibleForMonth(employee, start)))
         {
             output.EmployeesProcessed++;
             foreach (var day in workingDates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var date = day.ToDateTime(TimeOnly.MinValue);
-                if (DateTime.TryParse(employee.DateOfJoining, out var joined) && date.Date < joined.Date || DateTime.TryParse(employee.ExitDate, out var exited) && date.Date > exited.Date)
+                if (!EmploymentPeriod.WasEmployedOn(employee, date))
                 { output.EmploymentSkipped++; continue; }
+                if (!EmploymentPeriod.IsAttendanceExpectedOn(employee, date))
+                { output.InvalidSkipped++; output.Failures.Add($"{employee.EmployeeId} {day:yyyy-MM-dd}: ATTENDANCE_NOT_EXPECTED_FOR_LIFECYCLE"); continue; }
                 output.EligibleWorkingDays++;
                 var prepared = await validator.PrepareAsync(new AttendanceMutationRequest
                 {

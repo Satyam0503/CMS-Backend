@@ -16,8 +16,8 @@ public class WorkFromHomeController(IWorkFromHomeService service) : ControllerBa
     [HttpPut("allocations"), ModulePermission(AppModule.WorkFromHome, Permission.PolicyEdit)] public Task<Result> SaveAllocation(WorkFromHomeEmployeeAllocationDto dto) => service.SaveEmployeeAllocation(dto);
     [HttpPost("requests")] public Task<Result<WorkFromHomeResponseDto>> Create(WorkFromHomeRequestDto dto) => service.Create(dto);
     [HttpGet("requests/my")] public Task<Result<WorkFromHomeResponseDto>> Mine() => service.GetMy();
-    [HttpGet("requests/team"), ModulePermission(AppModule.WorkFromHome, Permission.ViewTeam)] public Task<Result<WorkFromHomeResponseDto>> Team() => service.GetTeam();
-    [HttpGet("requests/all"), ModulePermission(AppModule.WorkFromHome, Permission.ViewAll)] public Task<Result<WorkFromHomeResponseDto>> All() => service.GetAll();
+    [HttpGet("requests/team"), ModulePermission(AppModule.WorkFromHome, Permission.ViewTeam)] public Task<Result<WorkFromHomeResponseDto>> Team([FromQuery] WorkFromHomeRequestFilterDto filter) => service.GetTeam(filter);
+    [HttpGet("requests/all"), ModulePermission(AppModule.WorkFromHome, Permission.ViewAll)] public Task<Result<WorkFromHomeResponseDto>> All([FromQuery] WorkFromHomeRequestFilterDto filter) => service.GetAll(filter);
     [HttpPost("requests/{id}/approve"), ModulePermission(AppModule.WorkFromHome, Permission.ApproveTeam)] public Task<Result> Approve(string id, WorkFromHomeDecisionDto dto) => service.Decide(id, "Approved", dto);
     [HttpPost("requests/{id}/reject"), ModulePermission(AppModule.WorkFromHome, Permission.ApproveTeam)] public Task<Result> Reject(string id, WorkFromHomeDecisionDto dto) => service.Decide(id, "Rejected", dto);
     [HttpPost("requests/{id}/return"), ModulePermission(AppModule.WorkFromHome, Permission.ApproveTeam)] public Task<Result> Return(string id, WorkFromHomeDecisionDto dto) => service.Decide(id, "Returned", dto);

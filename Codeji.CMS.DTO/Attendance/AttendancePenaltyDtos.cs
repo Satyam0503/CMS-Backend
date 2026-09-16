@@ -54,6 +54,13 @@ public class AttendanceExceptionResolutionResultDto
     public string? RemainingIssue { get; set; }
 }
 
+/// <summary>Audited HR/Admin decision to unblock payroll when the underlying source cannot be corrected.</summary>
+public class AttendanceExceptionOverrideDto
+{
+    [Required, MinLength(3)] public string Reason { get; set; } = string.Empty;
+    [Range(1, int.MaxValue)] public int ExceptionVersion { get; set; }
+}
+
 public class AttendanceMonthRequestDto
 {
     [Required] public DateTime PayrollMonth { get; set; }

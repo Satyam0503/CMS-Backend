@@ -29,6 +29,20 @@ public sealed class PrivateEmployeeExitEvidenceStorage : IEmployeeExitEvidenceSt
         return (key, sha);
     }
 
+    public async Task<(string StorageKey, string Sha256)> SaveAsync(string companyId, string exitId, string fileName, string contentType, Stream content, CancellationToken cancellationToken = default)
+    {
+        if (content is null || !AllowedContentTypes.Contains(contentType)) throw new InvalidOperationException("Unsupported generated evidence file.");
+        if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(exitId) || companyId.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || exitId.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) throw new InvalidOperationException("Invalid evidence storage scope.");
+        var extension = contentType switch { "application/pdf" => ".pdf", "image/png" => ".png", "image/jpeg" => ".jpg", "message/rfc822" => ".eml", _ => throw new InvalidOperationException("Unsupported generated evidence file.") };
+        var key = Path.Combine(companyId, exitId, $"{Guid.NewGuid():N}{extension}").Replace('\\', '/');
+        var path = Path.Combine(_root, key.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await using (var output = File.Create(path)) { await content.CopyToAsync(output, cancellationToken); await output.FlushAsync(cancellationToken); }
+        if (!await HasExpectedSignature(path, contentType, cancellationToken)) { File.Delete(path); throw new InvalidOperationException("Generated evidence content is invalid."); }
+        await using var hashed = File.OpenRead(path); using var hash = SHA256.Create();
+        return (key, Convert.ToHexString(await hash.ComputeHashAsync(hashed, cancellationToken)));
+    }
+
     public Task<(Stream Content, string ContentType, string FileName)?> OpenReadAsync(string storageKey, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(storageKey)) return Task.FromResult<(Stream, string, string)?>(null);
@@ -37,6 +51,15 @@ public sealed class PrivateEmployeeExitEvidenceStorage : IEmployeeExitEvidenceSt
         if (!path.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase) || !File.Exists(path)) return Task.FromResult<(Stream, string, string)?>(null);
         var contentType = Path.GetExtension(path).ToLowerInvariant() switch { ".pdf" => "application/pdf", ".png" => "image/png", ".jpg" => "image/jpeg", ".eml" => "message/rfc822", _ => "application/octet-stream" };
         return Task.FromResult<(Stream, string, string)?>(new(File.OpenRead(path), contentType, Path.GetFileName(path)));
+    }
+
+    public Task DeleteAsync(string storageKey, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(storageKey)) return Task.CompletedTask;
+        var path = Path.GetFullPath(Path.Combine(_root, storageKey.Replace('/', Path.DirectorySeparatorChar)));
+        var rootPrefix = _root.EndsWith(Path.DirectorySeparatorChar) ? _root : _root + Path.DirectorySeparatorChar;
+        if (path.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase) && File.Exists(path)) File.Delete(path);
+        return Task.CompletedTask;
     }
 
     private static async Task<bool> HasExpectedSignature(string path, string contentType, CancellationToken cancellationToken)

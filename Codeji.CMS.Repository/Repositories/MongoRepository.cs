@@ -146,9 +146,9 @@ namespace Codeji.CMS.Repository.Repositories
             bool res = await GetQuery(filter, WithDeletedObjects).AnyAsync();
             return res;
         }
-        public async Task<TEntity?> FirstOrDefault(Expression<Func<TEntity, bool>> filter = null, bool WithDeletedObjects = false)
+        public async Task<TEntity?> FirstOrDefault(Expression<Func<TEntity, bool>> filter = null, bool WithDeletedObjects = false, bool withDefaultFilter = true)
         {
-            TEntity? res = GetQuery(filter, WithDeletedObjects).FirstOrDefault();
+            TEntity? res = GetQuery(filter, WithDeletedObjects, withDefaultFilter).FirstOrDefault();
             return res;
         }
         #region Create
@@ -294,10 +294,12 @@ namespace Codeji.CMS.Repository.Repositories
                 // check filters with company ID.
                 //to DO
                 ReplaceOneResult updateRes = await _dbSet.ReplaceOneAsync(filter, model, new ReplaceOptions { IsUpsert = false });
-                if (updateRes.ModifiedCount < 1)
+                // A matching replacement can legitimately be idempotent.  Treat a
+                // missing match as the failure, not a zero modified count.
+                if (updateRes.MatchedCount < 1)
                 {
                     Exception ex = new Exception();
-                    result.Message = HelperService.NotifyException("UpdateOne", "ERROR: updateRes.ModifiedCount < 1 for entity: " + typeof(TEntity).Name, ex);
+                    result.Message = HelperService.NotifyException("UpdateOne", "ERROR: updateRes.MatchedCount < 1 for entity: " + typeof(TEntity).Name, ex);
                     result.StatusCode = StatusCodes.Status400BadRequest;
                     return result;
                 }

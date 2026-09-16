@@ -14,5 +14,6 @@ namespace Codeji.CMS.DTO.Company
         public string Address { get; set; }
         public string? EmployeeIdPrefix { get; set; }
         public bool AutoGenerateEmployeeId { get; set; } = true;
+        public string? AppTheme { get; set; }
     }
 }

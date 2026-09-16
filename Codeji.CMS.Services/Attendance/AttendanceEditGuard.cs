@@ -3,6 +3,7 @@ using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Services.Attendance;
+using Codeji.CMS.Services.Employees;
 using Codeji.CMS.Utility.Enums;
 
 public interface IAttendanceEditGuard
@@ -26,7 +27,12 @@ public sealed class AttendanceEditGuard(
         var month = new DateTime(date.Year, date.Month, 1);
         var cutoff = (await exitCutoffs.GetAll(x => x.CompanyId == companyId && x.EmployeeUserId == userId && !x.IsDeleted, withDefaultFilter: false))
             .OrderByDescending(x => x.LastWorkingDate).FirstOrDefault();
-        if (cutoff is not null && date.Date > cutoff.LastWorkingDate.Date)
+        // A cutoff belongs to a historical employment period. Rejoining makes
+        // the employee eligible again from the new active employment period;
+        // the old cutoff must not lock valid attendance after rejoin. The
+        // centralized employment-period rule also preserves the cutoff for a
+        // genuinely exited employee and keeps pre-joining dates unavailable.
+        if (cutoff is not null && date.Date > cutoff.LastWorkingDate.Date && !EmploymentPeriod.WasEmployedOn(employee, date))
             throw new InvalidOperationException($"Attendance after {cutoff.LastWorkingDate:yyyy-MM-dd} is locked because the employee exit has completed.");
         // A correction is only valid while the employee's attendance period remains open.
         // Payroll generation and attendance locking are both finalisation boundaries.

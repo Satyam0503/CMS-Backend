@@ -6,6 +6,7 @@ using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Attendance;
+using MongoDB.Driver;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
@@ -69,10 +70,21 @@ public class PayRollServices : IPayRollServices
             if (company == null) throw new Exception();
 
             // get pay details based on month and year
-            Expression<Func<EmpPayRoll, bool>> expression = p => p.EmployeeId == empUser.EmployeeId && p.UserId == empUser.UserId && p.CompanyId == empUser.CompanyId && p.PayMonth.Month == month && p.PayMonth.Year == year;
-            EmpPayRoll? payRoll = await _empPayRollRepository.FirstOrDefault(expression) ?? throw new Exception(CustomStatusCode.PayRollNotExist.ToString());
-            if (!payRoll.IsProcessed)
-                throw new InvalidOperationException("Payroll for the selected month has not been processed yet.");
+            // A historical data import may have left a draft beside a processed payroll for the
+            // same employee and month.  Never select an arbitrary record here: a payslip can
+            // only be produced from the published (processed) payroll snapshot.
+            // Compare against the canonical first-of-month value rather than .Month/.Year:
+            // PayMonth is stored with DateTimeKind.Unspecified, so MongoDB's server-side
+            // $month/$year operators can read a shifted calendar month; exact equality is not
+            // affected because both sides undergo the same driver-side conversion.
+            var monthStart = new DateTime(year, month, 1);
+            Expression<Func<EmpPayRoll, bool>> expression = p => p.EmployeeId == empUser.EmployeeId && p.UserId == empUser.UserId && p.CompanyId == empUser.CompanyId && p.PayMonth == monthStart && p.IsProcessed;
+            EmpPayRoll? payRoll = _empPayRollRepository.Get(expression)
+                .OrderByDescending(p => p.ProcessedAt ?? DateTime.MinValue)
+                .ThenByDescending(p => p.CreatedAt)
+                .FirstOrDefault();
+            if (payRoll == null)
+                throw new InvalidOperationException("No processed payroll is available for the selected month. Process the payroll before generating a payslip.");
 
             // assign payroll data
             if (empUser.JobRole != null)
@@ -202,7 +214,7 @@ public class PayRollServices : IPayRollServices
         Result<string> result = new();
         var monthStart = new DateTime(payLoad.PayMonth.Year, payLoad.PayMonth.Month, 1);
         if (await _empPayRollRepository.Exist(p => p.CompanyId == companyId &&
-            p.PayMonth.Year == monthStart.Year && p.PayMonth.Month == monthStart.Month && p.IsProcessed))
+            p.PayMonth == monthStart && p.IsProcessed))
             return new Result<string> { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "Processed payroll cannot be changed. Select another month." };
 
         List<string> validationErrors = ValidatePayRollData(payLoad.PayData);
@@ -263,7 +275,7 @@ public class PayRollServices : IPayRollServices
         var tasks = new List<Task>();
         foreach (var item in dataList)
         {
-            var payRoll = await _empPayRollRepository.FirstOrDefault(p => p.CompanyId == companyId && p.UserId == item.UserId && item.PayMonth.Month == p.PayMonth.Month && item.PayMonth.Year == p.PayMonth.Year);
+            var payRoll = await _empPayRollRepository.FirstOrDefault(p => p.CompanyId == companyId && p.UserId == item.UserId && p.PayMonth == item.PayMonth);
             if (payRoll == null)
             {
                 tasks.Add(_empPayRollRepository.AddOne(item));
@@ -286,11 +298,12 @@ public class PayRollServices : IPayRollServices
         List<string> matchingEmployeeIds = [];
         List<EmpPayRoll> empPayRolls = [];
         IEnumerable<EmpUser> empUsers = [];
+        var monthStart = new DateTime(payload.PayMonth.Year, payload.PayMonth.Month, 1);
         if (!string.IsNullOrEmpty(payload.EmployeeName))
         {
             matchingEmployeeIds = (await _employeeRepository.GetAll(e => (e.FirstName + " " + e.LastName).Contains(payload.EmployeeName, StringComparison.CurrentCultureIgnoreCase) && e.CompanyId == companyId)).Select(e => e.UserId).ToList();
             Expression<Func<EmpPayRoll, bool>> expression = p => p.CompanyId == companyId
-                                        && payload.PayMonth.Month == p.PayMonth.Month && payload.PayMonth.Year == p.PayMonth.Year
+                                        && p.PayMonth == monthStart
                                         && (!processedOnly || p.IsProcessed)
                                         && (viewerUserId == null || p.UserId == viewerUserId)
                                         && matchingEmployeeIds.Contains(p.UserId);
@@ -302,7 +315,7 @@ public class PayRollServices : IPayRollServices
         else
         {
             Expression<Func<EmpPayRoll, bool>> expression = p => p.CompanyId == companyId
-                                        && payload.PayMonth.Month == p.PayMonth.Month && payload.PayMonth.Year == p.PayMonth.Year
+                                        && p.PayMonth == monthStart
                                         && (!processedOnly || p.IsProcessed)
                                         && (viewerUserId == null || p.UserId == viewerUserId);
             empPayRolls = _empPayRollRepository.Get(expression).ToList();
@@ -310,6 +323,20 @@ public class PayRollServices : IPayRollServices
                 (viewerUserId == null || e.UserId == viewerUserId);
             empUsers = await _employeeRepository.GetAll(empExpression);
         }
+
+        // One employee must be represented by one payroll row per month.  Older data can
+        // contain both a draft and a processed row; retain the processed snapshot in the
+        // response so payroll history, paid days and payslip actions stay consistent.  For
+        // duplicate drafts, use the newest deterministic record until the data is cleaned up.
+        empPayRolls = empPayRolls
+            .GroupBy(p => new { p.EmployeeId, p.UserId })
+            .Select(group => group
+                .OrderByDescending(p => p.IsProcessed)
+                .ThenByDescending(p => p.ProcessedAt ?? DateTime.MinValue)
+                .ThenByDescending(p => p.CreatedAt)
+                .ThenByDescending(p => p.Id)
+                .First())
+            .ToList();
 
         if (empPayRolls.Count == 0)
         {
@@ -356,6 +383,9 @@ public class PayRollServices : IPayRollServices
     public async Task<Result> AddUpdatePayRoll(AddUpdatePayRollRequestDto model, string companyId)
     {
         Result result = new();
+        // EmpPayRoll has a unique (company, employee, month) key. Canonicalising here
+        // makes the manual, upload and automatic paths agree on the same month value.
+        model.PayMonth = new DateTime(model.PayMonth.Year, model.PayMonth.Month, 1);
         var monetaryValues = new[] { model.BasicPay, model.Bonus ?? 0, model.HRA ?? 0, model.LTA ?? 0, model.OtherAllowance ?? 0,
             model.LossOfPay ?? 0, model.IncomeTax ?? 0, model.HealthInsurance ?? 0, model.EPF ?? 0, model.ESIC ?? 0 };
         if (monetaryValues.Any(x => x < 0) || model.PaidDays < 0 || (model.LossOfPayDays ?? 0) < 0)
@@ -363,24 +393,34 @@ public class PayRollServices : IPayRollServices
         EmpUser? empUser = await _employeeRepository.FirstOrDefault(e => e.EmployeeId == model.EmployeeId && e.CompanyId == companyId);
         if (empUser == null) return result;
         if (await _empPayRollRepository.Exist(p => p.CompanyId == companyId &&
-            p.PayMonth.Year == model.PayMonth.Year && p.PayMonth.Month == model.PayMonth.Month && p.IsProcessed))
+            p.PayMonth == model.PayMonth && p.IsProcessed))
             return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "Processed payroll cannot be changed." };
+        // The (CompanyId, EmployeeId, PayMonth) unique index is the real source of truth for
+        // "does this employee already have a payroll row for this month" - UserId is not part
+        // of that index and can drift (re-import, offboarding/reactivation), so it must never
+        // be part of the lookup used to find an existing row or recover from a conflict.
+        Expression<Func<EmpPayRoll, bool>> expression = p => p.EmployeeId == model.EmployeeId && p.CompanyId == companyId && p.PayMonth == model.PayMonth;
         EmpPayRoll? payRoll = null;
         if (!string.IsNullOrEmpty(model.PayRollId))
         {
-            payRoll = await _empPayRollRepository.FirstOrDefault(p => p.Id == model.PayRollId && p.CompanyId == companyId && p.UserId == empUser.UserId && p.EmployeeId == empUser.EmployeeId && p.PayMonth.Month == model.PayMonth.Month && p.PayMonth.Year == model.PayMonth.Year);
+            payRoll = await _empPayRollRepository.FirstOrDefault(p => p.Id == model.PayRollId && p.CompanyId == companyId && p.EmployeeId == empUser.EmployeeId && p.PayMonth == model.PayMonth);
         }
         if (payRoll == null)
         {
-            // check if payroll for the month already exist
-            Expression<Func<EmpPayRoll, bool>> expression = p => p.EmployeeId == model.EmployeeId && p.UserId == empUser.UserId && p.CompanyId == companyId && p.PayMonth.Month == model.PayMonth.Month && p.PayMonth.Year == model.PayMonth.Year;
-            bool exist = await _empPayRollRepository.Exist(expression);
-            if (exist)
+            // check if payroll for the month already exist. model.PayRollId was not supplied
+            // (or didn't resolve above), so any row found here is an unexpected pre-existing
+            // draft rather than the one the caller intended to update - block instead of
+            // silently overwriting it.
+            var existingForMonth = await _empPayRollRepository.FirstOrDefault(expression);
+            if (existingForMonth != null)
             {
                 result.StatusCode = CustomStatusCode.PayRollAlreadyForMonth;
                 result.Message = "Payroll for the month already exist";
                 return result;
             }
+        }
+        if (payRoll == null)
+        {
             // add new entry
             EmpPayRoll newPayRoll = new()
             {
@@ -411,12 +451,43 @@ public class PayRollServices : IPayRollServices
                 DeductionLines = MapDeductionLines(model.DeductionLines),
                 CalculationSnapshot = MapSnapshot(model.CalculationSnapshot)
             };
-            result = await _empPayRollRepository.AddOne(newPayRoll);
+            try
+            {
+                result = await _empPayRollRepository.AddOne(newPayRoll);
+            }
+            catch (MongoBulkWriteException<EmpPayRoll> exception) when (exception.WriteErrors.Any(error => error.Category == ServerErrorCategory.DuplicateKey))
+            {
+                // Two generation requests can reach this point together. The unique
+                // index has already protected the data; reload the winning draft and
+                // update it instead of surfacing a raw database exception to HR.
+                var winningPayRoll = await _empPayRollRepository.FirstOrDefault(expression);
+                if (winningPayRoll is null)
+                    return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "Payroll is being generated for this employee. Refresh and try again." };
+
+                model.PayRollId = winningPayRoll.Id;
+                return await AddUpdatePayRoll(model, companyId);
+            }
+
+            // MongoRepository.AddOne never rethrows a duplicate-key failure on a non-_id
+            // index (e.g. this collection's company/employee/month index) - it swallows the
+            // driver exception and returns a failed Result instead. Detect that case here so
+            // the same concurrent-generation race is recovered from instead of surfacing the
+            // raw database exception to HR.
+            if (!result.Success && IsPayrollUniqueKeyConflict(result.Message))
+            {
+                var winningPayRoll = await _empPayRollRepository.FirstOrDefault(expression);
+                if (winningPayRoll is null)
+                    return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "Payroll is being generated for this employee. Refresh and try again." };
+
+                model.PayRollId = winningPayRoll.Id;
+                return await AddUpdatePayRoll(model, companyId);
+            }
         }
         else
         {
             // update existing
-            Expression<Func<EmpPayRoll, bool>> expression = p => p.Id == payRoll.Id;
+            Expression<Func<EmpPayRoll, bool>> updateExpression = p => p.Id == payRoll.Id;
+            payRoll.UserId = empUser.UserId; // self-heal a stale UserId link found via the unique key
             payRoll.BasicPay = model.BasicPay;
             payRoll.Bonus = model.Bonus ?? 0;
             payRoll.PaidDays = model.PaidDays;
@@ -433,7 +504,7 @@ public class PayRollServices : IPayRollServices
             payRoll.Deduction.ESIC = model.ESIC ?? 0;
             payRoll.DeductionLines = MapDeductionLines(model.DeductionLines);
             payRoll.CalculationSnapshot = MapSnapshot(model.CalculationSnapshot);
-            result = await _empPayRollRepository.Update(expression, payRoll);
+            result = await _empPayRollRepository.Update(updateExpression, payRoll);
         }
         return result;
     }
@@ -445,6 +516,14 @@ public class PayRollServices : IPayRollServices
         IReadOnlyCollection<string>? employeeIds = null)
     {
         var monthStart = new DateTime(payMonth.Year, payMonth.Month, 1);
+        var currentMonthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+        if (monthStart >= currentMonthStart)
+            return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "Payroll can only be processed after the payroll month has ended." };
+        // Publishing an incomplete selection creates mixed payroll state for one calendar
+        // month. Drafts may be reviewed individually, but month-end processing is always a
+        // company-wide operation, including employees whose employment ended during the month.
+        if (employeeIds is not null)
+            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Payroll must be processed for all generated employees in the month." };
         var selectedEmployeeIds = employeeIds?
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Select(x => x.Trim())
@@ -455,7 +534,7 @@ public class PayRollServices : IPayRollServices
             return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Select at least one employee to process payroll." };
 
         var payrollRows = _empPayRollRepository.Get(p => p.CompanyId == companyId &&
-            p.PayMonth.Year == monthStart.Year && p.PayMonth.Month == monthStart.Month &&
+            p.PayMonth == monthStart &&
             (selectedEmployeeIds == null || selectedEmployeeIds.Contains(p.EmployeeId))).ToList();
 
         if (payrollRows.Count == 0)
@@ -487,6 +566,14 @@ public class PayRollServices : IPayRollServices
             : "Unable to process payroll. No employee payroll was published.";
         return result;
     }
+
+    // Recognises the swallowed duplicate-key failure message produced by MongoRepository.AddOne
+    // for the (CompanyId, EmployeeId, PayMonth) unique index specifically, so a real insert
+    // failure for any other reason is never mistaken for a recoverable generation race.
+    private static bool IsPayrollUniqueKeyConflict(string? message) =>
+        !string.IsNullOrEmpty(message)
+        && message.Contains("E11000", StringComparison.Ordinal)
+        && message.Contains("ux_payroll_company_employee_month", StringComparison.Ordinal);
 
     private static List<PayrollDeductionLine> MapDeductionLines(IEnumerable<PayrollDeductionLineDto> lines) => lines.Select(x => new PayrollDeductionLine
     {

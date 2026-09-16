@@ -1,6 +1,12 @@
 # .NET build outputs at every project depth (including tools/)
 **/bin/
 **/obj/
+**/artifacts/
+**/PrivateLeaveEvidence/
+**/PrivateLifecycleEvidence/
+**/test-results/
+**/TestResults/
+NUL
 .vs
 .vscode/*
 */Uploads/*
@@ -21,8 +27,21 @@ Codeji.CMS.API/Uploads/*
 
 # Runtime logs
 *.log
+build-lifecycle-validation.txt
 
-# Locally generated QA and test documentation
-/docs/test-reports/
+# Documentation
+# This intentionally excludes documentation files and the documentation tree,
+# including generated QA/test reports.
+/docs/
+*.md
+*.mdx
+*.pdf
+*.doc
+*.docx
+
+# Version the maintained HRMS implementation references only.
+!/docs/
+!/docs/hrms/
+!/docs/hrms/*.md
 # ASP.NET configuration containing secrets
 Codeji.CMS.API/appsettings.json

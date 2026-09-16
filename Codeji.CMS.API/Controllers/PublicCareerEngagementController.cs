@@ -91,6 +91,7 @@ public sealed class PublicCareerEngagementController(ICareerEngagementService se
     }
 
     [HttpPost("analytics")]
+    [EnableRateLimiting("career-analytics")]
     public async Task<IActionResult> Track(CareerAnalyticsRequest request)
     {
         var result = await service.Track(request);

@@ -28,13 +28,34 @@ public class LeavePolicyRequest : IValidatableObject
     [EnumDataType(typeof(LeavePolicyType), ErrorMessage = "Invalid leave policy type value")]
     public LeavePolicyType PolicyType { get; set; } = LeavePolicyType.Leave;
     public WorkFromHomePolicySettingsRequest? WorkFromHome { get; set; }
+    public LifecycleLeavePolicySettingsRequest? Lifecycle { get; set; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
-        if (PolicyType == LeavePolicyType.Leave && (AccrualAmount < 1 || AccrualAmount > 100))
-            yield return new ValidationResult("Accrual amount must be between 1 and 100 for a leave policy.", [nameof(AccrualAmount)]);
+        if (PolicyType == LeavePolicyType.Leave)
+        {
+            if (AccrualPeriod == LeaveAccrualPeriod.None && AccrualAmount != 0)
+                yield return new ValidationResult("A policy with no accrual must have zero credited leaves.", [nameof(AccrualAmount)]);
+            else if (AccrualPeriod != LeaveAccrualPeriod.None && (AccrualAmount < 1 || AccrualAmount > 100))
+                yield return new ValidationResult("Accrual amount must be between 1 and 100 for an accruing leave policy.", [nameof(AccrualAmount)]);
+        }
     }
 
+}
+
+public class LifecycleLeavePolicySettingsRequest
+{
+    public bool Enabled { get; set; }
+    public string EventType { get; set; } = string.Empty;
+    public bool RequiresHrApproval { get; set; } = true;
+    public bool RequiresReason { get; set; } = true;
+    public bool RequiresDocument { get; set; } = true;
+    public bool RequiresExpectedReturnDate { get; set; } = true;
+    /// <summary>Temporary account state to apply while the approved special leave case is active.</summary>
+    public string? DefaultAccountStatus { get; set; }
+    /// <summary>Temporary payroll-processing state to apply while the approved special leave case is active.</summary>
+    public string? DefaultPayrollStatus { get; set; }
+    public DateTime? EffectiveFromUtc { get; set; }
 }
 
 public class WorkFromHomePolicySettingsRequest
@@ -56,8 +77,6 @@ public class WorkFromHomePolicySettingsRequest
     public string? MixedAttendanceStatusCode { get; set; }
     public string? WfhWfoAttendanceStatusCode { get; set; }
     public string? WfhHdAttendanceStatusCode { get; set; }
-    public string? WfhSlAttendanceStatusCode { get; set; }
-    public string? WfhClAttendanceStatusCode { get; set; }
     public bool UseEffectiveOfficeSchedule { get; set; } = true;
     public int? FullDayRequiredWorkingMinutes { get; set; }
     public int? HalfDayRequiredWorkingMinutes { get; set; }

@@ -5,8 +5,10 @@ using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.DTO.Salary;
+using Codeji.CMS.Services.Employees;
 using MongoDB.Driver.Linq;
 using MongoDB.Driver;
+using MongoDB.Bson;
 
 namespace Codeji.CMS.Services.PayRoll
 {
@@ -50,13 +52,19 @@ namespace Codeji.CMS.Services.PayRoll
             _workingCalendar = workingCalendar;
         }
 
-        public async Task<Result> GeneratePayrollForMonthAsync(string companyId, DateTime payMonth)
+public async Task<Result> GeneratePayrollForMonthAsync(string companyId, DateTime payMonth)
 {
-    var employees = (await _employeeRepository.GetAll(e => e.CompanyId == companyId && e.Status && !e.IsDeleted)).ToList();
     var monthStart = new DateTime(payMonth.Year, payMonth.Month, 1);
+    // Payroll keys are calendar months.  Use the canonical first-of-month value for
+    // every read and write so a time component or client timezone cannot create a
+    // second key for the same displayed month.
+    payMonth = monthStart;
     var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+    var employees = (await _employeeRepository.GetAll(e => e.CompanyId == companyId && !e.IsDeleted))
+        .Where(e => EmploymentPeriod.IsPayrollIncludedForMonth(e, monthStart))
+        .ToList();
     if (await _empPayRollRepository.Exist(p => p.CompanyId == companyId &&
-        p.PayMonth.Year == monthStart.Year && p.PayMonth.Month == monthStart.Month && p.IsProcessed))
+        p.PayMonth == monthStart && p.IsProcessed))
         return new Result { Success = false, Message = $"Payroll for {monthStart:MMMM yyyy} is already processed and cannot be regenerated." };
     var divisorSetting = await _divisorPolicies.GetEffective(companyId, monthStart);
     var divisorPolicy = divisorSetting.DivisorPolicy;
@@ -70,11 +78,14 @@ namespace Codeji.CMS.Services.PayRoll
         // employee instead of blocking a completed historical month for everyone else.
         if (!DateTime.TryParse(employee.DateOfJoining, out var joining)) continue;
         if (joining.Date > monthEnd) continue;
-        if (DateTime.TryParse(employee.ExitDate, out var exit) && exit.Date < monthStart) continue;
-        if (DateTime.TryParse(employee.ExitDate, out exit) && exit.Date < joining.Date) { validationErrors.Add($"{employee.EmployeeId}: exit date cannot be before joining date."); continue; }
+        var exitDate = EmploymentPeriod.GetLastWorkingDate(employee);
+        if (exitDate.HasValue && exitDate.Value < monthStart) continue;
+        if (exitDate.HasValue && exitDate.Value < joining.Date) { validationErrors.Add($"{employee.EmployeeId}: exit date cannot be before joining date."); continue; }
         var summary = await _attendanceSummaryRepository.FirstOrDefault(x => x.CompanyId==companyId && x.EmployeeId==employee.EmployeeId && x.PayrollMonth==monthStart && x.IsApproved && x.IsLocked);
         if (summary==null) validationErrors.Add($"{employee.EmployeeId}: monthly attendance must be approved and locked.");
-        if (!_salaryRepository.Get(x=>x.CompanyId==companyId && x.EmployeeId==employee.EmployeeId && x.EffectiveFrom<=monthEnd && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value>=monthStart)).Any()) validationErrors.Add($"{employee.EmployeeId}: salary structure effective for the payroll month is required.");
+        // Missing salary structure is not a company-wide blocker: the generation loop below
+        // already skips that employee individually (tracked via skippedNoSalaryCount) and
+        // reports the count in the result message, so other employees can still be paid.
         if (await _attendanceExceptionRepository.Exist(x=>x.CompanyId==companyId && x.EmployeeId==employee.EmployeeId && x.PayrollMonth==monthStart && x.Status=="PENDING_REVIEW")) validationErrors.Add($"{employee.EmployeeId}: unresolved attendance exception requires review.");
     }
     if (validationErrors.Count>0) return new Result { Success=false, Message="Payroll validation failed. No payroll records were changed. "+string.Join("; ",validationErrors) };
@@ -82,7 +93,10 @@ namespace Codeji.CMS.Services.PayRoll
     int processedCount = 0;
     int skippedNoSalaryCount = 0;
     int consideredCount = 0;
+    var payrollMutations = new List<PayrollMutation>();
 
+    try
+    {
     foreach (var emp in employees)
     {
         if (string.IsNullOrEmpty(emp.DateOfJoining))
@@ -94,7 +108,7 @@ namespace Codeji.CMS.Services.PayRoll
         if (joiningDate.Date > monthEnd)
             continue;
 
-        DateTime? exitDate = DateTime.TryParse(emp.ExitDate, out var parsedExitDate) ? parsedExitDate.Date : null;
+        DateTime? exitDate = EmploymentPeriod.GetLastWorkingDate(emp);
         if (exitDate.HasValue && exitDate.Value < monthStart)
             continue;
 
@@ -105,13 +119,19 @@ namespace Codeji.CMS.Services.PayRoll
             x.CompanyId == companyId && x.EmployeeId == emp.EmployeeId &&
             x.PayrollMonth == monthStart && x.IsApproved && x.IsLocked);
         if (attendanceSummary == null)
+        {
+            await RollbackPayrollRunAsync(companyId, monthStart, payrollMutations);
             return new Result { Success = false, Message = $"Attendance must be validated and locked before payroll. Missing lock for employee {emp.EmployeeId}." };
+        }
 
         var attendanceException = await _attendanceExceptionRepository.FirstOrDefault(x =>
             x.CompanyId == companyId && x.EmployeeId == emp.EmployeeId &&
             x.PayrollMonth == monthStart && x.ExceptionType == "LHD_ED_LIMIT_EXCEEDED" && x.Status != "CANCELLED");
         if (attendanceException?.Status == "PENDING_REVIEW")
+        {
+            await RollbackPayrollRunAsync(companyId, monthStart, payrollMutations);
             return new Result { Success = false, Message = $"Payroll is blocked: the LHD/ED exception for employee {emp.EmployeeId} requires HR/Admin review." };
+        }
 
         consideredCount++;
 
@@ -145,7 +165,11 @@ namespace Codeji.CMS.Services.PayRoll
         var statusRules = (await _attendanceStatusRepository.GetAll(s => s.CompanyId == companyId)).ToDictionary(s => s.Code, StringComparer.OrdinalIgnoreCase);
         var workingDays = await _workingCalendar.CountWorkingDaysAsync(companyId, DateOnly.FromDateTime(monthStart), DateOnly.FromDateTime(monthEnd));
         decimal resolvedDivisor = PayrollCalculationRules.ResolveDivisor(divisorPolicy, daysInMonth, workingDays);
-        if (resolvedDivisor <= 0) return new Result { Success=false, Message=$"Invalid payroll divisor for employee {emp.EmployeeId}. No payroll was changed." };
+        if (resolvedDivisor <= 0)
+        {
+            await RollbackPayrollRunAsync(companyId, monthStart, payrollMutations);
+            return new Result { Success=false, Message=$"Invalid payroll divisor for employee {emp.EmployeeId}. No payroll was changed." };
+        }
         decimal perDaySalary = originalBasic / resolvedDivisor;
 
         var segmentDates = attendanceSegments.Select(x => x.Date.Date).ToHashSet();
@@ -182,7 +206,7 @@ namespace Codeji.CMS.Services.PayRoll
         var payrollDto = new AddUpdatePayRollRequestDto
         {
             EmployeeId = emp.EmployeeId,
-            PayMonth = payMonth,
+            PayMonth = monthStart,
             PaidDate = DateTime.UtcNow,
             BasicPay = finalBasic,
             HRA = hra,
@@ -220,9 +244,15 @@ namespace Codeji.CMS.Services.PayRoll
 var existingPayroll = _empPayRollRepository.Get(p =>
     p.EmployeeId == emp.EmployeeId &&
     p.CompanyId == companyId &&
-    p.PayMonth.Year == payMonth.Year &&
-    p.PayMonth.Month == payMonth.Month)
-.FirstOrDefault();
+    p.PayMonth == payMonth)
+    // Preserve a published payroll snapshot if legacy duplicate data exists. The
+    // service will reject any attempted change to it; ordering also prevents an
+    // arbitrary draft from being selected by the repository.
+    .OrderByDescending(p => p.IsProcessed)
+    .ThenByDescending(p => p.ProcessedAt ?? DateTime.MinValue)
+    .ThenByDescending(p => p.CreatedAt)
+    .FirstOrDefault();
+var originalPayroll = existingPayroll is null ? null : ClonePayroll(existingPayroll);
 
 if (existingPayroll != null)
 {
@@ -232,7 +262,11 @@ if (existingPayroll != null)
 // Add or update payroll
 var saveResult = await _payRollServices.AddUpdatePayRoll(payrollDto, companyId);
 if (!saveResult.Success)
+{
+    await RollbackPayrollRunAsync(companyId, monthStart, payrollMutations);
     return saveResult;
+}
+payrollMutations.Add(new PayrollMutation(emp.EmployeeId, originalPayroll, attendanceException?.Id, attendanceException?.Status));
 if (attendanceException?.Status == "DEDUCTION_APPROVED")
 {
     attendanceException.Status = "APPLIED_TO_PAYROLL";
@@ -242,6 +276,12 @@ if (attendanceException?.Status == "DEDUCTION_APPROVED")
 }
 processedCount++;
 }
+    }
+    catch
+    {
+        await RollbackPayrollRunAsync(companyId, monthStart, payrollMutations);
+        throw;
+    }
 
     return new Result
     {
@@ -251,6 +291,40 @@ processedCount++;
             : $"Generated payroll draft for {processedCount} employee(s). Review it and process the month to publish payslips."
     };
 }
+
+        // This service currently writes through legacy repositories that do not expose a
+        // shared MongoDB session. Keep the operation all-or-nothing with compensation:
+        // newly created drafts are deleted and pre-existing drafts/exception states are
+        // restored whenever any later calculation or persistence step fails.
+        private async Task RollbackPayrollRunAsync(string companyId, DateTime monthStart, IEnumerable<PayrollMutation> mutations)
+        {
+            foreach (var mutation in mutations.Reverse())
+            {
+                var payrollFilter = Builders<EmpPayRoll>.Filter.Where(x =>
+                    x.CompanyId == companyId && x.EmployeeId == mutation.EmployeeId &&
+                    x.PayMonth == monthStart);
+                if (mutation.OriginalPayroll is null)
+                    await _empPayRollRepository.GetCollection().DeleteOneAsync(payrollFilter);
+                else
+                    await _empPayRollRepository.GetCollection().ReplaceOneAsync(
+                        Builders<EmpPayRoll>.Filter.Eq(x => x.Id, mutation.OriginalPayroll.Id), mutation.OriginalPayroll);
+
+                if (mutation.AttendanceExceptionId is not null && mutation.OriginalAttendanceExceptionStatus is not null)
+                {
+                    await _attendanceExceptionRepository.GetCollection().UpdateOneAsync(
+                        Builders<AttendancePayrollException>.Filter.Eq(x => x.Id, mutation.AttendanceExceptionId),
+                        Builders<AttendancePayrollException>.Update
+                            .Set(x => x.Status, mutation.OriginalAttendanceExceptionStatus)
+                            .Set(x => x.UpdatedDate, DateTime.UtcNow));
+                }
+            }
+        }
+
+        private static EmpPayRoll ClonePayroll(EmpPayRoll payroll) =>
+            MongoDB.Bson.Serialization.BsonSerializer.Deserialize<EmpPayRoll>(payroll.ToBsonDocument());
+
+        private sealed record PayrollMutation(string EmployeeId, EmpPayRoll? OriginalPayroll,
+            string? AttendanceExceptionId, string? OriginalAttendanceExceptionStatus);
 
         private decimal CalculateMonthlyIncomeTax(decimal annualGrossIncome, bool isNewRegime = true)
         {

@@ -1344,9 +1344,7 @@ const ENTITIES = [
       { name: "HalfDayAttendanceStatusCode", type: "string" },
       { name: "MixedAttendanceStatusCode", type: "string" },
       { name: "WfhWfoAttendanceStatusCode", type: "string?" },
-      { name: "WfhHdAttendanceStatusCode", type: "string?" },
-      { name: "WfhSlAttendanceStatusCode", type: "string?" },
-      { name: "WfhClAttendanceStatusCode", type: "string?" }
+      { name: "WfhHdAttendanceStatusCode", type: "string?" }
     ],
     refs: [{ target: "LeavePolicy", via: "LeavePolicyId" }, { target: "AttendanceStatusSetting", via: "status codes" }]
   },

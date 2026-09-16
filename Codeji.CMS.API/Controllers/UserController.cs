@@ -127,6 +127,14 @@ public class UserController : BaseApiController
     public Task<Result<EmployeeOfficeScheduleAssignmentDto>> GetOfficeScheduleAssignment(string userId, CancellationToken cancellationToken) =>
         _officeScheduleAssignments.GetEmployeeAsync(CurrentContext.CompanyId(_httpContextAccessor), userId, cancellationToken);
 
+    [Route("MyOfficeScheduleAssignment")]
+    [HttpGet]
+    public Task<Result<EmployeeOfficeScheduleAssignmentDto>> GetMyOfficeScheduleAssignment(CancellationToken cancellationToken) =>
+        _officeScheduleAssignments.GetEmployeeAsync(
+            CurrentContext.CompanyId(_httpContextAccessor),
+            CurrentContext.UserId(_httpContextAccessor),
+            cancellationToken);
+
     [Route("AvailableOfficeSchedules")]
     [HttpGet]
     [ModulePermission(AppModule.Employees, Permission.Edit)]
@@ -206,6 +214,117 @@ public class UserController : BaseApiController
     public Task<Result> InitiateEmployeeExit([FromBody] InitiateEmployeeExitRequest request) =>
         _employeeService.InitiateEmployeeExit(request);
 
+    [Route("EmployeeLifecycle/Availability")]
+    [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public Task<Result> ChangeEmployeeAvailability([FromBody] ChangeEmployeeAvailabilityRequest request) =>
+        _employeeService.ChangeEmployeeAvailability(request);
+
+    [Route("EmployeeLifecycle")]
+    [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public Task<Result> ChangeEmployeeLifecycle([FromBody] ChangeEmployeeLifecycleRequest request) =>
+        _employeeService.ChangeEmployeeLifecycle(request);
+
+    [Route("EmployeeLifecycle/Dimension")]
+    [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public Task<Result> ChangeEmployeeLifecycleDimension([FromBody] ChangeEmployeeLifecycleDimensionRequest request) =>
+        _employeeService.ChangeEmployeeLifecycleDimension(request);
+
+    [Route("EmployeeLifecycle/History/{employeeUserId}")]
+    [HttpGet]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public Task<Result<EmployeeLifecycleStatusHistory>> GetEmployeeLifecycleHistory(string employeeUserId) =>
+        _employeeService.GetEmployeeLifecycleHistory(employeeUserId);
+
+    [Route("EmployeeLifecycle/Policies")]
+    [HttpGet]
+    [ModulePermission(AppModule.Employees, Permission.View)]
+    public Task<IReadOnlyList<EmployeeLifecyclePolicy>> GetEmployeeLifecyclePolicies(
+        [FromServices] IEmployeeLifecyclePolicyService policyService) =>
+        policyService.GetPoliciesAsync();
+
+    [Route("EmployeeLifecycle/SelfServicePolicies")]
+    [HttpGet]
+    public Task<IReadOnlyList<EmployeeLifecyclePolicy>> GetEmployeeLifecycleSelfServicePolicies(
+        [FromServices] IEmployeeLifecyclePolicyService policyService) =>
+        policyService.GetPoliciesAsync();
+
+    [Route("EmployeeLifecycle/Policies")]
+    [HttpPut]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public async Task<Result<EmployeeLifecyclePolicy>> SaveEmployeeLifecyclePolicy(
+        [FromBody] EmployeeLifecyclePolicySaveRequest request,
+        [FromServices] IEmployeeLifecyclePolicyService policyService)
+    {
+        var allowed = new[] { EmployeeLifecycleStatuses.MedicalLeave, EmployeeLifecycleStatuses.MaternityLeave, EmployeeLifecycleStatuses.PaternityLeave, EmployeeLifecycleStatuses.LongTermLeave, EmployeeLifecycleStatuses.Sabbatical, EmployeeLifecycleStatuses.AdministrativeLeave };
+        if (!allowed.Contains(request.EventType, StringComparer.Ordinal))
+            return new Result<EmployeeLifecyclePolicy> { Success = false, Message = "LIFECYCLE_POLICY_EVENT_TYPE_INVALID", MethodResults = [] };
+        var safePolicy = new EmployeeLifecyclePolicy {
+            Version = request.Version ?? 0, EventType = request.EventType, LeavePolicyId = request.LeavePolicyId, EffectiveFromUtc = request.EffectiveFromUtc, RequiresHrApproval = request.RequiresHrApproval,
+            RequiresReason = request.RequiresReason, RequiresDocument = request.RequiresDocument, RequiresExpectedReturnDate = request.RequiresExpectedReturnDate,
+            DefaultEmploymentStatus = request.DefaultEmploymentStatus, DefaultAvailabilityStatus = request.DefaultAvailabilityStatus,
+            DefaultAccountStatus = request.DefaultAccountStatus, DefaultPayrollStatus = request.DefaultPayrollStatus,
+            AttendanceExpected = request.AttendanceExpected, LeaveRequestsAllowed = request.LeaveRequestsAllowed,
+            WorkFromHomeRequestsAllowed = request.WorkFromHomeRequestsAllowed
+        };
+        var saved = await policyService.SavePolicyAsync(safePolicy);
+        return new Result<EmployeeLifecyclePolicy> { Success = saved.Success, Message = saved.Error, MethodResults = saved.Policy is null ? [] : [saved.Policy] };
+    }
+
+    [Route("EmployeeLifecycle/SpecialLeaves")]
+    [HttpGet]
+    [ModulePermission(AppModule.Employees, Permission.View)]
+    public Task<IReadOnlyList<EmployeeLifecyclePolicy>> GetSpecialLeaves([FromServices] IEmployeeLifecyclePolicyService service) => service.GetPoliciesAsync();
+
+    [Route("EmployeeLifecycle/SpecialLeaves")]
+    [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.Create)]
+    public async Task<Result<EmployeeLifecyclePolicy>> CreateSpecialLeave([FromBody] SpecialLeaveRequest request, [FromServices] IEmployeeLifecyclePolicyService service)
+    {
+        var result = await service.CreateSpecialLeaveAsync(request.ToEntity());
+        return new Result<EmployeeLifecyclePolicy> { Success = result.Success, Message = result.Error, MethodResults = result.Policy is null ? [] : [result.Policy] };
+    }
+
+    [Route("EmployeeLifecycle/SpecialLeaves/{id}")]
+    [HttpPut]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public async Task<Result<EmployeeLifecyclePolicy>> UpdateSpecialLeave(string id, [FromBody] SpecialLeaveRequest request, [FromServices] IEmployeeLifecyclePolicyService service)
+    {
+        var entity = request.ToEntity();
+        entity.Id = id;
+        var result = await service.UpdateSpecialLeaveAsync(entity);
+        return new Result<EmployeeLifecyclePolicy> { Success = result.Success, Message = result.Error, MethodResults = result.Policy is null ? [] : [result.Policy] };
+    }
+
+    [Route("EmployeeLifecycle/SpecialLeaves/{id}/link/{leavePolicyId}")]
+    [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public async Task<Result<EmployeeLifecyclePolicy>> LinkSpecialLeave(string id, string leavePolicyId, [FromServices] IEmployeeLifecyclePolicyService service)
+    {
+        var result = await service.LinkSpecialLeaveAsync(id, leavePolicyId);
+        return new Result<EmployeeLifecyclePolicy> { Success = result.Success, Message = result.Error, MethodResults = result.Policy is null ? [] : [result.Policy] };
+    }
+
+    [Route("EmployeeLifecycle/SpecialLeaves/{id}/unlink")]
+    [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public async Task<Result<EmployeeLifecyclePolicy>> UnlinkSpecialLeave(string id, [FromServices] IEmployeeLifecyclePolicyService service)
+    {
+        var result = await service.UnlinkSpecialLeaveAsync(id);
+        return new Result<EmployeeLifecyclePolicy> { Success = result.Success, Message = result.Error, MethodResults = result.Policy is null ? [] : [result.Policy] };
+    }
+
+    [Route("EmployeeLifecycle/SpecialLeaves/{id}")]
+    [HttpDelete]
+    [ModulePermission(AppModule.Employees, Permission.Delete)]
+    public async Task<Result> DeleteSpecialLeave(string id, [FromServices] IEmployeeLifecyclePolicyService service)
+    {
+        var result = await service.DeleteSpecialLeaveAsync(id);
+        return new Result { Success = result.Success, Message = result.Error };
+    }
+
     // Any authenticated employee may submit only their own resignation. This is
     // intentionally separate from the Employees.Edit protected HR action.
     [Route("SubmitOwnResignation")]
@@ -218,14 +337,23 @@ public class UserController : BaseApiController
     public Task<Result<EmployeeExitCaseDto>> GetEmployeeExitCase(string employeeUserId) =>
         _employeeService.GetEmployeeExitCase(employeeUserId);
 
+    [Route("EmployeeExitHistory/{employeeUserId}")]
+    [HttpGet]
+    public Task<Result<List<EmployeeExitHistoryDto>>> GetOwnEmployeeExitHistory(string employeeUserId) =>
+        _employeeService.GetOwnEmployeeExitHistory(employeeUserId);
+
     [Route("EmployeeExitManagement/{employeeUserId}")]
     [HttpGet]
     public Task<Result<EmployeeExitCaseDto>> GetEmployeeExitCaseForManagement(string employeeUserId) =>
         _employeeService.GetEmployeeExitCaseForManagement(employeeUserId);
 
+    [Route("EmployeeExitQueue")]
+    [HttpGet]
+    public Task<Result<List<EmployeeExitQueueItemDto>>> GetEmployeeExitQueue([FromQuery] int page = 1, [FromQuery] int pageSize = 25, [FromQuery] string? search = null, [FromQuery] string? status = null) =>
+        _employeeService.GetEmployeeExitQueue(page, pageSize, search, status);
+
     [Route("CompleteEmployeeExit")]
     [HttpPost]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result> CompleteEmployeeExit([FromBody] CompleteEmployeeExitRequest request) =>
         _employeeService.CompleteEmployeeExit(request);
 
@@ -239,6 +367,11 @@ public class UserController : BaseApiController
     public Task<Result> RespondToEmployeeExitDiscussion([FromBody] RespondToEmployeeExitDiscussionRequest request) =>
         _employeeService.RespondToEmployeeExitDiscussion(request);
 
+    [Route("RespondToEmployeeExitJointDiscussion")]
+    [HttpPost]
+    public Task<Result> RespondToEmployeeExitJointDiscussion([FromBody] RespondToEmployeeExitJointDiscussionRequest request) =>
+        _employeeService.RespondToEmployeeExitJointDiscussion(request);
+
     [Route("WithdrawOwnEmployeeExit")]
     [HttpPost]
     public Task<Result> WithdrawOwnEmployeeExit([FromBody] CancelEmployeeExitRequest request) =>
@@ -251,13 +384,11 @@ public class UserController : BaseApiController
 
     [Route("CancelEmployeeExit")]
     [HttpPost]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result> CancelEmployeeExit([FromBody] CancelEmployeeExitRequest request) =>
         _employeeService.CancelEmployeeExit(request);
 
     [Route("UpdateEmployeeExitDate")]
     [HttpPost]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result> UpdateEmployeeExitDate([FromBody] UpdateEmployeeExitDateRequest request) =>
         _employeeService.UpdateEmployeeExitDate(request);
 
@@ -268,49 +399,51 @@ public class UserController : BaseApiController
 
     [Route("DecideEmployeeExitNoticeAdjustment")]
     [HttpPost]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result> DecideEmployeeExitNoticeAdjustment([FromBody] DecideEmployeeExitNoticeAdjustmentRequest request) =>
         _employeeService.DecideEmployeeExitNoticeAdjustment(request);
 
+    [Route("DecideOwnEmployeeExitNoticeOffer")]
+    [HttpPost]
+    public Task<Result> DecideOwnEmployeeExitNoticeOffer([FromBody] DecideOwnEmployeeExitNoticeOfferRequest request) =>
+        _employeeService.DecideOwnEmployeeExitNoticeOffer(request);
+
     [Route("EmployeeExitPolicy")]
     [HttpPost]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result> UpsertEmployeeExitPolicy([FromBody] UpsertEmployeeExitPolicyRequest request) =>
         _employeeService.UpsertEmployeeExitPolicy(request);
 
     [Route("EmployeeExitPolicy/{policyId}")]
     [HttpGet]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result<EmployeeExitPolicy>> GetEmployeeExitPolicy(string policyId) =>
         _employeeService.GetEmployeeExitPolicy(policyId);
 
     [Route("EmployeeExitClearanceTemplate/{templateId}")]
     [HttpGet]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result<EmployeeExitClearanceTemplate>> GetEmployeeExitClearanceTemplate(string templateId) =>
         _employeeService.GetEmployeeExitClearanceTemplate(templateId);
 
     [Route("EmployeeExitPolicies")]
     [HttpGet]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result<EmployeeExitPolicy>> GetEmployeeExitPolicies() =>
         _employeeService.GetEmployeeExitPolicies();
 
     [Route("EmployeeExitClearanceTemplates")]
     [HttpGet]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result<EmployeeExitClearanceTemplate>> GetEmployeeExitClearanceTemplates() =>
         _employeeService.GetEmployeeExitClearanceTemplates();
 
     [Route("EmployeeExitClearanceTemplate")]
     [HttpPost]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result> UpsertEmployeeExitClearanceTemplate([FromBody] UpsertEmployeeExitClearanceTemplateRequest request) =>
         _employeeService.UpsertEmployeeExitClearanceTemplate(request);
 
+    [Route("EmployeeExitClearanceTemplate/{templateId}")]
+    [HttpDelete]
+    public Task<Result> DeleteEmployeeExitClearanceTemplate(string templateId) =>
+        _employeeService.DeleteEmployeeExitClearanceTemplate(templateId);
+
     [Route("ApproveEmployeeFinalSettlement")]
     [HttpPost]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result> ApproveEmployeeFinalSettlement([FromBody] ApproveEmployeeFinalSettlementRequest request) =>
         _employeeService.ApproveEmployeeFinalSettlement(request);
 
@@ -318,16 +451,48 @@ public class UserController : BaseApiController
     [HttpPost]
     public Task<Result> UpdateEmployeeFinalSettlementPayment([FromBody] UpdateEmployeeFinalSettlementPaymentRequest request) =>
         _employeeService.UpdateEmployeeFinalSettlementPayment(request);
+    [Route("CalculateEmployeeFinalSettlement")]
+    [HttpPost]
+    public Task<Result> CalculateEmployeeFinalSettlement([FromBody] CalculateEmployeeFinalSettlementRequest request) =>
+        _employeeService.CalculateEmployeeFinalSettlement(request);
+
+    [Route("MarkEmployeeFinalSettlementPaid")]
+    [HttpPost]
+    public Task<Result> MarkEmployeeFinalSettlementPaid([FromBody] MarkEmployeeFinalSettlementPaidRequest request) =>
+        _employeeService.MarkEmployeeFinalSettlementPaid(request);
+
+    [Route("RecordEmployeeExitInterview")]
+    [HttpPost]
+    public Task<Result> RecordEmployeeExitInterview([FromBody] RecordEmployeeExitInterviewRequest request) =>
+        _employeeService.RecordEmployeeExitInterview(request);
+
+    [Route("EmployeeExitReassignment")]
+    [HttpPost]
+    public Task<Result> UpsertEmployeeExitReassignment([FromBody] UpsertEmployeeExitReassignmentRequest request) =>
+        _employeeService.UpsertEmployeeExitReassignment(request);
+
+    [Route("GenerateEmployeeExitDocument")]
+    [HttpPost]
+    public Task<Result> GenerateEmployeeExitDocument([FromBody] GenerateEmployeeExitDocumentRequest request) =>
+        _employeeService.GenerateEmployeeExitDocument(request);
+
+    [Route("IssueEmployeeExitDocument")]
+    [HttpPost]
+    public Task<Result> IssueEmployeeExitDocument([FromBody] IssueEmployeeExitDocumentRequest request) =>
+        _employeeService.IssueEmployeeExitDocument(request);
 
     [Route("CompleteEmployeeExitClearance")]
     [HttpPost]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result> CompleteEmployeeExitClearance([FromBody] CompleteEmployeeExitClearanceRequest request) =>
         _employeeService.CompleteEmployeeExitClearance(request, false);
 
+    [Route("UpdateEmployeeExitClearanceStatus")]
+    [HttpPost]
+    public Task<Result> UpdateEmployeeExitClearanceStatus([FromBody] UpdateEmployeeExitClearanceStatusRequest request) =>
+        _employeeService.UpdateEmployeeExitClearanceStatus(request);
+
     [Route("WaiveEmployeeExitClearance")]
     [HttpPost]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result> WaiveEmployeeExitClearance([FromBody] CompleteEmployeeExitClearanceRequest request) =>
         _employeeService.CompleteEmployeeExitClearance(request, true);
 
@@ -368,7 +533,7 @@ public class UserController : BaseApiController
 
     [Route("EmployeeExitEvidenceUpload")]
     [HttpPost]
-    public async Task<Result> UploadEmployeeExitEvidence([FromForm] string employeeExitId, [FromForm] string category, [FromForm] string visibility, [FromForm] IFormFile file)
+    public async Task<Result> UploadEmployeeExitEvidence([FromForm] string employeeExitId, [FromForm] string category, [FromForm] string visibility, [FromForm] IFormFile file, [FromForm] string? formerEmployeeRequestId = null)
     {
         var access = await _employeeService.GetEmployeeExitCaseForEvidence(employeeExitId);
         if (!access.Success || access.MethodResult is null) return new Result { Success = false, Message = "EXIT_EVIDENCE_FORBIDDEN" };
@@ -376,7 +541,14 @@ public class UserController : BaseApiController
         try
         {
             var stored = await _employeeExitEvidenceStorage.SaveAsync(companyId, employeeExitId, file);
-            return await _employeeService.AddEmployeeExitEvidence(new AddEmployeeExitEvidenceRequest { EmployeeExitId = employeeExitId, Version = access.MethodResult.Version, Category = category, Type = "UploadedFile", Visibility = visibility, StorageKey = stored.StorageKey, FileName = file.FileName, ContentType = file.ContentType, Sha256 = stored.Sha256 });
+            var metadata = await _employeeService.AddEmployeeExitEvidence(new AddEmployeeExitEvidenceRequest { EmployeeExitId = employeeExitId, Version = access.MethodResult.Version, Category = category, Type = "UploadedFile", Visibility = visibility, StorageKey = stored.StorageKey, FileName = file.FileName, ContentType = file.ContentType, Sha256 = stored.Sha256, FormerEmployeeRequestId = formerEmployeeRequestId });
+            if (!metadata.Success)
+            {
+                // The file is private but not yet linked to a case. Remove it so a failed
+                // optimistic-concurrency write cannot accumulate orphan evidence blobs.
+                await _employeeExitEvidenceStorage.DeleteAsync(stored.StorageKey);
+            }
+            return metadata;
         }
         catch (InvalidOperationException ex) { return new Result { Success = false, Message = ex.Message }; }
     }
@@ -432,17 +604,30 @@ public class UserController : BaseApiController
     public Task<Result> RevokeFormerEmployeePortalAccess([FromBody] RevokeFormerEmployeePortalAccessRequest request) =>
         _formerEmployeePortalService.RevokeAccess(request);
 
+    [Route("EmployeeExitFormerEmployeePortalAccess")]
+    [HttpPost]
+    public Task<Result> SetFormerEmployeePortalAccess([FromBody] SetFormerEmployeePortalAccessRequest request) => _formerEmployeePortalService.SetAccess(request);
+
+    [Route("CompanyFormerEmployeePortalAccess")]
+    [HttpPost]
+    [Authorize(Policy = "AdminOnly")]
+    public Task<Result> SetCompanyFormerEmployeePortalAccess([FromBody] SetCompanyFormerEmployeePortalRequest request) => _formerEmployeePortalService.SetCompanyAccess(request);
+
     [Route("RejoinEmployee")]
     [HttpPost]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result> RejoinEmployee([FromBody] RejoinEmployeeRequest request) =>
         _employeeService.RejoinEmployee(request);
 
     [Route("ExceptionalCompleteEmployeeExit")]
     [HttpPost]
-    [Authorize(Policy = "HrExitOverride")]
     public Task<Result> ExceptionalCompleteEmployeeExit([FromBody] ExceptionalCompleteEmployeeExitRequest request) =>
         _employeeService.ExceptionalCompleteEmployeeExit(request);
+
+    [Route("GetExEmployees")]
+    [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.View)]
+    public Task<Result<GetAllEmployeeResponseModel>> GetExEmployees(GetAllEmployeeRequestModel? filters) =>
+        _employeeService.GetExEmployees(filters);
 
     // Department options are part of the Employee Directory.  Do not route this through
     // Dashboard.ViewAll: callers only need the same Employees.View permission as the grid.
@@ -750,6 +935,16 @@ public class UserController : BaseApiController
         return await _employeeService.MarkNotificationAsRead(currentUserId, userNotificationId);
     }
 
+    [HttpPatch]
+    [Route("Notification/{userNotificationId}/Snooze")]
+    public Task<Result> SnoozeNotification(string userNotificationId, [FromQuery] DateTime untilUtc) =>
+        _employeeService.SnoozeNotification(CurrentContext.UserId(_httpContextAccessor), userNotificationId, untilUtc.ToUniversalTime());
+
+    [HttpDelete]
+    [Route("Notification/{userNotificationId}")]
+    public Task<Result> DismissNotification(string userNotificationId) =>
+        _employeeService.DismissNotification(CurrentContext.UserId(_httpContextAccessor), userNotificationId);
+
     [HttpPost]
     [Route("AddUpdateWorkHistory")]
     public async Task<Result> AddWorkHistory(EmployeeWorkHistoryModel model)
@@ -820,7 +1015,8 @@ public class UserController : BaseApiController
     {
         Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>> result = new();
         string userId = CurrentContext.UserId(_httpContextAccessor);
-        result.MethodResult = await _employeeService.GetNotificationPreferences(userId);
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        result.MethodResult = await _employeeService.GetNotificationPreferences(userId, companyId);
         return result;
     }
 
@@ -829,7 +1025,8 @@ public class UserController : BaseApiController
     public async Task<Result<Dictionary<EnumsHelper.NotificationPreferenceType, bool>>> UpdateNotificationPreferences([FromBody] Dictionary<EnumsHelper.NotificationPreferenceType, bool> preferences)
     {
         string userId = CurrentContext.UserId(_httpContextAccessor);
-        return await _employeeService.UpdateNotificationPreferences(userId, preferences);
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        return await _employeeService.UpdateNotificationPreferences(userId, companyId, preferences);
     }
 
     [HttpPost]
@@ -842,3 +1039,57 @@ public class UserController : BaseApiController
     }
 }
 
+public sealed class EmployeeLifecyclePolicySaveRequest
+{
+    public int? Version { get; set; }
+    public string EventType { get; set; } = string.Empty;
+    public string? LeavePolicyId { get; set; }
+    public DateTime EffectiveFromUtc { get; set; }
+    public bool RequiresHrApproval { get; set; }
+    public bool RequiresReason { get; set; }
+    public bool RequiresDocument { get; set; }
+    public bool RequiresExpectedReturnDate { get; set; }
+    public string? DefaultEmploymentStatus { get; set; }
+    public string? DefaultAvailabilityStatus { get; set; }
+    public string? DefaultAccountStatus { get; set; }
+    public string? DefaultPayrollStatus { get; set; }
+    public bool AttendanceExpected { get; set; }
+    public bool LeaveRequestsAllowed { get; set; }
+    public bool WorkFromHomeRequestsAllowed { get; set; }
+}
+
+public sealed class SpecialLeaveRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string EventType { get; set; } = string.Empty;
+    public DateTime EffectiveFromUtc { get; set; }
+    public bool RequiresHrApproval { get; set; }
+    public bool RequiresReason { get; set; } = true;
+    public bool RequiresDocument { get; set; }
+    public bool RequiresExpectedReturnDate { get; set; }
+    public string? DefaultEmploymentStatus { get; set; }
+    public string? DefaultAvailabilityStatus { get; set; }
+    public string? DefaultAccountStatus { get; set; }
+    public string? DefaultPayrollStatus { get; set; }
+    public bool AttendanceExpected { get; set; }
+    public bool LeaveRequestsAllowed { get; set; } = true;
+    public bool WorkFromHomeRequestsAllowed { get; set; }
+
+    public EmployeeLifecyclePolicy ToEntity() => new()
+    {
+        Name = Name,
+        EventType = EventType,
+        EffectiveFromUtc = EffectiveFromUtc,
+        RequiresHrApproval = RequiresHrApproval,
+        RequiresReason = RequiresReason,
+        RequiresDocument = RequiresDocument,
+        RequiresExpectedReturnDate = RequiresExpectedReturnDate,
+        DefaultEmploymentStatus = DefaultEmploymentStatus,
+        DefaultAvailabilityStatus = DefaultAvailabilityStatus,
+        DefaultAccountStatus = DefaultAccountStatus,
+        DefaultPayrollStatus = DefaultPayrollStatus,
+        AttendanceExpected = AttendanceExpected,
+        LeaveRequestsAllowed = LeaveRequestsAllowed,
+        WorkFromHomeRequestsAllowed = WorkFromHomeRequestsAllowed
+    };
+}

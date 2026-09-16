@@ -18,11 +18,13 @@ public class PayRollController : BaseApiController
     readonly IHttpContextAccessor _httpContextAccessor;
     readonly IPayRollServices _payRollServices;
     readonly IRoleService _roleService;
-    public PayRollController(IHttpContextAccessor httpContextAccessor, IPayRollServices payRollServices, IRoleService roleService)
+    readonly ILogger<PayRollController> _logger;
+    public PayRollController(IHttpContextAccessor httpContextAccessor, IPayRollServices payRollServices, IRoleService roleService, ILogger<PayRollController> logger)
     {
         _httpContextAccessor = httpContextAccessor;
         _payRollServices = payRollServices;
         _roleService = roleService;
+        _logger = logger;
     }
 
     [HttpPost]
@@ -65,7 +67,7 @@ public class PayRollController : BaseApiController
         }
         catch (Exception exp)
         {
-            return StatusCode(500, new { message = "Error generating payslip", status = exp.Message });
+            return InternalPayrollError(exp, "PAYSLIP_GENERATION_FAILED", "Unable to generate payslip.");
         }
     }
 
@@ -93,7 +95,7 @@ public class PayRollController : BaseApiController
         }
         catch (Exception exp)
         {
-            return StatusCode(500, new { message = "Error generating payslip", status = exp.Message });
+            return InternalPayrollError(exp, "PAYSLIP_GENERATION_FAILED", "Unable to generate payslip.");
         }
     }
 
@@ -139,5 +141,12 @@ public class PayRollController : BaseApiController
             CurrentContext.CompanyId(_httpContextAccessor),
             CurrentContext.UserId(_httpContextAccessor),
             model.EmployeeIds);
+    }
+
+    private ObjectResult InternalPayrollError(Exception exception, string code, string message)
+    {
+        var correlationId = HttpContext.TraceIdentifier;
+        _logger.LogError(exception, "Payroll request failed. Code: {Code}; CorrelationId: {CorrelationId}", code, correlationId);
+        return StatusCode(StatusCodes.Status500InternalServerError, new { code, message, correlationId });
     }
 }

@@ -24,6 +24,9 @@ public class WorkFromHomeRequest : BaseClass
     public string? RevokedByUserId { get; set; }
 }
 
+// Policy documents predate several WFH schema revisions. Ignore retired fields so a
+// single legacy document cannot prevent unrelated leave-policy reads for a tenant.
+[BsonIgnoreExtraElements]
 public class WorkFromHomePolicy : BaseClass
 {
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))] public string PolicyId { get; set; } = string.Empty;
@@ -70,8 +73,6 @@ public class WorkFromHomePolicy : BaseClass
     public string MixedAttendanceStatusCode { get; set; } = "WFH+WFO";
     public string? WfhWfoAttendanceStatusCode { get; set; } = "WFH+WFO";
     public string? WfhHdAttendanceStatusCode { get; set; } = "WFH-HD";
-    public string? WfhSlAttendanceStatusCode { get; set; } = "WFH+SL";
-    public string? WfhClAttendanceStatusCode { get; set; } = "WFH+CL";
 }
 
 public class WorkFromHomeEmployeeAllocation

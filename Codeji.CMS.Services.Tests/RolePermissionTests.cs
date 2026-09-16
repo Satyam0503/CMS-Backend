@@ -32,7 +32,7 @@ public class RolePermissionTests
         };
         fixture.RoleRepository
             .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Codeji.CMS.Repository.Entities.RolePermissions.Roles, bool>>>(), false))
-            .ReturnsAsync((Expression<Func<Codeji.CMS.Repository.Entities.RolePermissions.Roles, bool>> predicate, bool _) =>
+            .ReturnsAsync((Expression<Func<Codeji.CMS.Repository.Entities.RolePermissions.Roles, bool>> predicate, bool _, bool _) =>
                 predicate.Compile()(storedRole) ? storedRole : null);
 
         var allowed = await fixture.Service.IsRoleTypeMatch("role-1", AuthRole.Administrator, "company-1");
@@ -54,7 +54,7 @@ public class RolePermissionTests
         };
         fixture.RoleRepository
             .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Codeji.CMS.Repository.Entities.RolePermissions.Roles, bool>>>(), false))
-            .ReturnsAsync((Expression<Func<Codeji.CMS.Repository.Entities.RolePermissions.Roles, bool>> predicate, bool _) =>
+            .ReturnsAsync((Expression<Func<Codeji.CMS.Repository.Entities.RolePermissions.Roles, bool>> predicate, bool _, bool _) =>
                 predicate.Compile()(storedRole) ? storedRole : null);
 
         Assert.False(await fixture.Service.IsRoleTypeMatch("role-1", AuthRole.Administrator, "company-1"));

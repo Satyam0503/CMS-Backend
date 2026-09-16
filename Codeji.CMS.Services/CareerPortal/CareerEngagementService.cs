@@ -239,13 +239,44 @@ public sealed class CareerEngagementService : ICareerEngagementService
 
     public async Task<Result> Track(CareerAnalyticsRequest request)
     {
+        if (request is null || string.IsNullOrWhiteSpace(request.EventType) || request.EventType.Length > 40 ||
+            request.VisitorToken?.Length > 256 || request.PublicJobId?.Length > 64 || request.PublicCompanyCode?.Length > 64)
+            return BadRequest("Invalid analytics payload.");
+
         if (!AnalyticsEvents.Contains(request.EventType)) return BadRequest("Unsupported analytics event.");
+
+        var publicJobId = string.IsNullOrWhiteSpace(request.PublicJobId) ? null : request.PublicJobId.Trim();
+        var companyCode = string.IsNullOrWhiteSpace(request.PublicCompanyCode) ? null : Digits(request.PublicCompanyCode);
+        var requiresJob = request.EventType is "JobViewed" or "JobSaved" or "JobUnsaved" or "ApplyClicked" or "ExternalApplyClicked";
+        var requiresCompany = request.EventType is "CompanyViewed" or "CompanyFollowed" or "CompanyUnfollowed";
+
+        JobVacancy? referencedJob = null;
+        Company? referencedCompany = null;
+        if (requiresJob || publicJobId is not null)
+        {
+            if (publicJobId is null) return BadRequest("A public job identifier is required for this analytics event.");
+            referencedJob = await EligibleJob(publicJobId);
+            if (referencedJob is null) return NotFound();
+        }
+
+        if (requiresCompany || companyCode is not null)
+        {
+            if (companyCode is null) return BadRequest("A public company identifier is required for this analytics event.");
+            referencedCompany = await EligibleCompany(companyCode);
+            if (referencedCompany is null) return NotFound();
+        }
+
+        if (referencedJob is not null && referencedCompany is not null && referencedJob.CompanyId != referencedCompany.CompanyId)
+            {
+                return BadRequest("The job and company identifiers do not match.");
+            }
+
         await _analytics.InsertOneAsync(new CareerAnalyticsEvent
         {
             EventType = request.EventType,
             VisitorIdHash = VisitorHash(request.VisitorToken ?? ""),
-            PublicJobId = request.PublicJobId,
-            PublicCompanyCode = string.IsNullOrWhiteSpace(request.PublicCompanyCode) ? null : Digits(request.PublicCompanyCode),
+            PublicJobId = publicJobId,
+            PublicCompanyCode = companyCode,
             CreatedAt = DateTime.UtcNow
         });
         return Ok();

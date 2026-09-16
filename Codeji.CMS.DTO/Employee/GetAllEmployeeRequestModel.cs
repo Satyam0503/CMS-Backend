@@ -7,6 +7,9 @@
         public List<string> Gender { get; set; }
         public int PageNo { get; set; }
         public int Records { get; set; }
+        /// <summary>Active (default), AttendanceRoster, NoticePeriod, ExEmployees, or All.</summary>
         public string? EmploymentStatus { get; set; }
+        /// <summary>Optional lifecycle availability filter, for example Sabbatical or MedicalLeave.</summary>
+        public string? AvailabilityStatus { get; set; }
     }
 }

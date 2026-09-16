@@ -16,6 +16,7 @@ public interface IAttendancePenaltyService
     Task<Result<AttendancePayrollException>> GetExceptions(string companyId, AttendanceExceptionFilterDto filter);
     Task<Result> Review(string companyId, string reviewerId, string id, AttendanceExceptionReviewDto dto);
     Task<Result<AttendanceExceptionResolutionResultDto>> ResolveAttendanceException(string companyId, string reviewerId, string id, AttendanceExceptionResolutionDto dto);
+    Task<Result> OverrideException(string companyId, string reviewerId, string id, AttendanceExceptionOverrideDto dto);
     Task<AttendanceMonthLockStatusDto> GetMonthLockStatus(string companyId, DateTime month);
     Task<Result<AttendanceMonthLockValidationResultDto>> ValidateAndLock(string companyId, string userId, DateTime month);
 }
@@ -192,6 +193,10 @@ public class AttendancePenaltyService : IAttendancePenaltyService
             .OrderByDescending(x => x.CreatedDate)
             .ToList();
 
+        foreach (var exception in all)
+            if (employees.TryGetValue(exception.UserId, out var employee))
+                exception.EmployeeName = $"{employee.FirstName} {employee.LastName}".Trim();
+
         return new Result<AttendancePayrollException>
         {
             MethodResults = all.Skip((filter.PageNo - 1) * filter.PageSize).Take(filter.PageSize).ToList(),
@@ -247,7 +252,8 @@ public class AttendancePenaltyService : IAttendancePenaltyService
         var holidays=(await _calendar.GetAll(x=>x.CompanyId==companyId&&x.Type==EnumsHelper.CalendarItem.Holiday&&(x.Recurring||(x.Date>=start.AddDays(-1)&&x.Date<endExclusive.AddDays(1))))).ToList();
         bool IsHoliday(DateTime d)=>holidays.Any(h => CalendarDateHelpers.MatchesDate(h, d));
         var summaries=new List<MonthlyAttendanceSummary>();
-        foreach(var emp in await _employees.GetAll(x=>x.CompanyId==companyId&&x.Status&&!x.IsDeleted))
+        foreach(var emp in (await _employees.GetAll(x=>x.CompanyId==companyId&&!x.IsDeleted))
+            .Where(employee => AttendancePayrollRules.IsEligibleForPayrollMonth(employee, start)))
         {
             if(!AttendancePayrollRules.TryGetEligiblePeriod(emp,start,end,out var from,out var to))continue;
             var toExclusive=to.Date.AddDays(1);
@@ -470,7 +476,15 @@ public class AttendancePenaltyService : IAttendancePenaltyService
             // WFH request/attendance row rather than a month-wide generic issue.
             var wfhMissingCheckout = records.Where(x => x.SourceType == "WFH_REQUEST" && rules.TryGetValue(x.Status, out var rule) && rule.RequiresTime && !x.CheckOutTime.HasValue).ToList();
             await UpsertWfhInsufficientHoursExceptions(companyId, emp, start, wfhMissingCheckout);
-            await UpsertValidationException(companyId,emp,start,"MISSING_CHECKOUT",records.Where(x=>x.SourceType != "WFH_REQUEST"&&rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date)).Distinct().ToList());
+            var wfhSegmentMissingCheckout = daySegments.Where(x => x.SourceType == "WFH_REQUEST" && rules.TryGetValue(x.Status, out var rule) && rule.RequiresTime && !x.CheckOutTime.HasValue).ToList();
+            await UpsertWfhInsufficientHoursExceptions(companyId, emp, start, wfhSegmentMissingCheckout);
+            // WFH half-days are stored as source-owned segments.  They already have a
+            // dedicated WFH_INSUFFICIENT_HOURS exception above, which sends the user
+            // to the guarded WFH-hours correction flow.  Including them here creates
+            // a second generic MISSING_CHECKOUT issue; its generic editor correctly
+            // refuses to overwrite the WFH segment, but leaves HR with no actionable
+            // path.  Only non-WFH records/segments belong to generic correction.
+            await UpsertValidationException(companyId,emp,start,"MISSING_CHECKOUT",records.Where(x=>x.SourceType != "WFH_REQUEST"&&rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>x.SourceType != "WFH_REQUEST"&&rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date)).Distinct().ToList());
             await UpsertValidationException(companyId,emp,start,"DUPLICATE_ATTENDANCE",records.GroupBy(x=>x.Date.Date).Where(x=>x.Count()>1).Select(x=>x.Key).ToList());
             await UpsertValidationException(companyId,emp,start,"INVALID_TIME_ORDER",records.Where(x=>x.CheckInTime.HasValue&&x.CheckOutTime.HasValue&&x.CheckOutTime<x.CheckInTime).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>x.CheckInTime.HasValue&&x.CheckOutTime.HasValue&&x.CheckOutTime<x.CheckInTime).Select(x=>x.Date.Date)).Distinct().ToList());
             await UpsertValidationException(companyId,emp,start,"UNKNOWN_OR_INACTIVE_STATUS",records.Where(x=>!rules.TryGetValue(x.Status,out var rule)||!rule.IsActive).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>!rules.TryGetValue(x.Status,out var rule)||!rule.IsActive).Select(x=>x.Date.Date)).Distinct().ToList());
@@ -483,6 +497,30 @@ public class AttendancePenaltyService : IAttendancePenaltyService
         if(dates.Count==0){if(item!=null&&item.Status=="PENDING_REVIEW"){item.Status="RESOLVED";item.Resolution="Underlying attendance issue corrected.";item.UpdatedDate=DateTime.UtcNow;item.Version++;await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x=>x.Id,item.Id),item);}return;}
         if(item==null){item=new AttendancePayrollException{CompanyId=companyId,UserId=employee.UserId,EmployeeId=employee.EmployeeId,PayrollMonth=month,ExceptionType=type,Severity="BLOCKING",AffectedDates=dates};await _exceptions.AddOne(item);return;}
         item.AffectedDates=dates;item.Status="PENDING_REVIEW";item.Resolution=null;item.UpdatedDate=DateTime.UtcNow;item.Version++;await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x=>x.Id,item.Id),item);
+    }
+
+    public async Task<Result> OverrideException(string companyId, string reviewerId, string id, AttendanceExceptionOverrideDto dto)
+    {
+        var item = await _exceptions.FirstOrDefault(x => x.Id == id && x.CompanyId == companyId);
+        if (item is null) return new Result { Success = false, Message = "Exception not found in the current company." };
+        if (item.Status != "PENDING_REVIEW" || item.Version != dto.ExceptionVersion)
+            return new Result { Success = false, Message = "This exception has changed. Refresh the exception list and review the latest details." };
+
+        item.Status = "WAIVED";
+        item.Decision = "HR_ADMIN_OVERRIDE";
+        item.Resolution = $"HR/Admin override: {dto.Reason.Trim()}";
+        item.Reason = dto.Reason.Trim();
+        item.ReviewedBy = reviewerId;
+        item.ReviewedAt = DateTime.UtcNow;
+        item.UpdatedBy = reviewerId;
+        item.UpdatedDate = DateTime.UtcNow;
+        item.Version++;
+        var saved = await _exceptions.Update(Builders<AttendancePayrollException>.Filter.And(
+            Builders<AttendancePayrollException>.Filter.Eq(x => x.Id, id),
+            Builders<AttendancePayrollException>.Filter.Eq(x => x.CompanyId, companyId),
+            Builders<AttendancePayrollException>.Filter.Eq(x => x.Status, "PENDING_REVIEW"),
+            Builders<AttendancePayrollException>.Filter.Eq(x => x.Version, dto.ExceptionVersion)), item);
+        return saved.Success ? new Result { Success = true, Message = "Exception overridden by HR/Admin and no longer blocks payroll." } : new Result { Success = false, Message = "The exception changed before the override could be saved." };
     }
 
     private async Task UpsertWfhInsufficientHoursExceptions(string companyId, EmpUser employee, DateTime month, IEnumerable<AttendanceModel> rows)
@@ -513,6 +551,41 @@ public class AttendancePenaltyService : IAttendancePenaltyService
                 ExistingStatus = row.Status,
                 SourceVersion = row.SourceVersion,
                 Reason = "Approved WFH attendance is missing a required check-out after the attendance day completed."
+            });
+        }
+    }
+
+    // Half-day WFH is represented by AttendanceDaySegment rather than a daily
+    // AttendanceModel.  Create the same source-linked exception so HR/Admin
+    // can correct the exact WFH half instead of receiving a generic checkout
+    // error that has no actionable WFH request attached.
+    private async Task UpsertWfhInsufficientHoursExceptions(string companyId, EmpUser employee, DateTime month, IEnumerable<AttendanceDaySegment> segments)
+    {
+        foreach (var segment in segments)
+        {
+            var existing = await _exceptions.FirstOrDefault(x =>
+                x.CompanyId == companyId && x.UserId == employee.UserId && x.EmployeeId == employee.EmployeeId &&
+                x.PayrollMonth == month && x.ExceptionType == "WFH_INSUFFICIENT_HOURS" &&
+                x.AttendanceDate == segment.Date.Date && x.LeaveRequestId == segment.SourceId &&
+                x.ExistingAttendanceId == segment.AttendanceDaySegmentId);
+            if (existing is not null) continue;
+
+            await _exceptions.AddOne(new AttendancePayrollException
+            {
+                CompanyId = companyId,
+                UserId = employee.UserId,
+                EmployeeId = employee.EmployeeId,
+                PayrollMonth = month,
+                AttendanceDate = segment.Date.Date,
+                AffectedDates = [segment.Date.Date],
+                ExceptionType = "WFH_INSUFFICIENT_HOURS",
+                Severity = "BLOCKING",
+                Status = "PENDING_REVIEW",
+                LeaveRequestId = segment.SourceId,
+                ExistingAttendanceId = segment.AttendanceDaySegmentId,
+                ExistingStatus = segment.Status,
+                SourceVersion = segment.SourceVersion,
+                Reason = $"Approved {segment.Segment.Replace('_', ' ').ToLowerInvariant()} WFH attendance is missing a required check-out after the attendance day completed."
             });
         }
     }

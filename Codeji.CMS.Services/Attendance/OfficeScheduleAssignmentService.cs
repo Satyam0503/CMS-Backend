@@ -22,26 +22,36 @@ public sealed class OfficeScheduleAssignmentService(
     IMongoDbRepository<EmployeeScheduleAssignment> employeeAssignments,
     IMongoDbRepository<DepartmentScheduleAssignment> departmentAssignments,
     IMongoDbRepository<EmpUser> employees,
-    IMongoDbRepository<Department> departments) : IOfficeScheduleAssignmentService
+    IMongoDbRepository<Department> departments,
+    IEffectiveOfficeScheduleService effectiveSchedules,
+    IWeeklyOffService weeklyOffs) : IOfficeScheduleAssignmentService
 {
     public async Task<Result<EmployeeOfficeScheduleAssignmentDto>> GetEmployeeAsync(string companyId, string userId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var employee = await Employee(companyId, userId);
         if (employee is null) return Fail<EmployeeOfficeScheduleAssignmentDto>("EMPLOYEE_NOT_FOUND");
+        if (IsFormerEmployee(employee)) return Fail<EmployeeOfficeScheduleAssignmentDto>("EMPLOYEE_SHIFT_NOT_AVAILABLE");
 
-        var assignment = (await employeeAssignments.GetAll(x => x.CompanyId == companyId && x.UserId == userId && x.IsActive && !x.IsDeleted, withDefaultFilter: false))
+        var now = DateTime.UtcNow;
+        var employeeOverride = (await employeeAssignments.GetAll(x => x.CompanyId == companyId && x.UserId == userId && x.IsActive && !x.IsDeleted, withDefaultFilter: false))
+            .Where(x => x.EffectiveFrom.Date <= now.Date && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value.Date >= now.Date))
             .OrderByDescending(x => x.EffectiveFrom).FirstOrDefault();
-        var schedule = assignment is null ? null : await Schedule(companyId, assignment.ScheduleId);
+        var effective = (await effectiveSchedules.ResolveManyAsync(companyId, [userId], now, cancellationToken)).FirstOrDefault();
+        var companyWeeklyOffs = await weeklyOffs.Get(companyId);
         return new Result<EmployeeOfficeScheduleAssignmentDto>
         {
             Success = true,
             MethodResult = new EmployeeOfficeScheduleAssignmentDto
             {
                 UserId = userId,
-                ScheduleId = schedule?.ScheduleId,
-                ScheduleName = schedule?.Name,
-                Source = assignment is null ? "DepartmentOrCompanyDefault" : "EmployeeOverride"
+                ScheduleId = effective?.ScheduleId,
+                EmployeeOverrideScheduleId = employeeOverride?.ScheduleId,
+                ScheduleName = effective?.ScheduleName,
+                StartTime = effective?.StartTime,
+                EndTime = effective?.EndTime,
+                WorkingDays = Enumerable.Range(0, 7).Where(day => !companyWeeklyOffs.OffDays.Contains(day)).ToList(),
+                Source = effective?.Source ?? "Unassigned"
             }
         };
     }
@@ -50,7 +60,9 @@ public sealed class OfficeScheduleAssignmentService(
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(actorUserId)) return Fail<EmployeeOfficeScheduleAssignmentDto>("OFFICE_SCHEDULE_ACTOR_REQUIRED");
-        if (await Employee(companyId, userId) is null) return Fail<EmployeeOfficeScheduleAssignmentDto>("EMPLOYEE_NOT_FOUND");
+        var employee = await Employee(companyId, userId);
+        if (employee is null) return Fail<EmployeeOfficeScheduleAssignmentDto>("EMPLOYEE_NOT_FOUND");
+        if (IsFormerEmployee(employee)) return Fail<EmployeeOfficeScheduleAssignmentDto>("EMPLOYEE_SHIFT_NOT_AVAILABLE");
         var scheduleId = request.ScheduleId?.Trim();
         var schedule = await ValidateSchedule(companyId, scheduleId);
         if (!schedule.Success) return Fail<EmployeeOfficeScheduleAssignmentDto>(schedule.Message);
@@ -143,6 +155,7 @@ public sealed class OfficeScheduleAssignmentService(
     }
 
     private Task<EmpUser?> Employee(string companyId, string userId) => employees.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == userId && x.Status && !x.IsDeleted);
+    private static bool IsFormerEmployee(EmpUser employee) => employee.EmploymentStatus is "Resigned" or "Terminated";
     private Task<CompanyOfficeSchedule?> Schedule(string companyId, string scheduleId) => schedules.FirstOrDefault(x => x.CompanyId == companyId && x.ScheduleId == scheduleId && x.IsActive && !x.IsDeleted);
     private async Task<Result<CompanyOfficeSchedule>> ValidateSchedule(string companyId, string? scheduleId)
     {

@@ -97,6 +97,15 @@ public class LeaveManagementController : BaseApiController
         return await _leaveManagementService.UpdateLeavePolicy(model);
     }
 
+    [Route("DeleteLeavePolicy/{policyId}")]
+    [HttpDelete]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Delete)]
+    public async Task<Result> DeleteLeavePolicy(string policyId)
+    {
+        var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        return await _leaveManagementService.DeleteLeavePolicy(policyId, companyId);
+    }
+
     [Route("GetAllLeavePolicies")]
     [HttpPost]
     [ModulePermission(AppModule.LeaveManagement, Permission.View)]
@@ -151,6 +160,16 @@ public class LeaveManagementController : BaseApiController
         if (!ModelState.IsValid) return new Result();
         leaveRequest.UserId = CurrentContext.UserId(_httpContextAccessor);
         return await _leaveManagementService.CreateLeaveRequest(leaveRequest);
+    }
+
+    [Route("me/requests/with-evidence")]
+    [HttpPost]
+    [RequestSizeLimit(10 * 1024 * 1024)]
+    public async Task<Result> CreateMyLeaveRequestWithEvidence([FromForm] LeaveRequestDto leaveRequest, [FromForm] IFormFile evidence)
+    {
+        if (!ModelState.IsValid) return new Result();
+        leaveRequest.UserId = CurrentContext.UserId(_httpContextAccessor);
+        return await _leaveManagementService.CreateLeaveRequestWithEvidence(leaveRequest, evidence);
     }
 
     [Route("CreateEmployeeLeaveRequest/{employeeId}")]

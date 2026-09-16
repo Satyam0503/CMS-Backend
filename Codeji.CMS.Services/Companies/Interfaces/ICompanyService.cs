@@ -17,6 +17,8 @@ namespace Codeji.CMS.Services.Interface
         Task<Result<PublicCareerCompanyDto>> GetPublicCareerCompany(string publicCompanyCode);
 
         Task<Result<Company>> UpdateCompanyDetails(UpdateCompanyInfoRequestModel model, string companyId);
+        Task<Result<CompanyNotificationPreferencesDto>> GetCompanyNotificationPreferences(string companyId);
+        Task<Result<CompanyNotificationPreferencesDto>> UpdateCompanyNotificationPreferences(string companyId, string userId, CompanyNotificationPreferencesDto model);
 
         Task<string> UpdateCompanyLogo(IFormFile companyLogo, string companyId);
 

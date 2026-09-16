@@ -34,7 +34,7 @@ namespace Codeji.CMS.GenericRepository.Interfaces
         /// <param name="filter"></param>
         /// <param name="WithDeletedObjects"></param>
         /// <returns></returns>
-        Task<TEntity?> FirstOrDefault(Expression<Func<TEntity, bool>> filter, bool WithDeletedObjects = false);
+        Task<TEntity?> FirstOrDefault(Expression<Func<TEntity, bool>> filter, bool WithDeletedObjects = false, bool withDefaultFilter = true);
         /// <summary>
         /// Check data exist in colletion or not.
         /// </summary>

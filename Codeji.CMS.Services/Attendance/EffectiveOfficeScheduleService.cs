@@ -2,6 +2,7 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.DTO.Attendance;
 using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.Employees;
 
 namespace Codeji.CMS.Services.Attendance;
 
@@ -51,7 +52,9 @@ public sealed class EffectiveOfficeScheduleService(
         // Resolve the requested users from the employee collection, rather than
         // accepting a client supplied department. This is the tenant-safe source
         // for department inheritance.
-        var companyEmployees = await employeeRepository.GetAll(x => x.CompanyId == companyId && ids.Contains(x.UserId) && x.Status && !x.IsDeleted, withDefaultFilter: false);
+        var companyEmployees = (await employeeRepository.GetAll(x => x.CompanyId == companyId && ids.Contains(x.UserId) && !x.IsDeleted, withDefaultFilter: false))
+            .Where(employee => EmploymentPeriod.WasEmployedOn(employee, day))
+            .ToList();
         var departments = companyEmployees.Where(x => !employeeByUser.ContainsKey(x.UserId) && !string.IsNullOrWhiteSpace(x.Department))
             .Select(x => x.Department.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var departmentByName = departments.Length == 0

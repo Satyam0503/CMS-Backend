@@ -79,6 +79,16 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
                 AutoReplenishment = true
             }));
+    options.AddPolicy("career-analytics", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 30,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
 });
 // .AddJsonOptions(options =>
 // {
@@ -130,9 +140,25 @@ builder.Services.AddSwaggerGen(option =>
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    options.ForwardLimit = 0;
-    options.KnownProxies.Add(IPAddress.Parse("::ffff:192.165.10.20"));
-    options.ForwardedForHeaderName = "X-Forwarded-For-You";
+    // Only accept client-address information from the reverse proxies explicitly
+    // configured for this deployment. With an empty list, forwarded headers are
+    // ignored rather than allowing a caller to choose its own limiter partition.
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor |
+                               ForwardedHeaders.XForwardedHost |
+                               ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = builder.Configuration.GetValue<int?>("ReverseProxy:ForwardLimit") ?? 1;
+
+    foreach (var proxy in builder.Configuration.GetSection("ReverseProxy:TrustedProxies").Get<string[]>() ?? [])
+    {
+        if (IPAddress.TryParse(proxy, out var address))
+        {
+            options.KnownProxies.Add(address);
+        }
+        else
+        {
+            throw new InvalidOperationException($"ReverseProxy:TrustedProxies contains an invalid IP address: '{proxy}'.");
+        }
+    }
 });
 
 // SignalR and Notification Services
@@ -148,6 +174,7 @@ builder.Services.AddHostedService<Codeji.CMS.Services.CareerPortal.CareerNotific
 builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceOutboxWorker>();
 builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceReminderHostedService>();
 builder.Services.AddHostedService<EmployeeExitOutboxWorker>();
+builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.LeaveAttendanceReconciliationHostedService>();
 builder.Services.AddHttpContextAccessor();
 // MongoDB Configuration
 ConfigurationManager configuration = builder.Configuration;
@@ -242,6 +269,10 @@ builder.Services.AddSingleton<IEmployeePresenceService, EmployeePresenceService>
 
 // mogodb repositories
 builder.Services.AddScoped<IMongoDbRepository<EmpUser>, MongoRepository<EmpUser>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeLifecyclePolicy>, MongoRepository<EmployeeLifecyclePolicy>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeLifecycleCase>, MongoRepository<EmployeeLifecycleCase>>();
+builder.Services.AddScoped<IEmployeeLifecycleCaseService, EmployeeLifecycleCaseService>();
+builder.Services.AddScoped<IEmployeeLifecyclePolicyService, EmployeeLifecyclePolicyService>();
 builder.Services.AddScoped<IMongoDbRepository<EmpPayRoll>, MongoRepository<EmpPayRoll>>();
 builder.Services.AddScoped<IMongoDbRepository<RefreshToken>, MongoRepository<RefreshToken>>();
 builder.Services.AddScoped<IMongoDbRepository<EmployeeExit>, MongoRepository<EmployeeExit>>();
@@ -350,6 +381,9 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();
 }
+// This must precede rate limiting and authentication so both use the client IP
+// supplied by a configured trusted proxy.
+app.UseForwardedHeaders();
 app.UseRateLimiter();
 app.UseAuthentication();
 // Establish the authenticated tenant before any policy handler performs a
@@ -376,10 +410,6 @@ app.MapHub<ChatHub>("/chathub", options =>
 
 // Configure controller routes
 app.MapControllers();
-app.UseForwardedHeaders(new ForwardedHeadersOptions
-{
-    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedHost
-});
 // Add security headers.
 // Use indexer assignment (not .Add) so duplicate keys don't throw — .NET 10's
 // IHeaderDictionary.Add throws ArgumentException on existing keys (ASP0019).

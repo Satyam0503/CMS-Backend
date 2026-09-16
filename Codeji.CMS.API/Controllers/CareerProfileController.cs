@@ -33,4 +33,13 @@ public sealed class CareerProfileController(
             CurrentContext.CompanyId(context), CurrentContext.UserId(context), request);
         return StatusCode(result.StatusCode, result);
     }
+
+    [HttpPut("theme")]
+    [ModulePermission(AppModule.CareerProfile, Permission.Edit)]
+    public async Task<IActionResult> UpdateTheme(UpdateCompanyThemeRequest request)
+    {
+        var result = await service.UpdateCompanyTheme(
+            CurrentContext.CompanyId(context), CurrentContext.UserId(context), request.AppTheme);
+        return StatusCode(result.StatusCode, result);
+    }
 }

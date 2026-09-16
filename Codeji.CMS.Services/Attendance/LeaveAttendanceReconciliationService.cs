@@ -5,6 +5,7 @@ using Codeji.CMS.Repository.Entities.Leave;
 using Codeji.CMS.Repository.Entities.Attendance;
 using MongoDB.Driver;
 using Codeji.CMS.Services.Attendance;
+using Codeji.CMS.Services.Employees;
 
 public interface ILeaveAttendanceReconciliationService
 {
@@ -39,11 +40,11 @@ public sealed class LeaveAttendanceReconciliationService(
             return result;
         }
 
-        var employee = await employees.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == request.EmployeeId && x.Status);
+        var employee = await employees.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == request.EmployeeId && !x.IsDeleted);
         var policy = await policies.FirstOrDefault(x => x.CompanyId == companyId && x.Id == request.LeavePolicyId && x.Status);
         if (employee == null)
         {
-            result.Message = "The employee for this leave request is not active in the authenticated company.";
+            result.Message = "The employee for this leave request is not available in the authenticated company.";
             return result;
         }
         if (policy == null)
@@ -76,8 +77,14 @@ public sealed class LeaveAttendanceReconciliationService(
             return result;
         }
 
-        var dates = await workingCalendar.GetLeaveDatesAsync(companyId, DateOnly.FromDateTime(request.StartDate),
-            DateOnly.FromDateTime(request.EndDate), policy.WeekendInclusive, policy.HolidayInclusive, cancellationToken);
+        var dates = (await workingCalendar.GetLeaveDatesAsync(companyId, DateOnly.FromDateTime(request.StartDate),
+            DateOnly.FromDateTime(request.EndDate), policy.WeekendInclusive, policy.HolidayInclusive, cancellationToken)).ToList();
+        dates = dates.Where(day => EmploymentPeriod.WasEmployedOn(employee, day.ToDateTime(TimeOnly.MinValue))).ToList();
+        if (dates.Count == 0)
+        {
+            result.Message = "The leave request does not contain a date within the employee's employment period.";
+            return result;
+        }
 
         if (request.IsHalfDay)
             return await ReconcileHalfDayAsync(companyId, request, employee, statusCode, actorUserId, cancellationToken);

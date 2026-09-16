@@ -15,6 +15,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Leave;
 using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Employees.Interface;
+using Codeji.CMS.Services.Employees;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
@@ -23,6 +24,7 @@ using Codeji.CMS.Utility.middlewares;
 using LinqKit;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
+using System.Security.Cryptography;
 
 namespace Codeji.CMS.Services.LeaveManagement;
 
@@ -47,6 +49,9 @@ public class LeaveManagementService : ILeaveManagementService
     private readonly IMongoDbRepository<WorkFromHomeRequest> _workFromHomeRequests;
     private readonly ILeaveAttendanceReconciliationService _leaveAttendanceReconciliation;
     private readonly IMongoClient _mongoClient;
+    private readonly IEmployeeLifecycleCaseService? _lifecycleCases;
+    private readonly IMongoDbRepository<EmployeeLifecyclePolicy>? _lifecyclePolicyRepository;
+    private readonly IEmployeeLifecyclePolicyService? _lifecyclePolicyService;
     public LeaveManagementService(
     IMongoDbRepository<EmpUser> employeeRepository,
     IMongoDbRepository<LeaveRequest> leave,
@@ -65,7 +70,10 @@ public class LeaveManagementService : ILeaveManagementService
     ILeaveAttendanceReconciliationService leaveAttendanceReconciliation,
     IMongoDbRepository<WorkFromHomePolicy> workFromHomePolicies,
     IMongoDbRepository<WorkFromHomeRequest> workFromHomeRequests,
-    IMongoClient mongoClient
+    IMongoClient mongoClient,
+    IEmployeeLifecycleCaseService? lifecycleCases = null,
+    IMongoDbRepository<EmployeeLifecyclePolicy>? lifecyclePolicyRepository = null,
+    IEmployeeLifecyclePolicyService? lifecyclePolicyService = null
     )
     {
         _httpContextAccessor = httpContextAccessor;
@@ -87,6 +95,9 @@ public class LeaveManagementService : ILeaveManagementService
         _workFromHomePolicies = workFromHomePolicies;
         _workFromHomeRequests = workFromHomeRequests;
         _mongoClient = mongoClient;
+        _lifecycleCases = lifecycleCases;
+        _lifecyclePolicyRepository = lifecyclePolicyRepository;
+        _lifecyclePolicyService = lifecyclePolicyService;
     }
 
     // updated services
@@ -94,6 +105,7 @@ public class LeaveManagementService : ILeaveManagementService
     {
         Result result = new();
         NormalizeUnpaidLeavePolicy(leavePolicyDto);
+        NormalizeLifecycleLeavePolicy(leavePolicyDto);
         NormalizeLeaveAttendanceMappings(leavePolicyDto);
         if (!await ValidatePolicyShape(company_id, leavePolicyDto.PolicyType, leavePolicyDto.FullDayAttendanceStatusCode, leavePolicyDto.HalfDayAttendanceStatusCode, leavePolicyDto.HalfDayAllowed, leavePolicyDto.WorkFromHome))
             return new Result { Success = false, Message = "LEAVE_POLICY_CONFIGURATION_INVALID: The policy type and attendance configuration are not valid for this company." };
@@ -132,6 +144,12 @@ public class LeaveManagementService : ILeaveManagementService
 
         // insert new leave policy
         result = await _leavePolicyRepo.AddOne(leavePolicy);
+        if (result.Success && leavePolicyDto.Lifecycle?.Enabled == true)
+        {
+            var lifecycleResult = await SynchronizeLifecyclePolicy(company_id, leavePolicy, leavePolicyDto.Lifecycle);
+            if (!lifecycleResult.Success)
+                return new Result { Success = false, Message = lifecycleResult.Error };
+        }
         if (result.Success && leavePolicy.PolicyType == EnumsHelper.LeavePolicyType.WorkFromHome)
         {
             var sync = await SyncWorkFromHomePolicy(company_id, leavePolicy, leavePolicyDto.WorkFromHome!);
@@ -167,6 +185,7 @@ public class LeaveManagementService : ILeaveManagementService
         if (model.PolicyType == EnumsHelper.LeavePolicyType.WorkFromHome)
             model.Paid = true;
         NormalizeUnpaidLeavePolicy(model);
+        NormalizeLifecycleLeavePolicy(model);
         NormalizeLeaveAttendanceMappings(model);
         if (!await ValidatePolicyShape(companyId, model.PolicyType, model.FullDayAttendanceStatusCode, model.HalfDayAttendanceStatusCode, model.HalfDayAllowed, model.WorkFromHome))
         {
@@ -208,6 +227,18 @@ public class LeaveManagementService : ILeaveManagementService
         result.Success = updateResult.Success;
         if (result.Success)
         {
+            if (model.Lifecycle?.Enabled == true)
+            {
+                var lifecycleResult = await SynchronizeLifecyclePolicy(companyId, updatedPolicyModel, model.Lifecycle);
+                if (!lifecycleResult.Success)
+                    return new Result<UpdateLeavePolicyRequest> { Success = false, Message = lifecycleResult.Error };
+            }
+            else
+            {
+                var unlinkResult = await RetireLifecycleLinks(companyId, updatedPolicyModel.Id);
+                if (!unlinkResult.Success)
+                    return new Result<UpdateLeavePolicyRequest> { Success = false, Message = unlinkResult.Error };
+            }
             if (updatedPolicyModel.PolicyType == EnumsHelper.LeavePolicyType.WorkFromHome)
             {
                 if (model.WorkFromHome is null)
@@ -239,14 +270,84 @@ public class LeaveManagementService : ILeaveManagementService
         return result;
     }
 
+
+private async Task<bool> HasActiveEmployeeAbsenceAsync(string companyId,string employeeId,string? excludeLeaveRequestId = null)
+    {
+       var employee=await _employeeRepository.FirstOrDefault(x=>x.CompanyId==companyId && x.UserId==employeeId &&  !x.IsDeleted);
+
+       if(employee?.Lifecycle?.AvailabilityStatus
+        is EmployeeLifecycleStatuses.MedicalLeave
+            or EmployeeLifecycleStatuses.AnnualLeave
+            or EmployeeLifecycleStatuses.MaternityLeave
+            or EmployeeLifecycleStatuses.PaternityLeave
+            or EmployeeLifecycleStatuses.SickLeave)
+        {
+            return true;
+        }
+
+        var activeLeave= await _leave.FirstOrDefault(x=>x.CompanyId==companyId && x.EmployeeId==employeeId  && x.LeaveRequestId!=excludeLeaveRequestId &&
+            (x.Status==EnumsHelper.LeaveRequestStatus.Accepted || x.Status ==EnumsHelper.LeaveRequestStatus.Pending)
+        );
+        return activeLeave is not null;
+
+    }
+
+
+
+public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
+    {
+        var policy = await _leavePolicyRepo.FirstOrDefault(x =>
+            x.CompanyId == companyId && x.Id == policyId && !x.IsDeleted);
+        if (policy is null)
+            return new Result { Success = false, Message = "LEAVE_POLICY_NOT_FOUND" };
+
+        policy.Status = false;
+        policy.IsDeleted = true;
+        policy.UpdatedDate = DateTime.UtcNow;
+        var updated = await _leavePolicyRepo.Update(
+            Builders<LeavePolicy>.Filter.Where(x => x.Id == policyId && x.CompanyId == companyId), policy);
+        if (!updated.Success)
+            return new Result { Success = false, Message = "LEAVE_POLICY_DELETE_FAILED" };
+
+        // Deleting a leave policy also unlinks its lifecycle compatibility records.
+        // Keep this tenant-scoped so a policy from another company can never be
+        // detached accidentally.
+        if (_lifecyclePolicyRepository is not null)
+        {
+            var lifecycleLinks = await _lifecyclePolicyRepository.GetAll(x =>
+                x.CompanyId == companyId && x.LeavePolicyId == policyId &&
+                x.IsActive && !x.IsDeleted);
+
+            foreach (var link in lifecycleLinks)
+            {
+                link.IsActive = false;
+                link.IsDeleted = true;
+                link.UpdatedBy = CurrentContext.UserId(_httpContextAccessor);
+                link.UpdatedDate = DateTime.UtcNow;
+
+                var unlinked = await _lifecyclePolicyRepository.Update(
+                    Builders<EmployeeLifecyclePolicy>.Filter.Where(x =>
+                        x.CompanyId == companyId &&
+                        x.Id == link.Id &&
+                        x.LeavePolicyId == policyId), link);
+                if (!unlinked.Success)
+                    return new Result { Success = false, Message = "LIFECYCLE_POLICY_UNLINK_FAILED" };
+            }
+        }
+
+        return new Result { Success = true, Message = "LEAVE_POLICY_DELETED_SUCCESSFULLY" };
+    }
     private async Task<Result> SynchronizeLeavePolicyEligibility(string companyId, LeavePolicy policy, string[]? applicableTo)
     {
         // null explicitly means no employees; an empty list means every active employee.
-        var activeUserIds = (await _employeeRepository.GetAll(emp => emp.Status && emp.CompanyId == companyId))
+            var activeUserIds = (await _employeeRepository.GetAll(emp => emp.Status && emp.CompanyId == companyId && (emp.Lifecycle == null || emp.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || emp.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || emp.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended)))
             .Select(emp => emp.UserId)
             .Distinct()
             .ToHashSet();
-        var eligibleUserIds = applicableTo == null
+        // No-accrual policies are approval-driven and never own an entitlement.
+        var eligibleUserIds = policy.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.None || policy.AccrualAmount <= 0
+            ? new HashSet<string>()
+            : applicableTo == null
             ? new HashSet<string>()
             : applicableTo.Length == 0
                 ? activeUserIds
@@ -308,6 +409,33 @@ public class LeaveManagementService : ILeaveManagementService
         Expression<Func<LeavePolicy, bool>> expression = status.HasValue ? lp => lp.CompanyId == companyId && lp.Status == status.Value : lp => lp.CompanyId == companyId;
         IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(expression);
         var list = _mapper.Map<List<UpdateLeavePolicyRequest>>(leavePolicies);
+        if (_lifecyclePolicyRepository is not null)
+        {
+            var lifecycleLinks = (await _lifecyclePolicyRepository.GetAll(x =>
+                x.CompanyId == companyId && x.IsActive && !x.IsDeleted && !string.IsNullOrWhiteSpace(x.LeavePolicyId)))
+                .ToDictionary(x => x.LeavePolicyId!, StringComparer.OrdinalIgnoreCase);
+            foreach (var policy in list)
+            {
+                if (!lifecycleLinks.TryGetValue(policy.Id, out var link)) continue;
+                policy.Lifecycle = new LifecycleLeavePolicySettingsRequest
+                {
+                    Enabled = true,
+                    EventType = link.EventType,
+                    RequiresHrApproval = link.RequiresHrApproval,
+                    RequiresReason = link.RequiresReason,
+                    RequiresDocument = link.RequiresDocument,
+                    RequiresExpectedReturnDate = link.RequiresExpectedReturnDate,
+                    DefaultAccountStatus = link.DefaultAccountStatus,
+                    DefaultPayrollStatus = link.DefaultPayrollStatus,
+                    EffectiveFromUtc = link.EffectiveFromUtc == DateTime.MinValue ? null : link.EffectiveFromUtc
+                };
+                policy.AccrualPeriod = EnumsHelper.LeaveAccrualPeriod.None;
+                policy.AccrualAmount = 0;
+                policy.MaxBalance = 0;
+                policy.CarryOverAllowed = false;
+                policy.CarryOverLimit = null;
+            }
+        }
         foreach (var policy in list.Where(x => x.PolicyType == EnumsHelper.LeavePolicyType.WorkFromHome))
         {
             policy.Paid = true;
@@ -336,8 +464,6 @@ public class LeaveManagementService : ILeaveManagementService
                 MixedAttendanceStatusCode = operationalPolicy.MixedAttendanceStatusCode,
                 WfhWfoAttendanceStatusCode = operationalPolicy.WfhWfoAttendanceStatusCode,
                 WfhHdAttendanceStatusCode = operationalPolicy.WfhHdAttendanceStatusCode,
-                WfhSlAttendanceStatusCode = operationalPolicy.WfhSlAttendanceStatusCode,
-                WfhClAttendanceStatusCode = operationalPolicy.WfhClAttendanceStatusCode,
                 FullDayRequiredWorkingMinutes = (int)(operationalPolicy.FullDayMinimumHours * 60),
                 HalfDayRequiredWorkingMinutes = (int)(operationalPolicy.HalfDayMinimumHours * 60),
                 BreakMinutes = 0,
@@ -376,7 +502,34 @@ public class LeaveManagementService : ILeaveManagementService
         return policies;
     }
 
-    public async Task<Result> CreateLeaveRequest(LeaveRequestDto leaveRequest)
+    public Task<Result> CreateLeaveRequest(LeaveRequestDto leaveRequest) => CreateLeaveRequestCore(leaveRequest, false);
+
+    public async Task<Result> CreateLeaveRequestWithEvidence(LeaveRequestDto leaveRequest, IFormFile evidence)
+    {
+        if (!IsValidLeaveEvidence(evidence))
+            return new Result { Success = false, Message = "LEAVE_EVIDENCE_INVALID: Upload a PDF, JPG, or PNG file up to 10 MB." };
+
+        // Allocate the request ID before inserting it. A just-created request
+        // must never be rediscovered by dates because date-only values are
+        // normalized to UTC before persistence.
+        var requestId = Guid.NewGuid().ToString();
+        var created = await CreateLeaveRequestCore(leaveRequest, true, requestId);
+        if (!created.Success) return created;
+
+        var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        var request = await _leave.FirstOrDefault(x => x.CompanyId == companyId && x.LeaveRequestId == requestId && x.Status == EnumsHelper.LeaveRequestStatus.Pending);
+        if (request is null)
+            return new Result { Success = false, Message = "LEAVE_EVIDENCE_REQUEST_LOOKUP_FAILED: The leave request was created but could not be linked to the uploaded evidence." };
+
+        var saved = await SaveLeaveEvidenceAsync(request, evidence);
+        if (saved.Success) return saved;
+
+        // Do not leave a request that cannot meet a mandatory-evidence rule.
+        await _leave.Delete(Builders<LeaveRequest>.Filter.Where(x => x.CompanyId == companyId && x.LeaveRequestId == request.LeaveRequestId && x.Status == EnumsHelper.LeaveRequestStatus.Pending));
+        return saved;
+    }
+
+    private async Task<Result> CreateLeaveRequestCore(LeaveRequestDto leaveRequest, bool evidenceIncluded, string? requestedLeaveRequestId = null)
     {
         Result result = new();
         var companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -391,15 +544,23 @@ public class LeaveManagementService : ILeaveManagementService
         }
         var requestStartDateTime = UtcMidnight(requestStartDate);
         var requestEndDateTime = UtcMidnight(requestEndDate);
-        var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == leaveRequest.UserId && x.Status && !x.IsDeleted);
+        var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == leaveRequest.UserId && x.Status && !x.IsDeleted && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended));
         if (employee == null) return new Result { Success = false, Message = "Employee does not belong to the authenticated company." };
+        if (employee.Lifecycle is not null && EmploymentPeriod.ResolveAvailabilityOn(employee, requestStartDate.ToDateTime(TimeOnly.MinValue)) != EmployeeLifecycleStatuses.Working)
+            return new Result { Success = false, Message = "LEAVE_LIFECYCLE_NOT_WORKING: Leave cannot be requested while the employee is on another leave, sabbatical, suspension, or absence state." };
+        var lastWorkingDate = employee.LastWorkingDate ?? (DateTime.TryParse(employee.ExitDate, out var legacyExit) ? legacyExit.Date : (DateTime?)null);
+        if (lastWorkingDate.HasValue && requestEndDate > DateOnly.FromDateTime(lastWorkingDate.Value))
+            return new Result { Success = false, Message = "LEAVE_AFTER_EXIT" };
         if (!IsPolicyApplicableToEmployee(leavePolicy, employee.UserId))
             return new Result { Success = false, Message = "This leave policy is not assigned to the selected employee." };
 
         // check if employee has balance for requested leave type
         var isUnpaidLeave = IsUnpaidLeavePolicy(leavePolicy);
-        var employeeLeaveBalance = isUnpaidLeave ? null : await _employeeLeaveBalanceRepo.FirstOrDefault(elb => elb.CompanyId == companyId && elb.UserId == leaveRequest.UserId && elb.LeavePolicyId == leaveRequest.LeavePolicyId);
-        if (!isUnpaidLeave && employeeLeaveBalance is null)
+        var isLifecycleLinked = await IsLifecycleLinkedPolicyAsync(companyId, leavePolicy.Id);
+        if (isLifecycleLinked && await RequiresLifecycleEvidenceAsync(companyId, leavePolicy.Id) && !evidenceIncluded)
+            return new Result { Success = false, Message = "LEAVE_EVIDENCE_REQUIRED: Supporting evidence is required for this special leave request." };
+        var employeeLeaveBalance = isUnpaidLeave || isLifecycleLinked ? null : await _employeeLeaveBalanceRepo.FirstOrDefault(elb => elb.CompanyId == companyId && elb.UserId == leaveRequest.UserId && elb.LeavePolicyId == leaveRequest.LeavePolicyId);
+        if (!isUnpaidLeave && !isLifecycleLinked && employeeLeaveBalance is null)
         {
             result.StatusCode = CustomStatusCode.LeaveBalanceNotExist;
             return result;
@@ -452,15 +613,25 @@ public class LeaveManagementService : ILeaveManagementService
 
         if (totalRequestedDays <= 0)
             return new Result { Success = false, Message = "Leave duration must be greater than zero." };
-        if (!isUnpaidLeave && (!IsValidBalance(employeeLeaveBalance!) || totalRequestedDays > employeeLeaveBalance!.Remaining))
+        if (!isUnpaidLeave && !isLifecycleLinked && (!IsValidBalance(employeeLeaveBalance!) || totalRequestedDays > employeeLeaveBalance!.Remaining))
         {
             result.Success = false;
             result.StatusCode = CustomStatusCode.InsufficientLeaveBalance;
             return result;
         }
+        if(await HasActiveEmployeeAbsenceAsync(companyId, leaveRequest.UserId))
+        {
+            return new Result
+            {
+                Success = false,
+                Message= "This Employee have Already active leave"
+
+            };
+        }
 
         var request = new LeaveRequest
         {
+            LeaveRequestId = requestedLeaveRequestId ?? string.Empty,
             EmployeeId = leaveRequest.UserId,
             LeavePolicyId = leaveRequest.LeavePolicyId,
             StartDate = requestStartDateTime,
@@ -510,8 +681,9 @@ public class LeaveManagementService : ILeaveManagementService
             return new Result { Success = false, Message = "This leave request has started and cannot be updated." };
 
         var isUnpaidLeave = IsUnpaidLeavePolicy(leavePolicyEntity);
-        var employeeLeaveBalance = isUnpaidLeave ? null : await _employeeLeaveBalanceRepo.FirstOrDefault(elb => elb.CompanyId == companyId && elb.UserId == leaveRequestDto.UserId && elb.LeavePolicyId == leaveRequestDto.LeavePolicyId);
-        if (!isUnpaidLeave && employeeLeaveBalance is null)
+        var isLifecycleLinked = await IsLifecycleLinkedPolicyAsync(companyId, leavePolicyEntity.Id);
+        var employeeLeaveBalance = isUnpaidLeave || isLifecycleLinked ? null : await _employeeLeaveBalanceRepo.FirstOrDefault(elb => elb.CompanyId == companyId && elb.UserId == leaveRequestDto.UserId && elb.LeavePolicyId == leaveRequestDto.LeavePolicyId);
+        if (!isUnpaidLeave && !isLifecycleLinked && employeeLeaveBalance is null)
         {
             result.StatusCode = CustomStatusCode.LeaveBalanceNotExist;
             return result;
@@ -553,11 +725,20 @@ public class LeaveManagementService : ILeaveManagementService
 
         if (totalRequestedDays <= 0)
             return new Result { Success = false, Message = "Leave duration must be greater than zero." };
-        if (!isUnpaidLeave && (!IsValidBalance(employeeLeaveBalance!) || totalRequestedDays > employeeLeaveBalance!.Remaining))
+        if (!isUnpaidLeave && !isLifecycleLinked && (!IsValidBalance(employeeLeaveBalance!) || totalRequestedDays > employeeLeaveBalance!.Remaining))
         {
             result.Success = false;
             result.StatusCode = CustomStatusCode.InsufficientLeaveBalance;
             return result;
+        }
+        if(await HasActiveEmployeeAbsenceAsync(companyId, leaveRequestDto.UserId, leaveRequestDto.LeaveRequestId))
+        {
+            return new Result
+            {
+                Success = false,
+                Message= "This Employee have Already active leave"
+
+            };
         }
 
         existingLeaveRequest.LeavePolicyId = leaveRequestDto.LeavePolicyId;
@@ -783,16 +964,35 @@ public class LeaveManagementService : ILeaveManagementService
         if (policyForDecision == null)
             return new Result { Success = false, Message = "The leave policy for this request is not active." };
         var isUnpaidLeave = IsUnpaidLeavePolicy(policyForDecision);
-        bool debitBalance = !isUnpaidLeave && model.Status == EnumsHelper.LeaveRequestStatus.Accepted &&
+        var isLifecycleLinked = await IsLifecycleLinkedPolicyAsync(companyId, policyForDecision.Id);
+        if (isLifecycleLinked && model.Status == EnumsHelper.LeaveRequestStatus.Accepted &&
+            await RequiresLifecycleEvidenceAsync(companyId, policyForDecision.Id) &&
+            existingLeaveRequest.Evidence.Count == 0)
+        {
+            return new Result
+            {
+                Success = false,
+                Message = "LEAVE_EVIDENCE_REQUIRED: Evidence is required before this special leave can be approved."
+            };
+        }
+        bool debitBalance = !isUnpaidLeave && !isLifecycleLinked && model.Status == EnumsHelper.LeaveRequestStatus.Accepted &&
             existingLeaveRequest.Status is EnumsHelper.LeaveRequestStatus.Pending or EnumsHelper.LeaveRequestStatus.Rejected;
-        bool creditBalance = !isUnpaidLeave && existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted &&
+        bool creditBalance = !isUnpaidLeave && !isLifecycleLinked && existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted &&
             model.Status is EnumsHelper.LeaveRequestStatus.Rejected or EnumsHelper.LeaveRequestStatus.WithDrawn;
         bool needsReconciliation = model.Status == EnumsHelper.LeaveRequestStatus.Accepted &&
             existingLeaveRequest.Status is EnumsHelper.LeaveRequestStatus.Pending or EnumsHelper.LeaveRequestStatus.Rejected;
         bool needsReversal = existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted &&
             model.Status is EnumsHelper.LeaveRequestStatus.Rejected or EnumsHelper.LeaveRequestStatus.WithDrawn;
-        bool statusOnly = existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Pending &&
-            model.Status is EnumsHelper.LeaveRequestStatus.Rejected or EnumsHelper.LeaveRequestStatus.WithDrawn ||
+        // Lifecycle special leave is approval-driven and has no employee balance
+        // to debit. Its approval is still a durable leave status change; the
+        // lifecycle case is created immediately after that commit.
+        bool statusOnly = (isLifecycleLinked && (
+                (model.Status == EnumsHelper.LeaveRequestStatus.Accepted &&
+                 existingLeaveRequest.Status is EnumsHelper.LeaveRequestStatus.Pending or EnumsHelper.LeaveRequestStatus.Rejected) ||
+                (existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted &&
+                 model.Status is EnumsHelper.LeaveRequestStatus.Rejected or EnumsHelper.LeaveRequestStatus.WithDrawn))) ||
+            (existingLeaveRequest.Status == EnumsHelper.LeaveRequestStatus.Pending &&
+             model.Status is EnumsHelper.LeaveRequestStatus.Rejected or EnumsHelper.LeaveRequestStatus.WithDrawn) ||
             isUnpaidLeave && (
                 model.Status == EnumsHelper.LeaveRequestStatus.Accepted &&
                 existingLeaveRequest.Status is EnumsHelper.LeaveRequestStatus.Pending or EnumsHelper.LeaveRequestStatus.Rejected ||
@@ -928,9 +1128,17 @@ public class LeaveManagementService : ILeaveManagementService
                 await MarkReconciliationRetryAsync(companyId, leaveRequestId, reconciliation.Message);
                 result = new Result { Success = true, Message = "Leave approved. Attendance synchronization is pending retry." };
             }
+            if (_lifecycleCases is not null)
+            {
+                var lifecycleCase = await _lifecycleCases.CreateFromApprovedLeaveSystemAsync(new Codeji.CMS.DTO.Employee.CreateEmployeeLifecycleCaseRequest { LeaveRequestId = leaveRequestId }, reviewedBy);
+                if (!lifecycleCase.Success && lifecycleCase.Error is not "LIFECYCLE_POLICY_LINK_NOT_FOUND")
+                    result = new Result { Success = false, Message = $"Leave approved but lifecycle case creation failed: {lifecycleCase.Error}" };
+            }
         }
         else if (result.Success && model.Status is EnumsHelper.LeaveRequestStatus.Rejected or EnumsHelper.LeaveRequestStatus.WithDrawn)
         {
+            if (_lifecycleCases is not null)
+                await _lifecycleCases.CancelFromLeaveRequestSystemAsync(leaveRequestId, reviewedBy, model.Comment ?? "Leave decision reversed");
             result = await _leaveAttendanceReconciliation.ReverseLeaveAttendanceAsync(companyId, leaveRequestId, existingLeaveRequest.Version, reviewedBy);
         }
         if (result.Success)
@@ -954,6 +1162,138 @@ public class LeaveManagementService : ILeaveManagementService
         policy.PolicyType == EnumsHelper.LeavePolicyType.UnpaidLeave ||
         string.Equals(policy.Code?.Trim(), "UL", StringComparison.OrdinalIgnoreCase) &&
         !policy.Paid && policy.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.None;
+
+    private async Task<bool> IsLifecycleLinkedPolicyAsync(string companyId, string leavePolicyId)
+    {
+        if (_lifecyclePolicyRepository is null || string.IsNullOrWhiteSpace(leavePolicyId)) return false;
+        var today = DateOnly.FromDateTime(Codeji.CMS.Utility.Helpers.IndiaTime.Today);
+        var policies = await _lifecyclePolicyRepository.GetAll(x => x.CompanyId == companyId && x.LeavePolicyId == leavePolicyId && x.IsActive && !x.IsDeleted);
+        return policies.Any(x => x.EffectiveFromUtc == DateTime.MinValue || Codeji.CMS.Utility.Helpers.IndiaTime.ToBusinessDate(x.EffectiveFromUtc) <= today);
+    }
+
+    private async Task<bool> RequiresLifecycleEvidenceAsync(string companyId, string leavePolicyId)
+    {
+        if (_lifecyclePolicyRepository is null) return false;
+        return (await _lifecyclePolicyRepository.GetAll(x => x.CompanyId == companyId && x.LeavePolicyId == leavePolicyId && x.IsActive && !x.IsDeleted))
+            .Any(x => x.RequiresDocument);
+    }
+
+    private static bool IsValidLeaveEvidence(IFormFile? file) =>
+        file is { Length: > 0 and <= 10 * 1024 * 1024 } &&
+        new[] { "application/pdf", "image/jpeg", "image/png" }.Contains(file.ContentType, StringComparer.OrdinalIgnoreCase);
+
+    private async Task<Result> SaveLeaveEvidenceAsync(LeaveRequest request, IFormFile file)
+    {
+        var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        var actor = CurrentContext.UserId(_httpContextAccessor);
+        var root = Path.Combine(Directory.GetCurrentDirectory(), "PrivateLeaveEvidence", companyId, request.LeaveRequestId);
+        Directory.CreateDirectory(root);
+        var storageFile = $"{Guid.NewGuid():N}{Path.GetExtension(file.FileName)}";
+        var path = Path.Combine(root, storageFile);
+        try
+        {
+            await using (var output = File.Create(path)) await file.CopyToAsync(output);
+            await using var input = File.OpenRead(path);
+            var evidence = new LeaveRequestEvidence { FileName = Path.GetFileName(file.FileName), ContentType = file.ContentType, SizeBytes = file.Length, StorageKey = storageFile, Sha256 = Convert.ToHexString(await SHA256.HashDataAsync(input)), UploadedBy = actor };
+            request.Evidence.Add(evidence); request.UpdatedBy = actor; request.UpdatedDate = DateTime.UtcNow;
+            var saved = await _leave.Update(Builders<LeaveRequest>.Filter.Where(x => x.CompanyId == companyId && x.LeaveRequestId == request.LeaveRequestId && x.Version == request.Version), request);
+            if (saved.Success) return new Result { Success = true };
+            File.Delete(path);
+            return new Result { Success = false, Message = "LEAVE_EVIDENCE_VERSION_CONFLICT: Refresh and try again." };
+        }
+        catch
+        {
+            if (File.Exists(path)) File.Delete(path);
+            return new Result { Success = false, Message = "LEAVE_EVIDENCE_SAVE_FAILED: The request was not submitted." };
+        }
+    }
+
+    private async Task<(bool Success, string? Error)> SynchronizeLifecyclePolicy(
+        string companyId, LeavePolicy leavePolicy, LifecycleLeavePolicySettingsRequest settings)
+    {
+        if (_lifecyclePolicyService is null)
+            return (false, "LIFECYCLE_POLICY_SERVICE_UNAVAILABLE: Lifecycle configuration could not be synchronized.");
+        if (string.IsNullOrWhiteSpace(settings.EventType))
+            return (false, "LIFECYCLE_POLICY_EVENT_REQUIRED: Select a lifecycle event.");
+        if (!IsSupportedSpecialLeaveAccountStatus(settings.DefaultAccountStatus))
+            return (false, "LIFECYCLE_ACCOUNT_STATUS_INVALID: Special leave can use Active or TemporarilyDisabled account access.");
+        if (!IsSupportedSpecialLeavePayrollStatus(settings.DefaultPayrollStatus))
+            return (false, "LIFECYCLE_PAYROLL_STATUS_INVALID: Special leave can use Active, Hold, or Paused payroll handling.");
+
+        var saved = await _lifecyclePolicyService.SavePolicyAsync(new EmployeeLifecyclePolicy
+        {
+            EventType = settings.EventType.Trim(),
+            LeavePolicyId = leavePolicy.Id,
+            EffectiveFromUtc = settings.EffectiveFromUtc ?? DateTime.MinValue,
+            RequiresHrApproval = settings.RequiresHrApproval,
+            RequiresReason = settings.RequiresReason,
+            RequiresDocument = settings.RequiresDocument,
+            RequiresExpectedReturnDate = settings.RequiresExpectedReturnDate,
+            DefaultAccountStatus = NormalizeSpecialLeaveAccountStatus(settings.DefaultAccountStatus),
+            DefaultPayrollStatus = NormalizeSpecialLeavePayrollStatus(settings.DefaultPayrollStatus),
+            AttendanceExpected = false,
+            LeaveRequestsAllowed = true,
+            WorkFromHomeRequestsAllowed = false,
+            IsActive = true,
+            // The leave-policy form is not a lifecycle-policy version editor.
+            // Resolve the current lifecycle version server-side instead of
+            // rejecting a valid edit because the mapped snapshot is stale.
+            Version = 0
+        }, companyId, CurrentContext.UserId(_httpContextAccessor));
+        return saved.Success ? (true, null) : (false, saved.Error ?? "LIFECYCLE_POLICY_SAVE_FAILED: Lifecycle configuration was not saved.");
+    }
+
+    private async Task<(bool Success, string? Error)> RetireLifecycleLinks(string companyId, string leavePolicyId)
+    {
+        if (_lifecyclePolicyRepository is null) return (true, null);
+        var activeLinks = await _lifecyclePolicyRepository.GetAll(x =>
+            x.CompanyId == companyId && x.LeavePolicyId == leavePolicyId && x.IsActive && !x.IsDeleted);
+        foreach (var link in activeLinks)
+        {
+            link.IsActive = false;
+            link.IsDeleted = true;
+            link.UpdatedBy = CurrentContext.UserId(_httpContextAccessor);
+            link.UpdatedDate = DateTime.UtcNow;
+            var retired = await _lifecyclePolicyRepository.Update(
+                Builders<EmployeeLifecyclePolicy>.Filter.Where(x =>
+                    x.CompanyId == companyId && x.Id == link.Id && x.Version == link.Version), link);
+            if (!retired.Success)
+                return (false, "LIFECYCLE_POLICY_UNLINK_FAILED: The old lifecycle link was not retired.");
+        }
+        return (true, null);
+    }
+
+    private static void NormalizeLifecycleLeavePolicy(LeavePolicyRequest policy)
+    {
+        if (policy.Lifecycle?.Enabled != true) return;
+        policy.AccrualPeriod = EnumsHelper.LeaveAccrualPeriod.None;
+        policy.AccrualAmount = 0;
+        policy.MaxBalance = 0;
+        policy.CarryOverAllowed = false;
+        policy.CarryOverLimit = null;
+    }
+
+    private static bool IsSupportedSpecialLeaveAccountStatus(string? value) =>
+        string.IsNullOrWhiteSpace(value) || value.Trim() is "Active" or "TemporarilyDisabled";
+
+    private static bool IsSupportedSpecialLeavePayrollStatus(string? value) =>
+        string.IsNullOrWhiteSpace(value) || value.Trim() is "Active" or "Hold" or "Paused";
+
+    private static string? NormalizeSpecialLeaveAccountStatus(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? NormalizeSpecialLeavePayrollStatus(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static void NormalizeLifecycleLeavePolicy(UpdateLeavePolicyRequest policy)
+    {
+        if (policy.Lifecycle?.Enabled != true) return;
+        policy.AccrualPeriod = EnumsHelper.LeaveAccrualPeriod.None;
+        policy.AccrualAmount = 0;
+        policy.MaxBalance = 0;
+        policy.CarryOverAllowed = false;
+        policy.CarryOverLimit = null;
+    }
 
     private static bool IsPolicyApplicableToEmployee(LeavePolicy policy, string? userId) =>
         !string.IsNullOrWhiteSpace(userId) &&
@@ -1160,8 +1500,6 @@ public class LeaveManagementService : ILeaveManagementService
         existing.MixedAttendanceStatusCode = settings.MixedAttendanceStatusCode?.Trim().ToUpperInvariant() ?? string.Empty;
         existing.WfhWfoAttendanceStatusCode = (settings.WfhWfoAttendanceStatusCode ?? settings.MixedAttendanceStatusCode)?.Trim().ToUpperInvariant();
         existing.WfhHdAttendanceStatusCode = settings.WfhHdAttendanceStatusCode?.Trim().ToUpperInvariant();
-        existing.WfhSlAttendanceStatusCode = settings.WfhSlAttendanceStatusCode?.Trim().ToUpperInvariant();
-        existing.WfhClAttendanceStatusCode = settings.WfhClAttendanceStatusCode?.Trim().ToUpperInvariant();
         existing.FullDayMinimumHours = (settings.FullDayRequiredWorkingMinutes ?? 480) / 60m;
         existing.HalfDayMinimumHours = (settings.HalfDayRequiredWorkingMinutes ?? 240) / 60m;
         existing.UpdatedDate = DateTime.UtcNow;
@@ -1181,10 +1519,10 @@ public class LeaveManagementService : ILeaveManagementService
             wfh.ApproverStrategy is not ("REPORTING_MANAGER" or "DEPARTMENT_HEAD" or "HR_ADMIN"))
             return false;
 
-        var codes = new[] { wfh.FullDayAttendanceStatusCode, wfh.HalfDayAttendanceStatusCode, wfh.MixedAttendanceStatusCode, wfh.WfhWfoAttendanceStatusCode, wfh.WfhHdAttendanceStatusCode, wfh.WfhSlAttendanceStatusCode, wfh.WfhClAttendanceStatusCode }
+        var codes = new[] { wfh.FullDayAttendanceStatusCode, wfh.HalfDayAttendanceStatusCode, wfh.MixedAttendanceStatusCode, wfh.WfhWfoAttendanceStatusCode, wfh.WfhHdAttendanceStatusCode }
             .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim().ToUpperInvariant()).Distinct().ToList();
         if (codes.Count == 0 || (wfh.AllowFirstHalf || wfh.AllowSecondHalf) && string.IsNullOrWhiteSpace(wfh.HalfDayAttendanceStatusCode) ||
-            wfh.AllowMixedHalfDayLeave && new[] { wfh.MixedAttendanceStatusCode ?? wfh.WfhWfoAttendanceStatusCode, wfh.WfhHdAttendanceStatusCode, wfh.WfhSlAttendanceStatusCode, wfh.WfhClAttendanceStatusCode }.Any(string.IsNullOrWhiteSpace))
+            wfh.AllowMixedHalfDayLeave && new[] { wfh.MixedAttendanceStatusCode ?? wfh.WfhWfoAttendanceStatusCode, wfh.WfhHdAttendanceStatusCode }.Any(string.IsNullOrWhiteSpace))
             return false;
         return (await _attendanceStatusRepo.GetAll(x => x.CompanyId == companyId && x.IsActive && codes.Contains(x.Code)))
             .Select(x => x.Code).Distinct(StringComparer.OrdinalIgnoreCase).Count() == codes.Count;
@@ -1424,10 +1762,16 @@ public class LeaveManagementService : ILeaveManagementService
             elb.CompanyId == companyId && elb.UserId == employeeId);
         IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(lp =>
             lp.CompanyId == companyId && lp.Status);
+        var lifecyclePolicyIds = _lifecyclePolicyRepository is null
+            ? new HashSet<string>(StringComparer.Ordinal)
+            : (await _lifecyclePolicyRepository.GetAll(x => x.CompanyId == companyId && x.IsActive && !x.IsDeleted && !string.IsNullOrWhiteSpace(x.LeavePolicyId)))
+                .Select(x => x.LeavePolicyId!)
+                .ToHashSet(StringComparer.Ordinal);
 
         List<EmployeeLeaveBalanceResponseDto> empLeaveBalanceResult = (
             from empLeaveBalance in employeeLeaveBalances
             join leavePolicy in leavePolicies on empLeaveBalance.LeavePolicyId equals leavePolicy.Id
+            where !lifecyclePolicyIds.Contains(leavePolicy.Id)
             select new EmployeeLeaveBalanceResponseDto
             {
                 LeaveBalanceId = empLeaveBalance.Id,
@@ -1461,6 +1805,11 @@ public class LeaveManagementService : ILeaveManagementService
         // Leave Balance UI exposes.
         var pageNo = Math.Max(1, filter.PageNo);
         var pageSize = filter.PageSize is 10 or 25 or 50 ? filter.PageSize : 10;
+        var lifecycleBalanceIds = _lifecyclePolicyRepository is null
+            ? new HashSet<string>(StringComparer.Ordinal)
+            : (await _lifecyclePolicyRepository.GetAll(x => x.CompanyId == companyId && x.IsActive && !x.IsDeleted && !string.IsNullOrWhiteSpace(x.LeavePolicyId)))
+                .Select(x => x.LeavePolicyId!)
+                .ToHashSet(StringComparer.Ordinal);
 
         // Apply every employee-level filter before counting or paging. The
         // authenticated company ID remains part of both the employee and
@@ -1473,7 +1822,7 @@ public class LeaveManagementService : ILeaveManagementService
         if (filter.LeavePolicies is { Count: > 0 })
         {
             var employeeIdsWithSelectedPolicies = (await _employeeLeaveBalanceRepo.GetAll(lb =>
-                    lb.CompanyId == companyId && filter.LeavePolicies.Contains(lb.LeavePolicyId)))
+                    lb.CompanyId == companyId && filter.LeavePolicies.Contains(lb.LeavePolicyId) && !lifecycleBalanceIds.Contains(lb.LeavePolicyId)))
                 .Select(lb => lb.UserId)
                 .Distinct()
                 .ToList();
@@ -1503,11 +1852,11 @@ public class LeaveManagementService : ILeaveManagementService
         Expression<Func<EmployeeLeaveBalance, bool>> leaveBalanceExpression;
         if (filter.LeavePolicies != null && filter.LeavePolicies.Count > 0)
         {
-            leaveBalanceExpression = lb => lb.CompanyId == companyId && empIds.Contains(lb.UserId) && filter.LeavePolicies.Contains(lb.LeavePolicyId);
+            leaveBalanceExpression = lb => lb.CompanyId == companyId && empIds.Contains(lb.UserId) && filter.LeavePolicies.Contains(lb.LeavePolicyId) && !lifecycleBalanceIds.Contains(lb.LeavePolicyId);
         }
         else
         {
-            leaveBalanceExpression = lb => lb.CompanyId == companyId && empIds.Contains(lb.UserId);
+            leaveBalanceExpression = lb => lb.CompanyId == companyId && empIds.Contains(lb.UserId) && !lifecycleBalanceIds.Contains(lb.LeavePolicyId);
         }
         IEnumerable<EmployeeLeaveBalance> employeeLeaveBalances = await _employeeLeaveBalanceRepo.GetAll(leaveBalanceExpression);
 
@@ -1714,6 +2063,7 @@ public class LeaveManagementService : ILeaveManagementService
         if (!leavePolicies.Any()) return;
         foreach (var policy in leavePolicies)
         {
+            if (await IsLifecycleLinkedPolicyAsync(policy.CompanyId, policy.Id)) continue;
             // get all active employees with leave policy
             IEnumerable<EmployeeLeaveBalance> employeeLeaveBalances = await _employeeLeaveBalanceRepo.GetAll(elb => elb.CompanyId == policy.CompanyId && elb.LeavePolicyId == policy.Id, withDefaultFilter: false);
             if (policy.AccrualPeriod == EnumsHelper.LeaveAccrualPeriod.Monthly && employeeLeaveBalances.Any())
