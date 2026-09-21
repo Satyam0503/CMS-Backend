@@ -35,3 +35,12 @@ Codeji.CMS.API/appsettings.json
 
 # Local planning and progress spreadsheets
 *.xlsx
+# Local validation output (not source)
+*-build*.txt
+*-api*.txt
+api-*.txt
+*-services*.txt
+services-*.txt
+*-tests*.txt
+*-token-tests*.txt
+tenant-*.txt
