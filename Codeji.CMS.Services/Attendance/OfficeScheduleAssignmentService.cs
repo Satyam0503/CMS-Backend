@@ -154,8 +154,8 @@ public sealed class OfficeScheduleAssignmentService(
         return new Result<DepartmentOfficeScheduleAssignmentDto> { Success = true, MethodResult = new() { DepartmentId = departmentId, ScheduleId = scheduleId, ScheduleName = schedule.MethodResult?.Name } };
     }
 
-    private Task<EmpUser?> Employee(string companyId, string userId) => employees.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == userId && x.Status && !x.IsDeleted);
-    private static bool IsFormerEmployee(EmpUser employee) => employee.EmploymentStatus is "Resigned" or "Terminated";
+    private Task<EmpUser?> Employee(string companyId, string userId) => employees.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == userId && x.Status && !x.IsDeleted && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended));
+    private static bool IsFormerEmployee(EmpUser employee) => EmploymentExitRules.IsFormerEmployee(employee);
     private Task<CompanyOfficeSchedule?> Schedule(string companyId, string scheduleId) => schedules.FirstOrDefault(x => x.CompanyId == companyId && x.ScheduleId == scheduleId && x.IsActive && !x.IsDeleted);
     private async Task<Result<CompanyOfficeSchedule>> ValidateSchedule(string companyId, string? scheduleId)
     {

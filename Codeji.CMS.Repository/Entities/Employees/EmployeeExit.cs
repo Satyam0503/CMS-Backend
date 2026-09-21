@@ -58,6 +58,10 @@ public sealed class EmployeeExit : BaseClass
     public DateTime? CompletedAtUtc { get; set; }
     public string? PolicyVersionId { get; set; }
     public int? PolicyVersion { get; set; }
+    /// <summary>Resolved tenant scope used when this immutable policy snapshot was created.</summary>
+    public string? PolicySourceScope { get; set; }
+    /// <summary>Exit-type policy selected at initiation; empty means generic policy.</summary>
+    public string? PolicyExitType { get; set; }
     public EmployeeExitPolicySnapshot? PolicySnapshot { get; set; }
     public EmployeeExitWithdrawal? Withdrawal { get; set; }
     public string? Reason { get; set; }
@@ -74,6 +78,11 @@ public sealed class EmployeeExitDiscussionMessage
 
 public sealed class EmployeeExitPolicySnapshot
 {
+    public string? SourceScope { get; set; }
+    public string? ExitType { get; set; }
+    public bool AllowEmployeeSelfResignation { get; set; }
+    public bool AllowRejoin { get; set; }
+    public bool AllowExitDuringActiveLeave { get; set; }
     public int MinimumNoticeDays { get; set; }
     public string NoticePaySalaryBasis { get; set; } = "GrossMonthly";
     public int NoticePayDailyRateDivisor { get; set; } = 30;

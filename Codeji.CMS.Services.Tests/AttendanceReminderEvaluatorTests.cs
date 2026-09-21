@@ -58,4 +58,25 @@ public class AttendanceReminderEvaluatorTests
                 Assert.Equal("EMP-003", item.EmployeeId);
             });
     }
+
+    [Theory]
+    [InlineData(EmployeeLifecycleStatuses.Resigned)]
+    [InlineData(EmployeeLifecycleStatuses.Terminated)]
+    [InlineData(EmployeeLifecycleStatuses.Retired)]
+    [InlineData(EmployeeLifecycleStatuses.ContractEnded)]
+    [InlineData(EmployeeLifecycleStatuses.Deceased)]
+    public void FindMissingAttendance_Excludes_every_completed_exit(string exitStatus)
+    {
+        var employee = new EmpUser
+        {
+            UserId = "former", EmployeeId = "FORMER-001", CompanyId = "company-1", Status = true, FirstName = "Former", LastName = "Employee",
+            Email = "former@example.com", EmploymentStatus = exitStatus,
+            Lifecycle = new EmployeeLifecycleState { EmploymentStatus = exitStatus }
+        };
+
+        var missing = AttendanceReminderEvaluator.FindMissingAttendance([employee], [], new DateTime(2026, 7, 30));
+
+        Assert.Empty(missing);
+    }
 }
+

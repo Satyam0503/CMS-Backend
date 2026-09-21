@@ -1,4 +1,4 @@
-﻿using System.Linq.Expressions;
+using System.Linq.Expressions;
 using MapsterMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
@@ -9,6 +9,7 @@ using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.RolePermissions;
+using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Companies;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Attendance;
@@ -46,6 +47,7 @@ namespace Codeji.CMS.Services
         private readonly ILogger<CompanyService> _logger;
         private readonly IAttendanceStatusService _attendanceStatusService;
         private readonly IMongoClient _mongoClient;
+        private readonly IMongoDbRepository<RecruitmentEnterpriseConfig> _recruitmentConfigRepo;
 
 
         public CompanyService(
@@ -66,8 +68,8 @@ namespace Codeji.CMS.Services
             IMiddlewareService middlewareService,
             IAttendanceStatusService attendanceStatusService,
             IMongoClient mongoClient,
-            ILogger<CompanyService> logger
-            )
+            ILogger<CompanyService> logger,
+            IMongoDbRepository<RecruitmentEnterpriseConfig> recruitmentConfigRepo)
         {
             _roleService = roleService;
             _companyRepo = companyRepo;
@@ -87,6 +89,7 @@ namespace Codeji.CMS.Services
             _jobTitleRepo = jobTitleRepo;
             _mongoClient = mongoClient;
             _logger = logger;
+            _recruitmentConfigRepo = recruitmentConfigRepo;
         }
 
         public async Task<Result> Register(CompanyRequestModel companyModel)
@@ -159,6 +162,7 @@ namespace Codeji.CMS.Services
                     return new Result { Success = false, StatusCode = StatusCodes.Status500InternalServerError, Message = "The company administrator account could not be created." };
                 }
                 await _attendanceStatusService.EnsureCompanyDefaults(companyId);
+                await EnsureRecruitmentDefaults(companyId, user.UserId);
                 await SendCompanyUserVerificationEmail(user, company);
                 await SeedDefaultDepartmentsAndJobTitles(company, user.UserId);
                 return result;
@@ -166,6 +170,11 @@ namespace Codeji.CMS.Services
             return result;
         }
 
+        private async Task EnsureRecruitmentDefaults(string companyId, string createdBy)
+        {
+            if (await _recruitmentConfigRepo.Exist(x => x.CompanyId == companyId && !x.IsDeleted)) return;
+            await _recruitmentConfigRepo.AddOne(new RecruitmentEnterpriseConfig { CompanyId = companyId, Locations = [], EnableSla = true, EnableAutomation = true, DefaultTimezone = "Asia/Kolkata", ConfigSource = "SystemDefault", DefaultVersion = 1, OverriddenFields = [], CreatedBy = createdBy, UpdatedBy = createdBy });
+        }
         private async Task SendCompanyUserVerificationEmail(EmpUser user, Company company)
         {
             string token = TokenHelper.GenerateToken();
@@ -1021,3 +1030,10 @@ namespace Codeji.CMS.Services
         }
     }
 }
+
+
+
+
+
+
+

@@ -25,7 +25,7 @@ public static class AttendanceReminderEvaluator
             .ToDictionary(x => x.UserId!, StringComparer.OrdinalIgnoreCase);
 
         return employees
-            .Where(x => x.Status && !string.IsNullOrWhiteSpace(x.UserId) && !attendanceByUser.ContainsKey(x.UserId!))
+            .Where(x => EmploymentExitRules.IsCurrentEmployee(x) && !string.IsNullOrWhiteSpace(x.UserId) && !attendanceByUser.ContainsKey(x.UserId!))
             .ToList();
     }
 }

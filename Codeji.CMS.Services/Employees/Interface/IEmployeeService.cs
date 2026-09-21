@@ -25,6 +25,7 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<Result> ChangeEmployeeAvailability(ChangeEmployeeAvailabilityRequest request);
                 Task<Result> ChangeEmployeeLifecycle(ChangeEmployeeLifecycleRequest request);
                 Task<Result> ChangeEmployeeLifecycleDimension(ChangeEmployeeLifecycleDimensionRequest request);
+                Task<Result> UpdateEmployeeContract(UpdateEmployeeContractRequest request);
                 Task<Result<EmployeeLifecycleStatusHistory>> GetEmployeeLifecycleHistory(string employeeUserId);
                 Task<Result> InitiateEmployeeExit(InitiateEmployeeExitRequest request);
                 Task<Result> SubmitOwnResignation(InitiateEmployeeExitRequest request);

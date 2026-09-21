@@ -171,6 +171,7 @@ public class EmployeeLifecycleTransitionTests
         Assert.Equal(EmployeeLifecycleStatuses.Terminated, state.EmploymentStatus);
         Assert.Equal(EmployeeLifecycleStatuses.AccountClosed, state.AccountStatus);
         Assert.Equal(EmployeeLifecycleStatuses.PayrollFinalSettlement, state.PayrollStatus);
+        Assert.Equal(EmployeeLifecycleStatuses.NotApplicable, state.AvailabilityStatus);
         Assert.Equal("Completed", state.OffboardingStatus);
         Assert.Equal("NotEligible", state.FormerPortalStatus);
         Assert.Equal(EmployeeLifecycleStatuses.AlumniEligible, state.AlumniStatus);
@@ -181,14 +182,104 @@ public class EmployeeLifecycleTransitionTests
     [Theory]
     [InlineData(EmployeeLifecycleStatuses.Retired)]
     [InlineData(EmployeeLifecycleStatuses.ContractEnded)]
-    [InlineData(EmployeeLifecycleStatuses.Deceased)]
-    public void Retirement_contract_end_and_deceased_are_former_employment_states(string employmentStatus)
+    public void Retirement_and_contract_end_are_rejoinable_former_employment_states(string employmentStatus)
     {
         var state = new EmployeeLifecycleState { EmploymentStatus = employmentStatus };
 
         Assert.True(state.IsFormerEmployee());
         Assert.False(state.IsCurrentEmployee());
         Assert.True(state.CanRejoin());
+    }
+
+    [Fact]
+    public void Deceased_employee_is_former_but_cannot_rejoin()
+    {
+        var employee = new EmpUser
+        {
+            Status = false,
+            FirstName = "Deceased",
+            LastName = "Employee",
+            Email = "deceased@example.com",
+            EmploymentStatus = EmployeeLifecycleStatuses.Deceased,
+            Lifecycle = new EmployeeLifecycleState { EmploymentStatus = EmployeeLifecycleStatuses.Deceased }
+        };
+
+        Assert.True(EmploymentExitRules.IsFormerEmployee(employee));
+        Assert.False(EmploymentExitRules.IsCurrentEmployee(employee));
+        Assert.False(EmploymentExitRules.CanLogin(employee));
+        Assert.False(EmploymentExitRules.CanRejoin(employee));
+    }
+
+    [Theory]
+    [InlineData(EmployeeLifecycleStatuses.Resigned)]
+    [InlineData(EmployeeLifecycleStatuses.Terminated)]
+    [InlineData(EmployeeLifecycleStatuses.Retired)]
+    [InlineData(EmployeeLifecycleStatuses.ContractEnded)]
+    public void Rejoin_rule_allows_non_deceased_completed_exits(string exitStatus)
+    {
+        var employee = new EmpUser
+        {
+            FirstName = "Former", LastName = "Employee", Email = "former@example.com",
+            Status = false,
+            EmploymentStatus = exitStatus,
+            Lifecycle = new EmployeeLifecycleState { EmploymentStatus = exitStatus }
+        };
+
+        Assert.True(EmploymentExitRules.CanRejoin(employee));
+    }
+
+    [Fact]
+    public void Former_portal_rule_requires_completed_non_deceased_policy_enabled_verified_access()
+    {
+        var exit = new EmployeeExit
+        {
+            Status = EmployeeLifecycleStatuses.Resigned,
+            PolicySnapshot = new EmployeeExitPolicySnapshot { EnableFormerEmployeePortal = true },
+            PostExitAccess = new EmployeeExitPostExitAccess { Enabled = true, PersonalEmailVerified = true }
+        };
+
+        Assert.True(EmploymentExitRules.CanUseFormerEmployeePortal(exit));
+        exit.Status = EmployeeLifecycleStatuses.Deceased;
+        Assert.False(EmploymentExitRules.CanUseFormerEmployeePortal(exit));
+    }
+
+    [Theory]
+    [InlineData(EmployeeLifecycleStatuses.Resigned)]
+    [InlineData(EmployeeLifecycleStatuses.Terminated)]
+    [InlineData(EmployeeLifecycleStatuses.Retired)]
+    [InlineData(EmployeeLifecycleStatuses.ContractEnded)]
+    [InlineData(EmployeeLifecycleStatuses.Deceased)]
+    public void Every_completed_exit_status_uses_the_same_employment_period_rules(string employmentStatus)
+    {
+        var employee = new EmpUser
+        {
+            UserId = "completed-exit", CompanyId = "c1", FirstName = "A", LastName = "B", Email = "exit@example.com",
+            DateOfJoining = "2026-01-01", Status = false, EmploymentStatus = employmentStatus,
+            LastWorkingDate = new DateTime(2026, 9, 15),
+            Lifecycle = new EmployeeLifecycleState { EmploymentStatus = employmentStatus, PayrollStatus = EmployeeLifecycleStatuses.PayrollClosed }
+        };
+
+        Assert.True(EmploymentExitRules.IsFormerEmployee(employee));
+        Assert.False(EmploymentPeriod.WasEmployedOn(employee, new DateTime(2026, 9, 16)));
+        Assert.True(EmploymentPeriod.IsPayrollIncludedForMonth(employee, new DateTime(2026, 9, 1)));
+        Assert.False(EmploymentPeriod.IsPayrollIncludedForMonth(employee, new DateTime(2026, 10, 1)));
+    }
+
+    [Theory]
+    [InlineData(EmployeeLifecycleStatuses.Retired)]
+    [InlineData(EmployeeLifecycleStatuses.ContractEnded)]
+    [InlineData(EmployeeLifecycleStatuses.Deceased)]
+    public void Completed_exit_request_aliases_normalize_to_final_status(string input)
+    {
+        Assert.Equal(input, EmployeeLifecycleStatuses.NormalizeCompletedEmploymentStatus(input));
+    }
+
+    [Theory]
+    [InlineData(EmployeeLifecycleStatuses.ExitReasonRetirement, EmployeeLifecycleStatuses.Retired)]
+    [InlineData(EmployeeLifecycleStatuses.ExitReasonContractEnd, EmployeeLifecycleStatuses.ContractEnded)]
+    public void Legacy_exit_request_aliases_normalize_to_final_status(string input, string expected)
+    {
+        Assert.Equal(expected, EmployeeLifecycleStatuses.NormalizeCompletedEmploymentStatus(input));
     }
 
     [Fact]
@@ -240,3 +331,4 @@ public class EmployeeLifecycleTransitionTests
         Assert.Equal(EmployeeLifecycleStatuses.Working, state.AvailabilityStatus);
     }
 }
+

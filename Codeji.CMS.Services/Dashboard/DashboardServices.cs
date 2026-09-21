@@ -52,7 +52,7 @@ namespace Codeji.CMS.Services.Dashboard
         public async Task<List<DepartmentEmpResponseDto>> GetAllDepartmentsDetails(string companyId)
         {
             var allDepartments = await _departmentRepository.GetAll(x => x.CompanyId == companyId && x.IsDeleted == false);
-            var allEmpUser = await _empUserRepository.GetAll(x => x.CompanyId == companyId);
+            var allEmpUser = await _empUserRepository.GetAll(x => x.CompanyId == companyId && x.Status && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended));
             var result = from ad in allDepartments
                          join aeu in allEmpUser on ad.DepartmentId equals aeu.Department into empGroup
                          select new DepartmentEmpResponseDto
@@ -66,7 +66,7 @@ namespace Codeji.CMS.Services.Dashboard
 
         public async Task<List<GenderDetailsResponseModel>> GetAllGenderDetails(string companyId)
         {
-            var allEmpUser = await _empUserRepository.GetAll(x => x.CompanyId == companyId);
+            var allEmpUser = await _empUserRepository.GetAll(x => x.CompanyId == companyId && x.Status && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended));
             var result = (from aeu in allEmpUser
                           group aeu by aeu.Gender into genderGroup
                           select new GenderDetailsResponseModel
@@ -159,7 +159,7 @@ namespace Codeji.CMS.Services.Dashboard
         {
             Result<UpcomingCelebrations> result = new();
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-            IEnumerable<EmpUser> employeeList = await _empUserRepository.GetAll(employee => employee.CompanyId == companyId);
+            IEnumerable<EmpUser> employeeList = await _empUserRepository.GetAll(employee => employee.CompanyId == companyId && employee.Status && (employee.Lifecycle == null || employee.Lifecycle.EmploymentStatus == null || employee.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || employee.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || employee.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended));
             List<string> empJobIds = employeeList.Select(e => e.JobRole).ToList();
             IEnumerable<JobTitles> jobTitles = await _jobTitleRepository.GetAll(jt => jt.CompanyId == companyId && empJobIds.Contains(jt.JobTitleId));
 

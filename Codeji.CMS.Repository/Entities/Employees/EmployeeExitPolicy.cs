@@ -9,6 +9,11 @@ public sealed class EmployeeExitPolicy : BaseClass
     public string EmployeeExitPolicyId { get; set; } = string.Empty;
     /// <summary>Persisted tenant-local scope identity: Company, Department:&lt;id&gt;, or Role:&lt;id&gt;.</summary>
     public string ScopeKey { get; set; } = "Company";
+    /// <summary>
+    /// Optional final employment outcome this policy governs. Empty is the
+    /// backwards-compatible generic policy for the configured scope.
+    /// </summary>
+    public string? ExitType { get; set; }
     public string? DepartmentId { get; set; }
     /// <summary>Department scope set for a shared policy. Legacy records use DepartmentId only.</summary>
     public List<string> DepartmentIds { get; set; } = [];
@@ -20,6 +25,7 @@ public sealed class EmployeeExitPolicy : BaseClass
     public int NoticePayDailyRateDivisor { get; set; } = 30;
     /// <summary>Allows a company (or scoped policy) to opt out of the offboarding workflow.</summary>
     public bool EnableOffboarding { get; set; } = true;
+    public bool AllowEmployeeSelfResignation { get; set; } = true;
     public int Version { get; set; } = 1;
     public bool RequireManagerReview { get; set; } = true;
     public bool RequireHrReview { get; set; } = true;
@@ -27,6 +33,9 @@ public sealed class EmployeeExitPolicy : BaseClass
     public bool RequireResignationEvidence { get; set; }
     public bool RequireEmployeeAcknowledgement { get; set; }
     public bool EnableFormerEmployeePortal { get; set; }
+    public bool AllowRejoin { get; set; } = true;
+    /// <summary>When false, an active approved leave must be resolved before permanent exit initiation.</summary>
+    public bool AllowExitDuringActiveLeave { get; set; }
     public bool EnableNoticePeriodReminders { get; set; } = true;
     public int NoticePeriodReminderEveryDays { get; set; } = 3;
     public List<string> NoticePeriodReminderOffsets { get; set; } = new() { "30", "15", "7", "3", "1", "0" };

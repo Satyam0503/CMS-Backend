@@ -226,6 +226,12 @@ public class UserController : BaseApiController
     public Task<Result> ChangeEmployeeLifecycle([FromBody] ChangeEmployeeLifecycleRequest request) =>
         _employeeService.ChangeEmployeeLifecycle(request);
 
+    [Route("EmployeeLifecycle/Contract")]
+    [HttpPost]
+    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    public Task<Result> UpdateEmployeeContract([FromBody] UpdateEmployeeContractRequest request) =>
+        _employeeService.UpdateEmployeeContract(request);
+
     [Route("EmployeeLifecycle/Dimension")]
     [HttpPost]
     [ModulePermission(AppModule.Employees, Permission.Edit)]
@@ -409,8 +415,21 @@ public class UserController : BaseApiController
 
     [Route("EmployeeExitPolicy")]
     [HttpPost]
-    public Task<Result> UpsertEmployeeExitPolicy([FromBody] UpsertEmployeeExitPolicyRequest request) =>
-        _employeeService.UpsertEmployeeExitPolicy(request);
+    public async Task<IActionResult> UpsertEmployeeExitPolicy([FromBody] UpsertEmployeeExitPolicyRequest request)
+    {
+        var result = await _employeeService.UpsertEmployeeExitPolicy(request);
+        return result.Success ? Ok(result) : StatusCode(result.StatusCode, result);
+    }
+
+    [Route("EmployeeExitPolicy/{policyId}")]
+    [HttpPut]
+    public async Task<IActionResult> UpdateEmployeeExitPolicy(string policyId, [FromBody] UpsertEmployeeExitPolicyRequest request)
+    {
+        request ??= new UpsertEmployeeExitPolicyRequest();
+        request.EmployeeExitPolicyId = policyId;
+        var result = await _employeeService.UpsertEmployeeExitPolicy(request);
+        return result.Success ? Ok(result) : StatusCode(result.StatusCode, result);
+    }
 
     [Route("EmployeeExitPolicy/{policyId}")]
     [HttpGet]

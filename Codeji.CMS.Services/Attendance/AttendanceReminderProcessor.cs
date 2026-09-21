@@ -61,7 +61,7 @@ public sealed class AttendanceReminderProcessor(
 
                 var created = 0;
                 var existing = 0;
-                foreach (var employee in await employees.GetAll(x => x.CompanyId == companyId && x.Status && !x.IsDeleted, WithDeletedObjects: false, withDefaultFilter: false))
+                foreach (var employee in await employees.GetAll(x => x.CompanyId == companyId && x.Status && !x.IsDeleted && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended), WithDeletedObjects: false, withDefaultFilter: false))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var schedule = await schedules.ResolveAsync(companyId, employee, today, cancellationToken);
@@ -121,7 +121,7 @@ public sealed class AttendanceReminderProcessor(
 
         var today = reference.Date;
         var autoMarked = (await attendance.GetAll(x => x.Date.Date == today && x.SourceType == "SYSTEM_OFFICE_START_PRESENT", WithDeletedObjects: false, withDefaultFilter: false)).ToList();
-        var activeEmployees = (await employees.GetAll(x => x.Status && !x.IsDeleted && !string.IsNullOrWhiteSpace(x.CompanyId), WithDeletedObjects: false, withDefaultFilter: false)).ToList();
+        var activeEmployees = (await employees.GetAll(x => x.Status && !x.IsDeleted && !string.IsNullOrWhiteSpace(x.CompanyId), WithDeletedObjects: false, withDefaultFilter: false)).Where(EmploymentExitRules.IsCurrentEmployee).ToList();
         foreach (var companyGroup in activeEmployees.GroupBy(x => x.CompanyId, StringComparer.OrdinalIgnoreCase))
         {
             var companyId = companyGroup.Key;

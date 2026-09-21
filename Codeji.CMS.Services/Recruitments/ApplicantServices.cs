@@ -1,4 +1,6 @@
-﻿using System.Linq.Expressions;
+using System.Linq.Expressions;
+using System.Security.Cryptography;
+using System.Text;
 using MapsterMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
@@ -37,6 +39,7 @@ namespace Codeji.CMS.Services.Recruitments
 
         private readonly IMiddlewareService _middlewareService;
         private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IMongoDbRepository<PublicApplicationToken>? _applicationTokenRepository;
 
         public ApplicantServices(IMongoDbRepository<Applicant> applicantDbRepository,
             IMapper mapper,
@@ -49,7 +52,8 @@ namespace Codeji.CMS.Services.Recruitments
             IMongoDbRepository<EmpUser> employeeRepository,
             IPriorityTaskQueue priorityTaskQueue,
             IMiddlewareService middlewareService,
-            IHttpContextAccessor httpContextAccessor
+            IHttpContextAccessor httpContextAccessor,
+            IMongoDbRepository<PublicApplicationToken>? applicationTokenRepository = null
             )
         {
             _applicantRepository = applicantDbRepository;
@@ -64,6 +68,7 @@ namespace Codeji.CMS.Services.Recruitments
             _priorityTaskQueue = priorityTaskQueue;
             _middlewareService = middlewareService;
             _httpContextAccessor = httpContextAccessor;
+            _applicationTokenRepository = applicationTokenRepository;
         }
         /// <summary>
         /// For Annonymous add and update applicants
@@ -93,10 +98,13 @@ namespace Codeji.CMS.Services.Recruitments
                 Email = applicantRegisterModel.Email,
                 Status = applicantRegisterModel.Status,
                 State = applicantRegisterModel.State,
+                PipelineVersion = 1,
+                WorkflowSnapshot = RecruitmentWorkflowSnapshot.LegacyV1,
             };
             result = await _applicantRepository.AddOne(applicant);
             if (result.Success)
             {
+                result.ResourceId = applicant.ApplicantId;
                 await LogNewApplication(applicant);
                 await SendApplicationAlertToRecruitmentTeam(applicant);
                 await SendEmailToApplicant(applicant);
@@ -146,10 +154,17 @@ namespace Codeji.CMS.Services.Recruitments
             Applicant? entity = await _applicantRepository.FirstOrDefault(whereCondition);
             if (entity == null) return result;
 
+            if (!string.IsNullOrWhiteSpace(model.IdempotencyKey) && string.Equals(entity.LastCommandIdempotencyKey, model.IdempotencyKey, StringComparison.Ordinal))
+                return new Result { Success = true, StatusCode = StatusCodes.Status200OK };
+            var currentVersion = entity.Version > 0 ? entity.Version : 1;
+            if (model.ExpectedVersion.HasValue && model.ExpectedVersion.Value != currentVersion)
+                return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, ErrorCode = RecruitmentErrorCodes.ConcurrencyConflict, Message = "This application was updated by another user. Refresh it and try again." };
+
             var previousActivityType = entity.ActivityType;
             if (!IsAllowedActivityTransition(previousActivityType, model.ActivityType, out var transitionError))
             {
                 result.Message = transitionError;
+                result.ErrorCode = RecruitmentErrorCodes.InvalidTransition;
                 return result;
             }
 
@@ -164,16 +179,21 @@ namespace Codeji.CMS.Services.Recruitments
             entity.State = model.State;
             entity.UpdatedBy = actorUserId;
             entity.UpdatedDate = DateTime.UtcNow;
+            entity.LastCommandIdempotencyKey = string.IsNullOrWhiteSpace(model.IdempotencyKey) ? entity.LastCommandIdempotencyKey : model.IdempotencyKey;
+            entity.Version = currentVersion + 1;
             // Compare the persisted status while writing. A second HR user working from a
             // stale screen cannot overwrite a newer workflow stage.
             Expression<Func<Applicant, bool>> updateCondition = x =>
                 x.CompanyId == companyId &&
                 x.ApplicantId == model.ApplicantId &&
                 x.Email == model.Email &&
-                x.ActivityType == previousActivityType;
+                x.ActivityType == previousActivityType &&
+                (x.Version == currentVersion || x.Version == 0);
             result = await _applicantRepository.Update(updateCondition, entity);
             if (!result.Success)
             {
+                result.StatusCode = StatusCodes.Status409Conflict;
+                result.ErrorCode = RecruitmentErrorCodes.ConcurrencyConflict;
                 result.Message = "This application was updated by another user. Refresh it and try again.";
                 return result;
             }
@@ -199,6 +219,9 @@ namespace Codeji.CMS.Services.Recruitments
                 CreatedBy = actorUserId,
                 CreatedDate = DateTime.UtcNow,
                 ActivityCategory = 0,
+                EventType = "StageChanged",
+                PreviousStage = previousActivityType.ToString(),
+                CurrentStage = applicant.ActivityType.ToString(),
                 Description = $"{FormatApplicantName(applicant)} status changed from {previousActivityType} to {applicant.ActivityType}.",
                 JobRole = vacancy?.Title ?? string.Empty,
                 ApplicantName = $"{applicant.FirstName} {applicant.LastName}"
@@ -215,34 +238,26 @@ namespace Codeji.CMS.Services.Recruitments
             EnumsHelper.ActivityType current,
             EnumsHelper.ActivityType target,
             out string error)
-        {
-            error = string.Empty;
-            if (current == target) return true;
-
-            if (current is EnumsHelper.ActivityType.Selected or EnumsHelper.ActivityType.Rejected or EnumsHelper.ActivityType.ReApply)
-            {
-                error = $"Applicant status cannot be changed after it is {current}.";
-                return false;
-            }
-
-            // Rejection is the existing terminal side path and remains available from
-            // any non-terminal hiring stage. ReApply is a public-application flow only.
-            if (target == EnumsHelper.ActivityType.Rejected) return true;
-            if (target is EnumsHelper.ActivityType.New or EnumsHelper.ActivityType.ReApply)
-            {
-                error = $"Applicant status cannot be changed from {current} to {target}.";
-                return false;
-            }
-
-            if ((int)target > (int)current) return true; // preserve existing forward skipping
-
-            error = $"Applicant status cannot be changed from {current} back to {target}.";
-            return false;
-        }
+            => RecruitmentPipelineRules.IsAllowedTransition(current, target, out error);
         public async Task<Result> ApplyNowService(ApplicantAddEditModel model)
         {
             Result result = new();
-            Applicant? applicant = await _applicantRepository.FirstOrDefault(a => a.Email == model.Email);
+            if (model is null || string.IsNullOrWhiteSpace(model.VacancyId) || string.IsNullOrWhiteSpace(model.Email) ||
+                !new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(model.Email) ||
+                model.Experience < 0 || string.IsNullOrWhiteSpace(model.FirstName) || string.IsNullOrWhiteSpace(model.LastName))
+            {
+                return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Valid applicant and vacancy details are required.", ErrorCode = RecruitmentErrorCodes.InvalidRequest };
+            }
+
+            var vacancy = await _jobVacancyRepository.FirstOrDefault(v => v.JobId == model.VacancyId && !v.IsDeleted && v.Status);
+            if (vacancy is null) return new Result { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "The job is no longer available.", ErrorCode = RecruitmentErrorCodes.JobNotFound };
+            if (!string.Equals(vacancy.ApplicationMode, "Internal", StringComparison.OrdinalIgnoreCase))
+                return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "This job accepts applications through an external link.", ErrorCode = RecruitmentErrorCodes.ExternalApplication };
+            if (vacancy.ExpiresAt.HasValue && vacancy.ExpiresAt.Value <= DateTime.UtcNow || vacancy.ApplicationDeadline.HasValue && vacancy.ApplicationDeadline.Value <= DateTime.UtcNow)
+                return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Applications for this job are closed.", ErrorCode = RecruitmentErrorCodes.JobClosed };
+
+            model.Email = model.Email.Trim().ToLowerInvariant();
+            Applicant? applicant = await _applicantRepository.FirstOrDefault(a => a.CompanyId == vacancy.CompanyId && a.Email == model.Email);
             if (applicant != null)
             {
                 var canApplyAgain = DateTime.UtcNow.AddMonths(-6) > applicant.CreatedDate;
@@ -262,6 +277,7 @@ namespace Codeji.CMS.Services.Recruitments
             Applicant user = new Applicant()
             {
                 ApplicantId = Guid.NewGuid().ToString(),
+                CompanyId = vacancy.CompanyId,
                 FirstName = model.FirstName,
                 LastName = model.LastName,
                 Experience = model.Experience,
@@ -270,11 +286,22 @@ namespace Codeji.CMS.Services.Recruitments
                 Email = model.Email,
                 Status = EnumsHelper.ActivityStatus.Active,
                 State = model.State,
-                ActivityType = EnumsHelper.ActivityType.New,
+                ActivityType = applicant is null ? EnumsHelper.ActivityType.New : EnumsHelper.ActivityType.ReApply,
+                PipelineVersion = applicant?.PipelineVersion > 0 ? applicant.PipelineVersion : 1,
+                WorkflowSnapshot = string.IsNullOrWhiteSpace(applicant?.WorkflowSnapshot) ? RecruitmentWorkflowSnapshot.LegacyV1 : applicant.WorkflowSnapshot,
             };
             result = await _applicantRepository.AddOne(user);
             if (result.Success)
             {
+                result.ResourceId = user.ApplicantId;
+                if (_applicationTokenRepository is not null)
+                {
+                    string rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
+                    DateTime tokenExpiry = DateTime.UtcNow.AddHours(2);
+                    await _applicationTokenRepository.AddOne(new PublicApplicationToken { CompanyId = user.CompanyId, CreatedBy = user.ApplicantId, CreatedDate = DateTime.UtcNow, TokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawToken))), ApplicationReference = user.ApplicantId, ApplicantId = user.ApplicantId, JobId = user.VacancyId, ExpiresAt = tokenExpiry });
+                    result.ActionToken = rawToken;
+                }
+                await LogNewApplication(user);
                 await SendApplicationAlertToRecruitmentTeam(user);
                 await SendEmailToApplicant(user);
             }
@@ -284,6 +311,8 @@ namespace Codeji.CMS.Services.Recruitments
         public async Task<Result> UploadResume(IFormFile resume, string email)
         {
             Result result = new();
+            if (resume is null || resume.Length == 0 || resume.Length > 5 * 1024 * 1024 || !string.Equals(Path.GetExtension(resume.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+                return new Result { Success = false, StatusCode = CustomStatusCode.InvalidFileFormat, Message = "A PDF resume up to 5 MB is required.", ErrorCode = RecruitmentErrorCodes.InvalidResume };
             Applicant? applicant = await _applicantRepository.FirstOrDefault(a => a.Email == email);
             if (applicant is null) return result;
 
@@ -293,8 +322,7 @@ namespace Codeji.CMS.Services.Recruitments
             {
                 Directory.CreateDirectory(uploadFolder);
             }
-            string fileExtension = Path.GetExtension(resume.FileName);
-            string fileName = $"{Guid.NewGuid().ToString()}{fileExtension}";
+            string fileName = $"{Guid.NewGuid():N}.pdf";
             string filePath = Path.Combine(uploadFolder, fileName);
             using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
             {
@@ -316,6 +344,30 @@ namespace Codeji.CMS.Services.Recruitments
             return await _applicantRepository.UpdateMany(expression, Builders<Applicant>.Update.Set(a => a.ResumeUrl, fileName).Set(a => a.UpdatedDate, DateTime.UtcNow));
         }
 
+        public async Task<Result> UploadResumeForApplicant(string applicantId, IFormFile resume, string actorUserId)
+        {
+            if (string.IsNullOrWhiteSpace(applicantId)) return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Applicant ID is required.", ErrorCode = RecruitmentErrorCodes.InvalidResume };
+            if (resume is null || resume.Length == 0 || resume.Length > 5 * 1024 * 1024 || !string.Equals(Path.GetExtension(resume.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+                return new Result { Success = false, StatusCode = CustomStatusCode.InvalidFileFormat, Message = "A PDF resume up to 5 MB is required.", ErrorCode = RecruitmentErrorCodes.InvalidResume };
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            Applicant? applicant = await _applicantRepository.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicantId && !x.IsDeleted);
+            if (applicant is null) return new Result { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "Applicant was not found in the current company." };
+            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Resume");
+            Directory.CreateDirectory(uploadFolder);
+            string fileName = $"{Guid.NewGuid():N}.pdf";
+            string filePath = Path.Combine(uploadFolder, fileName);
+            using (FileStream fileStream = new(filePath, FileMode.CreateNew)) await resume.CopyToAsync(fileStream);
+            if (!string.IsNullOrEmpty(applicant.ResumeUrl))
+            {
+                string oldPath = Path.Combine(uploadFolder, Path.GetFileName(applicant.ResumeUrl));
+                if (File.Exists(oldPath)) File.Delete(oldPath);
+            }
+            var updated = await _applicantRepository.UpdateMany(
+                Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == applicantId),
+                Builders<Applicant>.Update.Set(x => x.ResumeUrl, fileName).Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.UpdatedBy, actorUserId));
+            if (!updated.Success) return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "Resume could not be saved." };
+            return updated;
+        }
         //Get Applicant List Using Filter Change this logic in Future
         public async Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters? filters)
         {
@@ -431,6 +483,41 @@ namespace Codeji.CMS.Services.Recruitments
             };
             return result;
         }
+        public async Task<Result<RecruitmentWorkflowViewModel>> GetWorkflow(string applicantId)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(applicantId))
+                return new Result<RecruitmentWorkflowViewModel> { Success = false, StatusCode = 400, ErrorCode = RecruitmentErrorCodes.InvalidRequest, Message = "Company and applicant are required." };
+
+            var applicant = await _applicantRepository.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicantId && !x.IsDeleted);
+            if (applicant is null)
+                return new Result<RecruitmentWorkflowViewModel> { Success = false, StatusCode = 404, ErrorCode = RecruitmentErrorCodes.InvalidRequest, Message = "Applicant was not found in the current company." };
+
+            var stage = applicant.ActivityType;
+            var terminal = stage is EnumsHelper.ActivityType.Rejected;
+            var selected = stage is EnumsHelper.ActivityType.Selected;
+            var scorecard = stage is EnumsHelper.ActivityType.Shortlisted or EnumsHelper.ActivityType.Selected;
+            var actions = new List<RecruitmentWorkflowActionViewModel>
+            {
+                Action("ScheduleInterview", !terminal, terminal ? "Rejected applications cannot be scheduled." : null),
+                Action("SubmitScreening", !terminal && !selected, selected ? "Screening is complete for selected applicants." : terminal ? "Rejected applications cannot be screened." : null),
+                Action("SubmitScorecard", scorecard, scorecard ? null : "Scorecards become available after shortlisting."),
+                Action("CreateOffer", selected, selected ? null : "An offer requires a selected application."),
+                Action("StartPreboarding", selected, selected ? null : "Preboarding requires a selected application."),
+                Action("AddToTalentPool", !terminal, terminal ? "Rejected applications cannot be added to the talent pool." : null),
+                Action("MergeApplicant", true, null),
+            };
+            var workflow = new RecruitmentWorkflowViewModel
+            {
+                ApplicantId = applicant.ApplicantId,
+                CurrentStage = stage,
+                PipelineVersion = applicant.PipelineVersion <= 0 ? 1 : applicant.PipelineVersion,
+                Actions = actions,
+            };
+            return new Result<RecruitmentWorkflowViewModel> { Success = true, StatusCode = 200, MethodResult = workflow, Data = workflow, Message = "Recruitment workflow loaded." };
+
+            static RecruitmentWorkflowActionViewModel Action(string code, bool enabled, string? reason) => new() { Code = code, Enabled = enabled, DisabledReason = reason };
+        }
         public async Task<Result<ApplicantLogResponseModel>> GetAllComment(string applicantId, int pageNo, int pageSize)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -495,6 +582,9 @@ namespace Codeji.CMS.Services.Recruitments
                             UserId = log.UserId,
                             UserName = user != null ? $"{user.FirstName} {user.LastName}" : log.UserId == log.ApplicantId ? log.ApplicantName : "System",
                             ApplicantName = log.ApplicantName,
+                            EventType = log.EventType,
+                            PreviousStage = log.PreviousStage,
+                            CurrentStage = log.CurrentStage,
                             CompanyId = log.CompanyId,
                             CreatedBy = log.CreatedBy,
                             CreatedDate = log.CreatedDate,
@@ -627,4 +717,12 @@ namespace Codeji.CMS.Services.Recruitments
         }
     }
 }
+
+
+
+
+
+
+
+
 

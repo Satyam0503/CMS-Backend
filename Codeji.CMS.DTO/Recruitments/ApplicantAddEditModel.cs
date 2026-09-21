@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.DTO.Recruitments
@@ -22,6 +22,10 @@ namespace Codeji.CMS.DTO.Recruitments
         public string State { get; set; }
         public ActivityStatus Status { get; set; }
         public ActivityType ActivityType { get; set; }
+        /// <summary>Optional client-generated key for retry-safe applicant commands.</summary>
+        public string? IdempotencyKey { get; set; }
+        /// <summary>Version observed by the caller; omitted keeps legacy behavior.</summary>
+        public int? ExpectedVersion { get; set; }
     }
 }
 

@@ -18,6 +18,7 @@ public sealed class ResolvedOffboardingPolicy
 {
     public required EmployeeExitPolicy Policy { get; init; }
     public required string SourceScope { get; init; }
+    public string? ExitType { get; init; }
     public bool Inherited => SourceScope.Equals("Company", StringComparison.OrdinalIgnoreCase);
 }
 
@@ -36,7 +37,24 @@ public static class OffboardingPolicyResolver
         ArgumentNullException.ThrowIfNull(context);
 
         var active = policies.Where(x => x.IsActive).ToList();
-        var department = active
+        var requestedExitType = EmployeeLifecycleStatuses.NormalizeCompletedEmploymentStatus(context.ExitType);
+
+        return ResolveForExitType(active, context, requestedExitType, exactExitType: true)
+            ?? ResolveForExitType(active, context, null, exactExitType: false);
+    }
+
+    private static ResolvedOffboardingPolicy? ResolveForExitType(
+        IEnumerable<EmployeeExitPolicy> active,
+        OffboardingPolicyContext context,
+        string? exitType,
+        bool exactExitType)
+    {
+        if (exactExitType && exitType is null) return null;
+        var candidates = active.Where(policy => exactExitType
+            ? string.Equals(EmployeeLifecycleStatuses.NormalizeCompletedEmploymentStatus(policy.ExitType), exitType, StringComparison.Ordinal)
+            : string.IsNullOrWhiteSpace(policy.ExitType));
+
+        var department = candidates
             .Where(x => !string.IsNullOrWhiteSpace(context.DepartmentId)
                 && (x.DepartmentIds.Contains(context.DepartmentId!, StringComparer.Ordinal)
                     || string.Equals(x.DepartmentId, context.DepartmentId, StringComparison.Ordinal))
@@ -44,21 +62,21 @@ public static class OffboardingPolicyResolver
             .OrderBy(x => x.EmployeeExitPolicyId, StringComparer.Ordinal)
             .FirstOrDefault();
         if (department is not null)
-            return new() { Policy = department, SourceScope = $"Department:{context.DepartmentId}" };
+            return new() { Policy = department, SourceScope = $"Department:{context.DepartmentId}", ExitType = exitType };
 
-        var role = active
+        var role = candidates
             .Where(x => !string.IsNullOrWhiteSpace(context.RoleId)
                 && string.Equals(x.RoleId, context.RoleId, StringComparison.Ordinal)
                 && !x.DepartmentIds.Any() && string.IsNullOrWhiteSpace(x.DepartmentId))
             .OrderBy(x => x.EmployeeExitPolicyId, StringComparer.Ordinal)
             .FirstOrDefault();
         if (role is not null)
-            return new() { Policy = role, SourceScope = $"Role:{context.RoleId}" };
+            return new() { Policy = role, SourceScope = $"Role:{context.RoleId}", ExitType = exitType };
 
-        var company = active
+        var company = candidates
             .Where(x => x.DepartmentIds.Count == 0 && string.IsNullOrWhiteSpace(x.DepartmentId) && string.IsNullOrWhiteSpace(x.RoleId))
             .OrderBy(x => x.EmployeeExitPolicyId, StringComparer.Ordinal)
             .FirstOrDefault();
-        return company is null ? null : new() { Policy = company, SourceScope = "Company" };
+        return company is null ? null : new() { Policy = company, SourceScope = "Company", ExitType = exitType };
     }
 }

@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text;
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.API.ChatHub;
@@ -171,6 +171,7 @@ builder.Services.AddHostedService<PriorityQueuedHostedService>();
 builder.Services.AddHostedService<BirthDayAndAnniversaryNotificationHostedServices>();
 builder.Services.AddHostedService<LeaveAccrualHostedService>();
 builder.Services.AddHostedService<Codeji.CMS.Services.CareerPortal.CareerNotificationWorker>();
+builder.Services.AddHostedService<Codeji.CMS.Services.Recruitments.RecruitmentEmailOutboxWorker>();
 builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceOutboxWorker>();
 builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceReminderHostedService>();
 builder.Services.AddHostedService<EmployeeExitOutboxWorker>();
@@ -432,3 +433,4 @@ app.Use(async (context, next) =>
 
 // Run the application
 app.Run();
+

@@ -1,4 +1,4 @@
-﻿using MongoDB.Bson.Serialization.Attributes;
+using MongoDB.Bson.Serialization.Attributes;
 
 namespace Codeji.CMS.Repository.Entities.Recruitments
 {
@@ -32,6 +32,9 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         public DateTime? ApplicationDeadline { get; set; }
         public string? Summary { get; set; }
         public string? Department { get; set; }
+        public string? DepartmentId { get; set; }
+        public string? LegalEntityId { get; set; }
+        public string? Grade { get; set; }
         public string? FunctionalArea { get; set; }
         public string? Industry { get; set; }
         public string? RoleCategory { get; set; }
@@ -55,3 +58,4 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         public bool? ShowSalary { get; set; }
     }
 }
+

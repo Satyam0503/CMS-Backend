@@ -1,4 +1,4 @@
-﻿using System.Linq.Expressions;
+using System.Linq.Expressions;
 using MapsterMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RequestModels;
@@ -8,6 +8,9 @@ using Codeji.CMS.Services.Recruitments.Interface;
 using MongoDB.Driver;
 using System.Text.RegularExpressions;
 using Codeji.CMS.Services.CareerPortal.Interface;
+using Codeji.CMS.Utility.Helpers;
+using Codeji.CMS.Utility.middlewares;
+using Microsoft.AspNetCore.Http;
 
 namespace Codeji.CMS.Services.Recruitments
 {
@@ -17,20 +20,27 @@ namespace Codeji.CMS.Services.Recruitments
         readonly IMongoDbRepository<Applicant> _applicantRepository;
         readonly IMapper _mapper;
         readonly ICareerNotificationService _careerNotifications;
+        readonly IHttpContextAccessor _httpContextAccessor;
 
         public JobVacancyService(IMongoDbRepository<JobVacancy> jobVacancyRepo, IMongoDbRepository<Applicant> applicantRepo, IMapper mapper,
-            ICareerNotificationService careerNotifications)
+            ICareerNotificationService careerNotifications, IHttpContextAccessor httpContextAccessor)
         {
             _jobVacancyRepo = jobVacancyRepo;
             _mapper = mapper;
             _applicantRepository = applicantRepo;
             _careerNotifications = careerNotifications;
+            _httpContextAccessor = httpContextAccessor;
         }
 
         public async Task<Result<JobVacancyModel>> AddJobVacancy(JobVacancyModel jobVacancy)
         {
+            var validation = ValidateJob(jobVacancy);
+            if (!validation.Success) return new Result<JobVacancyModel> { Success = false, Message = validation.Message, ErrorCode = RecruitmentErrorCodes.InvalidRequest };
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (string.IsNullOrWhiteSpace(companyId)) return new Result<JobVacancyModel> { Success = false, Message = "A valid company context is required.", ErrorCode = RecruitmentErrorCodes.PermissionDenied };
             JobVacancy vacancy = new JobVacancy()
             {
+                CompanyId = companyId,
                 Title = jobVacancy.Title,
                 Vacancies = jobVacancy.Vacancies,
                 JobType = jobVacancy.JobType,
@@ -78,10 +88,15 @@ namespace Codeji.CMS.Services.Recruitments
         }
         public async Task<Result<JobVacancyModel>> EditJobVacancy(JobVacancyModel jobVacancy, string jobId)
         {
-            JobVacancy? existing = await _jobVacancyRepo.FirstOrDefault(x => x.JobId == jobId, WithDeletedObjects: true);
+            var validation = ValidateJob(jobVacancy);
+            if (!validation.Success) return new Result<JobVacancyModel> { Success = false, Message = validation.Message, ErrorCode = RecruitmentErrorCodes.InvalidRequest };
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            JobVacancy? existing = await _jobVacancyRepo.FirstOrDefault(x => x.JobId == jobId && x.CompanyId == companyId, WithDeletedObjects: true);
+            if (existing is null) return new Result<JobVacancyModel> { Success = false, Message = "Job vacancy was not found.", ErrorCode = RecruitmentErrorCodes.JobNotFound };
             JobVacancy editedJob = new JobVacancy()
             {
                 JobId = jobId,
+                CompanyId = companyId,
                 Title = jobVacancy.Title,
                 Vacancies = jobVacancy.Vacancies,
                 JobType = jobVacancy.JobType,
@@ -124,7 +139,7 @@ namespace Codeji.CMS.Services.Recruitments
                 NoticePeriodMaxDays = jobVacancy.NoticePeriodMaxDays ?? existing?.NoticePeriodMaxDays,
                 ShowSalary = jobVacancy.ShowSalary ?? existing?.ShowSalary,
             };
-            Expression<Func<JobVacancy, bool>> whereCondition = x => x.JobId == jobId;
+            Expression<Func<JobVacancy, bool>> whereCondition = x => x.JobId == jobId && x.CompanyId == companyId;
             Result saved = await _jobVacancyRepo.Update(whereCondition, editedJob);
             if (saved.Success)
                 await _careerNotifications.HandleJobSaved(existing, editedJob);
@@ -207,7 +222,8 @@ namespace Codeji.CMS.Services.Recruitments
 
         public async Task<JobVacancyModel?> GetVacancyById(string vacancyId)
         {
-            JobVacancy? data = await _jobVacancyRepo.FirstOrDefault(x => x.JobId == vacancyId);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            JobVacancy? data = await _jobVacancyRepo.FirstOrDefault(x => x.JobId == vacancyId && (string.IsNullOrWhiteSpace(companyId) || x.CompanyId == companyId));
             if (data == null) return null;
             var result = _mapper.Map<JobVacancyModel>(data);
             return result;
@@ -215,7 +231,8 @@ namespace Codeji.CMS.Services.Recruitments
 
         public async Task<Result> DeleteJobVacancy(string vacancyId)
         {
-            Expression<Func<JobVacancy, bool>> whereCondition = x => x.JobId == vacancyId;
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            Expression<Func<JobVacancy, bool>> whereCondition = x => x.JobId == vacancyId && x.CompanyId == companyId;
             Result result = await _jobVacancyRepo.UpdateMany(whereCondition, Builders<JobVacancy>.Update.Set(x => x.IsDeleted, true));
             Result data = await _jobVacancyRepo.Delete(whereCondition);
             return data;
@@ -243,6 +260,24 @@ namespace Codeji.CMS.Services.Recruitments
         {
             if (!string.Equals(NormalizeApplicationMode(mode), "External", StringComparison.OrdinalIgnoreCase)) return null;
             return Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri.Scheme == Uri.UriSchemeHttps && !uri.IsLoopback ? url : null;
+        }
+
+        private static Result ValidateJob(JobVacancyModel model)
+        {
+            var result = new Result { Success = true };
+            if (model is null) return new Result { Message = "Job details are required." };
+            if (string.IsNullOrWhiteSpace(model.Title)) result.Message = "Job title is required.";
+            else if (model.Vacancies < 1) result.Message = "At least one vacancy is required.";
+            else if (string.IsNullOrWhiteSpace(model.Description)) result.Message = "Job description is required.";
+            else if (model.ExperienceMin.HasValue && model.ExperienceMax.HasValue && model.ExperienceMin > model.ExperienceMax) result.Message = "Minimum experience cannot exceed maximum experience.";
+            else if (model.SalaryMin.HasValue && model.SalaryMax.HasValue && model.SalaryMin > model.SalaryMax) result.Message = "Minimum salary cannot exceed maximum salary.";
+            else if (model.PublishedAt.HasValue && model.ExpiresAt.HasValue && model.PublishedAt > model.ExpiresAt) result.Message = "Publication date cannot exceed expiry date.";
+            else if (model.PublishedAt.HasValue && model.ApplicationDeadline.HasValue && model.PublishedAt > model.ApplicationDeadline) result.Message = "Publication date cannot exceed application deadline.";
+            else if (model.ExpiresAt.HasValue && model.ApplicationDeadline.HasValue && model.ApplicationDeadline > model.ExpiresAt) result.Message = "Application deadline cannot exceed expiry date.";
+            else if (model.NoticePeriodMaxDays < 0) result.Message = "Notice period cannot be negative.";
+            else if (!string.IsNullOrWhiteSpace(model.RecruiterContactEmail) && !new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(model.RecruiterContactEmail)) result.Message = "Recruiter contact email is invalid.";
+            if (!string.IsNullOrEmpty(result.Message)) result.Success = false;
+            return result;
         }
     }
 }

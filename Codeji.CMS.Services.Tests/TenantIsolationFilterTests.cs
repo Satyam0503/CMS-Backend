@@ -81,7 +81,7 @@ public sealed class TenantIsolationFilterTests
     /// all - every call site has to remember to add "a.CompanyId == companyId" by hand.
     /// </summary>
     [Fact]
-    public void AttendanceModel_NeverReceivesAnAutomaticTenantFilter()
+    public void AttendanceModel_ReceivesAutomaticTenantFilterFromCompanyId()
     {
         Assert.False(typeof(Codeji.CMS.GenericRepository.Interfaces.ISupportAuditing)
             .IsAssignableFrom(typeof(AttendanceModel)));
@@ -89,9 +89,9 @@ public sealed class TenantIsolationFilterTests
         var rendered = Render(IQueryableCustomExtensions.ApplyDefaultFilters<AttendanceModel>(
             a => a.UserId == "user-1", withDeletedObjects: false, "company-alpha"));
 
-        Assert.False(
+        Assert.True(
             MentionsCompanyId(rendered),
-            "Attendance queries are not tenant scoped by the repository. Rendered: " + rendered.ToJson());
+            "Attendance queries should be tenant scoped by CompanyId. Rendered: " + rendered.ToJson());
     }
 
     [Fact]

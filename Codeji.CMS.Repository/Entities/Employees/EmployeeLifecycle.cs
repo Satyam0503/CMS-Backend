@@ -15,6 +15,7 @@ public static class EmployeeLifecycleStatuses
     public const string Deceased = "Deceased";
 
     public const string Working = "Working";
+    public const string NotApplicable = "NotApplicable";
     public const string AnnualLeave = "AnnualLeave";
     public const string SickLeave = "SickLeave";
     public const string MedicalLeave = "MedicalLeave";
@@ -70,6 +71,40 @@ public static class EmployeeLifecycleStatuses
     public const string ExitReasonDeceased = "Deceased";
     public const string ExitReasonRedundancy = "Redundancy";
     public const string ExitReasonMisconduct = "Misconduct";
+
+    /// <summary>
+    /// Final employment states. Keep this list as the single source for
+    /// compatibility checks; new consumers must not maintain their own
+    /// resignation/termination-only string comparisons.
+    /// </summary>
+    public static readonly string[] CompletedEmploymentStatuses =
+    [
+        Resigned,
+        Terminated,
+        Retired,
+        ContractEnded,
+        Deceased
+    ];
+    public static readonly string[] FormerPortalEligibleStatuses =
+    [Resigned, Terminated, Retired, ContractEnded];
+
+    /// <summary>
+    /// Normalizes accepted exit-request values to the persisted final
+    /// employment status. The long-form values remain supported for existing
+    /// clients and historical records.
+    /// </summary>
+    public static string? NormalizeCompletedEmploymentStatus(string? value) => value?.Trim() switch
+    {
+        Resigned => Resigned,
+        Terminated => Terminated,
+        Retired or ExitReasonRetirement => Retired,
+        ContractEnded or ExitReasonContractEnd => ContractEnded,
+        Deceased or ExitReasonDeceased => Deceased,
+        _ => null
+    };
+
+    public static bool IsCompletedEmploymentStatus(string? value) =>
+        NormalizeCompletedEmploymentStatus(value) is not null;
 }
 
 public sealed class EmployeeLifecycleStatusHistory
@@ -106,8 +141,7 @@ public sealed class EmployeeLifecycleState
 public static class EmployeeLifecycleRules
 {
     public static bool IsFormerEmployee(this EmployeeLifecycleState state) =>
-        state.EmploymentStatus is EmployeeLifecycleStatuses.Resigned or EmployeeLifecycleStatuses.Terminated
-            or EmployeeLifecycleStatuses.Retired or EmployeeLifecycleStatuses.ContractEnded or EmployeeLifecycleStatuses.Deceased;
+        EmployeeLifecycleStatuses.IsCompletedEmploymentStatus(state.EmploymentStatus);
 
     public static bool IsCurrentEmployee(this EmployeeLifecycleState state) => !state.IsFormerEmployee() &&
         state.EmploymentStatus is EmployeeLifecycleStatuses.Active or EmployeeLifecycleStatuses.NoticePeriod or EmployeeLifecycleStatuses.Suspended;
@@ -135,4 +169,51 @@ public static class EmployeeLifecycleRules
 
     public static string LifecycleReason(this EmployeeLifecycleState state) =>
         state.AvailabilityReasonCode ?? (state.IsFormerEmployee() ? "EMPLOYMENT_ENDED" : "NORMAL_WORKING_STATE");
+}
+
+/// <summary>
+/// Compatibility-aware employment rules for consumers that receive an EmpUser
+/// rather than a lifecycle state. Lifecycle is authoritative when present;
+/// legacy fields remain a safe fallback until data backfill is complete.
+/// </summary>
+public static class EmploymentExitRules
+{
+    public static string GetEffectiveEmploymentStatus(EmpUser employee)
+    {
+        ArgumentNullException.ThrowIfNull(employee);
+        return employee.Lifecycle?.EmploymentStatus?.Trim()
+            ?? employee.EmploymentStatus?.Trim()
+            ?? EmployeeLifecycleStatuses.Active;
+    }
+
+    public static bool IsFormerEmployee(EmpUser employee) =>
+        EmployeeLifecycleStatuses.IsCompletedEmploymentStatus(GetEffectiveEmploymentStatus(employee));
+
+    public static bool IsCurrentEmployee(EmpUser employee)
+    {
+        ArgumentNullException.ThrowIfNull(employee);
+        var status = GetEffectiveEmploymentStatus(employee);
+        return employee.Status && status is (EmployeeLifecycleStatuses.Active
+            or EmployeeLifecycleStatuses.NoticePeriod
+            or EmployeeLifecycleStatuses.Suspended);
+    }
+
+    public static bool IsEligibleForWorkActivity(EmpUser employee) => IsCurrentEmployee(employee) &&
+        (employee.Lifecycle is null || employee.Lifecycle.AvailabilityStatus is
+            EmployeeLifecycleStatuses.Working or EmployeeLifecycleStatuses.UnauthorizedAbsence);
+
+    public static bool CanLogin(EmpUser employee) =>
+        IsCurrentEmployee(employee) &&
+        (employee.Lifecycle is null || employee.Lifecycle.CanLogin());
+
+    public static bool CanRejoin(EmpUser employee) =>
+        IsFormerEmployee(employee) &&
+        !string.Equals(GetEffectiveEmploymentStatus(employee), EmployeeLifecycleStatuses.Deceased, StringComparison.OrdinalIgnoreCase);
+
+    public static bool CanUseFormerEmployeePortal(EmployeeExit exit) =>
+        exit is not null &&
+        EmployeeLifecycleStatuses.FormerPortalEligibleStatuses.Contains(exit.Status) &&
+        exit.PolicySnapshot?.EnableFormerEmployeePortal == true &&
+        exit.PostExitAccess?.Enabled == true &&
+        exit.PostExitAccess.PersonalEmailVerified == true;
 }

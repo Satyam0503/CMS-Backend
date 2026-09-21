@@ -11,6 +11,16 @@ public sealed class InitiateEmployeeExitRequest
     public string? AttachmentUrl { get; set; }
 }
 
+public sealed class UpdateEmployeeContractRequest
+{
+    public string EmployeeUserId { get; set; } = string.Empty;
+    public int Version { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+    public string Action { get; set; } = "Extend"; // Extend or End
+    public string? Reason { get; set; }
+}
+
 public sealed class CompleteEmployeeExitRequest
 {
     /// <summary>Required for a concurrency-safe completion. EmployeeUserId is retained for older clients only.</summary>
@@ -230,6 +240,8 @@ public sealed class UpsertEmployeeExitPolicyRequest
     public string? EmployeeExitPolicyId { get; set; }
     /// <summary>Required when updating an existing policy.</summary>
     public int? Version { get; set; }
+    /// <summary>Optional final employment outcome. Empty keeps a generic scoped policy.</summary>
+    public string? ExitType { get; set; }
     public string? DepartmentId { get; set; }
     /// <summary>Departments sharing this exact policy. DepartmentId remains for legacy single-department records.</summary>
     public List<string> DepartmentIds { get; set; } = [];
@@ -240,6 +252,9 @@ public sealed class UpsertEmployeeExitPolicyRequest
     public string NoticePaySalaryBasis { get; set; } = "GrossMonthly";
     public int NoticePayDailyRateDivisor { get; set; } = 30;
     public bool EnableOffboarding { get; set; } = true;
+    public bool AllowEmployeeSelfResignation { get; set; } = true;
+    public bool AllowRejoin { get; set; } = true;
+    public bool AllowExitDuringActiveLeave { get; set; }
     public bool RequireManagerReview { get; set; } = true;
     public bool RequireHrReview { get; set; } = true;
     public bool AllowJointDiscussion { get; set; } = true;

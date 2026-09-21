@@ -28,11 +28,10 @@ public static class EmploymentPeriod
         if (TryGetJoiningDate(employee, out var joiningDate) && joiningDate > monthEnd)
             return false;
 
-        var employmentStatus = employee.EmploymentStatus?.Trim();
         var lastWorkingDate = GetLastWorkingDate(employee);
         // Older records may only have ExitDate and Status=false. Treat those
         // as completed exits too, so the migration can be deployed safely.
-        var isCompletedExit = employmentStatus is "Resigned" or "Terminated" || (!employee.Status && lastWorkingDate.HasValue);
+        var isCompletedExit = EmploymentExitRules.IsFormerEmployee(employee) || (!employee.Status && lastWorkingDate.HasValue);
         if (!isCompletedExit)
             return employee.Status;
 
@@ -45,9 +44,8 @@ public static class EmploymentPeriod
         if (TryGetJoiningDate(employee, out var joiningDate) && joiningDate > day)
             return false;
 
-        var employmentStatus = employee.EmploymentStatus?.Trim();
         var lastWorkingDate = GetLastWorkingDate(employee);
-        var isCompletedExit = employmentStatus is "Resigned" or "Terminated" || (!employee.Status && lastWorkingDate.HasValue);
+        var isCompletedExit = EmploymentExitRules.IsFormerEmployee(employee) || (!employee.Status && lastWorkingDate.HasValue);
         if (!isCompletedExit)
             return employee.Status;
 
@@ -69,6 +67,9 @@ public static class EmploymentPeriod
     /// <summary>Resolves the effective availability without mutating the employee.</summary>
     public static string ResolveAvailabilityOn(EmpUser employee, DateTime date)
     {
+        if (EmploymentExitRules.IsFormerEmployee(employee))
+            return EmployeeLifecycleStatuses.NotApplicable;
+
         var lifecycle = employee.Lifecycle ?? new EmployeeLifecycleState();
         if (lifecycle.AvailabilityExpectedReturnDate.HasValue &&
             date.Date >= lifecycle.AvailabilityExpectedReturnDate.Value.Date &&
@@ -87,8 +88,7 @@ public static class EmploymentPeriod
     {
         if (!IsEligibleForMonth(employee, month)) return false;
         var payrollStatus = employee.Lifecycle?.PayrollStatus;
-        var isFormer = employee.Lifecycle?.IsFormerEmployee() == true ||
-            employee.EmploymentStatus is EmployeeLifecycleStatuses.Resigned or EmployeeLifecycleStatuses.Terminated;
+        var isFormer = EmploymentExitRules.IsFormerEmployee(employee);
         if (!isFormer && payrollStatus is not null && payrollStatus is not EmployeeLifecycleStatuses.PayrollActive and not EmployeeLifecycleStatuses.PayrollFinalSettlement)
             return false;
         if (!string.Equals(payrollStatus, EmployeeLifecycleStatuses.PayrollClosed, StringComparison.OrdinalIgnoreCase)) return true;

@@ -274,6 +274,7 @@ public class LeaveManagementService : ILeaveManagementService
 private async Task<bool> HasActiveEmployeeAbsenceAsync(string companyId,string employeeId,string? excludeLeaveRequestId = null)
     {
        var employee=await _employeeRepository.FirstOrDefault(x=>x.CompanyId==companyId && x.UserId==employeeId &&  !x.IsDeleted);
+       if (employee is null || !EmploymentExitRules.IsCurrentEmployee(employee)) return false;
 
        if(employee?.Lifecycle?.AvailabilityStatus
         is EmployeeLifecycleStatuses.MedicalLeave
@@ -581,7 +582,7 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
 
         // check if employee already has approved leave on request date
         var nowDate = DateTime.UtcNow.Date;
-        var upcomingApprovedLeaves = await _leave.GetAll(lr => lr.EmployeeId == leaveRequest.UserId && lr.Status == EnumsHelper.LeaveRequestStatus.Accepted && lr.EndDate >= nowDate);
+        var upcomingApprovedLeaves = await _leave.GetAll(lr => lr.CompanyId == companyId && lr.EmployeeId == leaveRequest.UserId && lr.Status == EnumsHelper.LeaveRequestStatus.Accepted && lr.EndDate >= nowDate);
         bool isOverlapping = upcomingApprovedLeaves.Any(lr => requestStartDateTime <= lr.EndDate && requestEndDateTime >= lr.StartDate);
         if (isOverlapping)
         {
@@ -1633,7 +1634,7 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         if (leaveBalanceRequestDto is null || leaveBalanceRequestDto.Count == 0) return new Result { Success = false, Message = "At least one leave allocation change is required." };
         var companyId = CurrentContext.CompanyId(_httpContextAccessor);
         var employeeIds = leaveBalanceRequestDto.Select(x => x.EmployeeId).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
-        if (employeeIds.Count != 1 || !await _employeeRepository.Exist(x => x.CompanyId == companyId && x.UserId == employeeIds[0] && x.Status && !x.IsDeleted))
+        if (employeeIds.Count != 1 || !await _employeeRepository.Exist(x => x.CompanyId == companyId && x.UserId == employeeIds[0] && x.Status && !x.IsDeleted && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended)))
             return new Result { Success = false, Message = "The selected employee is not active in this company." };
         foreach (var balanceItem in leaveBalanceRequestDto)
         {

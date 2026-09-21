@@ -1,4 +1,3 @@
-
 using Codeji.CMS.Services.Account;
 using Codeji.CMS.Services.Account.Interface;
 using Codeji.CMS.Services.Attendance;
@@ -27,6 +26,29 @@ public static class ServicesRegistration
         //   services.AddSingleton<IColleagueBusiness, ColleagueBusiness>();
         services.AddScoped<IMiddlewareService, MiddlewareService>();
         services.AddScoped<IApplicantsService, ApplicantServices>();
+        services.AddScoped<IRecruitmentApplicationService, RecruitmentApplicationService>();
+        services.AddScoped<IRecruitmentHandoffService, RecruitmentHandoffService>();
+        services.AddScoped<IRecruitmentOnboardingService, RecruitmentOnboardingService>();
+        services.AddScoped<IRecruitmentInterviewService, RecruitmentInterviewService>();
+        services.AddScoped<IRecruitmentInterviewDebriefService, RecruitmentInterviewDebriefService>();
+        services.AddScoped<IRecruitmentInterviewPlanService, RecruitmentInterviewPlanService>();
+        services.AddScoped<IRecruitmentOfferService, RecruitmentOfferService>();
+        services.AddScoped<IRecruitmentOfferApprovalPolicyService, RecruitmentOfferApprovalPolicyService>();
+        services.AddScoped<IRecruitmentRequisitionService, RecruitmentRequisitionService>();
+        services.AddScoped<IRecruitmentScorecardService, RecruitmentScorecardService>();
+        services.AddScoped<IRecruitmentScreeningService, RecruitmentScreeningService>();
+        services.AddScoped<IRecruitmentScreeningQueueService, RecruitmentScreeningQueueService>();
+        services.AddScoped<IRecruitmentHiringDecisionService, RecruitmentHiringDecisionService>();
+        services.AddScoped<IRecruitmentCandidatePrivacyService, RecruitmentCandidatePrivacyService>();
+        services.AddScoped<IRecruitmentResumeExtractionService, RecruitmentResumeExtractionService>();
+        services.AddScoped<IRecruitmentAuditExportService, RecruitmentAuditExportService>();
+        services.AddScoped<IRecruitmentTalentPoolService, RecruitmentTalentPoolService>();
+        services.AddScoped<IRecruitmentDuplicateDetectionService, RecruitmentDuplicateDetectionService>();
+        services.AddScoped<IRecruitmentEnterpriseService, RecruitmentEnterpriseService>();
+        services.AddScoped<IRecruitmentExternalActionService, RecruitmentExternalActionService>();
+        services.AddScoped<IRecruitmentCandidateActionService, RecruitmentCandidateActionService>();
+        services.AddScoped<IRecruitmentEmailOutboxProcessor, RecruitmentEmailOutboxProcessor>();
+        services.AddScoped<IRecruitmentOfferNegotiationService, RecruitmentOfferNegotiationService>();
         services.AddScoped<IPublicCareerService, PublicCareerService>();
         services.AddScoped<IPublicCompanyProfileService, PublicCompanyProfileService>();
         services.AddScoped<ICareerSubscriptionService, CareerSubscriptionService>();
@@ -65,3 +87,17 @@ public static class ServicesRegistration
         return services;
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+

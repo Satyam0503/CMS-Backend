@@ -24,6 +24,7 @@ public static class EmployeeLifecycleTransitionService
         if (state.Version != expectedVersion) { error = "LIFECYCLE_VERSION_CONFLICT"; return false; }
         if (!allowed(value)) { error = "LIFECYCLE_STATUS_INVALID"; return false; }
         if (dimension == nameof(EmployeeLifecycleState.AlumniStatus) && !state.IsFormerEmployee()) { error = "ALUMNI_CURRENT_EMPLOYEE_FORBIDDEN"; return false; }
+        if (dimension == nameof(EmployeeLifecycleState.AlumniStatus) && state.EmploymentStatus == EmployeeLifecycleStatuses.Deceased) { error = "DECEASED_EMPLOYEE_ALUMNI_LOCKED"; return false; }
         if (state.IsFormerEmployee() && dimension is nameof(EmployeeLifecycleState.AccountStatus) && value != EmployeeLifecycleStatuses.AccountClosed)
         { error = "FORMER_EMPLOYEE_ACCOUNT_LOCKED"; return false; }
         var previous = dimension == nameof(EmployeeLifecycleState.AccountStatus) ? state.AccountStatus : dimension == nameof(EmployeeLifecycleState.PayrollStatus) ? state.PayrollStatus : state.AlumniStatus;
@@ -38,22 +39,19 @@ public static class EmployeeLifecycleTransitionService
     public static void ApplyCompletedExit(EmployeeLifecycleState state, string exitType, string? reason, string actorUserId, DateTime effectiveAtUtc)
     {
         var previousEmployment = state.EmploymentStatus;
-        state.EmploymentStatus = exitType switch
-        {
-            EmployeeLifecycleStatuses.Resigned => EmployeeLifecycleStatuses.Resigned,
-            EmployeeLifecycleStatuses.ExitReasonRetirement => EmployeeLifecycleStatuses.Retired,
-            EmployeeLifecycleStatuses.ExitReasonContractEnd => EmployeeLifecycleStatuses.ContractEnded,
-            EmployeeLifecycleStatuses.ExitReasonDeceased => EmployeeLifecycleStatuses.Deceased,
-            _ => EmployeeLifecycleStatuses.Terminated
-        };
-        state.AvailabilityStatus = EmployeeLifecycleStatuses.Working;
+        state.EmploymentStatus = EmployeeLifecycleStatuses.NormalizeCompletedEmploymentStatus(exitType)
+            ?? EmployeeLifecycleStatuses.Terminated;
+        state.AvailabilityStatus = EmployeeLifecycleStatuses.NotApplicable;
         state.AccountStatus = EmployeeLifecycleStatuses.AccountClosed;
         state.PayrollStatus = EmployeeLifecycleStatuses.PayrollFinalSettlement;
         state.OffboardingStatus = EmployeeLifecycleStatuses.OffboardingCompleted;
         // Former-portal access is still controlled by its existing invitation flow.
         state.FormerPortalStatus = EmployeeLifecycleStatuses.FormerPortalNotEligible;
-        if (state.AlumniStatus is not (EmployeeLifecycleStatuses.AlumniBlocked or EmployeeLifecycleStatuses.AlumniOptedOut))
-            state.AlumniStatus = EmployeeLifecycleStatuses.AlumniEligible;
+        state.AlumniStatus = state.EmploymentStatus == EmployeeLifecycleStatuses.Deceased
+            ? EmployeeLifecycleStatuses.AlumniBlocked
+            : state.AlumniStatus is EmployeeLifecycleStatuses.AlumniBlocked or EmployeeLifecycleStatuses.AlumniOptedOut
+                ? state.AlumniStatus
+                : EmployeeLifecycleStatuses.AlumniEligible;
         state.AvailabilityExpectedReturnDate = null;
         state.AvailabilityReasonCode = exitType;
         state.Version++;

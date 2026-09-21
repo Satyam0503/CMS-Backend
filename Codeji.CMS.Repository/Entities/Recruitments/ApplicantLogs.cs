@@ -1,4 +1,4 @@
-﻿using MongoDB.Bson.Serialization.Attributes;
+using MongoDB.Bson.Serialization.Attributes;
 
 namespace Codeji.CMS.Repository.Entities.Recruitments
 {
@@ -13,5 +13,8 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         public string JobRole { get; set; }
         public int ActivityCategory { get; set; }
         public string ApplicantName { get;set;}
+        public string? EventType { get; set; }
+        public string? PreviousStage { get; set; }
+        public string? CurrentStage { get; set; }
     }
 }

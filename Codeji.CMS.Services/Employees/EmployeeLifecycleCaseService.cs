@@ -374,6 +374,11 @@ public sealed class EmployeeLifecycleCaseService : IEmployeeLifecycleCaseService
     private static bool TryRestoreCaseLifecycleState(EmployeeLifecycleState state, EmployeeLifecycleCase item, string actor, DateTime effectiveAt, string reasonCode, string? reason, out bool changed, out int changeCount, out string error)
     {
         changed = false; changeCount = 0; error = string.Empty;
+        if (state.IsFormerEmployee())
+        {
+            error = "FORMER_EMPLOYEE_LIFECYCLE_RESTORE_FORBIDDEN";
+            return false;
+        }
         if (state.AvailabilityStatus == item.LifecycleStatus)
         {
             if (!EmployeeLifecycleTransitionService.TryChangeAvailability(state, EmployeeLifecycleStatuses.Working, actor, state.Version, effectiveAt, null, reasonCode, reason, out error)) return false;

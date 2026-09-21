@@ -158,6 +158,8 @@ public class PublicCareerService : IPublicCareerService
 
     public async Task<Result<PublicJobApplicationResponse>> Apply(string publicJobId, PublicJobApplicationRequest request)
     {
+        var requestValidation = ValidateApplicationRequest(request);
+        if (requestValidation is not null) return BadRequest<PublicJobApplicationResponse>(requestValidation);
         var job = await _jobs.Find(j => j.PublicJobId == publicJobId && !j.IsDeleted && j.Status && j.PublishToCareerPortal).FirstOrDefaultAsync();
         if (job is null) return NotFound<PublicJobApplicationResponse>("Job not found.");
 
@@ -254,6 +256,7 @@ public class PublicCareerService : IPublicCareerService
 
     public async Task<Result<PublicResumeUploadResult>> UploadResume(string applicationReference, string token, IFormFile resume)
     {
+        if (string.IsNullOrWhiteSpace(applicationReference) || string.IsNullOrWhiteSpace(token)) return BadRequest<PublicResumeUploadResult>("Application reference and upload token are required.");
         if (resume is null || resume.Length == 0) return BadRequest<PublicResumeUploadResult>("Resume file is required.");
         if (resume.Length > 5 * 1024 * 1024) return BadRequest<PublicResumeUploadResult>("Resume file must be 5MB or smaller.");
         if (!string.Equals(Path.GetExtension(resume.FileName), ".pdf", StringComparison.OrdinalIgnoreCase)) return BadRequest<PublicResumeUploadResult>("Only PDF resumes are allowed.");
@@ -261,6 +264,13 @@ public class PublicCareerService : IPublicCareerService
         var tokenHash = HashToken(token);
         var uploadToken = await _tokens.Find(t => t.ApplicationReference == applicationReference && t.TokenHash == tokenHash && !t.IsUsed).FirstOrDefaultAsync();
         if (uploadToken is null || uploadToken.ExpiresAt < DateTime.UtcNow) return BadRequest<PublicResumeUploadResult>("Resume upload token is invalid or expired.");
+
+        // Claim the one-use token before writing the file so parallel requests cannot
+        // both consume the same credential. The update filter is the concurrency boundary.
+        var claimed = await _tokens.UpdateOneAsync(
+            t => t.TokenId == uploadToken.TokenId && !t.IsUsed && t.ExpiresAt >= DateTime.UtcNow,
+            Builders<PublicApplicationToken>.Update.Set(t => t.IsUsed, true).Set(t => t.UsedAt, DateTime.UtcNow));
+        if (claimed.ModifiedCount != 1) return BadRequest<PublicResumeUploadResult>("Resume upload token is invalid or already used.");
 
         using MemoryStream memory = new();
         await resume.CopyToAsync(memory);
@@ -275,8 +285,6 @@ public class PublicCareerService : IPublicCareerService
 
         var applicantFilter = Builders<Applicant>.Filter.Eq(a => a.ApplicantId, uploadToken.ApplicantId) & Builders<Applicant>.Filter.Eq(a => a.CompanyId, uploadToken.CompanyId);
         await _applicants.UpdateOneAsync(applicantFilter, Builders<Applicant>.Update.Set(a => a.ResumeUrl, fileName).Set(a => a.UpdatedDate, DateTime.UtcNow).Set(a => a.UpdatedBy, "public-career"));
-        await _tokens.UpdateOneAsync(t => t.TokenId == uploadToken.TokenId, Builders<PublicApplicationToken>.Update.Set(t => t.IsUsed, true).Set(t => t.UsedAt, DateTime.UtcNow));
-
         return new Result<PublicResumeUploadResult> { Success = true, MethodResult = new PublicResumeUploadResult { ApplicationReference = applicationReference } };
     }
 
@@ -511,6 +519,21 @@ public class PublicCareerService : IPublicCareerService
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? uri)) return false;
         return uri.Scheme == Uri.UriSchemeHttps && !uri.IsLoopback;
+    }
+
+    private static string? ValidateApplicationRequest(PublicJobApplicationRequest? request)
+    {
+        if (request is null) return "Application details are required.";
+        if (string.IsNullOrWhiteSpace(request.FirstName) || string.IsNullOrWhiteSpace(request.LastName)) return "First and last name are required.";
+        if (!Regex.IsMatch(request.FirstName.Trim(), "^[^=~<>;`%]{1,100}$") || !Regex.IsMatch(request.LastName.Trim(), "^[^=~<>;`%]{1,100}$")) return "Applicant name contains invalid characters.";
+        if (!new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(request.Email?.Trim())) return "A valid email address is required.";
+        if (!Regex.IsMatch(request.Phone?.Trim() ?? string.Empty, "^[6-9]\\d{9}$")) return "A valid Indian phone number is required.";
+        if (request.Experience < 0) return "Experience cannot be negative.";
+        if (request.NoticePeriodDays < 0) return "Notice period cannot be negative.";
+        if (!string.IsNullOrWhiteSpace(request.LinkedInUrl) && !IsSafeExternalUrl(request.LinkedInUrl)) return "LinkedIn URL must be a safe HTTPS URL.";
+        if (!string.IsNullOrWhiteSpace(request.PortfolioUrl) && !IsSafeExternalUrl(request.PortfolioUrl)) return "Portfolio URL must be a safe HTTPS URL.";
+        if (request.CurrentCompany?.Length > 200 || request.CurrentJobTitle?.Length > 200 || request.CoverLetter?.Length > 10000) return "One or more application fields exceed the allowed length.";
+        return null;
     }
 
     private async Task QueueApplicationNotifications(Applicant applicant, JobVacancy job, Company company)

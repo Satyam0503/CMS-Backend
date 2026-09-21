@@ -73,6 +73,8 @@ public class CalendarServices : ICalendarServices
                     Id = ci.Id,
                     Name = ci.Name,
                     Date = ci.Date,
+                    StartTimeUtc = ci.StartTimeUtc,
+                    EndTimeUtc = ci.EndTimeUtc,
                     Description = ci.Description,
                     Type = (CalendarResponseItem)ci.Type,
                     ImageUrl = Common.GetCalendarItemCoverImagePath(ci.ImageUrl),
@@ -154,12 +156,15 @@ public class CalendarServices : ICalendarServices
                 CompanyId = CompanyId,
                 Name = model.Name,
                 Date = DateTime.SpecifyKind(model.Date.Date, DateTimeKind.Unspecified),
+                StartTimeUtc = model.StartTimeUtc,
+                EndTimeUtc = model.EndTimeUtc,
                 Description = model.Description,
                 Type = model.Type,
                 Recurring = model.Recurring,
                 ImageUrl = model.Image == null ? null : await AddUpdateCalenderItemImage(model.Image)
             };
             result = await _calendarRepository.AddOne(newItem);
+            result.ResourceId = newItem.Id;
         }
         else
         {
@@ -190,10 +195,13 @@ public class CalendarServices : ICalendarServices
             }
             existingCalendarItem.Name = model.Name;
             existingCalendarItem.Date = DateTime.SpecifyKind(model.Date.Date, DateTimeKind.Unspecified);
+            existingCalendarItem.StartTimeUtc = model.StartTimeUtc;
+            existingCalendarItem.EndTimeUtc = model.EndTimeUtc;
             existingCalendarItem.Type = model.Type;
             existingCalendarItem.Description = model.Description;
             existingCalendarItem.Recurring = model.Recurring;
             result = await _calendarRepository.Update(whereCondition, existingCalendarItem);
+            result.ResourceId = existingCalendarItem.Id;
         }
         return result;
     }
@@ -339,3 +347,5 @@ public class CalendarServices : ICalendarServices
         return result;
     }
 }
+
+

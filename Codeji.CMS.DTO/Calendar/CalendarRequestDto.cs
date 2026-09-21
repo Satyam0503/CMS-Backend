@@ -10,6 +10,9 @@ public class CalendarRequestDto
     public bool Recurring { get; set; }
     public CalendarItem Type { get; set; }
     public DateTime Date { get; set; }
+    public DateTime? StartTimeUtc { get; set; }
+    public DateTime? EndTimeUtc { get; set; }
     public string Description { get; set; }
     public IFormFile? Image { get; set; }
 }
+

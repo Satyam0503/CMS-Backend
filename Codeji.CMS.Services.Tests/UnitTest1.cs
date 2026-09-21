@@ -151,6 +151,57 @@ public class EmployeeServiceBulkImportTests
     }
 
     [Fact]
+    public async Task SubmitOwnResignation_WhenPolicyDisablesSelfResignation_IsRejectedBeforeAnyWrite()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false);
+        SetExitContext(fixture, "employee-1");
+        fixture.EmployeeRepository.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmpUser, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(new EmpUser
+            {
+                CompanyId = "company-1", UserId = "employee-1", FirstName = "Test", LastName = "Employee", Email = "test@example.com", Status = true, EmploymentStatus = "Active",
+                DateOfJoining = DateTime.UtcNow.Date.AddYears(-1).ToString("yyyy-MM-dd"), Lifecycle = new EmployeeLifecycleState()
+            });
+        fixture.EmployeeExitRepository.Setup(x => x.Exist(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeExit, bool>>>(), It.IsAny<bool>())).ReturnsAsync(false);
+        fixture.EmployeeExitPolicyRepository.Setup(x => x.GetAll(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeExitPolicy, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync([new EmployeeExitPolicy { CompanyId = "company-1", IsActive = true, AllowEmployeeSelfResignation = false, EnableOffboarding = true, Version = 1 }]);
+
+        var result = await fixture.Service.SubmitOwnResignation(new InitiateEmployeeExitRequest
+        {
+            EmployeeUserId = "employee-1", ExitType = "Resigned", LastWorkingDate = DateTime.UtcNow.Date.AddDays(30)
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal("SELF_RESIGNATION_DISABLED_BY_POLICY", result.Message);
+        fixture.EmployeeExitRepository.Verify(x => x.AddOne(It.IsAny<EmployeeExit>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitOwnResignation_WhenPolicyAllowsSelfResignation_CreatesResignationCase()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false);
+        SetExitContext(fixture, "employee-1");
+        fixture.EmployeeRepository.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmpUser, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(new EmpUser
+            {
+                CompanyId = "company-1", UserId = "employee-1", FirstName = "Test", LastName = "Employee", Email = "test@example.com", Status = true, EmploymentStatus = "Active",
+                DateOfJoining = DateTime.UtcNow.Date.AddYears(-1).ToString("yyyy-MM-dd"), Lifecycle = new EmployeeLifecycleState()
+            });
+        fixture.EmployeeExitRepository.Setup(x => x.Exist(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeExit, bool>>>(), It.IsAny<bool>())).ReturnsAsync(false);
+        fixture.EmployeeExitRepository.Setup(x => x.AddOne(It.IsAny<EmployeeExit>())).ReturnsAsync(new Result { Success = true });
+        fixture.EmployeeExitPolicyRepository.Setup(x => x.GetAll(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeExitPolicy, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync([new EmployeeExitPolicy { CompanyId = "company-1", IsActive = true, AllowEmployeeSelfResignation = true, EnableOffboarding = true, Version = 1 }]);
+        fixture.EmployeeRepository.Setup(x => x.Update(It.IsAny<FilterDefinition<EmpUser>>(), It.IsAny<EmpUser>())).ReturnsAsync(new Result { Success = true });
+
+        var result = await fixture.Service.SubmitOwnResignation(new InitiateEmployeeExitRequest
+        {
+            EmployeeUserId = "employee-1", ExitType = "Resigned", LastWorkingDate = DateTime.UtcNow.Date.AddDays(30)
+        });
+
+        Assert.True(result.Success);
+        fixture.EmployeeExitRepository.Verify(x => x.AddOne(It.Is<EmployeeExit>(exit => exit.ExitType == "Resigned")), Times.Once);
+    }
+
+    [Fact]
     public async Task ReviewEmployeeExit_CombinedManagerAndHr_ApprovesBothStages()
     {
         var fixture = CreateFixture(dbDuplicateExists: false);
@@ -563,7 +614,8 @@ public class EmployeeServiceBulkImportTests
             fixture.OfficeScheduleRepository.Object,
             fixture.EmployeeScheduleAssignmentRepository.Object,
             fixture.Logger.Object,
-            employeeExitRepository: fixture.EmployeeExitRepository.Object);
+            employeeExitRepository: fixture.EmployeeExitRepository.Object,
+            employeeExitPolicyRepository: fixture.EmployeeExitPolicyRepository.Object);
 
         return fixture;
     }
@@ -599,6 +651,9 @@ public class EmployeeServiceBulkImportTests
         public Mock<IMongoDbRepository<CompanyOfficeSchedule>> OfficeScheduleRepository { get; } = new();
         public Mock<IMongoDbRepository<EmployeeScheduleAssignment>> EmployeeScheduleAssignmentRepository { get; } = new();
         public Mock<IMongoDbRepository<EmployeeExit>> EmployeeExitRepository { get; } = new();
+        public Mock<IMongoDbRepository<EmployeeExitPolicy>> EmployeeExitPolicyRepository { get; } = new();
         public Mock<ILogger<EmployeeService>> Logger { get; } = new();
     }
 }
+
+

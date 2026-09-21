@@ -888,7 +888,7 @@ namespace Codeji.CMS.Services.Employees
                 (includeAllStatuses ||
                  (includeAttendanceRoster && ((x.Lifecycle == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod) || x.EmploymentStatus == null || x.EmploymentStatus == "" || x.EmploymentStatus == "Active" || x.EmploymentStatus == "NoticePeriod")) ||
                  (includeNoticePeriod && ((x.Lifecycle != null && x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod) || x.EmploymentStatus == "NoticePeriod")) ||
-                 (includeExEmployees && ((x.Lifecycle != null && (x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Resigned || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Terminated || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Retired || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.ContractEnded || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Deceased)) || x.EmploymentStatus == "Resigned" || x.EmploymentStatus == "Terminated" || x.EmploymentStatus == "Retired" || x.EmploymentStatus == "ContractEnded" || x.EmploymentStatus == "Deceased")) ||
+                 (includeExEmployees && ((x.Lifecycle != null && EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.Lifecycle.EmploymentStatus)) || EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.EmploymentStatus))) ||
                  (!includeAttendanceRoster && !includeNoticePeriod && !includeExEmployees && ((x.Lifecycle == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended) || x.EmploymentStatus == null || x.EmploymentStatus == "" || x.EmploymentStatus == "Active"))) &&
                 (string.IsNullOrWhiteSpace(requestedAvailabilityStatus) || (x.Lifecycle != null && x.Lifecycle.AvailabilityStatus == requestedAvailabilityStatus)) &&
                 ((filters.DepartmentId == null || filters.DepartmentId.Count == 0) || filters.DepartmentId.Contains(x.Department)) &&
@@ -1042,6 +1042,54 @@ private async Task<string?> ValidateSpecialLeaveAsync(
         ? "SPECIAL_LEAVE_APPROVED_REQUEST_REQUIRED"
         : null;
 }
+
+        public async Task<Result> UpdateEmployeeContract(UpdateEmployeeContractRequest request)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(actorUserId) || !await CanManageExitOperation(companyId, actorUserId, Codeji.CMS.Utility.Constraints.Permission.Edit)) return new Result { Success = false, Message = "CONTRACT_FORBIDDEN" };
+            if (request is null || string.IsNullOrWhiteSpace(request.EmployeeUserId)) return new Result { Success = false, Message = "CONTRACT_REQUEST_INVALID" };
+            var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == request.EmployeeUserId && !x.IsDeleted);
+            if (employee is null) return new Result { Success = false, Message = "EMPLOYEE_NOT_FOUND" };
+            if (employee.Contract.Version != request.Version) return new Result { Success = false, Message = "CONTRACT_CHANGED_OR_NOT_FOUND" };
+            var action = request.Action.Trim();
+            if (!action.Equals("Extend", StringComparison.OrdinalIgnoreCase) && !action.Equals("End", StringComparison.OrdinalIgnoreCase)) return new Result { Success = false, Message = "CONTRACT_ACTION_INVALID" };
+            var isExtend = action.Equals("Extend", StringComparison.OrdinalIgnoreCase);
+            var hasActiveExit = !isExtend && await _employeeExitRepository.Exist(x => x.CompanyId == companyId && x.EmployeeUserId == employee.UserId && x.IsActive && !x.IsDeleted);
+            var contractError = EmployeeContractLifecycleRules.Validate(action, employee.Contract, request.StartDate, request.EndDate, hasActiveExit);
+            if (contractError is not null) return new Result { Success = false, Message = contractError };
+            var previousEndDate = employee.Contract.EndDate;
+            var previousStartDate = employee.Contract.StartDate;
+            var previousStatus = employee.Contract.Status;
+            var previousVersion = employee.Contract.Version;
+            var previousHistoryCount = employee.Contract.History.Count;
+            employee.Contract.StartDate ??= request.StartDate?.Date;
+            employee.Contract.EndDate = request.EndDate?.Date ?? employee.Contract.EndDate;
+            employee.Contract.Status = isExtend ? "Extended" : "Ended";
+            employee.Contract.Version++;
+            employee.Contract.History.Add(new EmployeeContractChange { Action = isExtend ? "Extended" : "Ended", PreviousEndDate = previousEndDate, NewEndDate = employee.Contract.EndDate, ActorUserId = actorUserId, Reason = request.Reason?.Trim() });
+            var saved = await _employeeRepository.Update(Builders<EmpUser>.Filter.Where(x => x.CompanyId == companyId && x.UserId == employee.UserId && !x.IsDeleted && x.Contract.Version == request.Version), employee);
+            if (!saved.Success) return new Result { Success = false, Message = "CONTRACT_CHANGED_OR_NOT_FOUND" };
+            if (!isExtend)
+            {
+                var exitResult = await InitiateEmployeeExitCore(new InitiateEmployeeExitRequest { EmployeeUserId = employee.UserId, ExitType = EmployeeLifecycleStatuses.ContractEnded, LastWorkingDate = (employee.Contract.EndDate ?? DateTime.UtcNow.Date).Date, Reason = request.Reason }, false);
+                if (!exitResult.Success)
+                {
+                    // Contract end and the resulting exit case are one business operation.
+                    // Compensate the contract write when exit creation is rejected (for
+                    // example by a concurrent active exit or policy rule).
+                    employee.Contract.StartDate = previousStartDate;
+                    employee.Contract.EndDate = previousEndDate;
+                    employee.Contract.Status = previousStatus;
+                    employee.Contract.Version = previousVersion;
+                    if (employee.Contract.History.Count > previousHistoryCount)
+                        employee.Contract.History.RemoveRange(previousHistoryCount, employee.Contract.History.Count - previousHistoryCount);
+                    await _employeeRepository.Update(Builders<EmpUser>.Filter.Where(x => x.CompanyId == companyId && x.UserId == employee.UserId && !x.IsDeleted && x.Contract.Version == previousVersion + 1), employee);
+                }
+                return exitResult;
+            }
+            return new Result { Success = true, Message = "CONTRACT_UPDATED" };
+        }
 
         public async Task<Result> ChangeEmployeeLifecycle(ChangeEmployeeLifecycleRequest request)
         {
@@ -1199,19 +1247,20 @@ if (specialLeaveError is not null)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            var exitType = EmployeeLifecycleStatuses.NormalizeCompletedEmploymentStatus(request?.ExitType);
             if (request is null || string.IsNullOrWhiteSpace(request.EmployeeUserId)
-                || request.ExitType is not ("Resigned" or "Terminated") || request.LastWorkingDate == default)
+                || exitType is null || request.LastWorkingDate == default)
                 return new Result { Success = false, Message = "EXIT_REQUEST_INVALID" };
             if (isSelfSubmission && request.EmployeeUserId != actorUserId)
                 return new Result { Success = false, Message = "SELF_EXIT_ONLY" };
             if (!isSelfSubmission && request.EmployeeUserId == actorUserId)
                 return new Result { Success = false, Message = "SELF_EXIT_NOT_ALLOWED" };
-            if (isSelfSubmission && request.ExitType != "Resigned")
+            if (isSelfSubmission && exitType != EmployeeLifecycleStatuses.Resigned)
                 return new Result { Success = false, Message = "SELF_SUBMISSION_MUST_BE_RESIGNATION" };
 
             var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == request.EmployeeUserId && !x.IsDeleted);
             if (employee is null) return new Result { Success = false, Message = "EMPLOYEE_NOT_FOUND" };
-            if (NormalizeEmploymentStatus(employee) is "Resigned" or "Terminated" or "NoticePeriod")
+            if (EmploymentExitRules.IsFormerEmployee(employee) || NormalizeEmploymentStatus(employee) == EmployeeLifecycleStatuses.NoticePeriod)
                 return new Result { Success = false, Message = "EXIT_ALREADY_OPEN_OR_COMPLETED" };
             // Employment status can lag behind a case while it is awaiting review.  The
             // active-case check is the authoritative guard and also mirrors the database
@@ -1222,7 +1271,18 @@ if (specialLeaveError is not null)
                 return new Result { Success = false, Message = "EXIT_LAST_WORKING_DATE_IN_PAST" };
             if (DateTime.TryParse(employee.DateOfJoining, out var joined) && request.LastWorkingDate.Date < joined.Date)
                 return new Result { Success = false, Message = "EXIT_BEFORE_JOINING" };
-            var policy = await GetApplicableExitPolicy(employee);
+            var resolvedPolicy = await GetResolvedExitPolicy(employee, exitType);
+            var policy = resolvedPolicy?.Policy;
+            var entryFeature = policy?.Features.FirstOrDefault(x => x.Key == (isSelfSubmission ? "SelfResignation" : "HrInitiatedExit"));
+            if (policy is not null && !(entryFeature?.Enabled ?? (isSelfSubmission ? policy.AllowEmployeeSelfResignation : policy.EnableOffboarding)))
+                return new Result { Success = false, Message = isSelfSubmission ? "SELF_RESIGNATION_DISABLED_BY_POLICY" : "HR_INITIATED_EXIT_DISABLED_BY_POLICY" };
+            if (policy?.AllowExitDuringActiveLeave != true && _leaveRequestRepository is not null && await _leaveRequestRepository.Exist(x =>
+                x.CompanyId == companyId && x.EmployeeId == employee.UserId &&
+                x.Status == EnumsHelper.LeaveRequestStatus.Accepted &&
+                x.StartDate.Date <= request.LastWorkingDate.Date && x.EndDate.Date >= DateTime.UtcNow.Date))
+                return new Result { Success = false, Message = "ACTIVE_LEAVE_BLOCKS_EXIT" };
+            if (isSelfSubmission && policy?.AllowEmployeeSelfResignation == false)
+                return new Result { Success = false, Message = "SELF_RESIGNATION_DISABLED_BY_POLICY" };
             if (policy?.EnableOffboarding == false)
                 return new Result { Success = false, Message = "OFFBOARDING_DISABLED_FOR_COMPANY" };
             // The requested date is not silently rejected when it is shorter than the
@@ -1244,11 +1304,12 @@ if (specialLeaveError is not null)
             var exit = new EmployeeExit
             {
                 CompanyId = companyId, CreatedBy = actorUserId, EmployeeUserId = employee.UserId, EmployeeDepartmentId = employee.Department,
-                ExitType = request.ExitType, Status = status, InitiatedAtUtc = DateTime.UtcNow,
+                ExitType = exitType, Status = status, InitiatedAtUtc = DateTime.UtcNow,
                 ReportingManagerUserId = employee.ReportingManager,
                 LastWorkingDate = lastWorkingDate, ProposedLastWorkingDate = requiresNoticeDecision ? requestedLastWorkingDate : null, Reason = request.Reason?.Trim(), Notes = request.Notes?.Trim(),
                 PolicyVersionId = policy?.EmployeeExitPolicyId, PolicyVersion = policy?.Version,
-                PolicySnapshot = policy is null ? null : new EmployeeExitPolicySnapshot { MinimumNoticeDays = policy.MinimumNoticeDays, NoticePaySalaryBasis = policy.NoticePaySalaryBasis, NoticePayDailyRateDivisor = policy.NoticePayDailyRateDivisor, EnableOffboarding = policy.EnableOffboarding, RequireManagerReview = policy.RequireManagerReview, RequireHrReview = policy.RequireHrReview, AllowJointDiscussion = policy.AllowJointDiscussion, RequireResignationEvidence = policy.RequireResignationEvidence, RequireEmployeeAcknowledgement = policy.RequireEmployeeAcknowledgement, EnableFormerEmployeePortal = policy.EnableFormerEmployeePortal, EnableNoticePeriodReminders = policy.EnableNoticePeriodReminders, NoticePeriodReminderEveryDays = policy.NoticePeriodReminderEveryDays, NoticePeriodReminderOffsets = policy.NoticePeriodReminderOffsets.ToList(), NotifyNoticePeriodEmployee = policy.NotifyNoticePeriodEmployee, NotifyNoticePeriodReportingManager = policy.NotifyNoticePeriodReportingManager, NotifyNoticePeriodHr = policy.NotifyNoticePeriodHr, NotifyNoticePeriodAdmins = policy.NotifyNoticePeriodAdmins, NoticePeriodReminderEmail = policy.NoticePeriodReminderEmail, RequireHandover = policy.RequireHandover, RequireAssetClearance = policy.RequireAssetClearance, RequireAccessRevocation = policy.RequireAccessRevocation, RequireFinanceClearance = policy.RequireFinanceClearance, RequireBenefitClearance = policy.RequireBenefitClearance, RequireFinalSettlement = policy.RequireFinalSettlement, PresetLevel = policy.PresetLevel, Features = policy.Features.Select(CloneFeature).ToList() },
+                PolicySourceScope = resolvedPolicy?.SourceScope, PolicyExitType = resolvedPolicy?.ExitType,
+                PolicySnapshot = policy is null ? null : new EmployeeExitPolicySnapshot { SourceScope = resolvedPolicy?.SourceScope, ExitType = resolvedPolicy?.ExitType, AllowEmployeeSelfResignation = policy.AllowEmployeeSelfResignation, AllowRejoin = policy.AllowRejoin, AllowExitDuringActiveLeave = policy.AllowExitDuringActiveLeave, MinimumNoticeDays = policy.MinimumNoticeDays, NoticePaySalaryBasis = policy.NoticePaySalaryBasis, NoticePayDailyRateDivisor = policy.NoticePayDailyRateDivisor, EnableOffboarding = policy.EnableOffboarding, RequireManagerReview = policy.RequireManagerReview, RequireHrReview = policy.RequireHrReview, AllowJointDiscussion = policy.AllowJointDiscussion, RequireResignationEvidence = policy.RequireResignationEvidence, RequireEmployeeAcknowledgement = policy.RequireEmployeeAcknowledgement, EnableFormerEmployeePortal = policy.EnableFormerEmployeePortal, EnableNoticePeriodReminders = policy.EnableNoticePeriodReminders, NoticePeriodReminderEveryDays = policy.NoticePeriodReminderEveryDays, NoticePeriodReminderOffsets = policy.NoticePeriodReminderOffsets.ToList(), NotifyNoticePeriodEmployee = policy.NotifyNoticePeriodEmployee, NotifyNoticePeriodReportingManager = policy.NotifyNoticePeriodReportingManager, NotifyNoticePeriodHr = policy.NotifyNoticePeriodHr, NotifyNoticePeriodAdmins = policy.NotifyNoticePeriodAdmins, NoticePeriodReminderEmail = policy.NoticePeriodReminderEmail, RequireHandover = policy.RequireHandover, RequireAssetClearance = policy.RequireAssetClearance, RequireAccessRevocation = policy.RequireAccessRevocation, RequireFinanceClearance = policy.RequireFinanceClearance, RequireBenefitClearance = policy.RequireBenefitClearance, RequireFinalSettlement = policy.RequireFinalSettlement, PresetLevel = policy.PresetLevel, Features = policy.Features.Select(CloneFeature).ToList() },
                 AuditHistory = [new EmployeeExitAuditEvent { Action = isSelfSubmission ? "ResignationSubmitted" : "ExitInitiated", ActorUserId = actorUserId, Notes = request.Notes?.Trim() }]
             };
             if (requiresNoticeDecision)
@@ -1292,7 +1353,7 @@ if (specialLeaveError is not null)
                     Dimension = nameof(EmployeeLifecycleState.EmploymentStatus),
                     PreviousValue = previousLifecycleEmployment,
                     NewValue = EmployeeLifecycleStatuses.NoticePeriod,
-                    ReasonCode = request.ExitType,
+                    ReasonCode = exitType,
                     Reason = request.Reason?.Trim(),
                     EffectiveFromUtc = DateTime.UtcNow,
                     ChangedBy = actorUserId,
@@ -2031,9 +2092,14 @@ if (specialLeaveError is not null)
                 .Select(x => x?.Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!).Distinct(StringComparer.Ordinal).OrderBy(x => x).ToList();
             var departmentId = departmentIds.Count == 1 ? departmentIds[0] : null;
             var roleId = request.RoleId?.Trim();
+            var policyExitType = string.IsNullOrWhiteSpace(request.ExitType)
+                ? null
+                : EmployeeLifecycleStatuses.NormalizeCompletedEmploymentStatus(request.ExitType);
+            if (!string.IsNullOrWhiteSpace(request.ExitType) && policyExitType is null)
+                return new Result { Success = false, Message = "EXIT_POLICY_EXIT_TYPE_INVALID" };
             if (departmentIds.Count > 0 && !string.IsNullOrWhiteSpace(roleId))
                 return new Result { Success = false, Message = "EXIT_POLICY_SCOPE_MUST_BE_COMPANY_DEPARTMENT_OR_ROLE" };
-            var scopeKey = BuildExitPolicyScopeKey(departmentIds, roleId);
+            var scopeKey = BuildExitPolicyScopeKey(departmentIds, roleId, policyExitType);
             foreach (var selectedDepartmentId in departmentIds)
                 if (!await _departmentRepository.Exist(x => x.CompanyId == companyId && x.DepartmentId == selectedDepartmentId && x.IsActive && !x.IsDeleted))
                     return new Result { Success = false, Message = "EXIT_POLICY_DEPARTMENT_NOT_FOUND" };
@@ -2044,16 +2110,30 @@ if (specialLeaveError is not null)
             // department save cannot accidentally replace the company default when a stale
             // browser payload includes the wrong policy id.
             var requestedExisting = string.IsNullOrWhiteSpace(request.EmployeeExitPolicyId) ? null : await _employeeExitPolicyRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitPolicyId == request.EmployeeExitPolicyId && !x.IsDeleted);
+            // ScopeKey was introduced after some policies had already been stored and
+            // older consolidation writes could leave it inconsistent with the actual
+            // scope fields. Compare canonical fields so a same-scope edit can repair
+            // that legacy key, while still rejecting a real scope replacement.
+            var requestedExistingScopeKey = requestedExisting is null ? null : BuildExitPolicyScopeKey(GetPolicyDepartmentIds(requestedExisting), requestedExisting.RoleId, EmployeeLifecycleStatuses.NormalizeCompletedEmploymentStatus(requestedExisting.ExitType));
+            if (requestedExisting is not null && !string.Equals(requestedExistingScopeKey, scopeKey, StringComparison.Ordinal))
+                return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "EXIT_POLICY_SCOPE_CONFLICT" };
             var scopedExisting = requestedExisting ?? await _employeeExitPolicyRepository.FirstOrDefault(x => x.CompanyId == companyId
                 && x.ScopeKey == scopeKey && !x.IsDeleted);
             // Compatibility for policies saved before ScopeKey was introduced.
-            scopedExisting ??= await _employeeExitPolicyRepository.FirstOrDefault(x => x.CompanyId == companyId
-                && x.DepartmentId == departmentId && x.RoleId == roleId && !x.IsDeleted);
+            if (scopedExisting is null)
+            {
+                var legacyScopeCandidates = await _employeeExitPolicyRepository.GetAll(x => x.CompanyId == companyId
+                    && x.DepartmentId == departmentId && x.RoleId == roleId && !x.IsDeleted);
+                scopedExisting = legacyScopeCandidates.FirstOrDefault(x =>
+                    EmployeeLifecycleStatuses.NormalizeCompletedEmploymentStatus(x.ExitType) == policyExitType);
+            }
             var existing = scopedExisting;
             if (existing is not null && request.Version != existing.Version)
                 return new Result { Success = false, Message = "EXIT_POLICY_VERSION_CONFLICT" };
             var allPolicies = (await _employeeExitPolicyRepository.GetAll(x => x.CompanyId == companyId && !x.IsDeleted)).ToList();
-            var conflicts = departmentIds.Count == 0 ? [] : allPolicies.Where(x => x.EmployeeExitPolicyId != existing?.EmployeeExitPolicyId && GetPolicyDepartmentIds(x).Intersect(departmentIds, StringComparer.Ordinal).Any()).ToList();
+            var conflicts = departmentIds.Count == 0 ? [] : allPolicies.Where(x => x.EmployeeExitPolicyId != existing?.EmployeeExitPolicyId
+                && EmployeeLifecycleStatuses.NormalizeCompletedEmploymentStatus(x.ExitType) == policyExitType
+                && GetPolicyDepartmentIds(x).Intersect(departmentIds, StringComparer.Ordinal).Any()).ToList();
             if (conflicts.Count > 0 && !request.ConsolidateDepartmentPolicies)
                 return new Result { Success = false, Message = "EXIT_POLICY_DEPARTMENT_ALREADY_CONFIGURED" };
             if (conflicts.Any(conflict => !GetPolicyDepartmentIds(conflict).All(departmentIds.Contains)))
@@ -2061,9 +2141,9 @@ if (specialLeaveError is not null)
             if (conflicts.Any(conflict => !HasSameExitPolicyConfiguration(conflict, request)))
                 return new Result { Success = false, Message = "EXIT_POLICY_DEPARTMENT_CONFIGURATION_DIFFERS" };
             var policy = existing ?? new EmployeeExitPolicy { CompanyId = companyId, CreatedBy = actorUserId };
-            policy.ScopeKey = scopeKey; policy.DepartmentId = departmentId; policy.DepartmentIds = departmentIds; policy.RoleId = roleId; policy.MinimumNoticeDays = request.MinimumNoticeDays; policy.NoticePaySalaryBasis = request.NoticePaySalaryBasis; policy.NoticePayDailyRateDivisor = request.NoticePayDailyRateDivisor;
-            policy.EnableOffboarding = request.EnableOffboarding; policy.RequireManagerReview = request.RequireManagerReview; policy.RequireHrReview = request.RequireHrReview; policy.AllowJointDiscussion = request.AllowJointDiscussion;
-            policy.RequireResignationEvidence = request.RequireResignationEvidence; policy.RequireEmployeeAcknowledgement = request.RequireEmployeeAcknowledgement; policy.EnableFormerEmployeePortal = request.EnableFormerEmployeePortal;
+            policy.ScopeKey = scopeKey; policy.ExitType = policyExitType; policy.DepartmentId = departmentId; policy.DepartmentIds = departmentIds; policy.RoleId = roleId; policy.MinimumNoticeDays = request.MinimumNoticeDays; policy.NoticePaySalaryBasis = request.NoticePaySalaryBasis; policy.NoticePayDailyRateDivisor = request.NoticePayDailyRateDivisor;
+            policy.EnableOffboarding = request.EnableOffboarding; policy.AllowEmployeeSelfResignation = request.AllowEmployeeSelfResignation; policy.RequireManagerReview = request.RequireManagerReview; policy.RequireHrReview = request.RequireHrReview; policy.AllowJointDiscussion = request.AllowJointDiscussion;
+            policy.RequireResignationEvidence = request.RequireResignationEvidence; policy.RequireEmployeeAcknowledgement = request.RequireEmployeeAcknowledgement; policy.EnableFormerEmployeePortal = request.EnableFormerEmployeePortal; policy.AllowRejoin = request.AllowRejoin; policy.AllowExitDuringActiveLeave = request.AllowExitDuringActiveLeave;
             policy.EnableNoticePeriodReminders = request.EnableNoticePeriodReminders; policy.NoticePeriodReminderEveryDays = Math.Clamp(request.NoticePeriodReminderEveryDays, 1, 365); policy.NoticePeriodReminderOffsets = request.NoticePeriodReminderOffsets.Where(x => int.TryParse(x, out var days) && days >= 0 && days <= 365).Distinct().ToList(); policy.NotifyNoticePeriodEmployee = request.NotifyNoticePeriodEmployee; policy.NotifyNoticePeriodReportingManager = request.NotifyNoticePeriodReportingManager; policy.NotifyNoticePeriodHr = request.NotifyNoticePeriodHr; policy.NotifyNoticePeriodAdmins = request.NotifyNoticePeriodAdmins; policy.NoticePeriodReminderEmail = request.NoticePeriodReminderEmail;
             policy.RequireHandover = request.RequireHandover; policy.RequireAssetClearance = request.RequireAssetClearance; policy.RequireAccessRevocation = request.RequireAccessRevocation; policy.RequireFinanceClearance = request.RequireFinanceClearance; policy.RequireBenefitClearance = request.RequireBenefitClearance; policy.RequireFinalSettlement = request.RequireFinalSettlement;
             policy.PresetLevel = request.PresetLevel; policy.Features = request.Features.Select(ToFeature).ToList();
@@ -2188,7 +2268,7 @@ if (specialLeaveError is not null)
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (_employeeFinalSettlementRepository is null || request is null) return new Result { Success = false, Message = "FINAL_SETTLEMENT_INVALID" };
             if (!await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "FINAL_SETTLEMENT_FORBIDDEN" };
-            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && (x.Status == "NoticePeriod" || x.Status == "Resigned" || x.Status == "Terminated"));
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && (x.Status == "NoticePeriod" || EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.Status)));
             if (exit is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             if (DateTime.UtcNow.Date < exit.LastWorkingDate.Date) return new Result { Success = false, Message = "LAST_WORKING_DATE_NOT_REACHED" };
             var settlement = await _employeeFinalSettlementRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && !x.IsDeleted)
@@ -2219,7 +2299,7 @@ if (specialLeaveError is not null)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (!await IsHrExitActor(companyId, actorUserId) || request is null) return new Result { Success = false, Message = "FINAL_SETTLEMENT_FORBIDDEN" };
-            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && (x.Status == "NoticePeriod" || x.Status == "Resigned" || x.Status == "Terminated"));
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && (x.Status == "NoticePeriod" || EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.Status)));
             if (exit is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             if (DateTime.UtcNow.Date < exit.LastWorkingDate.Date) return new Result { Success = false, Message = "LAST_WORKING_DATE_NOT_REACHED" };
             if (_employeePayrollRepository is null) return new Result { Success = false, Message = "FINAL_PAYROLL_NOT_CONFIGURED" };
@@ -2263,7 +2343,7 @@ if (specialLeaveError is not null)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (!await IsHrExitActor(companyId, actorUserId) || request is null) return new Result { Success = false, Message = "FINAL_SETTLEMENT_FORBIDDEN" };
-            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && (x.Status == "NoticePeriod" || x.Status == "Resigned" || x.Status == "Terminated"));
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && (x.Status == "NoticePeriod" || EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.Status)));
             if (exit is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             var settlement = await _employeeFinalSettlementRepository!.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && !x.IsDeleted);
             if (settlement is null || settlement.Status != "Approved") return new Result { Success = false, Message = "FINAL_SETTLEMENT_NOT_APPROVED" };
@@ -2279,7 +2359,7 @@ if (specialLeaveError is not null)
             var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (!await IsHrExitActor(companyId, actorUserId) || request is null || request.Type is not ("RelievingLetter" or "ExperienceLetter" or "FinalSettlementStatement") || _employeeExitEvidenceStorage is null) return new Result { Success = false, Message = "EXIT_DOCUMENT_INVALID_OR_FORBIDDEN" };
             var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted);
-            if (exit is null || exit.Version != request.Version || exit.Status is not ("Resigned" or "Terminated")) return new Result { Success = false, Message = "EXIT_DOCUMENT_NOT_AVAILABLE" };
+            if (exit is null || exit.Version != request.Version || !EmployeeLifecycleStatuses.IsCompletedEmploymentStatus(exit.Status)) return new Result { Success = false, Message = "EXIT_DOCUMENT_NOT_AVAILABLE" };
             var documentRequest = string.IsNullOrWhiteSpace(request.RequestId) ? null : exit.FormerEmployeeRequests.FirstOrDefault(x => x.RequestId == request.RequestId);
             if (documentRequest is null || documentRequest.Status != "InProgress" || !GeneratedDocumentMatchesRequest(request.Type, documentRequest.Type)) return new Result { Success = false, Message = "FORMER_DOCUMENT_NOT_READY" };
             if (exit.Evidence.Any(x => x.FormerEmployeeRequestId == documentRequest.RequestId && x.Status is not ("Superseded" or "Archived"))) return new Result { Success = false, Message = "FORMER_DOCUMENT_DRAFT_EXISTS" };
@@ -2307,7 +2387,7 @@ if (specialLeaveError is not null)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId) || string.IsNullOrWhiteSpace(request.EvidenceId) || string.IsNullOrWhiteSpace(request.RequestId) || !await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "FORMER_DOCUMENT_ISSUE_FORBIDDEN" };
-            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && (x.Status == "Resigned" || x.Status == "Terminated"));
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.Status));
             var evidence = exit?.Evidence.FirstOrDefault(x => x.EvidenceId == request.EvidenceId);
             var documentRequest = string.IsNullOrWhiteSpace(request.RequestId) ? null : exit?.FormerEmployeeRequests.FirstOrDefault(x => x.RequestId == request.RequestId);
             if (exit is null || evidence is null || documentRequest is null || evidence.FormerEmployeeRequestId != documentRequest.RequestId || exit.Version != request.Version || evidence.Status != "Verified" || evidence.Visibility != "EmployeeOnly" || string.IsNullOrWhiteSpace(evidence.StorageKey)) return new Result { Success = false, Message = "FORMER_DOCUMENT_NOT_READY" };
@@ -2358,7 +2438,7 @@ if (specialLeaveError is not null)
             {
                 return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x =>
                     x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version &&
-                    !x.IsDeleted && (x.IsActive || x.Status == "Resigned" || x.Status == "Terminated")), exit);
+                    !x.IsDeleted && (x.IsActive || EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.Status))), exit);
             }
             catch
             {
@@ -2370,7 +2450,7 @@ if (specialLeaveError is not null)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId) || string.IsNullOrWhiteSpace(request.Title)) return new Result { Success = false, Message = "EXIT_HANDOVER_INVALID" };
-            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && (x.IsActive || x.Status == "Resigned" || x.Status == "Terminated"));
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && (x.IsActive || EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.Status)));
             if (exit is null || exit.Version != request.Version || exit.Status != "NoticePeriod") return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             if (exit.ReportingManagerUserId != actorUserId && !await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "EXIT_HANDOVER_FORBIDDEN" };
             var task = string.IsNullOrWhiteSpace(request.HandoverTaskId) ? null : exit.HandoverTasks.FirstOrDefault(x => x.HandoverTaskId == request.HandoverTaskId);
@@ -2393,7 +2473,7 @@ if (specialLeaveError is not null)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (request is null || request.Action is not ("Submit" or "Approve" or "ChangesRequested" or "Blocked" or "Waived")) return new Result { Success = false, Message = "EXIT_HANDOVER_INVALID" };
-            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && (x.IsActive || x.Status == "Resigned" || x.Status == "Terminated"));
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && (x.IsActive || EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.Status)));
             var task = exit?.HandoverTasks.FirstOrDefault(x => x.HandoverTaskId == request.HandoverTaskId);
             if (exit is null || task is null || !exit.IsActive || exit.IsDeleted) return new Result { Success = false, Message = "EXIT_HANDOVER_NOT_FOUND" };
             if (exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
@@ -2663,10 +2743,11 @@ if (specialLeaveError is not null)
             if (!await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "REJOIN_FORBIDDEN" };
             if (request is null || string.IsNullOrWhiteSpace(request.Reason)) return new Result { Success = false, Message = "REJOIN_REASON_REQUIRED" };
             var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted);
-            if (exit is null || exit.Version != request.Version || exit.Status is not ("Resigned" or "Terminated")) return new Result { Success = false, Message = "REJOIN_NOT_ALLOWED" };
-            if (exit.ExitInterview?.IsRehireEligible != true) return new Result { Success = false, Message = "REJOIN_NOT_ELIGIBLE" };
+            if (exit is null || exit.Version != request.Version || exit.Status == EmployeeLifecycleStatuses.Deceased || !EmployeeLifecycleStatuses.IsCompletedEmploymentStatus(exit.Status)) return new Result { Success = false, Message = "REJOIN_NOT_ALLOWED" };
+            if (exit.PolicySnapshot?.AllowRejoin == false || exit.ExitInterview?.IsRehireEligible != true) return new Result { Success = false, Message = "REJOIN_NOT_ELIGIBLE" };
             var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == exit.EmployeeUserId && !x.IsDeleted);
             if (employee is null) return new Result { Success = false, Message = "EMPLOYEE_NOT_FOUND" };
+            if (!EmploymentExitRules.CanRejoin(employee)) return new Result { Success = false, Message = "REJOIN_NOT_ALLOWED" };
             var priorStatus = employee.Status;
             var priorEmploymentStatus = employee.EmploymentStatus;
             var priorLastWorkingDate = employee.LastWorkingDate;
@@ -2874,7 +2955,7 @@ if (specialLeaveError is not null)
             // fallback only when there is no active case.
             var employeeExits = await _employeeExitRepository.GetAll(x => x.CompanyId == companyId && x.EmployeeUserId == employeeUserId && !x.IsDeleted);
             var exit = employeeExits.Where(x => x.IsActive).OrderByDescending(x => x.InitiatedAtUtc).FirstOrDefault()
-                ?? employeeExits.Where(x => x.Status is "Resigned" or "Terminated").OrderByDescending(x => x.CompletedAtUtc ?? x.InitiatedAtUtc).FirstOrDefault()
+                ?? employeeExits.Where(x => EmployeeLifecycleStatuses.IsCompletedEmploymentStatus(x.Status)).OrderByDescending(x => x.CompletedAtUtc ?? x.InitiatedAtUtc).FirstOrDefault()
                 ?? employeeExits.Where(x => x.Status == "Withdrawn").OrderByDescending(x => x.InitiatedAtUtc).FirstOrDefault();
             if (exit is null) return new Result<EmployeeExitCaseDto> { Success = false, Message = "EXIT_CASE_NOT_FOUND" };
             if (exit.EmployeeUserId == actorUserId) return new Result<EmployeeExitCaseDto> { Success = false, Message = "EXIT_CASE_FORBIDDEN" };
@@ -2947,15 +3028,15 @@ if (specialLeaveError is not null)
                 // The former employee stays in the final-month payroll run through
                 // EmploymentPeriod. F&F actions therefore remain available after the
                 // employment record has been completed, without reopening the case.
-                if (exit.Status is "Resigned" or "Terminated") actions.AddRange(["CalculateSettlement", "ApproveSettlement", "MarkSettlementPaid"]);
+                if (EmployeeLifecycleStatuses.IsCompletedEmploymentStatus(exit.Status)) actions.AddRange(["CalculateSettlement", "ApproveSettlement", "MarkSettlementPaid"]);
                 if ((exit.Status is "PendingManagerApproval" or "PendingHrApproval" or "NoticePeriod") &&
                     exit.NoticeAdjustments.Any(x => x.Status == "Pending"))
                     actions.Add("DecideNoticeAdjustment");
                 if (exit.FormerEmployeeRequests.Any(x => x.Status is "Pending" or "InProgress")) actions.Add("ManageDocumentRequests");
                 if (exit.IsActive) actions.Add("WaiveClearance");
-                if (exit.Status is "Resigned" or "Terminated") actions.Add("Rejoin");
+                if (exit.Status != EmployeeLifecycleStatuses.Deceased && EmployeeLifecycleStatuses.IsCompletedEmploymentStatus(exit.Status)) actions.Add("Rejoin");
             }
-            if (exit.Status is "Resigned" or "Terminated" && exit.PolicySnapshot?.EnableFormerEmployeePortal == true && await CanManageExitOperation(companyId, actorUserId, Codeji.CMS.Utility.Constraints.Permission.PortalManage)) actions.Add("ManageFormerPortal");
+            if (exit.Status != EmployeeLifecycleStatuses.Deceased && EmployeeLifecycleStatuses.IsCompletedEmploymentStatus(exit.Status) && exit.PolicySnapshot?.EnableFormerEmployeePortal == true && await CanManageExitOperation(companyId, actorUserId, Codeji.CMS.Utility.Constraints.Permission.PortalManage)) actions.Add("ManageFormerPortal");
             var managementCase = new EmployeeExitCaseDto
             {
                 EmployeeExitId = exit.EmployeeExitId, EmployeeUserId = exit.EmployeeUserId, ExitType = exit.ExitType, Status = exit.Status, Version = exit.Version,
@@ -3035,9 +3116,11 @@ if (specialLeaveError is not null)
             if (exit is null) return new Result { Success = false, Message = "OPEN_EXIT_NOT_FOUND" };
             if (request.Version != exit.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             if (DateTime.UtcNow.Date < exit.LastWorkingDate.Date) return new Result { Success = false, Message = "LAST_WORKING_DATE_NOT_REACHED" };
-            if (exit.PolicySnapshot?.RequireResignationEvidence == true && !exit.Evidence.Any(x => x.Category == "Resignation" && x.Status == "Verified")) return new Result { Success = false, Message = "RESIGNATION_EVIDENCE_PENDING" };
-            if (exit.PolicySnapshot?.RequireEmployeeAcknowledgement == true && exit.PostExitAccess?.AcknowledgementStatus != "Acknowledged") return new Result { Success = false, Message = "EMPLOYEE_ACKNOWLEDGEMENT_PENDING" };
-            if (string.IsNullOrWhiteSpace(exit.PostExitAccess?.PersonalEmail) || exit.PostExitAccess.PersonalEmailVerified != true) return new Result { Success = false, Message = "POST_EXIT_CONTACT_VERIFICATION_REQUIRED" };
+            var completedExitType = EmployeeLifecycleStatuses.NormalizeCompletedEmploymentStatus(exit.ExitType)
+                ?? (exit.PolicySnapshot?.RequireResignationEvidence == true ? EmployeeLifecycleStatuses.Resigned : EmployeeLifecycleStatuses.Terminated);
+            if (completedExitType == EmployeeLifecycleStatuses.Resigned && exit.PolicySnapshot?.RequireResignationEvidence == true && !exit.Evidence.Any(x => x.Category == "Resignation" && x.Status == "Verified")) return new Result { Success = false, Message = "RESIGNATION_EVIDENCE_PENDING" };
+            if (completedExitType != EmployeeLifecycleStatuses.Deceased && exit.PolicySnapshot?.RequireEmployeeAcknowledgement == true && exit.PostExitAccess?.AcknowledgementStatus != "Acknowledged") return new Result { Success = false, Message = "EMPLOYEE_ACKNOWLEDGEMENT_PENDING" };
+            if (completedExitType != EmployeeLifecycleStatuses.Deceased && (string.IsNullOrWhiteSpace(exit.PostExitAccess?.PersonalEmail) || exit.PostExitAccess.PersonalEmailVerified != true)) return new Result { Success = false, Message = "POST_EXIT_CONTACT_VERIFICATION_REQUIRED" };
             if (exit.Clearances.Any(x => x.IsMandatory && x.Status is not ("Completed" or "Waived"))) return new Result { Success = false, Message = "MANDATORY_CLEARANCE_PENDING" };
             if (BlocksCompletion(exit.PolicySnapshot, "Handover", exit.PolicySnapshot?.RequireHandover == true) && (!exit.HandoverTasks.Any() || exit.HandoverTasks.Any(x => x.Status is not ("Approve" or "Approved" or "Waived")))) return new Result { Success = false, Message = "HANDOVER_PENDING_OR_NOT_INITIALIZED" };
             if (BlocksCompletion(exit.PolicySnapshot, "Assets", exit.PolicySnapshot?.RequireAssetClearance == true) && (!exit.Assets.Any() || exit.Assets.Any(x => x.Status is not ("Verified" or "Waived" or "RecoveredFinancially")))) return new Result { Success = false, Message = "ASSET_CLEARANCE_PENDING_OR_NOT_INITIALIZED" };
@@ -3183,14 +3266,7 @@ if (specialLeaveError is not null)
 
         private static string NormalizeEmploymentStatus(EmpUser employee)
         {
-            var lifecycleStatus = employee.Lifecycle?.EmploymentStatus;
-            if (lifecycleStatus is EmployeeLifecycleStatuses.Active or EmployeeLifecycleStatuses.NoticePeriod or EmployeeLifecycleStatuses.Suspended or EmployeeLifecycleStatuses.Resigned or EmployeeLifecycleStatuses.Terminated)
-                return lifecycleStatus;
-            return employee.EmploymentStatus switch
-            {
-                "NoticePeriod" or "Resigned" or "Terminated" => employee.EmploymentStatus,
-                _ => "Active"
-            };
+            return EmploymentExitRules.GetEffectiveEmploymentStatus(employee);
         }
 
         private async Task<(bool Success, decimal DailyRate, decimal Amount)> CalculateNoticeRecovery(string companyId, EmployeeExit exit, int shortfallDays)
@@ -3218,14 +3294,20 @@ if (specialLeaveError is not null)
             return policy is null || lastWorkingDate >= DateTime.UtcNow.Date.AddDays(policy.MinimumNoticeDays);
         }
 
-        private async Task<EmployeeExitPolicy?> GetApplicableExitPolicy(EmpUser employee)
+        private async Task<EmployeeExitPolicy?> GetApplicableExitPolicy(EmpUser employee, string? exitType = null)
+            => (await GetResolvedExitPolicy(employee, exitType))?.Policy;
+
+        private async Task<ResolvedOffboardingPolicy?> GetResolvedExitPolicy(EmpUser employee, string? exitType)
         {
             if (_employeeExitPolicyRepository is null) return null;
             var policies = (await _employeeExitPolicyRepository.GetAll(x => x.CompanyId == employee.CompanyId && x.IsActive && !x.IsDeleted))
-                .OrderByDescending(x => x.Version).ThenByDescending(x => x.UpdatedDate).ToList();
-            return policies.FirstOrDefault(x => GetPolicyDepartmentIds(x).Contains(employee.Department ?? string.Empty, StringComparer.Ordinal))
-                ?? policies.FirstOrDefault(x => x.ScopeKey == BuildExitPolicyScopeKey((string?)null, employee.RoleId) || x.RoleId == employee.RoleId)
-                ?? policies.FirstOrDefault(x => x.ScopeKey == "Company" || (string.IsNullOrWhiteSpace(x.DepartmentId) && string.IsNullOrWhiteSpace(x.RoleId)));
+                .ToList();
+            return OffboardingPolicyResolver.Resolve(policies, new OffboardingPolicyContext
+            {
+                DepartmentId = employee.Department,
+                RoleId = employee.RoleId,
+                ExitType = exitType ?? string.Empty
+            });
         }
 
         private static void RescheduleExitReminders(EmployeeExit exit, string actorUserId)
@@ -3267,10 +3349,10 @@ if (specialLeaveError is not null)
             return normalized.Length is > 0 and <= 80 ? normalized : string.Empty;
         }
 
-        private static string BuildExitPolicyScopeKey(string? departmentId, string? roleId) =>
-            BuildExitPolicyScopeKey(string.IsNullOrWhiteSpace(departmentId) ? [] : [departmentId], roleId);
+        private static string BuildExitPolicyScopeKey(string? departmentId, string? roleId, string? exitType = null) =>
+            BuildExitPolicyScopeKey(string.IsNullOrWhiteSpace(departmentId) ? [] : [departmentId], roleId, exitType);
 
-        private static string BuildExitPolicyScopeKey(IEnumerable<string> departmentIds, string? roleId)
+        private static string BuildExitPolicyScopeKey(IEnumerable<string> departmentIds, string? roleId, string? exitType = null)
         {
             var normalizedDepartmentIds = departmentIds
                 .Where(x => !string.IsNullOrWhiteSpace(x))
@@ -3278,13 +3360,14 @@ if (specialLeaveError is not null)
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(x => x, StringComparer.Ordinal)
                 .ToList();
-            return normalizedDepartmentIds.Count switch
+            var scope = normalizedDepartmentIds.Count switch
             {
                 1 => $"Department:{normalizedDepartmentIds[0]}",
                 > 1 => $"Departments:{string.Join("|", normalizedDepartmentIds)}",
                 _ when !string.IsNullOrWhiteSpace(roleId) => $"Role:{roleId}",
                 _ => "Company"
             };
+            return string.IsNullOrWhiteSpace(exitType) ? scope : $"{scope}|ExitType:{exitType}";
         }
 
         private static List<string> GetPolicyDepartmentIds(EmployeeExitPolicy policy)
@@ -3464,7 +3547,7 @@ if (specialLeaveError is not null)
             for (var index = 0; index < objects.Length; index++) { writer.Flush(); offsets.Add(output.Position); writer.Write($"{index + 1} 0 obj\n{objects[index]}\nendobj\n"); }
             writer.Flush(); var xref = output.Position; writer.Write($"xref\n0 {objects.Length + 1}\n0000000000 65535 f \n"); for (var index = 1; index < offsets.Count; index++) writer.Write($"{offsets[index]:D10} 00000 n \n"); writer.Write($"trailer << /Size {objects.Length + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF"); writer.Flush(); return output.ToArray();
         }
-        private static bool IsValidFeatureConfiguration(IEnumerable<EmployeeExitFeatureConfigurationRequest>? features) => features is not null && features.All(x => !string.IsNullOrWhiteSpace(x.Key) && OffboardingFeatureKeys.Contains(x.Key) && (x.DueDaysBeforeLastWorkingDate is null or >= 0) && (!x.BlocksCompletion || x.Enabled) && (!x.Required || x.Enabled)) && features.Select(x => x.Key).Distinct(StringComparer.Ordinal).Count() == features.Count();
+        private static bool IsValidFeatureConfiguration(IEnumerable<EmployeeExitFeatureConfigurationRequest>? features) => features is not null && features.All(x => !string.IsNullOrWhiteSpace(x.Key) && OffboardingFeatureKeys.Contains(x.Key) && (x.DueDaysBeforeLastWorkingDate is null or >= 0) && (!x.BlocksCompletion || x.Enabled) && (!x.Required || x.Enabled) && (!x.AllowWaiver || x.Enabled) && (!x.WaiverReasonRequired || x.AllowWaiver)) && features.Select(x => x.Key).Distinct(StringComparer.Ordinal).Count() == features.Count();
         private static EmployeeExitFeatureConfiguration ToFeature(EmployeeExitFeatureConfigurationRequest x) => new() { Key = x.Key, Enabled = x.Enabled, BlocksCompletion = x.BlocksCompletion, Required = x.Required, OwnerPermission = x.OwnerPermission?.Trim(), AllowWaiver = x.AllowWaiver, WaiverReasonRequired = x.WaiverReasonRequired, DueDaysBeforeLastWorkingDate = x.DueDaysBeforeLastWorkingDate };
         private static EmployeeExitFeatureConfiguration CloneFeature(EmployeeExitFeatureConfiguration x) => new() { Key = x.Key, Enabled = x.Enabled, BlocksCompletion = x.BlocksCompletion, Required = x.Required, OwnerPermission = x.OwnerPermission, AllowWaiver = x.AllowWaiver, WaiverReasonRequired = x.WaiverReasonRequired, DueDaysBeforeLastWorkingDate = x.DueDaysBeforeLastWorkingDate };
         private static EmployeeExitFeatureConfigurationRequest ToFeatureRequest(EmployeeExitFeatureConfiguration x) => new() { Key = x.Key, Enabled = x.Enabled, BlocksCompletion = x.BlocksCompletion, Required = x.Required, OwnerPermission = x.OwnerPermission, AllowWaiver = x.AllowWaiver, WaiverReasonRequired = x.WaiverReasonRequired, DueDaysBeforeLastWorkingDate = x.DueDaysBeforeLastWorkingDate };

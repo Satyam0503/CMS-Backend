@@ -1,0 +1,91 @@
+using Codeji.CMS.Domain.Models;
+using Codeji.CMS.DTO.Recruitments;
+using Codeji.CMS.GenericRepository.Interfaces;
+using Codeji.CMS.Repository.Entities.Recruitments;
+using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility.middlewares;
+using Microsoft.AspNetCore.Http;
+using MongoDB.Driver;
+using static Codeji.CMS.Utility.Enums.EnumsHelper;
+namespace Codeji.CMS.Services.Recruitments;
+public sealed class RecruitmentEnterpriseService(
+ IMongoDbRepository<Applicant> applicants,
+ IMongoDbRepository<ApplicantLogs> logs,
+ IMongoDbRepository<RecruitmentInterview> interviews,
+ IMongoDbRepository<RecruitmentOffer> offers,
+ IMongoDbRepository<RecruitmentOfferVersion> offerVersions,
+ IMongoDbRepository<RecruitmentOfferCounterRequest> offerCounters,
+ IMongoDbRepository<RecruitmentScorecard> scorecards,
+ IMongoDbRepository<RecruitmentTalentPoolMember> talentPoolMembers,
+ IMongoDbRepository<RecruitmentHandoff> handoffs,
+ IMongoDbRepository<RecruitmentExternalActionToken> externalTokens,
+ IMongoDbRepository<RecruitmentStageSlaPolicy> slaPolicies,
+ IMongoDbRepository<RecruitmentEnterpriseConfig> configs,
+ IMongoDbRepository<RecruitmentAutomationOutboxEvent> outbox,
+ IMongoDbRepository<RecruitmentRelationshipLink> links,
+ IHttpContextAccessor context) : IRecruitmentEnterpriseService
+{
+ public async Task<Result<string>> Merge(RecruitmentApplicantMergeCommand command,string actor)
+ {
+  var company=CurrentContext.CompanyId(context); var key=command.IdempotencyKey?.Trim();
+  if(string.IsNullOrWhiteSpace(company)||string.IsNullOrWhiteSpace(key)||command.SourceApplicantId==command.TargetApplicantId)return Fail<string>(RecruitmentErrorCodes.InvalidRequest,"Invalid merge request.");
+  var source=await applicants.FirstOrDefault(x=>x.CompanyId==company&&x.ApplicantId==command.SourceApplicantId&&!x.IsDeleted); var target=await applicants.FirstOrDefault(x=>x.CompanyId==company&&x.ApplicantId==command.TargetApplicantId&&!x.IsDeleted);
+  if(source is null||target is null)return Fail<string>(RecruitmentErrorCodes.InvalidRequest,"Both applicants must belong to the current company.");
+  if(source.MergeStatus=="Merged")return Ok(source.ApplicantId,"Merge already applied.");
+  var version=source.Version<=0?1:source.Version; if(command.ExpectedSourceVersion.HasValue&&command.ExpectedSourceVersion.Value!=version)return Fail<string>(RecruitmentErrorCodes.ConcurrencyConflict,"Source applicant was changed by another user.",409);
+  if(!await MigrateApplicantReferences(company,source.ApplicantId,target.ApplicantId,actor))return Fail<string>(RecruitmentErrorCodes.ConcurrencyConflict,"Applicant related history could not be preserved; merge was not completed.",409);
+  source.MergedIntoApplicantId=target.ApplicantId; source.MergeStatus="Merged"; source.Version=version+1; source.UpdatedBy=actor; source.UpdatedDate=DateTime.UtcNow; source.IsDeleted=true;
+  var updated=await applicants.Update(Builders<Applicant>.Filter.Where(x=>x.CompanyId==company&&x.ApplicantId==source.ApplicantId&&(x.Version==version||x.Version==0)),source); if(!updated.Success)return Fail<string>(RecruitmentErrorCodes.ConcurrencyConflict,"Merge could not be completed.",409);
+  await logs.AddOne(new ApplicantLogs{CompanyId=company,ApplicantId=target.ApplicantId,ApplicantName=(target.FirstName+" "+target.LastName).Trim(),JobRole=target.VacancyId,UserId=actor,ActivityCategory=0,Description="Applicant "+source.ApplicantId+" merged into "+target.ApplicantId+". "+command.Reason?.Trim(),EventType="ApplicantMerged",PreviousStage=source.ActivityType.ToString(),CurrentStage=target.ActivityType.ToString(),CreatedBy=actor,UpdatedBy=actor});
+  return Ok(target.ApplicantId,"Applicant merge completed; related recruitment history was reassigned and the source remains as a soft-deleted audit record.");
+ }
+ private async Task<bool> MigrateApplicantReferences(string company,string source,string target,string actor)
+ {
+  var now=DateTime.UtcNow;
+  var results=await Task.WhenAll(Migrate(interviews,company,source,target,actor,now),Migrate(offers,company,source,target,actor,now),Migrate(offerVersions,company,source,target,actor,now),Migrate(offerCounters,company,source,target,actor,now),Migrate(scorecards,company,source,target,actor,now),Migrate(talentPoolMembers,company,source,target,actor,now),Migrate(handoffs,company,source,target,actor,now),Migrate(logs,company,source,target,actor,now),Migrate(externalTokens,company,source,target,actor,now,true));
+  return results.All(x=>x.Success);
+ }
+ private static Task<Codeji.CMS.Domain.Models.Result> Migrate<T>(IMongoDbRepository<T> repository,string company,string source,string target,string actor,DateTime now,bool revoke=false) where T:Codeji.CMS.Repository.Entities.BaseClass
+ {
+  var filter=Builders<T>.Filter.And(Builders<T>.Filter.Eq("CompanyId",company),Builders<T>.Filter.Eq("ApplicantId",source));
+  var update=Builders<T>.Update.Set("UpdatedBy",actor).Set("UpdatedDate",now);
+  update=revoke?update.Set("RevokedAtUtc",now):update.Set("ApplicantId",target);
+  return repository.UpdateMany(filter,update);
+ }
+ public async Task<Result<RecruitmentAnalytics>> Analytics(string? vacancyId)
+ {
+  var company=CurrentContext.CompanyId(context); if(string.IsNullOrWhiteSpace(company))return Fail<RecruitmentAnalytics>(RecruitmentErrorCodes.InvalidRequest,"Company context is required."); var rows=await applicants.GetAll(x=>x.CompanyId==company&&!x.IsDeleted&&(string.IsNullOrWhiteSpace(vacancyId)||x.VacancyId==vacancyId)); var a=new RecruitmentAnalytics{TotalApplicants=rows.Count(),ActiveApplicants=rows.Count(x=>x.MergeStatus!="Merged"&&x.ActivityType!=ActivityType.Rejected),RejectedApplicants=rows.Count(x=>x.ActivityType==ActivityType.Rejected),MergedApplicants=rows.Count(x=>x.MergeStatus=="Merged")}; a.ByStage=rows.GroupBy(x=>x.ActivityType.ToString()).ToDictionary(x=>x.Key,x=>x.Count()); var r=new Result<RecruitmentAnalytics>{Success=true,StatusCode=200,Message="Recruitment analytics loaded.",MethodResult=a,Data=a,TotalRecords=a.TotalApplicants}; return r;
+ }
+ public async Task<Result<RecruitmentFeedbackSlaReport>> FeedbackSla(string? vacancyId)
+ {
+  var company=CurrentContext.CompanyId(context); if(string.IsNullOrWhiteSpace(company)) return Fail<RecruitmentFeedbackSlaReport>(RecruitmentErrorCodes.InvalidRequest,"Company context is required.");
+  var interviewRows=(await interviews.GetAll(x=>x.CompanyId==company&&!x.IsDeleted&&(string.IsNullOrWhiteSpace(vacancyId)||x.VacancyId==vacancyId)&&(x.Status==RecruitmentInterviewStatus.Scheduled||x.Status==RecruitmentInterviewStatus.Confirmed))).ToList();
+  var items=new List<RecruitmentFeedbackSlaItem>(); var now=DateTime.UtcNow;
+  foreach(var interview in interviewRows) { var cards=(await scorecards.GetAll(x=>x.CompanyId==company&&x.InterviewId==interview.InterviewId&&!x.IsDeleted&&(x.Status==RecruitmentScorecardStatus.Submitted||x.Status==RecruitmentScorecardStatus.Locked))).ToList(); var due=cards.Where(x=>x.FeedbackDueAtUtc.HasValue).Select(x=>x.FeedbackDueAtUtc!.Value).DefaultIfEmpty(interview.EndsAtUtc.AddHours(24)).Min(); items.Add(new RecruitmentFeedbackSlaItem { InterviewId=interview.InterviewId, ApplicantId=interview.ApplicantId, VacancyId=interview.VacancyId, RoundNumber=interview.RoundNumber, DueAtUtc=due, AssignedInterviewers=interview.PanelistUserIds.Length, SubmittedScorecards=cards.Select(x=>x.ReviewerUserId).Distinct(StringComparer.OrdinalIgnoreCase).Count(), Overdue=due<now && cards.Count < Math.Max(1, interview.QuorumRequired) }); }
+  var report=new RecruitmentFeedbackSlaReport { TotalOpenRounds=items.Count, OverdueRounds=items.Count(x=>x.Overdue), Items=items.OrderByDescending(x=>x.Overdue).ThenBy(x=>x.DueAtUtc).ToList() }; return new Result<RecruitmentFeedbackSlaReport> { Success=true, StatusCode=200, MethodResult=report, Data=report, TotalRecords=report.TotalOpenRounds, Message="Feedback SLA report loaded." };
+ }
+ public async Task<Result<int>> QueueFeedbackReminders(string? vacancyId, string actorUserId)
+ {
+  var report=await FeedbackSla(vacancyId); if(!report.Success || report.MethodResult is null) return new Result<int> { Success=false, StatusCode=report.StatusCode, ErrorCode=report.ErrorCode, Message=report.Message };
+  var company=CurrentContext.CompanyId(context); var queued=0;
+  foreach(var item in report.MethodResult.Items.Where(x=>x.Overdue)) { var key=$"feedback-reminder:{item.InterviewId}:{item.DueAtUtc:O}"; var existing=await outbox.FirstOrDefault(x=>x.CompanyId==company&&x.IdempotencyKey==key&&!x.IsDeleted); if(existing is not null) continue; var add=await outbox.AddOne(new RecruitmentAutomationOutboxEvent { CompanyId=company, EventType="InterviewerFeedbackReminder", ApplicantId=item.ApplicantId, IdempotencyKey=key, Payload=new Dictionary<string,string> { ["interviewId"]=item.InterviewId, ["vacancyId"]=item.VacancyId, ["roundNumber"]=item.RoundNumber.ToString(), ["submittedScorecards"]=item.SubmittedScorecards.ToString(), ["assignedInterviewers"]=item.AssignedInterviewers.ToString() }, CreatedBy=actorUserId, UpdatedBy=actorUserId }); if(add.Success) queued++; }
+  return new Result<int> { Success=true, StatusCode=200, MethodResult=queued, Data=queued, Message=$"Queued {queued} interviewer feedback reminder(s)." };
+ }
+ public async Task<Result<string>> UpsertSla(RecruitmentStageSlaPolicyCommand command,string actor){var c=CurrentContext.CompanyId(context); if(string.IsNullOrWhiteSpace(c)||string.IsNullOrWhiteSpace(command.Stage)||command.TargetHours<=0)return Fail<string>(RecruitmentErrorCodes.InvalidRequest,"Stage and positive target hours are required."); var normalizedLocation=string.IsNullOrWhiteSpace(command.Location)?null:command.Location.Trim(); var p=await slaPolicies.FirstOrDefault(x=>x.CompanyId==c&&x.Stage==command.Stage.Trim()&&x.Location==normalizedLocation&&!x.IsDeleted); if(p is null){p=new RecruitmentStageSlaPolicy{CompanyId=c,Stage=command.Stage.Trim(),Location=normalizedLocation,TargetHours=command.TargetHours,Enabled=command.Enabled,LastCommandIdempotencyKey=command.IdempotencyKey,CreatedBy=actor,UpdatedBy=actor}; var add=await slaPolicies.AddOne(p); return add.Success?Ok(p.PolicyId,"SLA policy saved."):Fail<string>(RecruitmentErrorCodes.ConcurrencyConflict,"SLA policy could not be saved.",409);} p.TargetHours=command.TargetHours;p.Enabled=command.Enabled;p.LastCommandIdempotencyKey=command.IdempotencyKey;p.UpdatedBy=actor;p.UpdatedDate=DateTime.UtcNow;var u=await slaPolicies.Update(Builders<RecruitmentStageSlaPolicy>.Filter.Where(x=>x.CompanyId==c&&x.PolicyId==p.PolicyId),p);return u.Success?Ok(p.PolicyId,"SLA policy updated."):Fail<string>(RecruitmentErrorCodes.ConcurrencyConflict,"SLA policy could not be updated.",409);}
+ public async Task<Result<string>> UpsertConfig(RecruitmentEnterpriseConfigCommand command,string actor){var c=CurrentContext.CompanyId(context);if(string.IsNullOrWhiteSpace(c))return Fail<string>(RecruitmentErrorCodes.InvalidRequest,"Company context is required.");var e=await configs.FirstOrDefault(x=>x.CompanyId==c&&!x.IsDeleted);var mode=(command.RecruitmentMode??"Simple").Trim();if(mode is not ("Simple" or "Standard" or "Enterprise"))return Fail<string>(RecruitmentErrorCodes.InvalidRequest,"Recruitment mode must be Simple, Standard, or Enterprise.");var locations=(command.Locations??[]).Where(x=>!string.IsNullOrWhiteSpace(x)).Select(x=>x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();var timezone="Asia/Kolkata";if(e is null)e=new RecruitmentEnterpriseConfig{CompanyId=c,CreatedBy=actor,DefaultVersion=1}; else e.DefaultVersion = Math.Max(1, e.DefaultVersion) + 1;if(command.ResetToDefaults){locations=[];command.EnableSla=true;command.EnableAutomation=true;timezone="Asia/Kolkata";mode="Simple";}e.Locations=locations;e.RecruitmentMode=mode;e.EnableSla=command.EnableSla;e.EnableAutomation=command.EnableAutomation;e.ApplicationReview=command.ApplicationReview ?? true;e.HiringManagerReview=command.HiringManagerReview ?? mode is "Standard" or "Enterprise";e.InterviewRounds=command.InterviewRounds ?? mode is "Standard" or "Enterprise";e.ParallelPanels=command.ParallelPanels ?? mode == "Enterprise";e.Scorecards=command.Scorecards ?? mode is "Standard" or "Enterprise";e.OfferApproval=command.OfferApproval ?? mode is "Standard" or "Enterprise";e.OfferNegotiation=command.OfferNegotiation ?? mode == "Enterprise";e.CandidateEmailActions=command.CandidateEmailActions ?? mode is "Standard" or "Enterprise";e.Requisitions=command.Requisitions ?? mode == "Enterprise";e.SlaTracking=command.SlaTracking ?? command.EnableSla;e.Automation=command.Automation ?? command.EnableAutomation;e.InternalMobility=command.InternalMobility ?? mode == "Enterprise";e.RehireLinks=command.RehireLinks ?? mode is "Standard" or "Enterprise";e.DefaultTimezone=timezone;e.ConfigSource=command.ResetToDefaults?"SystemDefault":"CompanyOverride";e.OverriddenFields=command.ResetToDefaults?new List<string>():new[] { "Locations", "RecruitmentMode", "EnableSla", "EnableAutomation", "DefaultTimezone" }.Where(field=>(field=="Locations"&&locations.Count>0)||(field=="RecruitmentMode"&&mode!="Simple")||(field=="EnableSla"&&!command.EnableSla)||(field=="EnableAutomation"&&!command.EnableAutomation)||false).ToList();e.LastCommandIdempotencyKey=command.IdempotencyKey;e.UpdatedBy=actor;e.UpdatedDate=DateTime.UtcNow;if(string.IsNullOrWhiteSpace(e.ConfigId)){var add=await configs.AddOne(e);return add.Success?Ok(e.ConfigId,"Recruitment configuration saved."):Fail<string>(RecruitmentErrorCodes.ConcurrencyConflict,"Recruitment configuration could not be saved.",409);}var u=await configs.Update(Builders<RecruitmentEnterpriseConfig>.Filter.Where(x=>x.CompanyId==c&&x.ConfigId==e.ConfigId),e);return u.Success?Ok(e.ConfigId,command.ResetToDefaults?"Recruitment configuration reset to defaults.":"Recruitment configuration updated."):Fail<string>(RecruitmentErrorCodes.ConcurrencyConflict,"Recruitment configuration could not be updated.",409);} public async Task<Result<RecruitmentEnterpriseConfig>> GetConfig(){var c=CurrentContext.CompanyId(context);if(string.IsNullOrWhiteSpace(c))return Fail<RecruitmentEnterpriseConfig>(RecruitmentErrorCodes.InvalidRequest,"Company context is required.");var e=await configs.FirstOrDefault(x=>x.CompanyId==c&&!x.IsDeleted);if(e is null)e=new RecruitmentEnterpriseConfig{CompanyId=c,ConfigSource="SystemDefault",DefaultVersion=1,Locations=[],RecruitmentMode="Simple",EnableSla=true,EnableAutomation=true,DefaultTimezone="Asia/Kolkata",OverriddenFields=[]};return new Result<RecruitmentEnterpriseConfig>{Success=true,StatusCode=200,MethodResult=e,Data=e,Message=e.ConfigSource=="SystemDefault"?"Recruitment defaults loaded.":"Recruitment configuration loaded."};} public async Task<Result<string>> Link(RecruitmentRelationshipLinkCommand command,string actor){var c=CurrentContext.CompanyId(context);var key=command.IdempotencyKey?.Trim();if(string.IsNullOrWhiteSpace(c)||string.IsNullOrWhiteSpace(key)||key.Length<12)return Fail<string>(RecruitmentErrorCodes.InvalidRequest,"Company and an idempotency key of at least 12 characters are required.");var existing=await links.FirstOrDefault(x=>x.CompanyId==c&&x.LastCommandIdempotencyKey==key&&!x.IsDeleted);if(existing is not null)return Ok(existing.LinkId,"Relationship link already exists.");var a=await applicants.FirstOrDefault(x=>x.CompanyId==c&&x.ApplicantId==command.ApplicantId&&!x.IsDeleted);if(a is null)return Fail<string>(RecruitmentErrorCodes.InvalidRequest,"Applicant was not found in the current company.");if(string.IsNullOrWhiteSpace(command.RelatedPersonId)||command.RelatedPersonId.Trim()==a.ApplicantId)return Fail<string>(RecruitmentErrorCodes.InvalidRequest,"A valid related person is required and cannot be the applicant.");if(command.RelationshipType is not ("InternalMobility" or "Rehire"))return Fail<string>(RecruitmentErrorCodes.InvalidRequest,"Relationship type must be InternalMobility or Rehire.");var e=new RecruitmentRelationshipLink{CompanyId=c,ApplicantId=a.ApplicantId,RelationshipType=command.RelationshipType,RelatedPersonId=command.RelatedPersonId.Trim(),Notes=command.Notes?.Trim(),LastCommandIdempotencyKey=key,CreatedBy=actor,UpdatedBy=actor};var add=await links.AddOne(e);return add.Success?Ok(e.LinkId,"Recruitment relationship linked."):Fail<string>(RecruitmentErrorCodes.ConcurrencyConflict,"Relationship could not be linked.",409);}
+ public async Task<Result<string>> Enqueue(RecruitmentAutomationEventCommand command,string actor){var c=CurrentContext.CompanyId(context);var key=command.IdempotencyKey?.Trim();if(string.IsNullOrWhiteSpace(c)||string.IsNullOrWhiteSpace(command.EventType)||string.IsNullOrWhiteSpace(key)||key.Length<12)return Fail<string>(RecruitmentErrorCodes.InvalidRequest,"Event type and an idempotency key of at least 12 characters are required.");var existing=await outbox.FirstOrDefault(x=>x.CompanyId==c&&x.IdempotencyKey==key&&!x.IsDeleted);if(existing is not null)return Ok(existing.EventId,"Automation event already queued.");if(!string.IsNullOrWhiteSpace(command.ApplicantId)){var applicant=await applicants.FirstOrDefault(x=>x.CompanyId==c&&x.ApplicantId==command.ApplicantId.Trim()&&!x.IsDeleted);if(applicant is null)return Fail<string>(RecruitmentErrorCodes.InvalidRequest,"Applicant was not found in the current company.");}var e=new RecruitmentAutomationOutboxEvent{CompanyId=c,EventType=command.EventType.Trim(),ApplicantId=command.ApplicantId?.Trim(),Payload=command.Payload??[],IdempotencyKey=key,CreatedBy=actor,UpdatedBy=actor};var add=await outbox.AddOne(e);return add.Success?Ok(e.EventId,"Automation event queued."):Fail<string>(RecruitmentErrorCodes.ConcurrencyConflict,"Automation event could not be queued.",409);}
+ private static Result<T> Fail<T>(string code,string msg,int status=400)=>new(){Success=false,StatusCode=status,ErrorCode=code,Message=msg}; private static Result<string> Ok(string id,string msg)=>new(){Success=true,StatusCode=200,MethodResult=id,Message=msg};
+}
+
+
+
+
+
+
+
+
+
+
+
+
+

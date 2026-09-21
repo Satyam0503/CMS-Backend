@@ -145,7 +145,7 @@ public sealed class WorkFromHomeService(
             return Ok<IEnumerable<WorkFromHomeEmployeeAllocationDto>>([]);
 
         var today = CompanyNow(policy).Date;
-        var activeEmployees = await employees.GetAll(x => x.CompanyId == CompanyId && x.Status && !x.IsDeleted);
+        var activeEmployees = await employees.GetAll(x => x.CompanyId == CompanyId && x.Status && !x.IsDeleted && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended));
         return Ok<IEnumerable<WorkFromHomeEmployeeAllocationDto>>(activeEmployees
             .Select(employee =>
             {
@@ -164,7 +164,7 @@ public sealed class WorkFromHomeService(
     {
         var employeeId = dto.EmployeeId?.Trim();
         if (string.IsNullOrWhiteSpace(employeeId) || dto.WeeklyLimit is < 0 or > 31) return Fail("WFH_INVALID_EMPLOYEE_ALLOCATION", "Provide an active employee ID and a weekly WFH limit from 0 to 31.");
-        if (!await employees.Exist(x => x.CompanyId == CompanyId && x.EmployeeId == employeeId && x.Status && !x.IsDeleted)) return Fail("WFH_EMPLOYEE_NOT_FOUND", "The employee is not active in this company.");
+        if (!await employees.Exist(x => x.CompanyId == CompanyId && x.EmployeeId == employeeId && x.Status && !x.IsDeleted && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended))) return Fail("WFH_EMPLOYEE_NOT_FOUND", "The employee is not active in this company.");
         var policy = await policies.FirstOrDefault(x => x.CompanyId == CompanyId);
         if (policy is null) return Fail("WFH_POLICY_DISABLED", "Configure the company WFH policy before allocating WFH.");
         policy.EmployeeAllocations ??= [];
@@ -248,7 +248,7 @@ public sealed class WorkFromHomeService(
             return Fail<WorkFromHomeResponseDto>("WFH_INVALID_STATUS", "Unsupported WFH status filter.");
         var search = filter.EmployeeSearch?.Trim();
         var department = filter.Department?.Trim();
-        var employeeRows = await employees.GetAll(x => x.CompanyId == CompanyId && x.Status && !x.IsDeleted);
+        var employeeRows = await employees.GetAll(x => x.CompanyId == CompanyId && x.Status && !x.IsDeleted && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended));
         var matchingEmployees = employeeRows.Where(employee =>
             (string.IsNullOrWhiteSpace(department) || string.Equals(employee.Department, department, StringComparison.OrdinalIgnoreCase)) &&
             (string.IsNullOrWhiteSpace(search) ||
@@ -870,7 +870,7 @@ public sealed class WorkFromHomeService(
         return manager is null ? string.Empty : (await ActiveEmployee(manager.ReportingManager))?.UserId ?? string.Empty;
     }
 
-    private async Task<EmpUser?> ActiveEmployee(string userId) => string.IsNullOrWhiteSpace(userId) ? null : await employees.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == userId && IsCurrentEmployeeForWorkflow(x) && !x.IsDeleted);
+    private async Task<EmpUser?> ActiveEmployee(string userId) => string.IsNullOrWhiteSpace(userId) ? null : await employees.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == userId && x.Status && !x.IsDeleted && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended) && (x.EmploymentStatus == null || x.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.EmploymentStatus == EmployeeLifecycleStatuses.Suspended));
     private async Task<EmpUser?> EmployeeEmployedOn(string userId, DateTime date)
     {
         if (string.IsNullOrWhiteSpace(userId)) return null;
@@ -993,7 +993,7 @@ public sealed class WorkFromHomeService(
     {
         if (employee.Lifecycle is not null && !string.IsNullOrWhiteSpace(employee.Lifecycle.EmploymentStatus))
             return employee.Lifecycle.IsCurrentEmployee();
-        return employee.Status && employee.EmploymentStatus is not ("Resigned" or "Terminated");
+        return EmploymentExitRules.IsCurrentEmployee(employee);
     }
     internal static bool IsLifecycleAvailableForWfh(EmpUser employee, DateTime date)
         => EmploymentPeriod.ResolveAvailabilityOn(employee, date) == EmployeeLifecycleStatuses.Working;

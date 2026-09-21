@@ -82,7 +82,7 @@ public class AccountServices : IAccountServices
         Result<TokenResponseDto> result = new();
         model.Email = model.Email.Trim();
         EmpUser? user = await FindSingleForAnonymousAuthAsync(_employeeRepository,
-            x => x.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase) && x.Status && !x.IsDeleted && (x.EmploymentStatus == null || x.EmploymentStatus == "" || x.EmploymentStatus == "Active" || x.EmploymentStatus == "NoticePeriod"));
+            x => x.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase) && x.Status && !x.IsDeleted && (x.EmploymentStatus == null || x.EmploymentStatus == "" || x.EmploymentStatus == "Active" || x.EmploymentStatus == "NoticePeriod") && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended));
         if (user == null)
         {
             result.Success = false;
