@@ -159,6 +159,26 @@ public sealed class RecruitmentLifecycleServiceTests
     }
 
     [Fact]
+    public async Task Handoff_creates_payroll_attendance_and_leave_checkpoints()
+    {
+        var applicants = new Mock<IMongoDbRepository<Applicant>>();
+        applicants.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync(new Applicant { ApplicantId = "a-1", CompanyId = "company-1", ActivityType = ActivityType.Selected, FirstName = "Ada", LastName = "Lovelace", VacancyId = "v-1", Phone = "1" });
+        var employees = new Mock<IEmployeeService>();
+        employees.Setup(x => x.InviteNewEmployee(It.IsAny<InviteEmployeeDto>(), "actor-1")).ReturnsAsync(new Result<InviteEmployeeDto> { Success = true, MethodResult = new InviteEmployeeDto { UserId = "employee-user-1", FirstName = "Ada", LastName = "Lovelace", Email = "ada@example.com", EmployeeId = "E-1" } });
+        var handoffs = new Mock<IMongoDbRepository<RecruitmentHandoff>>();
+        handoffs.Setup(x => x.AddOne(It.IsAny<RecruitmentHandoff>())).ReturnsAsync(new Result { Success = true });
+        var onboarding = new Mock<IMongoDbRepository<RecruitmentOnboardingCase>>();
+        onboarding.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentOnboardingCase, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync((RecruitmentOnboardingCase?)null);
+        onboarding.Setup(x => x.AddOne(It.IsAny<RecruitmentOnboardingCase>())).ReturnsAsync(new Result { Success = true });
+        var logs = new Mock<IMongoDbRepository<ApplicantLogs>>();
+        logs.Setup(x => x.AddOne(It.IsAny<ApplicantLogs>())).ReturnsAsync(new Result { Success = true });
+        var service = new RecruitmentHandoffService(applicants.Object, handoffs.Object, logs.Object, employees.Object, TenantContext("company-1"), onboardingCases: onboarding.Object);
+        var result = await service.HandoffToPreboarding(HandoffRequest(), "actor-1");
+        Assert.True(result.Success);
+        onboarding.Verify(x => x.AddOne(It.Is<RecruitmentOnboardingCase>(item => item.Tasks.Any(task => task.Code == "payroll-setup") && item.Tasks.Any(task => task.Code == "attendance-setup") && item.Tasks.Any(task => task.Code == "leave-setup"))), Times.Once);
+    }
+
+    [Fact]
     public async Task Handoff_invites_selected_applicant_and_records_audit_event()
     {
         var applicants = new Mock<IMongoDbRepository<Applicant>>();
@@ -332,6 +352,7 @@ public sealed class RecruitmentLifecycleServiceTests
         Assert.False(result.Success);
         Assert.Equal(RecruitmentErrorCodes.InvalidRequest, result.ErrorCode);
     }}
+
 
 
 

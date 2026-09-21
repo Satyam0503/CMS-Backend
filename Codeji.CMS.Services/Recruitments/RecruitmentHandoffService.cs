@@ -97,7 +97,7 @@ public sealed class RecruitmentHandoffService(
         if (onboardingCases is not null)
         {
             var onboarding = await onboardingCases.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted);
-            if (onboarding is null) await onboardingCases.AddOne(new RecruitmentOnboardingCase { CompanyId = companyId, ApplicantId = applicant.ApplicantId, EmployeeUserId = handoff.EmployeeUserId, Status = RecruitmentOnboardingStatus.PendingActivation, LastCommandIdempotencyKey = request.IdempotencyKey.Trim(), Tasks = [new RecruitmentOnboardingTask { Code = "account-activation", Title = "Activate employee account" }, new RecruitmentOnboardingTask { Code = "access", Title = "Provision role and system access" }, new RecruitmentOnboardingTask { Code = "orientation", Title = "Complete onboarding orientation" }], CreatedBy = actorUserId, UpdatedBy = actorUserId });
+            if (onboarding is null) await onboardingCases.AddOne(new RecruitmentOnboardingCase { CompanyId = companyId, ApplicantId = applicant.ApplicantId, EmployeeUserId = handoff.EmployeeUserId, Status = RecruitmentOnboardingStatus.PendingActivation, LastCommandIdempotencyKey = request.IdempotencyKey.Trim(), Tasks = [new RecruitmentOnboardingTask { Code = "account-activation", Title = "Activate employee account" }, new RecruitmentOnboardingTask { Code = "access", Title = "Provision role and system access" }, new RecruitmentOnboardingTask { Code = "payroll-setup", Title = "Configure payroll and compensation profile" }, new RecruitmentOnboardingTask { Code = "attendance-setup", Title = "Configure attendance, schedule, and work policy" }, new RecruitmentOnboardingTask { Code = "leave-setup", Title = "Configure leave policy and balances" }, new RecruitmentOnboardingTask { Code = "orientation", Title = "Complete onboarding orientation" }], CreatedBy = actorUserId, UpdatedBy = actorUserId });
         }
         if (preboardingCases is not null)
         {
@@ -126,6 +126,7 @@ public sealed class RecruitmentHandoffService(
         return result;
     }
 }
+
 
 
 

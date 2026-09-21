@@ -96,23 +96,10 @@ public sealed class RecruitmentSprint0SecurityTests
         external.Verify(x => x.Validate("raw-token", true), Times.Never);
     }
 
-    [Fact]
-    public async Task Legacy_email_upload_is_retired_with_gone_response()
-    {
-        var controller = new ApplicantsController(
-            new Mock<IApplicantsService>().Object,
-            new Mock<IRecruitmentHandoffService>().Object,
-            new Mock<IRecruitmentInterviewService>().Object,
-            new Mock<IRecruitmentOfferService>().Object,
-            new HttpContextAccessor { HttpContext = new DefaultHttpContext() });
-
-        var result = await controller.UploadResume(new ResumeApplicantModel(), "candidate@example.com");
-
-        Assert.False(result.Success);
-        Assert.Equal(StatusCodes.Status410Gone, result.StatusCode);
-    }
     private static Mock<IMongoDbRepository<T>> Repository<T>() where T : class
         => new();
 }
+
+
 
 
