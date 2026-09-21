@@ -29,20 +29,7 @@ Codeji.CMS.API/Uploads/*
 *.log
 build-lifecycle-validation.txt
 
-# Documentation
-# This intentionally excludes documentation files and the documentation tree,
-# including generated QA/test reports.
-/docs/
-*.md
-*.mdx
-*.pdf
-*.doc
-*.docx
-
-# Version the maintained HRMS implementation references only.
-!/docs/
-!/docs/hrms/
-!/docs/hrms/*.md
+# Documentation is maintained under /docs and committed with the source.
 # ASP.NET configuration containing secrets
 Codeji.CMS.API/appsettings.json
 
