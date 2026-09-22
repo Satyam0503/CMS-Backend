@@ -26,6 +26,7 @@ public static class ServicesRegistration
         //   services.AddSingleton<IColleagueBusiness, ColleagueBusiness>();
         services.AddScoped<IMiddlewareService, MiddlewareService>();
         services.AddScoped<IApplicantsService, ApplicantServices>();
+        services.AddScoped<IRecruitmentCandidateShareService, RecruitmentCandidateShareService>();
         services.AddScoped<IRecruitmentApplicationService, RecruitmentApplicationService>();
         services.AddScoped<IRecruitmentHandoffService, RecruitmentHandoffService>();
         services.AddScoped<IRecruitmentOnboardingService, RecruitmentOnboardingService>();
@@ -87,6 +88,7 @@ public static class ServicesRegistration
         return services;
     }
 }
+
 
 
 

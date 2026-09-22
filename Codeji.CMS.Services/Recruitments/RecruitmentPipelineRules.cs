@@ -9,6 +9,9 @@ public static class RecruitmentPipelineRules
     public static IReadOnlyList<string> ParseSnapshot(string? snapshot)
         => (snapshot ?? string.Empty).Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+    /// <summary>Generic applicant profile edits may not advance the recruitment lifecycle.</summary>
+    public static bool RequiresCanonicalStageCommand(ActivityType current, ActivityType requested) => current != requested;
+
     public static bool IsAllowedTransition(ActivityType current, ActivityType target, out string error)
     {
         error = string.Empty;
@@ -16,6 +19,11 @@ public static class RecruitmentPipelineRules
         if (current is ActivityType.Selected or ActivityType.Rejected or ActivityType.ReApply)
         {
             error = $"Applicant status cannot be changed after it is {current}.";
+            return false;
+        }
+        if (target == ActivityType.Selected)
+        {
+            error = "Applicants must be selected through the hiring decision workflow.";
             return false;
         }
         if (target == ActivityType.Rejected) return true;

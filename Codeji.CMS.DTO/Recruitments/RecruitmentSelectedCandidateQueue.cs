@@ -1,0 +1,2 @@
+namespace Codeji.CMS.DTO.Recruitments;
+public sealed class RecruitmentSelectedCandidateQueueItem { public string ApplicantId { get; set; } = string.Empty; public string VacancyId { get; set; } = string.Empty; public string ApplicantName { get; set; } = string.Empty; public string? Email { get; set; } public string Stage { get; set; } = "Selected"; public bool IsEmployee { get; set; } public DateTime SelectedAtUtc { get; set; } }

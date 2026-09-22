@@ -70,7 +70,24 @@ public sealed class RecruitmentLifecycleServiceTests
         offers.Verify(x => x.Update(It.IsAny<FilterDefinition<RecruitmentOffer>>(), It.IsAny<RecruitmentOffer>()), Times.Never);
     }
 
-    [Fact]
+        [Fact]
+    public async Task Offer_persists_future_expiry()
+    {
+        var applicants = new Mock<IMongoDbRepository<Applicant>>();
+        applicants.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new Applicant { ApplicantId = "a-1", CompanyId = "company-1", FirstName = "Ada", LastName = "Lovelace", VacancyId = "v-1", Phone = "1" });
+        var offers = new Mock<IMongoDbRepository<RecruitmentOffer>>();
+        RecruitmentOffer? saved = null;
+        offers.Setup(x => x.AddOne(It.IsAny<RecruitmentOffer>())).Callback<RecruitmentOffer>(item => saved = item).ReturnsAsync(new Result { Success = true });
+        var service = new RecruitmentOfferService(applicants.Object, offers.Object, new Mock<IMongoDbRepository<ApplicantLogs>>().Object, new Mock<INotificationService>().Object, TenantContext("company-1"));
+        var expiry = DateTime.UtcNow.AddDays(7);
+        var result = await service.Upsert(new RecruitmentOfferCommand { ApplicantId = "a-1", VacancyId = "v-1", Salary = 100, Currency = "INR", Status = RecruitmentOfferStatus.Draft, ExpiresAtUtc = expiry, IdempotencyKey = "expiry-key-001" }, "actor-1");
+        Assert.True(result.Success);
+        Assert.NotNull(saved);
+        Assert.Equal(DateTimeKind.Utc, saved!.ExpiresAtUtc!.Value.Kind);
+        Assert.Equal(expiry, saved.ExpiresAtUtc.Value);
+    }
+[Fact]
     public async Task Interview_lookup_does_not_cross_tenant_boundary()
     {
         var applicants = new Mock<IMongoDbRepository<Applicant>>();
@@ -78,7 +95,7 @@ public sealed class RecruitmentLifecycleServiceTests
             .ReturnsAsync((Expression<Func<Applicant, bool>> filter, bool _, bool __) => new[] { new Applicant { ApplicantId = "a-1", CompanyId = "company-2", Phone = "1" } }.AsQueryable().FirstOrDefault(filter));
         var service = new RecruitmentInterviewService(applicants.Object, new Mock<IMongoDbRepository<RecruitmentInterview>>().Object, new Mock<ICalendarServices>().Object, TenantContext("company-1"));
 
-        var result = await service.Upsert(new RecruitmentInterviewCommand { ApplicantId = "a-1", VacancyId = "v-1", Title = "Screen", StartsAtUtc = DateTime.UtcNow, EndsAtUtc = DateTime.UtcNow.AddHours(1), IdempotencyKey = "k-1", Status = RecruitmentInterviewStatus.Scheduled }, "actor-1");
+        var result = await service.Upsert(new RecruitmentInterviewCommand { ApplicantId = "a-1", VacancyId = "v-1", Title = "Screen", StartsAtUtc = DateTime.UtcNow, EndsAtUtc = DateTime.UtcNow.AddHours(1), IdempotencyKey = "k-1", PanelistUserIds = ["employee-1"], Status = RecruitmentInterviewStatus.Scheduled }, "actor-1");
 
         Assert.False(result.Success);
         Assert.Equal(RecruitmentErrorCodes.InvalidRequest, result.ErrorCode);
@@ -213,8 +230,71 @@ public sealed class RecruitmentLifecycleServiceTests
         employees.Verify(x => x.InviteNewEmployee(It.IsAny<InviteEmployeeDto>(), It.IsAny<string>()), Times.Never);
     }
 
-    private static CandidateHandoffRequest HandoffRequest() => new() { ApplicantId = "a-1", IdempotencyKey = "handoff-key", FirstName = "Ada", LastName = "Lovelace", Email = "ada@example.com", EmployeeId = "E-1" };
     [Fact]
+    public async Task Handoff_requires_an_accepted_offer_when_offer_repository_is_available()
+    {
+        var applicants = new Mock<IMongoDbRepository<Applicant>>();
+        applicants.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync(new Applicant { ApplicantId = "a-1", CompanyId = "company-1", ActivityType = ActivityType.Selected, Phone = "1" });
+        var offers = new Mock<IMongoDbRepository<RecruitmentOffer>>();
+        offers.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentOffer, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync((RecruitmentOffer?)null);
+        var employees = new Mock<IEmployeeService>();
+        var service = new RecruitmentHandoffService(applicants.Object, new Mock<IMongoDbRepository<RecruitmentHandoff>>().Object, new Mock<IMongoDbRepository<ApplicantLogs>>().Object, employees.Object, TenantContext("company-1"), offers: offers.Object);
+
+        var result = await service.HandoffToPreboarding(HandoffRequest(), "actor-1");
+
+        Assert.False(result.Success);
+        Assert.Equal(RecruitmentErrorCodes.InvalidTransition, result.ErrorCode);
+        employees.Verify(x => x.InviteNewEmployee(It.IsAny<InviteEmployeeDto>(), It.IsAny<string>()), Times.Never);
+    }
+    [Fact]
+    public async Task Handoff_uses_canonical_application_stage_when_present()
+    {
+        var applicants = new Mock<IMongoDbRepository<Applicant>>();
+        applicants.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new Applicant { ApplicantId = "a-1", CompanyId = "company-1", VacancyId = "v-1", ActivityType = ActivityType.Selected, Phone = "1" });
+        var applications = new Mock<IMongoDbRepository<RecruitmentJobApplication>>();
+        applications.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentJobApplication, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new RecruitmentJobApplication { ApplicationId = "app-1", ApplicantId = "a-1", VacancyId = "v-1", CompanyId = "company-1", CurrentStage = nameof(ActivityType.Shortlisted) });
+        var employees = new Mock<IEmployeeService>();
+        var service = new RecruitmentHandoffService(applicants.Object, new Mock<IMongoDbRepository<RecruitmentHandoff>>().Object, new Mock<IMongoDbRepository<ApplicantLogs>>().Object, employees.Object, TenantContext("company-1"), applications: applications.Object);
+
+        var result = await service.HandoffToPreboarding(HandoffRequest(), "actor-1");
+
+        Assert.False(result.Success);
+        Assert.Equal(RecruitmentErrorCodes.InvalidTransition, result.ErrorCode);
+        employees.Verify(x => x.InviteNewEmployee(It.IsAny<InviteEmployeeDto>(), It.IsAny<string>()), Times.Never);
+    }
+    [Fact]
+    public async Task Handoff_rejects_duplicate_application_even_with_a_new_idempotency_key()
+    {
+        var handoffs = new Mock<IMongoDbRepository<RecruitmentHandoff>>();
+        handoffs.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentHandoff, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new RecruitmentHandoff { CompanyId = "company-1", ApplicantId = "a-1", IdempotencyKey = "old-key", EmployeeUserId = "employee-user-1" });
+        var employees = new Mock<IEmployeeService>();
+        var service = new RecruitmentHandoffService(new Mock<IMongoDbRepository<Applicant>>().Object, handoffs.Object, new Mock<IMongoDbRepository<ApplicantLogs>>().Object, employees.Object, TenantContext("company-1"));
+
+        var request = HandoffRequest();
+        request.IdempotencyKey = "new-key";
+        var result = await service.HandoffToPreboarding(request, "actor-1");
+
+        Assert.True(result.Success);
+        Assert.Equal("employee-user-1", result.MethodResult);
+        employees.Verify(x => x.InviteNewEmployee(It.IsAny<InviteEmployeeDto>(), It.IsAny<string>()), Times.Never);
+    }    private static CandidateHandoffRequest HandoffRequest() => new() { ApplicantId = "a-1", IdempotencyKey = "handoff-key", FirstName = "Ada", LastName = "Lovelace", Email = "ada@example.com", EmployeeId = "E-1" };
+        [Fact]
+    public async Task Scheduled_interview_rejects_past_start()
+    {
+        var applicants = new Mock<IMongoDbRepository<Applicant>>();
+        applicants.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync(new Applicant { ApplicantId = "a-1", CompanyId = "company-1", Phone = "1" });
+        var interviews = new Mock<IMongoDbRepository<RecruitmentInterview>>();
+        var service = new RecruitmentInterviewService(applicants.Object, interviews.Object, new Mock<ICalendarServices>().Object, TenantContext("company-1"));
+        var start = DateTime.UtcNow.AddMinutes(-5);
+        var result = await service.Upsert(new RecruitmentInterviewCommand { ApplicantId = "a-1", VacancyId = "v-1", Title = "Technical screen", StartsAtUtc = start, EndsAtUtc = start.AddHours(1), IdempotencyKey = "past-interview-001", Status = RecruitmentInterviewStatus.Scheduled }, "actor-1");
+        Assert.False(result.Success);
+        Assert.Equal(RecruitmentErrorCodes.InvalidRequest, result.ErrorCode);
+        interviews.Verify(x => x.AddOne(It.IsAny<RecruitmentInterview>()), Times.Never);
+    }
+[Fact]
     public async Task Scheduled_interview_syncs_shared_calendar_and_persists_resource_id()
     {
         var applicants = new Mock<IMongoDbRepository<Applicant>>();
@@ -227,7 +307,7 @@ public sealed class RecruitmentLifecycleServiceTests
         var service = new RecruitmentInterviewService(applicants.Object, interviews.Object, calendar.Object, TenantContext("company-1"));
         var start = DateTime.UtcNow.AddHours(2);
 
-        var result = await service.Upsert(new RecruitmentInterviewCommand { ApplicantId = "a-1", VacancyId = "v-1", Title = "Technical screen", StartsAtUtc = start, EndsAtUtc = start.AddHours(1), IdempotencyKey = "interview-key", Status = RecruitmentInterviewStatus.Scheduled }, "actor-1");
+        var result = await service.Upsert(new RecruitmentInterviewCommand { ApplicantId = "a-1", VacancyId = "v-1", Title = "Technical screen", StartsAtUtc = start, EndsAtUtc = start.AddHours(1), IdempotencyKey = "interview-key", PanelistUserIds = ["employee-1"], Status = RecruitmentInterviewStatus.Scheduled }, "actor-1");
 
         Assert.True(result.Success);
         Assert.Equal("Synced", (await CapturedInterview(interviews)).CalendarSyncStatus);
@@ -351,7 +431,32 @@ public sealed class RecruitmentLifecycleServiceTests
         var result = await service.Upsert(new RecruitmentInterviewPlanCommand { Name = "Default", IsDefault = true, IdempotencyKey = "plan-duplicate-order", Stages = [new RecruitmentInterviewPlanStageCommand { Order = 1, Code = "tech", Name = "Technical" }, new RecruitmentInterviewPlanStageCommand { Order = 1, Code = "hr", Name = "HR" }] }, "actor-1");
         Assert.False(result.Success);
         Assert.Equal(RecruitmentErrorCodes.InvalidRequest, result.ErrorCode);
-    }}
+    }    [Fact]
+    public async Task Requisition_persists_flexible_intake_fields()
+    {
+        var vacancies = new Mock<IMongoDbRepository<JobVacancy>>();
+        vacancies.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<JobVacancy, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync(new JobVacancy { JobId = "v-1", CompanyId = "company-1" });
+        var requisitions = new Mock<IMongoDbRepository<RecruitmentRequisition>>();
+        requisitions.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentRequisition, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync((RecruitmentRequisition?)null);
+        requisitions.Setup(x => x.AddOne(It.IsAny<RecruitmentRequisition>())).ReturnsAsync(new Result { Success = true });
+        var service = new RecruitmentRequisitionService(vacancies.Object, requisitions.Object, TenantContext("company-1"));
+
+        var result = await service.Upsert(new RecruitmentRequisitionCommand { VacancyId = "v-1", PositionTitle = "Engineer", Headcount = 2, EmploymentType = "Full-time", HiringManagerUserId = "manager-1", CostCenter = "ENG-01", TargetStartDateUtc = DateTime.UtcNow.AddDays(30), Justification = "Growth plan", IdempotencyKey = "req-fields" }, "actor-1");
+
+        Assert.True(result.Success);
+        requisitions.Verify(x => x.AddOne(It.Is<RecruitmentRequisition>(request => request.EmploymentType == "Full-time" && request.HiringManagerUserId == "manager-1" && request.CostCenter == "ENG-01" && request.Justification == "Growth plan")), Times.Once);
+    }
+
+    [Fact]
+    public async Task Requisition_rejects_past_target_start_date()
+    {
+        var service = new RecruitmentRequisitionService(new Mock<IMongoDbRepository<JobVacancy>>().Object, new Mock<IMongoDbRepository<RecruitmentRequisition>>().Object, TenantContext("company-1"));
+        var result = await service.Upsert(new RecruitmentRequisitionCommand { VacancyId = "v-1", PositionTitle = "Engineer", Headcount = 1, TargetStartDateUtc = DateTime.UtcNow.AddDays(-1), IdempotencyKey = "req-past-date" }, "actor-1");
+        Assert.False(result.Success);
+        Assert.Equal(RecruitmentErrorCodes.InvalidRequest, result.ErrorCode);
+    }
+}
+
 
 
 

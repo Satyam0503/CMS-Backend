@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace Codeji.CMS.DTO.Recruitments;
 
@@ -17,7 +18,8 @@ public sealed class RecruitmentExternalActionIssueCommand
 
 public sealed class RecruitmentExternalActionTokenDto
 {
-    public string ActionTokenId { get; set; } = string.Empty;
+    [JsonIgnore] public string CompanyId { get; set; } = string.Empty;
+public string ActionTokenId { get; set; } = string.Empty;
     public string ActionType { get; set; } = string.Empty;
     public string ApplicantId { get; set; } = string.Empty;
     public string? VacancyId { get; set; }
@@ -61,3 +63,8 @@ public sealed class RecruitmentCandidateOfferActionCommand
     public string? Message { get; set; }
     [System.ComponentModel.DataAnnotations.Required] public string IdempotencyKey { get; set; } = string.Empty;
 }
+
+
+
+
+

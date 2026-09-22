@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Text;
 using Codeji.CMS.API.App_Start;
@@ -224,7 +225,20 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
         options.Events = new JwtBearerEvents
         {
-            OnMessageReceived = context =>
+            OnTokenValidated = context =>
+            {
+                var principal = context.Principal;
+                var subject = principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+                    ?? principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                var userId = principal?.FindFirst("user_id")?.Value;
+                var companyId = principal?.FindFirst("company_id")?.Value;
+                var roleId = principal?.FindFirst("role_id")?.Value;
+                if (string.IsNullOrWhiteSpace(subject) || string.IsNullOrWhiteSpace(userId) ||
+                    !string.Equals(subject, userId, StringComparison.Ordinal) ||
+                    string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(roleId))
+                    context.Fail("Required tenant identity claims are missing or inconsistent.");
+                return Task.CompletedTask;
+            },            OnMessageReceived = context =>
             {
                 var accessToken = context.Request.Query["access_token"];
                 // If the request is for our hub...
@@ -433,4 +447,6 @@ app.Use(async (context, next) =>
 
 // Run the application
 app.Run();
+
+
 

@@ -1,4 +1,4 @@
-﻿namespace Codeji.CMS.Utility.Enums
+namespace Codeji.CMS.Utility.Enums
 {
     public static class EnumsHelper
     {
@@ -33,7 +33,9 @@
             Administrator = 1,
             HR = 2,
             Employee = 3,
-            HRExecutive = 4
+            HRExecutive = 4,
+            Agency = 5,
+            Vendor = 6
         }
         public enum MailType
         {
@@ -128,4 +130,6 @@
         }
     }
 }
+
+
 

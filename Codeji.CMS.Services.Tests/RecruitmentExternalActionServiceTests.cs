@@ -70,6 +70,21 @@ public sealed class RecruitmentExternalActionServiceTests
         Assert.Equal(RecruitmentErrorCodes.InvalidRequest, result.ErrorCode);
     }
 
+    [Fact]
+    public async Task Issue_does_not_reuse_another_tenant_issuance_key()
+    {
+        var tokens = new Mock<IMongoDbRepository<RecruitmentExternalActionToken>>();
+        var seed = new[] { new RecruitmentExternalActionToken { CompanyId = "company-b", ApplicantId = "app-1", ActionType = "AcceptOffer", IssuanceKey = "issuance-key-003", TokenHash = "old-hash", ExpiresAtUtc = DateTime.UtcNow.AddHours(1) } };
+        tokens.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentExternalActionToken, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync((Expression<Func<RecruitmentExternalActionToken, bool>> filter, bool _, bool __) => seed.AsQueryable().FirstOrDefault(filter));
+        tokens.Setup(x => x.AddOne(It.IsAny<RecruitmentExternalActionToken>())).ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+        var service = new RecruitmentExternalActionService(tokens.Object, new Mock<IMongoDbRepository<RecruitmentEmailOutbox>>().Object, TenantContext("company-a"));
+
+        var result = await service.Issue(new RecruitmentExternalActionIssueCommand { ApplicantId = "app-1", OfferId = "offer-1", ActionType = "AcceptOffer", RecipientEmail = "candidate@example.com", IssuanceKey = "issuance-key-003" }, "actor-1");
+
+        Assert.True(result.Success);
+        tokens.Verify(x => x.AddOne(It.Is<RecruitmentExternalActionToken>(item => item.CompanyId == "company-a")), Times.Once);
+    }
     private static IHttpContextAccessor TenantContext(string companyId)
     {
         var context = new DefaultHttpContext();
@@ -77,6 +92,7 @@ public sealed class RecruitmentExternalActionServiceTests
         return new HttpContextAccessor { HttpContext = context };
     }
 }
+
 
 
 

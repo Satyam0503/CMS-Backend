@@ -9,6 +9,11 @@ public sealed class RecruitmentRequisitionCommand
     [Required] public string PositionTitle { get; set; } = string.Empty;
     public string? DepartmentId { get; set; }
     public string? Location { get; set; }
+    public string? EmploymentType { get; set; }
+    public string? HiringManagerUserId { get; set; }
+    public string? CostCenter { get; set; }
+    public DateTime? TargetStartDateUtc { get; set; }
+    public string? Justification { get; set; }
     [Range(1, 10000)] public int Headcount { get; set; } = 1;
     public int? ApprovedHeadcount { get; set; }
     public string? ApprovalReference { get; set; }

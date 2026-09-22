@@ -15,7 +15,7 @@ public sealed class RecruitmentScreeningQueueServiceTests
     {
         var applicants = new Mock<IMongoDbRepository<Applicant>>();
         applicants.Setup(x => x.GetAll(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
-            .ReturnsAsync((Expression<Func<Applicant, bool>> filter, bool _, bool __) => new[] { new Applicant { CompanyId = "company-1", ApplicantId = "a-1", VacancyId = "v-1", FirstName = "Ada", LastName = "Lovelace", Email = "ada@example.com", Phone = "1", CreatedDate = DateTime.UtcNow.AddHours(-72) }, new Applicant { CompanyId = "company-2", ApplicantId = "a-2", VacancyId = "v-1", FirstName = "Other", LastName = "Tenant", Phone = "2", CreatedDate = DateTime.UtcNow.AddHours(-72) } }.AsQueryable().Where(filter).ToArray());
+            .ReturnsAsync((Expression<Func<Applicant, bool>> filter, bool _, bool __) => new[] { new Applicant { CompanyId = "company-1", ApplicantId = "a-1", VacancyId = "v-1", FirstName = "Ada", LastName = "Lovelace", Email = "ada@example.com", Phone = "1", CreatedDate = DateTime.UtcNow.AddHours(-72) }, new Applicant { CompanyId = "company-2", ApplicantId = "a-2", VacancyId = "v-1", FirstName = "Other", LastName = "Tenant", Phone = "2", CreatedDate = DateTime.UtcNow.AddHours(-72) }, new Applicant { CompanyId = "company-1", ApplicantId = "a-shortlisted", VacancyId = "v-1", FirstName = "Already", LastName = "Shortlisted", Phone = "3", ActivityType = Codeji.CMS.Utility.Enums.EnumsHelper.ActivityType.Shortlisted, CreatedDate = DateTime.UtcNow.AddHours(-72) } }.AsQueryable().Where(filter).ToArray());
         var reviews = new Mock<IMongoDbRepository<RecruitmentScreeningReview>>();
         reviews.Setup(x => x.GetAll(It.IsAny<Expression<Func<RecruitmentScreeningReview, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync(Array.Empty<RecruitmentScreeningReview>());
         var service = new RecruitmentScreeningQueueService(applicants.Object, reviews.Object, TenantContext("company-1"));
@@ -34,4 +34,5 @@ public sealed class RecruitmentScreeningQueueServiceTests
         return new HttpContextAccessor { HttpContext = context };
     }
 }
+
 

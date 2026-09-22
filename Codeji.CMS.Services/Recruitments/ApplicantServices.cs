@@ -161,11 +161,9 @@ namespace Codeji.CMS.Services.Recruitments
                 return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, ErrorCode = RecruitmentErrorCodes.ConcurrencyConflict, Message = "This application was updated by another user. Refresh it and try again." };
 
             var previousActivityType = entity.ActivityType;
-            if (!IsAllowedActivityTransition(previousActivityType, model.ActivityType, out var transitionError))
+            if (RecruitmentPipelineRules.RequiresCanonicalStageCommand(previousActivityType, model.ActivityType))
             {
-                result.Message = transitionError;
-                result.ErrorCode = RecruitmentErrorCodes.InvalidTransition;
-                return result;
+                return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, ErrorCode = RecruitmentErrorCodes.InvalidTransition, Message = "Recruitment stage changes must be completed through the recruitment lifecycle workflow." };
             }
 
             entity.Experience = model.Experience;

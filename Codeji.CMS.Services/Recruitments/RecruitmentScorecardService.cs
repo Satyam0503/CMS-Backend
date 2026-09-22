@@ -52,6 +52,13 @@ public sealed class RecruitmentScorecardService(
         await applicantLogs.AddOne(new ApplicantLogs { CompanyId = companyId, ApplicantId = applicant.ApplicantId, ApplicantName = $"{applicant.FirstName} {applicant.LastName}".Trim(), JobRole = applicant.VacancyId, UserId = actorUserId, ActivityCategory = 0, Description = $"Scorecard {existing.Status.ToLowerInvariant()} by {existing.ReviewerUserId}.", EventType = "ScorecardUpdated", PreviousStage = previousStatus, CurrentStage = next, CreatedBy = actorUserId, UpdatedBy = actorUserId });
         return Ok(result, existing.ScorecardId, "Scorecard updated.");
     }
+    public async Task<Result<List<RecruitmentScorecard>>> GetByApplicant(string applicantId, string vacancyId)
+    {
+        var companyId = CurrentContext.CompanyId(context);
+        if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(applicantId) || string.IsNullOrWhiteSpace(vacancyId)) return new Result<List<RecruitmentScorecard>> { Success = false, StatusCode = 400, Message = "Applicant and vacancy are required." };
+        var rows = (await scorecards.GetAll(x => x.CompanyId == companyId && x.ApplicantId == applicantId.Trim() && x.VacancyId == vacancyId.Trim() && !x.IsDeleted)).OrderByDescending(x => x.RoundNumber).ThenByDescending(x => x.UpdatedDate).ToList();
+        return new Result<List<RecruitmentScorecard>> { Success = true, StatusCode = 200, MethodResult = rows, Data = rows, TotalRecords = rows.Count, Message = $"{rows.Count} scorecard(s) loaded." };
+    }
     private static RecruitmentScorecardCriterion Map(RecruitmentScorecardCriterionCommand item) => new() { Name = item.Name.Trim(), Rating = item.Rating, Notes = item.Notes?.Trim() };
     private static bool IsAllowed(string current, string next) => current == next || (current, next) switch { (RecruitmentScorecardStatus.Draft, RecruitmentScorecardStatus.Submitted) => true, (RecruitmentScorecardStatus.Submitted, RecruitmentScorecardStatus.Locked) => true, _ => false };
     private static Result<string> Ok(Result<string> result, string id, string message) { result.Success = true; result.StatusCode = StatusCodes.Status200OK; result.MethodResult = id; result.Message = message; return result; }

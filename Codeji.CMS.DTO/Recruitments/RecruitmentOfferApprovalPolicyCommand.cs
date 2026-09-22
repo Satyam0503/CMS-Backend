@@ -11,7 +11,11 @@ public sealed class RecruitmentOfferApprovalPolicyCommand
     [Range(0, double.MaxValue)] public decimal ApprovalThreshold { get; set; }
     public bool RequireApprovalReference { get; set; } = true;
     public string? ApproverRoleId { get; set; }
+    public string? DelegatedApproverUserId { get; set; }
+    public DateTime? DelegationExpiresAtUtc { get; set; }
     [Required] public string IdempotencyKey { get; set; } = string.Empty;
     public int? ExpectedVersion { get; set; }
 }
+
+
 

@@ -13,5 +13,5 @@ public sealed class RecruitmentScreeningController(IRecruitmentScreeningQueueSer
 {
     [HttpGet("Queue")]
     [ModulePermission(AppModule.Applications, Permission.View)]
-    public Task<Result<RecruitmentScreeningQueueReport>> Queue([FromQuery] string? vacancyId, [FromQuery] int overdueAfterHours = 48) => queueService.Get(vacancyId, overdueAfterHours);
+    public Task<Result<RecruitmentScreeningQueueReport>> Queue([FromQuery] string? vacancyId, [FromQuery] int overdueAfterHours = 48, [FromQuery] string? reviewerUserId = null, [FromQuery] int? minScore = null, [FromQuery] int? maxScore = null, [FromQuery] DateTime? submittedAfterUtc = null, [FromQuery] DateTime? submittedBeforeUtc = null) => queueService.Get(vacancyId, overdueAfterHours, reviewerUserId, minScore, maxScore, submittedAfterUtc, submittedBeforeUtc);
 }

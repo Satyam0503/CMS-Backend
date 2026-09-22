@@ -2,6 +2,7 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Recruitments;
+using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
@@ -14,7 +15,9 @@ public sealed class RecruitmentScreeningService(
     IMongoDbRepository<Applicant> applicants,
     IMongoDbRepository<RecruitmentScreeningReview> reviews,
     IMongoDbRepository<ApplicantLogs> logs,
-    IHttpContextAccessor context) : IRecruitmentScreeningService
+    IHttpContextAccessor context,
+    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null,
+    IMongoDbRepository<EmpUser>? employees = null) : IRecruitmentScreeningService
 {
     public async Task<Result<string>> Upsert(RecruitmentScreeningReviewCommand command, string actorUserId)
     {
@@ -24,10 +27,20 @@ public sealed class RecruitmentScreeningService(
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(reviewer))
             return Fail(RecruitmentErrorCodes.InvalidRequest, "Company, reviewer, and idempotency key are required.");
         var decision = command.Decision?.Trim();
+        if (employees is not null && !string.IsNullOrWhiteSpace(reviewer))
+        {
+            var activeReviewer = await employees.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == reviewer && x.Status && !x.IsDeleted);
+            if (activeReviewer is null) return Fail(RecruitmentErrorCodes.InvalidRequest, "Reviewer is not active in the current company.");
+        }
         if (decision is not (RecruitmentScreeningDecision.Pending or RecruitmentScreeningDecision.Pass or RecruitmentScreeningDecision.Hold or RecruitmentScreeningDecision.Reject))
             return Fail(RecruitmentErrorCodes.InvalidRequest, "Screening decision must be Pending, Pass, Hold, or Reject.");
         if (command.Score is < 0 or > 100 || command.Criteria is null || command.Criteria.Count == 0 || command.Criteria.Any(x => string.IsNullOrWhiteSpace(x.Name)))
             return Fail(RecruitmentErrorCodes.InvalidRequest, "Screening requires at least one named criterion and a score from 0 to 100.");
+        var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
+        if (config is not null && config.ScreeningPassScore > 0 && decision == RecruitmentScreeningDecision.Pass && command.Score < config.ScreeningPassScore)
+            return Fail(RecruitmentErrorCodes.InvalidRequest, $"Screening pass requires a score of at least {config.ScreeningPassScore}.");
+        if (config?.ScreeningCriteria is { Count: > 0 } configuredCriteria && command.Criteria.Any(x => !configuredCriteria.Contains(x.Name.Trim(), StringComparer.OrdinalIgnoreCase)))
+            return Fail(RecruitmentErrorCodes.InvalidRequest, "Screening criteria must match the company configuration.");
         if (decision == RecruitmentScreeningDecision.Reject && string.IsNullOrWhiteSpace(command.RejectionReason))
             return Fail(RecruitmentErrorCodes.InvalidRequest, "A rejection reason is required.");
         var applicant = await applicants.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && !x.IsDeleted);
@@ -53,6 +66,19 @@ public sealed class RecruitmentScreeningService(
         if (!updated.Success) return Fail(RecruitmentErrorCodes.ConcurrencyConflict, "Screening review was changed by another user.", StatusCodes.Status409Conflict);
         await WriteLog(applicant, existing, actorUserId, previous);
         return Ok(existing.ReviewId, "Screening review updated.");
+    }
+
+    public async Task<Result<RecruitmentScreeningBulkResult>> Bulk(RecruitmentScreeningBulkCommand command, string actorUserId)
+    {
+        if (command.Items is null || command.Items.Count == 0 || command.Items.Count > 100 || string.IsNullOrWhiteSpace(command.IdempotencyKey))
+            return new Result<RecruitmentScreeningBulkResult> { Success = false, StatusCode = 400, ErrorCode = RecruitmentErrorCodes.InvalidRequest, Message = "Up to 100 screening items and an idempotency key are required." };
+        var result = new RecruitmentScreeningBulkResult();
+        foreach (var item in command.Items.Where(x => !string.IsNullOrWhiteSpace(x.ApplicantId) && !string.IsNullOrWhiteSpace(x.VacancyId)))
+        {
+            var response = await Upsert(new RecruitmentScreeningReviewCommand { ApplicantId = item.ApplicantId.Trim(), VacancyId = item.VacancyId.Trim(), Decision = command.Decision, Score = command.Score, Criteria = command.Criteria, Evidence = command.Evidence, RejectionReason = command.RejectionReason, IdempotencyKey = $"{command.IdempotencyKey.Trim()}:{item.ApplicantId.Trim()}:{item.VacancyId.Trim()}" }, actorUserId);
+            if (response.Success) result.Succeeded++; else { result.Failed++; result.FailedApplicantIds.Add(item.ApplicantId.Trim()); }
+        }
+        return new Result<RecruitmentScreeningBulkResult> { Success = result.Failed == 0, StatusCode = result.Failed == 0 ? 200 : 207, ErrorCode = result.Failed == 0 ? null : RecruitmentErrorCodes.InvalidRequest, MethodResult = result, Data = result, TotalRecords = command.Items.Count, Message = $"Processed {result.Succeeded} screening item(s); {result.Failed} failed." };
     }
 
     private async Task WriteLog(Applicant applicant, RecruitmentScreeningReview review, string actor, string? previous)

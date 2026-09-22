@@ -1,0 +1,2 @@
+namespace Codeji.CMS.DTO.Recruitments;
+public sealed class RecruitmentPreboardingQueueItem { public string CaseId { get; set; } = string.Empty; public string ApplicantId { get; set; } = string.Empty; public string OfferId { get; set; } = string.Empty; public string Status { get; set; } = string.Empty; public string OwnerUserId { get; set; } = string.Empty; public int PendingTaskCount { get; set; } public bool ReadyForHire { get; set; } public string? FirstBlockerCode { get; set; } }

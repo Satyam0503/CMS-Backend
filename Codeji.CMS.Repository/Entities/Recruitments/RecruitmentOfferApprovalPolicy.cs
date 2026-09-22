@@ -12,7 +12,11 @@ public sealed class RecruitmentOfferApprovalPolicy : BaseClass
     public decimal ApprovalThreshold { get; set; }
     public bool RequireApprovalReference { get; set; } = true;
     public string? ApproverRoleId { get; set; }
+    public string? DelegatedApproverUserId { get; set; }
+    public DateTime? DelegationExpiresAtUtc { get; set; }
     public string? LastCommandIdempotencyKey { get; set; }
     public int Version { get; set; } = 1;
 }
+
+
 

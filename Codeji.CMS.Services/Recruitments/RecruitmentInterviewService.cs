@@ -41,6 +41,11 @@ public sealed class RecruitmentInterviewService(
 
         var startsAtUtc = DateTime.SpecifyKind(command.StartsAtUtc, DateTimeKind.Utc);
         var endsAtUtc = DateTime.SpecifyKind(command.EndsAtUtc, DateTimeKind.Utc);
+        var requestedStatus = string.IsNullOrWhiteSpace(command.Status) ? RecruitmentInterviewStatus.Draft : command.Status.Trim();
+        if (requestedStatus is RecruitmentInterviewStatus.Scheduled or RecruitmentInterviewStatus.Confirmed && panelists.Length == 0)
+            return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Select at least one active interviewer before scheduling.");
+        if (requestedStatus is RecruitmentInterviewStatus.Scheduled or RecruitmentInterviewStatus.Confirmed && startsAtUtc <= DateTime.UtcNow)
+            return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Scheduled interviews must start in the future.");
         if (!RecruitmentInterviewRules.IsValidSchedule(startsAtUtc, endsAtUtc))
             return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Interview end must be after start and both timestamps must be UTC.");
 
@@ -119,6 +124,24 @@ public sealed class RecruitmentInterviewService(
         if (existing.Status is RecruitmentInterviewStatus.Scheduled or RecruitmentInterviewStatus.Confirmed)
             await SyncCalendar(existing, actorUserId);
         return Ok(result, existing.InterviewId, existing.CalendarSyncStatus == "Synced" ? "Interview updated and calendar synchronized." : "Interview updated; calendar sync is pending.");
+    }
+
+    public async Task<Result<List<RecruitmentInterview>>> GetRounds(string applicantId, string vacancyId)
+    {
+        var companyId = CurrentContext.CompanyId(context);
+        if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(applicantId) || string.IsNullOrWhiteSpace(vacancyId)) return new Result<List<RecruitmentInterview>> { Success = false, StatusCode = 400, Message = "Applicant and vacancy are required." };
+        var rows = (await interviews.GetAll(x => x.CompanyId == companyId && x.ApplicantId == applicantId.Trim() && x.VacancyId == vacancyId.Trim() && !x.IsDeleted)).OrderByDescending(x => x.RoundNumber).ThenByDescending(x => x.StartsAtUtc).ToList();
+        return new Result<List<RecruitmentInterview>> { Success = true, StatusCode = 200, MethodResult = rows, Data = rows, TotalRecords = rows.Count, Message = rows.Count == 0 ? "No interview rounds found." : $"{rows.Count} interview round(s) loaded." };
+    }
+
+    public async Task<Result<string>> RetryCalendar(string interviewId, string actorUserId)
+    {
+        var companyId = CurrentContext.CompanyId(context);
+        if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(interviewId)) return Fail(new Result<string>(), RecruitmentErrorCodes.InvalidRequest, "Company and interview are required.");
+        var interview = await interviews.FirstOrDefault(x => x.CompanyId == companyId && x.InterviewId == interviewId.Trim() && !x.IsDeleted);
+        if (interview is null) return Fail(new Result<string>(), RecruitmentErrorCodes.InvalidRequest, "Interview was not found in the current company.");
+        await SyncCalendar(interview, actorUserId);
+        return Ok(new Result<string>(), interview.InterviewId, interview.CalendarSyncStatus == "Synced" ? "Interview calendar synchronized." : "Interview calendar sync is still pending.");
     }
 
     private async Task SyncCalendar(RecruitmentInterview interview, string actorUserId)

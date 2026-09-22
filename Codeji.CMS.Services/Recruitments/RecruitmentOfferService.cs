@@ -26,6 +26,7 @@ public sealed class RecruitmentOfferService(
         var companyId = CurrentContext.CompanyId(context);
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(command.IdempotencyKey)) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Company and idempotency key are required.");
         if (!RecruitmentOfferRules.IsValidCompensation(command.Salary, command.Currency)) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Salary and currency are invalid.");
+        if (command.ExpiresAtUtc.HasValue && command.ExpiresAtUtc.Value <= DateTime.UtcNow) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Offer expiry must be in the future.");
         var applicant = await applicants.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && !x.IsDeleted);
         if (applicant is null) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Applicant was not found in the current company.");
         var idempotencyKey = command.IdempotencyKey.Trim();
@@ -33,7 +34,9 @@ public sealed class RecruitmentOfferService(
         if (existing is not null && string.Equals(existing.LastCommandIdempotencyKey, idempotencyKey, StringComparison.Ordinal)) return Ok(result, existing.OfferId, "Offer command already applied.");
         if (existing is null)
         {
-            var offer = new RecruitmentOffer { CompanyId = companyId, ApplicantId = command.ApplicantId, VacancyId = command.VacancyId, Salary = command.Salary, Currency = command.Currency.Trim().ToUpperInvariant(), StartDateUtc = command.StartDateUtc.HasValue ? DateTime.SpecifyKind(command.StartDateUtc.Value, DateTimeKind.Utc) : null, Status = RecruitmentOfferStatus.Draft, LastCommandIdempotencyKey = idempotencyKey, CreatedBy = actorUserId, UpdatedBy = actorUserId };
+            if (!string.Equals(command.Status, RecruitmentOfferStatus.Draft, StringComparison.OrdinalIgnoreCase)) return Fail(result, RecruitmentErrorCodes.InvalidTransition, "Create the offer as Draft first, then submit it for approval or send it.", StatusCodes.Status409Conflict);
+
+var offer = new RecruitmentOffer { CompanyId = companyId, ApplicantId = command.ApplicantId, VacancyId = command.VacancyId, Salary = command.Salary, Currency = command.Currency.Trim().ToUpperInvariant(), StartDateUtc = command.StartDateUtc.HasValue ? DateTime.SpecifyKind(command.StartDateUtc.Value, DateTimeKind.Utc) : null, ExpiresAtUtc = command.ExpiresAtUtc.HasValue ? DateTime.SpecifyKind(command.ExpiresAtUtc.Value, DateTimeKind.Utc) : null, Status = RecruitmentOfferStatus.Draft, LastCommandIdempotencyKey = idempotencyKey, CreatedBy = actorUserId, UpdatedBy = actorUserId };
             var saved = await offers.AddOne(offer);
             return saved.Success ? Ok(result, offer.OfferId, "Offer created.") : Fail(result, RecruitmentErrorCodes.ConcurrencyConflict, "Offer could not be created.", StatusCodes.Status409Conflict);
         }
@@ -44,7 +47,9 @@ public sealed class RecruitmentOfferService(
             var policy = approvalPolicies is null ? null : await approvalPolicies.FirstOrDefault(x => x.CompanyId == companyId && x.VacancyId == command.VacancyId && !x.IsDeleted);
             if (policy is null && approvalPolicies is not null && vacancy is not null && (!string.IsNullOrWhiteSpace(vacancy.LegalEntityId) || !string.IsNullOrWhiteSpace(vacancy.DepartmentId) || !string.IsNullOrWhiteSpace(vacancy.Grade))) policy = await approvalPolicies.FirstOrDefault(x => x.CompanyId == companyId && string.IsNullOrEmpty(x.VacancyId) && x.LegalEntityId == vacancy.LegalEntityId && x.DepartmentId == vacancy.DepartmentId && x.Grade == vacancy.Grade && !x.IsDeleted);
             policy ??= approvalPolicies is null ? null : await approvalPolicies.FirstOrDefault(x => x.CompanyId == companyId && string.IsNullOrEmpty(x.VacancyId) && string.IsNullOrEmpty(x.LegalEntityId) && string.IsNullOrEmpty(x.DepartmentId) && string.IsNullOrEmpty(x.Grade) && !x.IsDeleted);
-            if (!string.IsNullOrWhiteSpace(policy?.ApproverRoleId) && !string.Equals(CurrentContext.UserRoleId(context), policy.ApproverRoleId, StringComparison.Ordinal)) return Fail(result, RecruitmentErrorCodes.ApprovalRequired, "This offer must be approved by the configured approver role.", StatusCodes.Status403Forbidden);
+            var roleMatches = string.IsNullOrWhiteSpace(policy?.ApproverRoleId) || string.Equals(CurrentContext.UserRoleId(context), policy.ApproverRoleId, StringComparison.Ordinal);
+            var delegateMatches = !string.IsNullOrWhiteSpace(policy?.DelegatedApproverUserId) && string.Equals(CurrentContext.UserId(context), policy.DelegatedApproverUserId, StringComparison.Ordinal) && (!policy!.DelegationExpiresAtUtc.HasValue || policy.DelegationExpiresAtUtc > DateTime.UtcNow);
+            if ((!string.IsNullOrWhiteSpace(policy?.ApproverRoleId) || !string.IsNullOrWhiteSpace(policy?.DelegatedApproverUserId)) && !roleMatches && !delegateMatches) return Fail(result, RecruitmentErrorCodes.ApprovalRequired, "This offer must be approved by the configured approver role or active delegation.", StatusCodes.Status403Forbidden);
             var requiresReference = policy?.RequireApprovalReference ?? true;
             var thresholdApplies = policy is null || (string.Equals(policy.Currency, command.Currency.Trim(), StringComparison.OrdinalIgnoreCase) && command.Salary >= policy.ApprovalThreshold);
             if (requiresReference && thresholdApplies && string.IsNullOrWhiteSpace(command.ApprovalReference) && string.IsNullOrWhiteSpace(existing.ApprovalReference)) return Fail(result, RecruitmentErrorCodes.ApprovalRequired, "A shared approval reference is required before an offer can be approved.", StatusCodes.Status409Conflict);
@@ -56,6 +61,7 @@ public sealed class RecruitmentOfferService(
         existing.Salary = command.Salary;
         existing.Currency = command.Currency.Trim().ToUpperInvariant();
         existing.StartDateUtc = command.StartDateUtc.HasValue ? DateTime.SpecifyKind(command.StartDateUtc.Value, DateTimeKind.Utc) : null;
+        existing.ExpiresAtUtc = command.ExpiresAtUtc.HasValue ? DateTime.SpecifyKind(command.ExpiresAtUtc.Value, DateTimeKind.Utc) : null;
         existing.Status = command.Status.Trim();
         existing.LastCommandIdempotencyKey = idempotencyKey;
         existing.Version = currentVersion + 1;
@@ -78,6 +84,7 @@ public sealed class RecruitmentOfferService(
     private static Result<string> Ok(Result<string> result, string id, string message) { result.Success = true; result.StatusCode = StatusCodes.Status200OK; result.MethodResult = id; result.Message = message; return result; }
     private static Result<string> Fail(Result<string> result, string code, string message, int status = StatusCodes.Status400BadRequest) { result.ErrorCode = code; result.StatusCode = status; result.Message = message; return result; }
 }
+
 
 
 

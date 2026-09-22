@@ -19,10 +19,21 @@ public sealed class RecruitmentOnboardingController(IRecruitmentOnboardingServic
     [ModulePermission(AppModule.Applications, Permission.View)]
     public Task<Result<RecruitmentOnboardingCase>> GetByApplicant(string applicantId) => onboardingService.Get(applicantId);
 
+    [HttpGet("Queue")]
+    [ModulePermission(AppModule.Applications, Permission.View)]
+    public Task<Result<RecruitmentOnboardingQueueItem>> Queue([FromQuery] string? status = null, [FromQuery] int pageNo = 1, [FromQuery] int pageSize = 25) =>
+        onboardingService.GetQueue(status, pageNo, pageSize);
+
+    [HttpPost("RetryActivation/{caseId}")]
+    [ModulePermission(AppModule.Applications, Permission.Edit)]
+    public Task<Result<string>> RetryActivation(string caseId) =>
+        onboardingService.RetryActivation(caseId, CurrentContext.UserId(context));
     [HttpPost("Update")]
     [ModulePermission(AppModule.Applications, Permission.Edit)]
     public Task<Result<string>> Update([FromBody] RecruitmentOnboardingUpdateCommand command) =>
         onboardingService.Update(command, CurrentContext.UserId(context));
 }
+
+
 
 

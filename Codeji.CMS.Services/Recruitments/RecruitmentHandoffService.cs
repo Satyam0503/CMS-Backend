@@ -19,7 +19,9 @@ public sealed class RecruitmentHandoffService(
     IEmployeeService employeeService,
     IHttpContextAccessor httpContextAccessor,
     IMongoDbRepository<RecruitmentPreboardingCase>? preboardingCases = null,
-    IMongoDbRepository<RecruitmentOnboardingCase>? onboardingCases = null) : IRecruitmentHandoffService
+    IMongoDbRepository<RecruitmentOnboardingCase>? onboardingCases = null,
+    IMongoDbRepository<RecruitmentOffer>? offers = null,
+    IMongoDbRepository<RecruitmentJobApplication>? applications = null) : IRecruitmentHandoffService
 {
     public async Task<Result<string>> HandoffToPreboarding(CandidateHandoffRequest request, string actorUserId)
     {
@@ -32,7 +34,7 @@ public sealed class RecruitmentHandoffService(
             return result;
         }
 
-        var prior = await handoffs.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == request.ApplicantId && x.IdempotencyKey == request.IdempotencyKey && !x.IsDeleted);
+        var prior = await handoffs.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == request.ApplicantId && !x.IsDeleted);
         if (prior is not null)
         {
             result.Success = true;
@@ -49,12 +51,43 @@ public sealed class RecruitmentHandoffService(
             result.Message = "Applicant was not found in the current company.";
             return result;
         }
-        if (applicant.ActivityType != ActivityType.Selected)
+        var canonicalApplication = applications is null
+            ? null
+            : await applications.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.VacancyId == applicant.VacancyId && !x.IsDeleted);
+        var isSelected = canonicalApplication is not null
+            ? string.Equals(canonicalApplication.CurrentStage, nameof(ActivityType.Selected), StringComparison.OrdinalIgnoreCase)
+            : applicant.ActivityType == ActivityType.Selected;
+        if (!isSelected)
         {
             result.ErrorCode = RecruitmentErrorCodes.InvalidTransition;
             result.StatusCode = StatusCodes.Status409Conflict;
             result.Message = "Only a selected applicant can be handed off to preboarding.";
             return result;
+        }
+
+        if (offers is not null)
+        {
+            var acceptedOffer = await offers.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.Status == RecruitmentOfferStatus.Accepted && !x.IsDeleted);
+            if (acceptedOffer is null)
+            {
+                result.ErrorCode = RecruitmentErrorCodes.InvalidTransition;
+                result.StatusCode = StatusCodes.Status409Conflict;
+                result.Message = "An accepted offer is required before preboarding can start.";
+                return result;
+            }
+        }
+
+        RecruitmentPreboardingCase? existingPreboarding = null;
+        if (preboardingCases is not null)
+        {
+            existingPreboarding = await preboardingCases.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted);
+            if (existingPreboarding is null || existingPreboarding.Tasks.Any(x => x.Status is not ("Completed" or "Skipped")))
+            {
+                result.ErrorCode = RecruitmentErrorCodes.InvalidTransition;
+                result.StatusCode = StatusCodes.Status409Conflict;
+                result.Message = "Preboarding mandatory tasks must be complete before employee creation.";
+                return result;
+            }
         }
 
         var invite = await employeeService.InviteNewEmployee(new InviteEmployeeDto
@@ -80,7 +113,7 @@ public sealed class RecruitmentHandoffService(
         var saved = await handoffs.AddOne(handoff);
         if (!saved.Success)
         {
-            var committed = await handoffs.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == request.ApplicantId && x.IdempotencyKey == request.IdempotencyKey.Trim() && !x.IsDeleted);
+            var committed = await handoffs.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == request.ApplicantId && !x.IsDeleted);
             if (committed is not null)
             {
                 result.Success = true;
@@ -101,7 +134,7 @@ public sealed class RecruitmentHandoffService(
         }
         if (preboardingCases is not null)
         {
-            var preboarding = await preboardingCases.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted);
+            var preboarding = existingPreboarding ?? await preboardingCases.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted);
             if (preboarding is not null) { preboarding.Status = RecruitmentPreboardingStatus.ReadyForOnboarding; preboarding.OwnerUserId = actorUserId; preboarding.UpdatedBy = actorUserId; preboarding.UpdatedDate = DateTime.UtcNow; await preboardingCases.Update(MongoDB.Driver.Builders<RecruitmentPreboardingCase>.Filter.Where(x => x.CompanyId == companyId && x.CaseId == preboarding.CaseId), preboarding); }
         }
         await applicantLogs.AddOne(new ApplicantLogs
@@ -126,6 +159,8 @@ public sealed class RecruitmentHandoffService(
         return result;
     }
 }
+
+
 
 
 

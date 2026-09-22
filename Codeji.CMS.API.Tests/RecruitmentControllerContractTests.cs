@@ -21,6 +21,17 @@ public sealed class RecruitmentControllerContractTests
         Assert.Contains(Permission.Edit, permission.Permissions);
     }
     [Fact]
+    public void Application_backfill_endpoint_requires_authentication_and_applications_edit()
+    {
+        var controller = typeof(RecruitmentApplicationController);
+        Assert.NotNull(controller.GetCustomAttribute<AuthorizeAttribute>());
+        var method = controller.GetMethod(nameof(RecruitmentApplicationController.BackfillLegacy), BindingFlags.Instance | BindingFlags.Public);
+        Assert.NotNull(method);
+        var permission = method!.GetCustomAttributes<ModulePermissionAttribute>().Single();
+        Assert.Equal(AppModule.Applications, permission.Module);
+        Assert.Contains(Permission.Edit, permission.Permissions);
+    }
+        [Fact]
     public void Requisition_endpoint_requires_authentication_and_jobs_edit()
     {
         var controller = typeof(RecruitmentPlanningController);
@@ -69,7 +80,7 @@ public sealed class RecruitmentControllerContractTests
         var attribute = method!.GetCustomAttributes<ModulePermissionAttribute>().Single();
         Assert.Equal(module, attribute.Module);
         Assert.Contains(permissionValue, attribute.Permissions);
-    }}
+    }
 
 
 
@@ -77,6 +88,18 @@ public sealed class RecruitmentControllerContractTests
 
 
 
+    [Fact]
+    public void Bulk_screening_endpoint_requires_applications_edit()
+    {
+        var controller = typeof(RecruitmentPlanningController);
+        Assert.NotNull(controller.GetCustomAttribute<AuthorizeAttribute>());
+        var method = controller.GetMethod(nameof(RecruitmentPlanningController.BulkScreening), BindingFlags.Instance | BindingFlags.Public);
+        Assert.NotNull(method);
+        var permission = method!.GetCustomAttributes<ModulePermissionAttribute>().Single();
+        Assert.Equal(AppModule.Applications, permission.Module);
+        Assert.Contains(Permission.Edit, permission.Permissions);
+    }
+}
 public sealed class RecruitmentResumeUploadContractTests
 {
     [Fact]
@@ -114,3 +137,53 @@ public sealed class RecruitmentCandidateActionContractTests
     }
 }
 
+
+
+
+
+public sealed class RecruitmentOnboardingContractTests
+{
+    [Fact]
+    public void Retry_activation_requires_applications_edit()
+    {
+        var controller = typeof(RecruitmentOnboardingController);
+        Assert.NotNull(controller.GetCustomAttribute<AuthorizeAttribute>());
+        var method = controller.GetMethod(nameof(RecruitmentOnboardingController.RetryActivation), BindingFlags.Instance | BindingFlags.Public);
+        Assert.NotNull(method);
+        var permission = method!.GetCustomAttributes<ModulePermissionAttribute>().Single();
+        Assert.Equal(AppModule.Applications, permission.Module);
+        Assert.Contains(Permission.Edit, permission.Permissions);
+    }
+}
+
+public sealed class RecruitmentCandidateShareContractTests
+{
+    [Theory]
+    [InlineData(nameof(RecruitmentCandidateShareController.Grant), AppModule.Applications, Permission.Edit)]
+    [InlineData(nameof(RecruitmentCandidateShareController.Revoke), AppModule.Applications, Permission.Edit)]
+    [InlineData(nameof(RecruitmentCandidateShareController.ByApplicant), AppModule.Applications, Permission.View)]
+    public void Candidate_share_endpoints_are_authenticated_and_permissioned(string methodName, string module, string permissionValue)
+    {
+        var controller = typeof(RecruitmentCandidateShareController);
+        Assert.NotNull(controller.GetCustomAttribute<AuthorizeAttribute>());
+        var method = controller.GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public);
+        Assert.NotNull(method);
+        var permission = method!.GetCustomAttributes<ModulePermissionAttribute>().Single();
+        Assert.Equal(module, permission.Module);
+        Assert.Contains(permissionValue, permission.Permissions);
+    }
+    [Theory]
+    [InlineData(nameof(RecruitmentApplicationController.UpsertStage), Permission.Edit)]
+    [InlineData(nameof(RecruitmentApplicationController.GetHistory), Permission.View)]
+    [InlineData(nameof(RecruitmentApplicationController.BackfillLegacy), Permission.Edit)]
+    public void Application_stage_endpoints_require_expected_permissions(string methodName, string permissionValue)
+    {
+        var controller = typeof(RecruitmentApplicationController);
+        Assert.NotNull(controller.GetCustomAttribute<AuthorizeAttribute>());
+        var method = controller.GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public);
+        Assert.NotNull(method);
+        var permission = method!.GetCustomAttributes<ModulePermissionAttribute>().Single();
+        Assert.Equal(AppModule.Applications, permission.Module);
+        Assert.Contains(permissionValue, permission.Permissions);
+    }
+}

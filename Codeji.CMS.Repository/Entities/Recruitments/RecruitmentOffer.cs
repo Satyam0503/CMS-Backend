@@ -16,6 +16,7 @@ public sealed class RecruitmentOffer : BaseClass
     public string Status { get; set; } = RecruitmentOfferStatus.Draft;
     public string? ApprovalReference { get; set; }
     public DateTime? SentAtUtc { get; set; }
+    public DateTime? ExpiresAtUtc { get; set; }
     public DateTime? RespondedAtUtc { get; set; }
     public string? LastCommandIdempotencyKey { get; set; }
     public int Version { get; set; } = 1;

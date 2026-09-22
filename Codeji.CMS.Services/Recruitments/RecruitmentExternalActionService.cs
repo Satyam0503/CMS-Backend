@@ -112,11 +112,12 @@ public sealed class RecruitmentExternalActionService(
     }
 
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
-    private static RecruitmentExternalActionTokenDto ToDto(RecruitmentExternalActionToken x) => new() { ActionTokenId = x.ActionTokenId, ActionType = x.ActionType, ApplicantId = x.ApplicantId, VacancyId = x.VacancyId, InterviewId = x.InterviewId, OfferId = x.OfferId, ResourceVersion = x.ResourceVersion, ExpiresAtUtc = x.ExpiresAtUtc };
+    private static RecruitmentExternalActionTokenDto ToDto(RecruitmentExternalActionToken x) => new() { CompanyId = x.CompanyId, ActionTokenId = x.ActionTokenId, ActionType = x.ActionType, ApplicantId = x.ApplicantId, VacancyId = x.VacancyId, InterviewId = x.InterviewId, OfferId = x.OfferId, ResourceVersion = x.ResourceVersion, ExpiresAtUtc = x.ExpiresAtUtc };
     private static Result<T> Fail<T>(string code, string message, int status = 400) => new() { Success = false, StatusCode = status, ErrorCode = code, Message = message };
     private static Result<T> Ok<T>(T value, string message) => new() { Success = true, StatusCode = 200, MethodResult = value, Data = value, Message = message };
     private static Result<string> Ok(string value, string message) => Ok<string>(value, message);
 }
+
 
 
 

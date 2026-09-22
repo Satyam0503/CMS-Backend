@@ -19,9 +19,9 @@ public sealed class RecruitmentSprint0SecurityTests
         external.Setup(x => x.Validate("raw-token", false)).ReturnsAsync(new Result<RecruitmentExternalActionTokenDto>
         {
             Success = true,
-            MethodResult = new RecruitmentExternalActionTokenDto
-            {
-                ActionType = "RequestOfferChange",
+            MethodResult = new RecruitmentExternalActionTokenDto {
+                CompanyId = "company-a",
+ActionType = "RequestOfferChange",
                 ApplicantId = "app-1",
                 OfferId = "offer-1"
             }
@@ -69,9 +69,9 @@ public sealed class RecruitmentSprint0SecurityTests
         external.Setup(x => x.Validate("raw-token", false)).ReturnsAsync(new Result<RecruitmentExternalActionTokenDto>
         {
             Success = true,
-            MethodResult = new RecruitmentExternalActionTokenDto
-            {
-                ActionType = "AcceptOffer",
+            MethodResult = new RecruitmentExternalActionTokenDto {
+                CompanyId = "company-a",
+ActionType = "AcceptOffer",
                 ApplicantId = "app-1",
                 OfferId = "offer-1"
             }
@@ -99,6 +99,8 @@ public sealed class RecruitmentSprint0SecurityTests
     private static Mock<IMongoDbRepository<T>> Repository<T>() where T : class
         => new();
 }
+
+
 
 
 

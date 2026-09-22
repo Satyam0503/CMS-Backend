@@ -15,14 +15,15 @@ public sealed class RecruitmentCandidateActionService(
     IMongoDbRepository<RecruitmentInterview> interviews,
     IMongoDbRepository<RecruitmentEmailOutbox> outbox,
     IMongoDbRepository<RecruitmentAutomationOutboxEvent>? automationOutbox = null,
-    IMongoDbRepository<RecruitmentPreboardingCase>? preboardingCases = null) : IRecruitmentCandidateActionService
+    IMongoDbRepository<RecruitmentPreboardingCase>? preboardingCases = null,
+    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null) : IRecruitmentCandidateActionService
 {
     public async Task<Result<string>> RespondToOffer(RecruitmentCandidateOfferActionCommand command)
     {
         if (string.IsNullOrWhiteSpace(command.Token) || string.IsNullOrWhiteSpace(command.IdempotencyKey) || command.IdempotencyKey.Trim().Length < 12)
             return Fail(RecruitmentErrorCodes.InvalidRequest, "A valid action link and idempotency key are required.");
         var token = await external.Validate(command.Token.Trim(), false);
-        if (!token.Success || token.MethodResult is null || token.MethodResult.ActionType is not ("AcceptOffer" or "DeclineOffer" or "RequestOfferChange"))
+        if (!token.Success || token.MethodResult is null || string.IsNullOrWhiteSpace(token.MethodResult.CompanyId) || token.MethodResult.ActionType is not ("AcceptOffer" or "DeclineOffer" or "RequestOfferChange"))
             return Fail(RecruitmentErrorCodes.InvalidRequest, "This offer link is invalid or expired.", StatusCodes.Status410Gone);
         var decision = command.Decision.Trim();
         var requestedAction = token.MethodResult.ActionType;
@@ -33,13 +34,18 @@ public sealed class RecruitmentCandidateActionService(
         if (decision == "RequestOfferChange" && string.IsNullOrWhiteSpace(command.Message))
             return Fail(RecruitmentErrorCodes.InvalidRequest, "A message is required when requesting an offer change.");
         var t = token.MethodResult;
-        var applicant = await applicants.FirstOrDefault(x => x.ApplicantId == t.ApplicantId && !x.IsDeleted);
+        var applicant = await applicants.FirstOrDefault(x => x.CompanyId == t.CompanyId && x.ApplicantId == t.ApplicantId && !x.IsDeleted);
         if (applicant is null || string.IsNullOrWhiteSpace(t.OfferId)) return Fail(RecruitmentErrorCodes.InvalidRequest, "This offer link is no longer available.", StatusCodes.Status410Gone);
         var offer = await offers.FirstOrDefault(x => x.CompanyId == applicant.CompanyId && x.OfferId == t.OfferId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted);
         if (offer is null) return Fail(RecruitmentErrorCodes.InvalidTransition, "This offer is no longer awaiting a response.", StatusCodes.Status409Conflict);
         if (offer.LastCommandIdempotencyKey == command.IdempotencyKey.Trim() && offer.Status is RecruitmentOfferStatus.Accepted or RecruitmentOfferStatus.Declined or RecruitmentOfferStatus.ChangeRequested)
             return Ok(offer.OfferId, $"Offer {offer.Status.ToLowerInvariant()} successfully.");
         if (offer.Status is not (RecruitmentOfferStatus.Sent or RecruitmentOfferStatus.Approved)) return Fail(RecruitmentErrorCodes.InvalidTransition, "This offer is no longer awaiting a response.", StatusCodes.Status409Conflict);
+        if (offer.ExpiresAtUtc.HasValue && offer.ExpiresAtUtc.Value <= DateTime.UtcNow)
+        {
+            await offers.UpdateMany(Builders<RecruitmentOffer>.Filter.Where(x => x.CompanyId == offer.CompanyId && x.OfferId == offer.OfferId && x.Version == offer.Version && x.Status == offer.Status && !x.IsDeleted), Builders<RecruitmentOffer>.Update.Set(x => x.Status, RecruitmentOfferStatus.Expired).Set(x => x.RespondedAtUtc, DateTime.UtcNow).Inc(x => x.Version, 1));
+            return Fail(RecruitmentErrorCodes.InvalidTransition, "This offer has expired.", StatusCodes.Status409Conflict);
+        }
         var next = decision switch
         {
             "Accepted" => RecruitmentOfferStatus.Accepted,
@@ -60,7 +66,7 @@ public sealed class RecruitmentCandidateActionService(
         if (next == RecruitmentOfferStatus.Accepted && preboardingCases is not null)
         {
             var existingCase = await preboardingCases.FirstOrDefault(x => x.CompanyId == offer.CompanyId && x.OfferId == offer.OfferId && !x.IsDeleted);
-            if (existingCase is null) await preboardingCases.AddOne(new RecruitmentPreboardingCase { CompanyId = offer.CompanyId, ApplicantId = applicant.ApplicantId, OfferId = offer.OfferId, Status = RecruitmentPreboardingStatus.PendingCandidateDetails, OwnerUserId = "", LastCommandIdempotencyKey = command.IdempotencyKey.Trim(), Tasks = [new RecruitmentPreboardingTask { Code = "candidate-details", Title = "Collect candidate details" }, new RecruitmentPreboardingTask { Code = "documents", Title = "Collect preboarding documents" }, new RecruitmentPreboardingTask { Code = "verification", Title = "Complete verification" }], CreatedBy = "candidate-action", UpdatedBy = "candidate-action" });
+            if (existingCase is null) { var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == offer.CompanyId && !x.IsDeleted); var codes = config?.PreboardingChecklist is { Count: > 0 } ? config.PreboardingChecklist : ["candidate-details", "documents", "verification"]; var tasks = codes.Select(code => new RecruitmentPreboardingTask { Code = code, Title = code.Replace("-", " ") }).ToList(); await preboardingCases.AddOne(new RecruitmentPreboardingCase { CompanyId = offer.CompanyId, ApplicantId = applicant.ApplicantId, OfferId = offer.OfferId, Status = RecruitmentPreboardingStatus.PendingCandidateDetails, OwnerUserId = "", LastCommandIdempotencyKey = command.IdempotencyKey.Trim(), Tasks = tasks, CreatedBy = "candidate-action", UpdatedBy = "candidate-action" }); }
         }
         if (next == RecruitmentOfferStatus.Accepted && automationOutbox is not null)
         {
@@ -76,12 +82,12 @@ public sealed class RecruitmentCandidateActionService(
         if (string.IsNullOrWhiteSpace(command.Token) || string.IsNullOrWhiteSpace(command.IdempotencyKey) || command.IdempotencyKey.Trim().Length < 12)
             return Fail(RecruitmentErrorCodes.InvalidRequest, "A valid action link and idempotency key are required.");
         var token = await external.Validate(command.Token.Trim(), false);
-        if (!token.Success || token.MethodResult is null || token.MethodResult.ActionType is not ("ScheduleInterview" or "RescheduleInterview"))
+        if (!token.Success || token.MethodResult is null || string.IsNullOrWhiteSpace(token.MethodResult.CompanyId) || token.MethodResult.ActionType is not ("ScheduleInterview" or "RescheduleInterview"))
             return Fail(RecruitmentErrorCodes.InvalidRequest, "This interview link is invalid or expired.", StatusCodes.Status410Gone);
         var t = token.MethodResult;
         if (string.IsNullOrWhiteSpace(t.InterviewId)) return Fail(RecruitmentErrorCodes.InvalidRequest, "This interview link is incomplete.", StatusCodes.Status410Gone);
-        var interview = await interviews.FirstOrDefault(x => x.InterviewId == t.InterviewId && x.ApplicantId == t.ApplicantId && !x.IsDeleted);
-        var applicant = await applicants.FirstOrDefault(x => x.ApplicantId == t.ApplicantId && !x.IsDeleted);
+        var interview = await interviews.FirstOrDefault(x => x.InterviewId == t.InterviewId && x.CompanyId == t.CompanyId && x.ApplicantId == t.ApplicantId && !x.IsDeleted);
+        var applicant = await applicants.FirstOrDefault(x => x.CompanyId == t.CompanyId && x.ApplicantId == t.ApplicantId && !x.IsDeleted);
         if (interview is null || applicant is null) return Fail(RecruitmentErrorCodes.InvalidRequest, "This interview is no longer available.", StatusCodes.Status410Gone);
         var consumed = await external.Validate(command.Token.Trim(), true);
         if (!consumed.Success) return Fail(RecruitmentErrorCodes.ConcurrencyConflict, "This action link was already used.", StatusCodes.Status409Conflict);
@@ -103,5 +109,7 @@ public sealed class RecruitmentCandidateActionService(
     private static Result<string> Fail(string code, string message, int status = 400) => new() { Success = false, StatusCode = status, ErrorCode = code, Message = message };
     private static Result<string> Ok(string value, string message) => new() { Success = true, StatusCode = 200, MethodResult = value, Message = message };
 }
+
+
 
 

@@ -1,6 +1,7 @@
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
+using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.Services.Recruitments;
@@ -100,6 +101,12 @@ namespace Codeji.CMS.API.Controllers
                 return new Result<string> { Success = false, StatusCode = StatusCodes.Status400BadRequest, ErrorCode = RecruitmentErrorCodes.InvalidRequest, Message = "Invalid handoff request." };
             return await _recruitmentHandoffService.HandoffToPreboarding(request, CurrentContext.UserId(_httpContextAccessor));
         }
+
+        [HttpGet]
+        [Route("InterviewRounds/{applicantId}/{vacancyId}")]
+        [ModulePermission(AppModule.Applications, Permission.View)]
+        public Task<Result<List<RecruitmentInterview>>> GetInterviewRounds(string applicantId, string vacancyId)
+            => _recruitmentInterviewService.GetRounds(applicantId, vacancyId);
 
         [HttpPost]
         [Route("UpsertInterview")]

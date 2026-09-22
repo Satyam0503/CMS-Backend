@@ -13,6 +13,11 @@ public sealed class RecruitmentRequisition : BaseClass
     public string PositionTitle { get; set; } = string.Empty;
     public string? DepartmentId { get; set; }
     public string? Location { get; set; }
+    public string? EmploymentType { get; set; }
+    public string? HiringManagerUserId { get; set; }
+    public string? CostCenter { get; set; }
+    public DateTime? TargetStartDateUtc { get; set; }
+    public string? Justification { get; set; }
     public int Headcount { get; set; }
     public int ApprovedHeadcount { get; set; }
     public string Status { get; set; } = RecruitmentRequisitionStatus.Draft;

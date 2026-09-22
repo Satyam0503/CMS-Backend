@@ -12,7 +12,12 @@ public sealed class RecruitmentEnterpriseController(IRecruitmentEnterpriseServic
 {
  [HttpPost("MergeApplicants"), ModulePermission(AppModule.Applications, Permission.Edit)] public Task<Result<string>> MergeApplicants([FromBody] RecruitmentApplicantMergeCommand command)=>service.Merge(command,CurrentContext.UserId(context));
  [HttpGet("Analytics"), ModulePermission(AppModule.Applications, Permission.View)] public Task<Result<RecruitmentAnalytics>> Analytics([FromQuery]string? vacancyId)=>service.Analytics(vacancyId);
+ [HttpGet("SelectedCandidates"), ModulePermission(AppModule.Applications, Permission.View)] public Task<Result<List<RecruitmentSelectedCandidateQueueItem>>> SelectedCandidates([FromQuery]string? vacancyId)=>service.SelectedCandidates(vacancyId);
+ [HttpGet("PendingOffers"), ModulePermission(AppModule.Applications, Permission.View)] public Task<Result<List<RecruitmentOfferPendingQueueItem>>> PendingOffers([FromQuery]string? vacancyId)=>service.PendingOffers(vacancyId);
+ [HttpPost("UpdatePreboarding"), ModulePermission(AppModule.Applications, Permission.Edit)] public Task<Result<string>> UpdatePreboarding([FromBody]RecruitmentPreboardingUpdateCommand command)=>service.UpdatePreboarding(command,CurrentContext.UserId(context));
+ [HttpGet("PreboardingQueue"), ModulePermission(AppModule.Applications, Permission.View)] public Task<Result<List<RecruitmentPreboardingQueueItem>>> PreboardingQueue()=>service.PreboardingQueue();
  [HttpGet("FeedbackSla"), ModulePermission(AppModule.Applications, Permission.View)] public Task<Result<RecruitmentFeedbackSlaReport>> FeedbackSla([FromQuery]string? vacancyId)=>service.FeedbackSla(vacancyId);
+ [HttpGet("DebriefPending"), ModulePermission(AppModule.Applications, Permission.View)] public Task<Result<RecruitmentFeedbackSlaReport>> DebriefPending([FromQuery]string? vacancyId)=>service.FeedbackSla(vacancyId);
  [HttpPost("QueueFeedbackReminders"), ModulePermission(AppModule.Applications, Permission.Edit)] public Task<Result<int>> QueueFeedbackReminders([FromQuery]string? vacancyId)=>service.QueueFeedbackReminders(vacancyId,CurrentContext.UserId(context));
  [HttpPost("UpsertSlaPolicy"), ModulePermission(AppModule.Jobs, Permission.Edit)] public Task<Result<string>> UpsertSlaPolicy([FromBody]RecruitmentStageSlaPolicyCommand command)=>service.UpsertSla(command,CurrentContext.UserId(context));
  [HttpGet("Config"), ModulePermission(AppModule.Jobs, Permission.View)] public Task<Result<Codeji.CMS.Repository.Entities.Recruitments.RecruitmentEnterpriseConfig>> Config()=>service.GetConfig();

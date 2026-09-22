@@ -33,6 +33,11 @@ public sealed class RecruitmentPlanningController(
     public Task<Result<string>> UpsertScreening([FromBody] RecruitmentScreeningReviewCommand command) =>
         screeningService.Upsert(command, CurrentContext.UserId(context));
 
+    [HttpPost("BulkScreening")]
+    [ModulePermission(AppModule.Applications, Permission.Edit)]
+    public Task<Result<RecruitmentScreeningBulkResult>> BulkScreening([FromBody] RecruitmentScreeningBulkCommand command) =>
+        screeningService.Bulk(command, CurrentContext.UserId(context));
+
     [HttpGet("OfferApprovalPolicy")]
     [ModulePermission(AppModule.Jobs, Permission.View)]
     public Task<Result<RecruitmentOfferApprovalPolicy>> GetOfferApprovalPolicy([FromQuery] string? vacancyId) => offerApprovalPolicyService.Get(vacancyId);
@@ -54,6 +59,10 @@ public sealed class RecruitmentPlanningController(
     [ModulePermission(AppModule.Applications, Permission.Edit)]
     public Task<Result<string>> CompleteInterviewDebrief([FromBody] RecruitmentInterviewDebriefCommand command) =>
         debriefService.Complete(command, CurrentContext.UserId(context));
+
+    [HttpGet("Scorecards/{applicantId}/{vacancyId}")]
+    [ModulePermission(AppModule.Applications, Permission.View)]
+    public Task<Result<List<RecruitmentScorecard>>> GetScorecards(string applicantId, string vacancyId) => scorecardService.GetByApplicant(applicantId, vacancyId);
 
     [HttpPost("UpsertScorecard")]
     [ModulePermission(AppModule.Applications, Permission.Edit)]
