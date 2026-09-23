@@ -72,7 +72,7 @@ public sealed class RecruitmentExternalActionService(
             CreatedBy = actor, UpdatedBy = actor
         };
         var added = await tokens.AddOne(entity);
-        return added.Success ? Ok(new RecruitmentExternalActionTokenDto { ActionTokenId = entity.ActionTokenId, ActionType = entity.ActionType, ApplicantId = entity.ApplicantId, VacancyId = entity.VacancyId, InterviewId = entity.InterviewId, OfferId = entity.OfferId, ResourceVersion = entity.ResourceVersion, ExpiresAtUtc = entity.ExpiresAtUtc }, "Action link issued.") : Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.ConcurrencyConflict, "Action link could not be issued.", 409);
+        return added.Success ? Ok(new RecruitmentExternalActionTokenDto { ActionTokenId = entity.ActionTokenId, ActionType = entity.ActionType, ApplicantId = entity.ApplicantId, VacancyId = entity.VacancyId, InterviewId = entity.InterviewId, OfferId = entity.OfferId, ResourceVersion = entity.ResourceVersion, ExpiresAtUtc = entity.ExpiresAtUtc, RawToken = raw }, "Action link issued.") : Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.ConcurrencyConflict, "Action link could not be issued.", 409);
     }
 
     public async Task<Result<RecruitmentExternalActionTokenDto>> Validate(string token, bool consume)

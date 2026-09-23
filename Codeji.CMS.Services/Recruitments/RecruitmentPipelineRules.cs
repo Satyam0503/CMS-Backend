@@ -21,6 +21,8 @@ public static class RecruitmentPipelineRules
             error = $"Applicant status cannot be changed after it is {current}.";
             return false;
         }
+        if (target == ActivityType.OnHold && current is ActivityType.New or ActivityType.InProgress or ActivityType.Shortlisted) return true;
+        if (current == ActivityType.OnHold && target is ActivityType.InProgress or ActivityType.Shortlisted or ActivityType.Rejected) return true;
         if (target == ActivityType.Selected)
         {
             error = "Applicants must be selected through the hiring decision workflow.";

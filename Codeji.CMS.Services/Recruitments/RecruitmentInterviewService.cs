@@ -27,12 +27,13 @@ public sealed class RecruitmentInterviewService(
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(command.IdempotencyKey))
             return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Company and idempotency key are required.");
 
-        var applicant = await applicants.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && !x.IsDeleted);
+        var applicant = await applicants.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && x.VacancyId == command.VacancyId && !x.IsDeleted);
         if (applicant is null)
             return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Applicant was not found in the current company.");
 
         var panelists = (command.PanelistUserIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (panelists.Length > 12) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "An interview panel cannot contain more than 12 interviewers.");
+        if (command.RoundNumber is < 1 or > 50) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Interview round must be between 1 and 50.");
         if (panelists.Length > 0 && employees is not null)
         {
             var eligible = await employees.GetAll(x => x.CompanyId == companyId && x.Status && panelists.Contains(x.UserId));
@@ -53,6 +54,17 @@ public sealed class RecruitmentInterviewService(
         var existing = string.IsNullOrWhiteSpace(command.InterviewId)
             ? await interviews.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && x.LastCommandIdempotencyKey == idempotencyKey && !x.IsDeleted)
             : await interviews.FirstOrDefault(x => x.CompanyId == companyId && x.InterviewId == command.InterviewId && !x.IsDeleted);
+
+        if (existing is null && command.RoundNumber > 1)
+        {
+            var priorRounds = (await interviews.GetAll(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && x.VacancyId == command.VacancyId && !x.IsDeleted && x.RoundNumber < command.RoundNumber)).ToList();
+            for (var round = 1; round < command.RoundNumber; round++)
+            {
+                var prior = priorRounds.Where(x => x.RoundNumber == round).OrderByDescending(x => x.UpdatedDate).FirstOrDefault();
+                if (prior is null || prior.Status != RecruitmentInterviewStatus.Completed || prior.DebriefStatus != RecruitmentDebriefStatus.Complete)
+                    return Fail(result, RecruitmentErrorCodes.InvalidTransition, $"Complete and debrief interview round {round} before scheduling round {command.RoundNumber}.", StatusCodes.Status409Conflict);
+            }
+        }
 
         if (existing is not null && string.Equals(existing.LastCommandIdempotencyKey, idempotencyKey, StringComparison.Ordinal))
         {
@@ -77,7 +89,7 @@ public sealed class RecruitmentInterviewService(
                 RoundType = command.RoundType?.Trim(),
                 StartsAtUtc = startsAtUtc,
                 EndsAtUtc = endsAtUtc,
-                TimeZoneId = command.TimeZoneId.Trim(),
+                TimeZoneId = (command.TimeZoneId ?? "UTC").Trim(),
                 Location = command.Location?.Trim(),
                 MeetingUrl = command.MeetingUrl?.Trim(),
                 PanelistUserIds = panelists,
@@ -107,7 +119,7 @@ public sealed class RecruitmentInterviewService(
         existing.RoundType = command.RoundType?.Trim();
         existing.StartsAtUtc = startsAtUtc;
         existing.EndsAtUtc = endsAtUtc;
-        existing.TimeZoneId = command.TimeZoneId.Trim();
+        existing.TimeZoneId = (command.TimeZoneId ?? "UTC").Trim();
         existing.Location = command.Location?.Trim();
         existing.MeetingUrl = command.MeetingUrl?.Trim();
         existing.PanelistUserIds = panelists;
@@ -146,6 +158,13 @@ public sealed class RecruitmentInterviewService(
 
     private async Task SyncCalendar(RecruitmentInterview interview, string actorUserId)
     {
+        var targetUsers = (interview.PanelistUserIds ?? [])
+            .Concat([actorUserId, interview.CreatedBy ?? string.Empty])
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
         var sync = await calendarServices.AddUpdateCalendarItem(new CalendarRequestDto
         {
             Id = interview.CalendarItemId,
@@ -155,7 +174,9 @@ public sealed class RecruitmentInterviewService(
             EndTimeUtc = interview.EndsAtUtc,
             Type = CalendarItem.Event,
             Recurring = false,
-            Description = $"Applicant {interview.ApplicantId}; {interview.StartsAtUtc:u} - {interview.EndsAtUtc:u}; panel: {string.Join(", ", interview.PanelistUserIds)}"
+            Description = $"Applicant {interview.ApplicantId}; {interview.StartsAtUtc:u} - {interview.EndsAtUtc:u}; panel: {string.Join(", ", interview.PanelistUserIds)}",
+            TargetUserIds = targetUsers,
+            RestrictToTargetUsersAndHrAdmin = true
         });
         interview.UpdatedBy = actorUserId;
         interview.CalendarSyncStatus = sync.Success && !string.IsNullOrWhiteSpace(sync.ResourceId) ? "Synced" : "Pending";

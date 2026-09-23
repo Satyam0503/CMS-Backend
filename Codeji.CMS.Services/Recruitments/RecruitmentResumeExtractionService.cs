@@ -14,11 +14,20 @@ public sealed class RecruitmentResumeExtractionService(
     IHttpContextAccessor context) : IRecruitmentResumeExtractionService
 {
     private static readonly HashSet<string> Decisions = [RecruitmentResumeExtractionDecision.Pending, RecruitmentResumeExtractionDecision.Approved, RecruitmentResumeExtractionDecision.Rejected];
+    public async Task<Result<RecruitmentResumeExtractionReview?>> Get(string applicantId, string vacancyId)
+    {
+        var companyId = CurrentContext.CompanyId(context);
+        if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(applicantId) || string.IsNullOrWhiteSpace(vacancyId)) return new Result<RecruitmentResumeExtractionReview?> { Success = false, StatusCode = 400, ErrorCode = RecruitmentErrorCodes.InvalidRequest, Message = "Company, applicant, and vacancy are required." };
+        var review = await reviews.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicantId.Trim() && x.VacancyId == vacancyId.Trim() && !x.IsDeleted);
+        return new Result<RecruitmentResumeExtractionReview?> { Success = true, StatusCode = 200, MethodResult = review, Data = review, Message = review is null ? "No resume review has been recorded." : "Resume review loaded." };
+    }
+
     public async Task<Result<string>> Upsert(RecruitmentResumeExtractionReviewCommand command, string actorUserId)
     {
         var companyId = CurrentContext.CompanyId(context); var key = command.IdempotencyKey?.Trim(); var decision = command.Decision?.Trim();
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(key) || !Decisions.Contains(decision ?? string.Empty)) return Fail(400, "Company, idempotency key, and a valid extraction decision are required.");
         if (command.ExtractedFields is null || command.ExtractedFields.Count == 0 || command.ExtractedFields.Keys.Any(string.IsNullOrWhiteSpace)) return Fail(400, "At least one named extracted field is required.");
+        if (decision == RecruitmentResumeExtractionDecision.Approved && command.ExtractedFields.Values.Any(string.IsNullOrWhiteSpace)) return Fail(400, "Approved resume fields must contain values; keep the review pending when extraction is incomplete.");
         var applicant = await applicants.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId.Trim() && x.VacancyId == command.VacancyId.Trim() && !x.IsDeleted);
         if (applicant is null) return Fail(404, "Applicant was not found in the current company.");
         var existing = string.IsNullOrWhiteSpace(command.ReviewId) ? await reviews.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted) : await reviews.FirstOrDefault(x => x.CompanyId == companyId && x.ReviewId == command.ReviewId && !x.IsDeleted);

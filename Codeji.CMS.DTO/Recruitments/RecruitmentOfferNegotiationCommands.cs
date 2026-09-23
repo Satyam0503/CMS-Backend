@@ -14,7 +14,7 @@ public sealed class RecruitmentOfferVersionCommand
     public DateTime? ExpiresAtUtc { get; set; }
     [Required] public string IdempotencyKey { get; set; } = string.Empty;
     public int? ExpectedBaseVersionNumber { get; set; }
-    public int? ExpectedVersionNumber { get; set; }
+    public int? ExpectedVersionNumber { get; set; } public Dictionary<string, decimal> CompensationComponents { get; set; } = [];
 }
 
 public sealed class RecruitmentOfferCounterCommand

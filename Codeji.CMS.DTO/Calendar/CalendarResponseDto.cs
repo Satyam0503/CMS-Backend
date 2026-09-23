@@ -13,5 +13,7 @@ public class CalendarResponseDto
     public CalendarResponseItem Type { get; set; }
     public string? ImageUrl { get; set; }
     public bool Recurring { get; set; }
+    public string[]? TargetUserIds { get; set; }
+    public bool RestrictToTargetUsersAndHrAdmin { get; set; }
 }
 

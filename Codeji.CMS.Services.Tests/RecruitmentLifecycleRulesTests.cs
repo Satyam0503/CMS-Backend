@@ -44,6 +44,8 @@ public sealed class RecruitmentLifecycleRulesTests
     [Fact]
     public void Pipeline_rules_reject_backward_moves_and_terminal_changes()
     {
+        Assert.True(RecruitmentPipelineRules.IsAllowedTransition(ActivityType.Shortlisted, ActivityType.OnHold, out var holdError));
+        Assert.True(string.IsNullOrWhiteSpace(holdError));
         Assert.False(RecruitmentPipelineRules.IsAllowedTransition(ActivityType.Shortlisted, ActivityType.InProgress, out var backwardError));
         Assert.Contains("back", backwardError, StringComparison.OrdinalIgnoreCase);
         Assert.False(RecruitmentPipelineRules.IsAllowedTransition(ActivityType.Selected, ActivityType.Rejected, out var terminalError));

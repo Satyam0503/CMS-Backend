@@ -27,6 +27,7 @@ public string ActionTokenId { get; set; } = string.Empty;
     public string? OfferId { get; set; }
     public int? ResourceVersion { get; set; }
     public DateTime ExpiresAtUtc { get; set; }
+    [JsonIgnore] public string? RawToken { get; set; }
 }
 
 public sealed class RecruitmentExternalActionConsumeCommand

@@ -14,5 +14,7 @@ public class CalendarRequestDto
     public DateTime? EndTimeUtc { get; set; }
     public string Description { get; set; }
     public IFormFile? Image { get; set; }
+    public string[]? TargetUserIds { get; set; }
+    public bool RestrictToTargetUsersAndHrAdmin { get; set; }
 }
 

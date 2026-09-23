@@ -22,4 +22,5 @@ public sealed class CandidateHandoffRequest
     public string? Gender { get; set; }
     public string? ReportingManager { get; set; }
     public string? ScheduleId { get; set; }
+    public bool AutoCompletePreboarding { get; set; }
 }

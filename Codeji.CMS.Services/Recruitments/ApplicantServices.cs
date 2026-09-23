@@ -40,6 +40,8 @@ namespace Codeji.CMS.Services.Recruitments
         private readonly IMiddlewareService _middlewareService;
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IMongoDbRepository<PublicApplicationToken>? _applicationTokenRepository;
+        private readonly IMongoDbRepository<RecruitmentJobApplication>? _jobApplicationRepository;
+        private readonly IMongoDbRepository<RecruitmentEnterpriseConfig>? _configRepository;
 
         public ApplicantServices(IMongoDbRepository<Applicant> applicantDbRepository,
             IMapper mapper,
@@ -53,7 +55,9 @@ namespace Codeji.CMS.Services.Recruitments
             IPriorityTaskQueue priorityTaskQueue,
             IMiddlewareService middlewareService,
             IHttpContextAccessor httpContextAccessor,
-            IMongoDbRepository<PublicApplicationToken>? applicationTokenRepository = null
+            IMongoDbRepository<PublicApplicationToken>? applicationTokenRepository = null,
+            IMongoDbRepository<RecruitmentJobApplication>? jobApplicationRepository = null,
+            IMongoDbRepository<RecruitmentEnterpriseConfig>? configRepository = null
             )
         {
             _applicantRepository = applicantDbRepository;
@@ -69,6 +73,8 @@ namespace Codeji.CMS.Services.Recruitments
             _middlewareService = middlewareService;
             _httpContextAccessor = httpContextAccessor;
             _applicationTokenRepository = applicationTokenRepository;
+            _jobApplicationRepository = jobApplicationRepository;
+            _configRepository = configRepository;
         }
         /// <summary>
         /// For Annonymous add and update applicants
@@ -79,7 +85,13 @@ namespace Codeji.CMS.Services.Recruitments
         {
             Result result = new();
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-            bool isApplicantExist = await _applicantRepository.Exist(ap => ap.CompanyId == companyId && ap.Email == applicantRegisterModel.Email);
+            var config = _configRepository is null ? null : await _configRepository.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
+            var allowMultiVacancy = config?.AllowMultiVacancyApplications ?? true;
+
+            // REC-BUG-07 Fix: Scope duplicate check to !ap.IsDeleted and to the specific VacancyId when AllowMultiVacancyApplications is enabled.
+            bool isApplicantExist = allowMultiVacancy && !string.IsNullOrWhiteSpace(applicantRegisterModel.VacancyId)
+                ? await _applicantRepository.Exist(ap => ap.CompanyId == companyId && ap.VacancyId == applicantRegisterModel.VacancyId && ap.Email == applicantRegisterModel.Email && !ap.IsDeleted)
+                : await _applicantRepository.Exist(ap => ap.CompanyId == companyId && ap.Email == applicantRegisterModel.Email && !ap.IsDeleted);
             if (isApplicantExist)
             {
                 result.StatusCode = CustomStatusCode.ApplicantAlreadyExist;
@@ -105,6 +117,29 @@ namespace Codeji.CMS.Services.Recruitments
             if (result.Success)
             {
                 result.ResourceId = applicant.ApplicantId;
+                // REC-BUG-09 Fix: Synchronize canonical RecruitmentJobApplication immediately on registration
+                if (_jobApplicationRepository is not null)
+                {
+                    await _jobApplicationRepository.AddOne(new RecruitmentJobApplication
+                    {
+                        CompanyId = companyId,
+                        ApplicantId = applicant.ApplicantId,
+                        VacancyId = applicant.VacancyId ?? string.Empty,
+                        CurrentStage = applicant.ActivityType.ToString(),
+                        StageHistory =
+                        [
+                            new RecruitmentApplicationStageEvent
+                            {
+                                FromStage = "None",
+                                ToStage = applicant.ActivityType.ToString(),
+                                ActorUserId = applicant.ApplicantId,
+                                Reason = "Initial application submitted"
+                            }
+                        ],
+                        CreatedBy = applicant.ApplicantId,
+                        UpdatedBy = applicant.ApplicantId
+                    });
+                }
                 await LogNewApplication(applicant);
                 await SendApplicationAlertToRecruitmentTeam(applicant);
                 await SendEmailToApplicant(applicant);
@@ -255,7 +290,7 @@ namespace Codeji.CMS.Services.Recruitments
                 return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Applications for this job are closed.", ErrorCode = RecruitmentErrorCodes.JobClosed };
 
             model.Email = model.Email.Trim().ToLowerInvariant();
-            Applicant? applicant = await _applicantRepository.FirstOrDefault(a => a.CompanyId == vacancy.CompanyId && a.Email == model.Email);
+            Applicant? applicant = await _applicantRepository.FirstOrDefault(a => a.CompanyId == vacancy.CompanyId && a.VacancyId == model.VacancyId && a.Email == model.Email && !a.IsDeleted);
             if (applicant != null)
             {
                 var canApplyAgain = DateTime.UtcNow.AddMonths(-6) > applicant.CreatedDate;

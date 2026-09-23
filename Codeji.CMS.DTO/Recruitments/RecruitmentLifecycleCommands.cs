@@ -29,6 +29,7 @@ public sealed class RecruitmentOfferCommand
     [Range(0, double.MaxValue)] public decimal Salary { get; set; }
     [Required] public string Currency { get; set; } = string.Empty;
     public DateTime? StartDateUtc { get; set; }
+    public Dictionary<string, decimal> CompensationComponents { get; set; } = [];
     public DateTime? ExpiresAtUtc { get; set; }
     public string? ApprovalReference { get; set; }
     [Required] public string IdempotencyKey { get; set; } = string.Empty;

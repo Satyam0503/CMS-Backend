@@ -24,20 +24,34 @@ public sealed class RecruitmentScorecardService(
         var reviewerUserId = string.IsNullOrWhiteSpace(command.ReviewerUserId) ? actorUserId : command.ReviewerUserId.Trim();
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(reviewerUserId)) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Company, reviewer, and idempotency key are required.");
         if (command.Criteria is null || command.Criteria.Count == 0 || command.Criteria.Any(x => string.IsNullOrWhiteSpace(x.Name) || x.Rating is < 1 or > 5)) return Fail(result, RecruitmentErrorCodes.ScorecardInvalid, "At least one criterion with a rating from 1 to 5 is required.");
+        var roundNumber = command.RoundNumber <= 0 ? 1 : command.RoundNumber;
         if (!string.IsNullOrWhiteSpace(command.InterviewId) && interviews is not null)
         {
             var interview = await interviews.FirstOrDefault(x => x.CompanyId == companyId && x.InterviewId == command.InterviewId && !x.IsDeleted);
-            if (interview is null || (interview.PanelistUserIds.Length > 0 && !interview.PanelistUserIds.Contains(reviewerUserId, StringComparer.OrdinalIgnoreCase))) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Reviewer is not assigned to this interview.");
+            if (interview is null) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Reviewer is not assigned to this interview.");
+            roundNumber = interview.RoundNumber > 0 ? interview.RoundNumber : roundNumber;
+            if (interview.PanelistUserIds.Length > 0 && !interview.PanelistUserIds.Contains(reviewerUserId, StringComparer.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(command.ReviewerUserId) && !string.Equals(command.ReviewerUserId.Trim(), actorUserId, StringComparison.OrdinalIgnoreCase))
+                    return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Reviewer is not assigned to this interview.");
+                if (string.Equals(interview.CreatedBy, actorUserId, StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(CurrentContext.AdminUserId(context)))
+                    reviewerUserId = interview.PanelistUserIds[0];
+                else
+                    return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Reviewer is not assigned to this interview.");
+            }
         }
         var applicant = await applicants.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && !x.IsDeleted);
         if (applicant is null) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Applicant was not found in the current company.");
-        var existing = string.IsNullOrWhiteSpace(command.ScorecardId) ? await scorecards.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && x.ReviewerUserId == reviewerUserId && x.LastCommandIdempotencyKey == key && !x.IsDeleted) : await scorecards.FirstOrDefault(x => x.CompanyId == companyId && x.ScorecardId == command.ScorecardId && !x.IsDeleted);
+        var existing = !string.IsNullOrWhiteSpace(command.ScorecardId)
+            ? await scorecards.FirstOrDefault(x => x.CompanyId == companyId && x.ScorecardId == command.ScorecardId && !x.IsDeleted)
+            : await scorecards.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && x.ReviewerUserId == reviewerUserId && (x.LastCommandIdempotencyKey == key || (x.RoundNumber == roundNumber && (string.IsNullOrEmpty(command.InterviewId) || x.InterviewId == command.InterviewId))) && !x.IsDeleted);
         if (existing is not null && existing.LastCommandIdempotencyKey == key) return Ok(result, existing.ScorecardId, "Scorecard command already applied.");
-        if (existing is not null && !string.Equals(existing.ReviewerUserId, actorUserId, StringComparison.OrdinalIgnoreCase)) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Only the assigned interviewer can update this scorecard.", StatusCodes.Status403Forbidden);
+        if (existing is not null && !string.Equals(existing.ReviewerUserId, actorUserId, StringComparison.OrdinalIgnoreCase) && !string.Equals(existing.CreatedBy, actorUserId, StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(CurrentContext.AdminUserId(context)))
+            return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Only the assigned interviewer can update this scorecard.", StatusCodes.Status403Forbidden);
         if (existing is null)
         {
             if (command.Status is not (RecruitmentScorecardStatus.Draft or RecruitmentScorecardStatus.Submitted)) return Fail(result, RecruitmentErrorCodes.InvalidTransition, "A new scorecard must start in Draft or Submitted.", StatusCodes.Status409Conflict);
-            var entity = new RecruitmentScorecard { CompanyId = companyId, ApplicantId = applicant.ApplicantId, VacancyId = command.VacancyId, InterviewId = command.InterviewId, RoundNumber = command.RoundNumber <= 0 ? 1 : command.RoundNumber, FeedbackDueAtUtc = command.FeedbackDueAtUtc, Recommendation = command.Recommendation?.Trim(), ReviewerUserId = reviewerUserId, Criteria = command.Criteria.Select(Map).ToList(), Status = command.Status.Trim(), LastCommandIdempotencyKey = key, CreatedBy = actorUserId, UpdatedBy = actorUserId };
+            var entity = new RecruitmentScorecard { CompanyId = companyId, ApplicantId = applicant.ApplicantId, VacancyId = command.VacancyId, InterviewId = command.InterviewId, RoundNumber = roundNumber, FeedbackDueAtUtc = command.FeedbackDueAtUtc, Recommendation = command.Recommendation?.Trim(), ReviewerUserId = reviewerUserId, Criteria = command.Criteria.Select(Map).ToList(), Status = command.Status.Trim(), LastCommandIdempotencyKey = key, CreatedBy = actorUserId, UpdatedBy = actorUserId };
             var saved = await scorecards.AddOne(entity);
             return saved.Success ? Ok(result, entity.ScorecardId, "Scorecard saved.") : Fail(result, RecruitmentErrorCodes.ConcurrencyConflict, "Scorecard could not be saved.", StatusCodes.Status409Conflict);
         }
@@ -46,7 +60,7 @@ public sealed class RecruitmentScorecardService(
         var version = existing.Version <= 0 ? 1 : existing.Version;
         if (command.ExpectedVersion.HasValue && command.ExpectedVersion.Value != version) return Fail(result, RecruitmentErrorCodes.ConcurrencyConflict, "Scorecard was changed by another user.", StatusCodes.Status409Conflict);
         var previousStatus = existing.Status;
-        existing.Criteria = command.Criteria.Select(Map).ToList(); existing.RoundNumber = command.RoundNumber <= 0 ? existing.RoundNumber : command.RoundNumber; existing.FeedbackDueAtUtc = command.FeedbackDueAtUtc; existing.Recommendation = command.Recommendation?.Trim(); existing.Status = next; existing.LastCommandIdempotencyKey = key; existing.Version = version + 1; existing.UpdatedBy = actorUserId; existing.UpdatedDate = DateTime.UtcNow;
+        existing.Criteria = command.Criteria.Select(Map).ToList(); existing.RoundNumber = roundNumber; existing.FeedbackDueAtUtc = command.FeedbackDueAtUtc; existing.Recommendation = command.Recommendation?.Trim(); existing.Status = next; existing.LastCommandIdempotencyKey = key; existing.Version = version + 1; existing.UpdatedBy = actorUserId; existing.UpdatedDate = DateTime.UtcNow;
         var updated = await scorecards.Update(Builders<RecruitmentScorecard>.Filter.Where(x => x.CompanyId == companyId && x.ScorecardId == existing.ScorecardId && (x.Version == version || x.Version == 0)), existing);
         if (!updated.Success) return Fail(result, RecruitmentErrorCodes.ConcurrencyConflict, "Scorecard was changed by another user.", StatusCodes.Status409Conflict);
         await applicantLogs.AddOne(new ApplicantLogs { CompanyId = companyId, ApplicantId = applicant.ApplicantId, ApplicantName = $"{applicant.FirstName} {applicant.LastName}".Trim(), JobRole = applicant.VacancyId, UserId = actorUserId, ActivityCategory = 0, Description = $"Scorecard {existing.Status.ToLowerInvariant()} by {existing.ReviewerUserId}.", EventType = "ScorecardUpdated", PreviousStage = previousStatus, CurrentStage = next, CreatedBy = actorUserId, UpdatedBy = actorUserId });

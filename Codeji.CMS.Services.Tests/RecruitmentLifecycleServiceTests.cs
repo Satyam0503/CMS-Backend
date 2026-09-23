@@ -88,6 +88,84 @@ public sealed class RecruitmentLifecycleServiceTests
         Assert.Equal(expiry, saved.ExpiresAtUtc.Value);
     }
 [Fact]
+    public async Task Offer_persists_compensation_components_and_total_ctc()
+    {
+        var applicants = new Mock<IMongoDbRepository<Applicant>>();
+        applicants.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new Applicant { ApplicantId = "a-1", CompanyId = "company-1", FirstName = "Ada", LastName = "Lovelace", VacancyId = "v-1", Phone = "1" });
+        var offers = new Mock<IMongoDbRepository<RecruitmentOffer>>();
+        offers.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentOffer, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync((RecruitmentOffer?)null);
+        RecruitmentOffer? saved = null;
+        offers.Setup(x => x.AddOne(It.IsAny<RecruitmentOffer>()))
+            .Callback<RecruitmentOffer>(item => saved = item)
+            .ReturnsAsync(new Result { Success = true });
+        var service = new RecruitmentOfferService(applicants.Object, offers.Object, new Mock<IMongoDbRepository<ApplicantLogs>>().Object, new Mock<INotificationService>().Object, TenantContext("company-1"));
+
+        var result = await service.Upsert(new RecruitmentOfferCommand
+        {
+            ApplicantId = "a-1",
+            VacancyId = "v-1",
+            Salary = 100,
+            Currency = "INR",
+            Status = RecruitmentOfferStatus.Draft,
+            CompensationComponents = new Dictionary<string, decimal> { ["Housing"] = 20, ["Variable"] = 30 },
+            IdempotencyKey = "ctc-components-1"
+        }, "actor-1");
+
+        Assert.True(result.Success);
+        Assert.NotNull(saved);
+        Assert.Equal(150m, saved!.TotalCtc);
+        Assert.Equal(2, saved.CompensationComponents.Count);
+        Assert.Equal(20m, saved.CompensationComponents["Housing"]);
+    }
+[Fact]
+    public async Task Offer_rejects_duplicate_compensation_component_names()
+    {
+        var applicants = new Mock<IMongoDbRepository<Applicant>>();
+        var offers = new Mock<IMongoDbRepository<RecruitmentOffer>>();
+        var service = new RecruitmentOfferService(applicants.Object, offers.Object, new Mock<IMongoDbRepository<ApplicantLogs>>().Object, new Mock<INotificationService>().Object, TenantContext("company-1"));
+
+        var result = await service.Upsert(new RecruitmentOfferCommand
+        {
+            ApplicantId = "a-1",
+            VacancyId = "v-1",
+            Salary = 100,
+            Currency = "INR",
+            Status = RecruitmentOfferStatus.Draft,
+            CompensationComponents = new Dictionary<string, decimal> { ["Housing"] = 20, ["housing"] = 30 },
+            IdempotencyKey = "duplicate-components-1"
+        }, "actor-1");
+
+        Assert.False(result.Success);
+        Assert.Contains("unique names", result.Message, StringComparison.OrdinalIgnoreCase);
+        applicants.Verify(x => x.FirstOrDefault(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()), Times.Never);
+    }
+[Fact]
+    public async Task Offer_rejects_expiry_before_start_date()
+    {
+        var applicants = new Mock<IMongoDbRepository<Applicant>>();
+        var offers = new Mock<IMongoDbRepository<RecruitmentOffer>>();
+        var service = new RecruitmentOfferService(applicants.Object, offers.Object, new Mock<IMongoDbRepository<ApplicantLogs>>().Object, new Mock<INotificationService>().Object, TenantContext("company-1"));
+        var start = DateTime.UtcNow.AddDays(2);
+
+        var result = await service.Upsert(new RecruitmentOfferCommand
+        {
+            ApplicantId = "a-1",
+            VacancyId = "v-1",
+            Salary = 100,
+            Currency = "INR",
+            Status = RecruitmentOfferStatus.Draft,
+            StartDateUtc = start,
+            ExpiresAtUtc = start.AddHours(-1),
+            IdempotencyKey = "expiry-order-1"
+        }, "actor-1");
+
+        Assert.False(result.Success);
+        Assert.Contains("expiry must be after", result.Message, StringComparison.OrdinalIgnoreCase);
+        applicants.Verify(x => x.FirstOrDefault(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()), Times.Never);
+    }
+[Fact]
     public async Task Interview_lookup_does_not_cross_tenant_boundary()
     {
         var applicants = new Mock<IMongoDbRepository<Applicant>>();
@@ -153,7 +231,21 @@ public sealed class RecruitmentLifecycleServiceTests
         Assert.False(result.Success);
         Assert.Equal(RecruitmentErrorCodes.InvalidRequest, result.ErrorCode);
     }
-    private static IHttpContextAccessor TenantContext(string companyId)
+    [Fact]
+    public async Task Hiring_decision_requires_notes_for_hold()
+    {
+        var service = new RecruitmentHiringDecisionService(new Mock<IMongoDbRepository<Applicant>>().Object, new Mock<IMongoDbRepository<RecruitmentInterview>>().Object, new Mock<IMongoDbRepository<RecruitmentHiringDecision>>().Object, new Mock<IMongoDbRepository<ApplicantLogs>>().Object, TenantContext("company-1"));
+        var result = await service.Upsert(new RecruitmentHiringDecisionCommand { ApplicantId = "a-1", VacancyId = "v-1", Decision = RecruitmentHiringDecisionStatus.Hold, IdempotencyKey = "decision-notes-1" }, "actor-1");
+        Assert.False(result.Success);
+        Assert.Contains("Decision notes are required", result.Message);
+    }    [Fact]
+    public async Task Hiring_decision_requires_notes_for_reject()
+    {
+        var service = new RecruitmentHiringDecisionService(new Mock<IMongoDbRepository<Applicant>>().Object, new Mock<IMongoDbRepository<RecruitmentInterview>>().Object, new Mock<IMongoDbRepository<RecruitmentHiringDecision>>().Object, new Mock<IMongoDbRepository<ApplicantLogs>>().Object, TenantContext("company-1"));
+        var result = await service.Upsert(new RecruitmentHiringDecisionCommand { ApplicantId = "a-1", VacancyId = "v-1", Decision = RecruitmentHiringDecisionStatus.Reject, IdempotencyKey = "decision-notes-2" }, "actor-1");
+        Assert.False(result.Success);
+        Assert.Contains("Decision notes are required", result.Message);
+    }    private static IHttpContextAccessor TenantContext(string companyId)
     {
         var context = new DefaultHttpContext();
         context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("company_id", companyId)], "TestAuth"));

@@ -12,6 +12,8 @@ public sealed class RecruitmentOffer : BaseClass
     public string VacancyId { get; set; } = string.Empty;
     public string Currency { get; set; } = string.Empty;
     public decimal Salary { get; set; }
+    public Dictionary<string, decimal> CompensationComponents { get; set; } = [];
+    public decimal TotalCtc { get; set; }
     public DateTime? StartDateUtc { get; set; }
     public string Status { get; set; } = RecruitmentOfferStatus.Draft;
     public string? ApprovalReference { get; set; }

@@ -17,7 +17,8 @@ public sealed class RecruitmentScreeningService(
     IMongoDbRepository<ApplicantLogs> logs,
     IHttpContextAccessor context,
     IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null,
-    IMongoDbRepository<EmpUser>? employees = null) : IRecruitmentScreeningService
+    IMongoDbRepository<EmpUser>? employees = null,
+    IMongoDbRepository<RecruitmentJobApplication>? applications = null) : IRecruitmentScreeningService
 {
     public async Task<Result<string>> Upsert(RecruitmentScreeningReviewCommand command, string actorUserId)
     {
@@ -36,36 +37,96 @@ public sealed class RecruitmentScreeningService(
             return Fail(RecruitmentErrorCodes.InvalidRequest, "Screening decision must be Pending, Pass, Hold, or Reject.");
         if (command.Score is < 0 or > 100 || command.Criteria is null || command.Criteria.Count == 0 || command.Criteria.Any(x => string.IsNullOrWhiteSpace(x.Name)))
             return Fail(RecruitmentErrorCodes.InvalidRequest, "Screening requires at least one named criterion and a score from 0 to 100.");
+
         var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
         if (config is not null && config.ScreeningPassScore > 0 && decision == RecruitmentScreeningDecision.Pass && command.Score < config.ScreeningPassScore)
             return Fail(RecruitmentErrorCodes.InvalidRequest, $"Screening pass requires a score of at least {config.ScreeningPassScore}.");
-        if (config?.ScreeningCriteria is { Count: > 0 } configuredCriteria && command.Criteria.Any(x => !configuredCriteria.Contains(x.Name.Trim(), StringComparer.OrdinalIgnoreCase)))
-            return Fail(RecruitmentErrorCodes.InvalidRequest, "Screening criteria must match the company configuration.");
+
+        // REC-BUG-06 Fix: When bulk screening sends "Bulk recruiter review", automatically expand it to match the company's configured ScreeningCriteria.
+        var criteriaToSave = command.Criteria;
+        if (config?.ScreeningCriteria is { Count: > 0 } configuredCriteria)
+        {
+            if (criteriaToSave.Count == 1 && string.Equals(criteriaToSave[0].Name.Trim(), "Bulk recruiter review", StringComparison.OrdinalIgnoreCase))
+            {
+                var template = criteriaToSave[0];
+                criteriaToSave = configuredCriteria.Select(name => new RecruitmentScreeningCriterionCommand
+                {
+                    Name = name,
+                    Passed = template.Passed,
+                    Notes = template.Notes
+                }).ToList();
+            }
+            else if (criteriaToSave.Any(x => !configuredCriteria.Contains(x.Name.Trim(), StringComparer.OrdinalIgnoreCase)))
+            {
+                return Fail(RecruitmentErrorCodes.InvalidRequest, "Screening criteria must match the company configuration.");
+            }
+        }
+
         if (decision == RecruitmentScreeningDecision.Reject && string.IsNullOrWhiteSpace(command.RejectionReason))
             return Fail(RecruitmentErrorCodes.InvalidRequest, "A rejection reason is required.");
         var applicant = await applicants.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && !x.IsDeleted);
         if (applicant is null) return Fail(RecruitmentErrorCodes.InvalidRequest, "Applicant was not found in the current company.");
         if (applicant.ActivityType == ActivityType.Rejected) return Fail(RecruitmentErrorCodes.InvalidTransition, "Rejected applications cannot be screened.", StatusCodes.Status409Conflict);
+
         var existing = string.IsNullOrWhiteSpace(command.ReviewId)
             ? await reviews.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.ReviewerUserId == reviewer && x.LastCommandIdempotencyKey == key && !x.IsDeleted)
             : await reviews.FirstOrDefault(x => x.CompanyId == companyId && x.ReviewId == command.ReviewId && !x.IsDeleted);
         if (existing is not null && existing.LastCommandIdempotencyKey == key) return Ok(existing.ReviewId, "Screening command already applied.");
+
         if (existing is null)
         {
-            var entity = new RecruitmentScreeningReview { CompanyId = companyId, ApplicantId = applicant.ApplicantId, VacancyId = command.VacancyId, ReviewerUserId = reviewer, ResumeVersion = command.ResumeVersion?.Trim(), Score = command.Score, Decision = decision!, RejectionReason = command.RejectionReason?.Trim(), Evidence = command.Evidence?.Trim(), Criteria = command.Criteria.Select(Map).ToList(), LastCommandIdempotencyKey = key, CreatedBy = actorUserId, UpdatedBy = actorUserId };
+            var entity = new RecruitmentScreeningReview { CompanyId = companyId, ApplicantId = applicant.ApplicantId, VacancyId = command.VacancyId, ReviewerUserId = reviewer, ResumeVersion = command.ResumeVersion?.Trim(), Score = command.Score, Decision = decision!, RejectionReason = command.RejectionReason?.Trim(), Evidence = command.Evidence?.Trim(), Criteria = criteriaToSave.Select(Map).ToList(), LastCommandIdempotencyKey = key, CreatedBy = actorUserId, UpdatedBy = actorUserId };
             var saved = await reviews.AddOne(entity);
             if (!saved.Success) return Fail(RecruitmentErrorCodes.ConcurrencyConflict, "Screening review could not be saved.", StatusCodes.Status409Conflict);
+            await AutoAdvanceApplicantStage(companyId, applicant, decision!, config, actorUserId);
             await WriteLog(applicant, entity, actorUserId, null);
             return Ok(entity.ReviewId, "Screening review saved.");
         }
+
         var version = existing.Version <= 0 ? 1 : existing.Version;
         if (command.ExpectedVersion.HasValue && command.ExpectedVersion.Value != version) return Fail(RecruitmentErrorCodes.ConcurrencyConflict, "Screening review was changed by another user.", StatusCodes.Status409Conflict);
         var previous = existing.Decision;
-        existing.VacancyId = command.VacancyId; existing.ResumeVersion = command.ResumeVersion?.Trim(); existing.Score = command.Score; existing.Decision = decision!; existing.RejectionReason = command.RejectionReason?.Trim(); existing.Evidence = command.Evidence?.Trim(); existing.Criteria = command.Criteria.Select(Map).ToList(); existing.LastCommandIdempotencyKey = key; existing.Version = version + 1; existing.UpdatedBy = actorUserId; existing.UpdatedDate = DateTime.UtcNow;
+        existing.VacancyId = command.VacancyId; existing.ResumeVersion = command.ResumeVersion?.Trim(); existing.Score = command.Score; existing.Decision = decision!; existing.RejectionReason = command.RejectionReason?.Trim(); existing.Evidence = command.Evidence?.Trim(); existing.Criteria = criteriaToSave.Select(Map).ToList(); existing.LastCommandIdempotencyKey = key; existing.Version = version + 1; existing.UpdatedBy = actorUserId; existing.UpdatedDate = DateTime.UtcNow;
         var updated = await reviews.Update(Builders<RecruitmentScreeningReview>.Filter.Where(x => x.CompanyId == companyId && x.ReviewId == existing.ReviewId && (x.Version == version || x.Version == 0)), existing);
         if (!updated.Success) return Fail(RecruitmentErrorCodes.ConcurrencyConflict, "Screening review was changed by another user.", StatusCodes.Status409Conflict);
+        await AutoAdvanceApplicantStage(companyId, applicant, decision!, config, actorUserId);
         await WriteLog(applicant, existing, actorUserId, previous);
         return Ok(existing.ReviewId, "Screening review updated.");
+    }
+
+    private async Task AutoAdvanceApplicantStage(string companyId, Applicant applicant, string decision, RecruitmentEnterpriseConfig? config, string actorUserId)
+    {
+        // REC-BUG-06 Fix: Automatically advance Applicant.ActivityType and canonical RecruitmentJobApplication.CurrentStage when AutoAdvanceOnScreening is enabled (default true)
+        if (!(config?.AutoAdvanceOnScreening ?? true)) return;
+
+        ActivityType? nextStage = decision switch
+        {
+            RecruitmentScreeningDecision.Pass when applicant.ActivityType is ActivityType.New or ActivityType.InProgress or ActivityType.OnHold => ActivityType.Shortlisted,
+            RecruitmentScreeningDecision.Hold when applicant.ActivityType is ActivityType.New or ActivityType.InProgress or ActivityType.Shortlisted => ActivityType.OnHold,
+            RecruitmentScreeningDecision.Reject when applicant.ActivityType is not ActivityType.Selected => ActivityType.Rejected,
+            _ => null
+        };
+
+        if (!nextStage.HasValue || applicant.ActivityType == nextStage.Value) return;
+
+        applicant.ActivityType = nextStage.Value;
+        applicant.UpdatedBy = actorUserId;
+        applicant.UpdatedDate = DateTime.UtcNow;
+        await applicants.Update(Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId), applicant);
+
+        if (applications is not null)
+        {
+            var canonical = await applications.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.VacancyId == applicant.VacancyId && !x.IsDeleted);
+            if (canonical is not null && !string.Equals(canonical.CurrentStage, nextStage.Value.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                canonical.StageHistory.Add(new RecruitmentApplicationStageEvent { FromStage = canonical.CurrentStage, ToStage = nextStage.Value.ToString(), ActorUserId = actorUserId, Reason = $"Screening decision: {decision}" });
+                canonical.CurrentStage = nextStage.Value.ToString();
+                canonical.Version = (canonical.Version <= 0 ? 1 : canonical.Version) + 1;
+                canonical.UpdatedBy = actorUserId;
+                canonical.UpdatedDate = DateTime.UtcNow;
+                await applications.Update(Builders<RecruitmentJobApplication>.Filter.Where(x => x.CompanyId == companyId && x.ApplicationId == canonical.ApplicationId && !x.IsDeleted), canonical);
+            }
+        }
     }
 
     public async Task<Result<RecruitmentScreeningBulkResult>> Bulk(RecruitmentScreeningBulkCommand command, string actorUserId)

@@ -22,5 +22,14 @@ public sealed class RecruitmentResumeExtractionServiceTests
         Assert.True(result.Success);
         Assert.Equal(RecruitmentResumeExtractionDecision.Pending, saved!.Decision);
     }
-    private static IHttpContextAccessor TenantContext(string companyId) => new HttpContextAccessor { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("company_id", companyId)], "TestAuth")) } };
+    [Fact]
+    public async Task Approved_extraction_rejects_empty_values()
+    {
+        var applicants = new Mock<IMongoDbRepository<Applicant>>();
+        applicants.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync(new Applicant { CompanyId = "company-1", ApplicantId = "a-1", VacancyId = "v-1", Phone = "1" });
+        var service = new RecruitmentResumeExtractionService(applicants.Object, new Mock<IMongoDbRepository<RecruitmentResumeExtractionReview>>().Object, new Mock<IMongoDbRepository<ApplicantLogs>>().Object, TenantContext("company-1"));
+        var result = await service.Upsert(new RecruitmentResumeExtractionReviewCommand { ApplicantId = "a-1", VacancyId = "v-1", Decision = RecruitmentResumeExtractionDecision.Approved, ExtractedFields = new Dictionary<string, string> { ["skills"] = " " }, IdempotencyKey = "extract-review-2" }, "actor-1");
+        Assert.False(result.Success);
+        Assert.Equal("Approved resume fields must contain values; keep the review pending when extraction is incomplete.", result.Message);
+    }    private static IHttpContextAccessor TenantContext(string companyId) => new HttpContextAccessor { HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("company_id", companyId)], "TestAuth")) } };
 }

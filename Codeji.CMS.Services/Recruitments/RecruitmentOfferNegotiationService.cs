@@ -22,12 +22,30 @@ public sealed class RecruitmentOfferNegotiationService(
     private static readonly Regex CurrencyPattern = new("^[A-Z]{3}$", RegexOptions.Compiled);
     private const int MaximumNegotiationRounds = 5;
 
+    public async Task<Result<List<RecruitmentOfferVersion>>> GetVersions(string offerId)
+    {
+        var companyId = CurrentContext.CompanyId(context);
+        if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(offerId)) return Fail<List<RecruitmentOfferVersion>>(RecruitmentErrorCodes.InvalidRequest, "Company and offer are required.");
+        var offer = await offers.FirstOrDefault(x => x.CompanyId == companyId && x.OfferId == offerId.Trim() && !x.IsDeleted);
+        if (offer is null) return Fail<List<RecruitmentOfferVersion>>(RecruitmentErrorCodes.InvalidRequest, "Offer was not found in the current company.");
+        var items = (await versions.GetAll(x => x.CompanyId == companyId && x.OfferId == offer.OfferId && !x.IsDeleted)).OrderByDescending(x => x.VersionNumber).ToList();
+        return new Result<List<RecruitmentOfferVersion>> { Success = true, StatusCode = 200, MethodResult = items, Data = items, TotalRecords = items.Count, Message = "Offer versions loaded." };
+    }
+    public async Task<Result<List<RecruitmentOfferCounterRequest>>> GetCounters(string offerId)
+    {
+        var companyId = CurrentContext.CompanyId(context);
+        if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(offerId)) return Fail<List<RecruitmentOfferCounterRequest>>(RecruitmentErrorCodes.InvalidRequest, "Company and offer are required.");
+        var offer = await offers.FirstOrDefault(x => x.CompanyId == companyId && x.OfferId == offerId.Trim() && !x.IsDeleted);
+        if (offer is null) return Fail<List<RecruitmentOfferCounterRequest>>(RecruitmentErrorCodes.InvalidRequest, "Offer was not found in the current company.");
+        var items = (await counters.GetAll(x => x.CompanyId == companyId && x.OfferId == offer.OfferId && !x.IsDeleted)).OrderByDescending(x => x.NegotiationRound).ToList();
+        return new Result<List<RecruitmentOfferCounterRequest>> { Success = true, StatusCode = 200, MethodResult = items, Data = items, TotalRecords = items.Count, Message = "Offer counter requests loaded." };
+    }
     public async Task<Result<string>> CreateVersion(RecruitmentOfferVersionCommand command, string actor)
     {
         var companyId = CurrentContext.CompanyId(context);
         if (string.IsNullOrWhiteSpace(companyId) || !ValidKey(command.IdempotencyKey)) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Company and an idempotency key of at least 12 characters are required.");
-        if (!ValidMoney(command.Salary, command.Currency) || !VersionStatuses.Contains(command.Status.Trim())) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Salary, currency, and offer status are invalid.");
-        if (command.ExpiresAtUtc.HasValue && command.ExpiresAtUtc.Value <= DateTime.UtcNow) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Offer expiry must be in the future.");
+        if (!ValidMoney(command.Salary, command.Currency) || !VersionStatuses.Contains(command.Status.Trim())) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Salary, currency, and offer status are invalid."); if (command.CompensationComponents is null || command.CompensationComponents.Count > 30 || command.CompensationComponents.Any(x => string.IsNullOrWhiteSpace(x.Key) || x.Value < 0) || command.CompensationComponents.GroupBy(x => x.Key.Trim(), StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1)) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Compensation components must have unique names, non-negative values, and no more than 30 entries.");
+        if (command.ExpiresAtUtc.HasValue && command.ExpiresAtUtc.Value <= DateTime.UtcNow) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Offer expiry must be in the future."); if (command.StartDateUtc.HasValue && command.StartDateUtc.Value.Date < DateTime.UtcNow.Date) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Offer start date cannot be in the past.");
         if (command.StartDateUtc.HasValue && command.ExpiresAtUtc.HasValue && command.ExpiresAtUtc.Value <= command.StartDateUtc.Value) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Offer expiry must be after the start date.");
         var offer = await offers.FirstOrDefault(x => x.CompanyId == companyId && x.OfferId == command.OfferId.Trim() && !x.IsDeleted);
         if (offer is null) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Offer was not found in the current company.");
@@ -38,7 +56,7 @@ public sealed class RecruitmentOfferNegotiationService(
         var latest = (await versions.GetAll(x => x.CompanyId == companyId && x.OfferId == offer.OfferId && !x.IsDeleted)).OrderByDescending(x => x.VersionNumber).FirstOrDefault();
         var latestNumber = latest?.VersionNumber ?? 0;
         if (command.ExpectedVersionNumber.HasValue && command.ExpectedVersionNumber.Value != latestNumber) return Fail<string>(RecruitmentErrorCodes.ConcurrencyConflict, "Offer version changed; refresh before creating a new version.", 409);
-        var version = new RecruitmentOfferVersion { CompanyId = companyId, OfferId = offer.OfferId, ApplicantId = offer.ApplicantId, VersionNumber = latestNumber + 1, Salary = command.Salary, Currency = command.Currency.Trim().ToUpperInvariant(), StartDateUtc = command.StartDateUtc, Status = command.Status.Trim(), VersionReason = command.VersionReason?.Trim() ?? "ManualRevision", IdempotencyKey = command.IdempotencyKey.Trim(), ApprovalReference = command.ApprovalReference?.Trim(), ExpiresAtUtc = command.ExpiresAtUtc, CreatedBy = actor, UpdatedBy = actor };
+        var version = new RecruitmentOfferVersion { CompanyId = companyId, OfferId = offer.OfferId, ApplicantId = offer.ApplicantId, VersionNumber = latestNumber + 1, Salary = command.Salary, Currency = command.Currency.Trim().ToUpperInvariant(), StartDateUtc = command.StartDateUtc, Status = command.Status.Trim(), CompensationComponents = command.CompensationComponents.ToDictionary(x => x.Key.Trim(), x => x.Value, StringComparer.OrdinalIgnoreCase), TotalCtc = command.Salary + command.CompensationComponents.Values.Sum(), VersionReason = command.VersionReason?.Trim() ?? "ManualRevision", IdempotencyKey = command.IdempotencyKey.Trim(), ApprovalReference = command.ApprovalReference?.Trim(), ExpiresAtUtc = command.ExpiresAtUtc, CreatedBy = actor, UpdatedBy = actor };
         var added = await versions.AddOne(version);
         return added.Success ? Ok(version.OfferVersionId, "Offer version created.") : Fail<string>(RecruitmentErrorCodes.ConcurrencyConflict, "Offer version could not be created; retry with the same idempotency key.", 409);
     }

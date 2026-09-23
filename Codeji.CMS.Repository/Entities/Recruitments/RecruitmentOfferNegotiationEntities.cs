@@ -9,7 +9,7 @@ public sealed class RecruitmentOfferVersion : BaseClass
     public string OfferId { get; set; } = string.Empty;
     public string ApplicantId { get; set; } = string.Empty;
     public int VersionNumber { get; set; }
-    public decimal Salary { get; set; }
+    public decimal Salary { get; set; } public Dictionary<string, decimal> CompensationComponents { get; set; } = []; public decimal TotalCtc { get; set; }
     public string Currency { get; set; } = string.Empty;
     public DateTime? StartDateUtc { get; set; }
     public string Status { get; set; } = "Draft";

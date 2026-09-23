@@ -8,6 +8,7 @@ using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Services.Calendar.Interface;
+using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
@@ -35,6 +36,69 @@ public class CalendarServices : ICalendarServices
         _logger = logger;
     }
 
+    private async Task<bool> IsCallerHrOrAdminAsync()
+    {
+        var adminId = CurrentContext.AdminUserId(_context);
+        if (!string.IsNullOrWhiteSpace(adminId))
+            return true;
+
+        var roleId = CurrentContext.UserRoleId(_context);
+        var roleService = _context?.HttpContext?.RequestServices?.GetService(typeof(IRoleService)) as IRoleService;
+        if (roleService is not null && !string.IsNullOrWhiteSpace(roleId) && !string.IsNullOrWhiteSpace(CompanyId))
+        {
+            var checks = await Task.WhenAll(
+                roleService.IsRoleTypeMatch(roleId, Roles.Administrator, CompanyId),
+                roleService.IsRoleTypeMatch(roleId, Roles.HR, CompanyId),
+                roleService.IsRoleTypeMatch(roleId, Roles.HRExecutive, CompanyId));
+            if (checks.Any(x => x))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsRestrictedInterviewCalendarItem(CalendarEntity ci)
+    {
+        if (ci.RestrictToTargetUsersAndHrAdmin)
+            return true;
+
+        return !string.IsNullOrWhiteSpace(ci.Name)
+            && ci.Name.StartsWith("Interview:", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(ci.Description)
+            && ci.Description.Contains("panel:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static HashSet<string> ExtractTargetUsers(CalendarEntity ci)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (ci.TargetUserIds is not null)
+        {
+            foreach (var id in ci.TargetUserIds)
+            {
+                if (!string.IsNullOrWhiteSpace(id))
+                    set.Add(id.Trim());
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(ci.CreatedBy))
+            set.Add(ci.CreatedBy.Trim());
+
+        if (!string.IsNullOrWhiteSpace(ci.Description))
+        {
+            var panelIndex = ci.Description.IndexOf("panel:", StringComparison.OrdinalIgnoreCase);
+            if (panelIndex >= 0)
+            {
+                var panelSegment = ci.Description[(panelIndex + "panel:".Length)..];
+                foreach (var part in panelSegment.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (!string.IsNullOrWhiteSpace(part))
+                        set.Add(part.Trim());
+                }
+            }
+        }
+
+        return set;
+    }
+
     public async Task<Result<CalendarResponseDto>> GetAllCalendarItems(CalendarFilters filter)
     {
         // get all holidays
@@ -58,29 +122,56 @@ public class CalendarServices : ICalendarServices
                 expression = cl => cl.CompanyId == CompanyId && ((cl.Recurring && cl.Type == CalendarItem.Event) || (cl.Date.Year == year && cl.Type == CalendarItem.Event));
             }
 
-            calendarItems = (await _calendarRepository.GetAll(expression)).Select(ci =>
+            var rawCalendarItems = (await _calendarRepository.GetAll(expression)).ToList();
+            var isHrOrAdmin = await IsCallerHrOrAdminAsync();
+            var currentUserId = CurrentContext.UserId(_context);
+            var callerIdentities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(currentUserId))
             {
-                if (ci.Recurring)
+                callerIdentities.Add(currentUserId.Trim());
+                var callerEmployee = await _employeeRepository.FirstOrDefault(e => e.CompanyId == CompanyId && e.UserId == currentUserId);
+                if (callerEmployee is not null)
                 {
-                    var date = ci.Date;
-                    // Treat recurring holiday dates as calendar business dates.
-                    // Do not carry over time components or timezone offsets when
-                    // re-projecting them into the requested year.
-                    ci.Date = new DateTime(year, date.Month, date.Day, 0, 0, 0, DateTimeKind.Unspecified);
+                    if (!string.IsNullOrWhiteSpace(callerEmployee.EmployeeId)) callerIdentities.Add(callerEmployee.EmployeeId.Trim());
+                    if (!string.IsNullOrWhiteSpace(callerEmployee.Email)) callerIdentities.Add(callerEmployee.Email.Trim());
                 }
-                return new CalendarResponseDto
+            }
+
+            calendarItems = rawCalendarItems
+                .Where(ci =>
                 {
-                    Id = ci.Id,
-                    Name = ci.Name,
-                    Date = ci.Date,
-                    StartTimeUtc = ci.StartTimeUtc,
-                    EndTimeUtc = ci.EndTimeUtc,
-                    Description = ci.Description,
-                    Type = (CalendarResponseItem)ci.Type,
-                    ImageUrl = Common.GetCalendarItemCoverImagePath(ci.ImageUrl),
-                    Recurring = ci.Recurring
-                };
-            });
+                    if (!IsRestrictedInterviewCalendarItem(ci))
+                        return true;
+                    if (isHrOrAdmin)
+                        return true;
+                    var allowedUsers = ExtractTargetUsers(ci);
+                    return callerIdentities.Any(id => allowedUsers.Contains(id));
+                })
+                .Select(ci =>
+                {
+                    if (ci.Recurring)
+                    {
+                        var date = ci.Date;
+                        // Treat recurring holiday dates as calendar business dates.
+                        // Do not carry over time components or timezone offsets when
+                        // re-projecting them into the requested year.
+                        ci.Date = new DateTime(year, date.Month, date.Day, 0, 0, 0, DateTimeKind.Unspecified);
+                    }
+                    return new CalendarResponseDto
+                    {
+                        Id = ci.Id,
+                        Name = ci.Name,
+                        Date = ci.Date,
+                        StartTimeUtc = ci.StartTimeUtc,
+                        EndTimeUtc = ci.EndTimeUtc,
+                        Description = ci.Description,
+                        Type = (CalendarResponseItem)ci.Type,
+                        ImageUrl = Common.GetCalendarItemCoverImagePath(ci.ImageUrl),
+                        Recurring = ci.Recurring,
+                        TargetUserIds = ExtractTargetUsers(ci).ToArray(),
+                        RestrictToTargetUsersAndHrAdmin = IsRestrictedInterviewCalendarItem(ci)
+                    };
+                });
         }
 
         // get employee birthdays and work anniversaries
@@ -144,13 +235,6 @@ public class CalendarServices : ICalendarServices
         Result result = new();
             if (string.IsNullOrEmpty(model.Id))
             {
-            // var existingItem = await _calendarRepository.FirstOrDefault(ci => ci.Name.Equals(model.Name, StringComparison.OrdinalIgnoreCase) && ci.Type == model.Type);
-            // if (existingItem != null)
-            // {
-            //     result.Success = false;
-            //     return result;
-            // }
-
             var newItem = new CalendarEntity
             {
                 CompanyId = CompanyId,
@@ -161,6 +245,8 @@ public class CalendarServices : ICalendarServices
                 Description = model.Description,
                 Type = model.Type,
                 Recurring = model.Recurring,
+                TargetUserIds = model.TargetUserIds,
+                RestrictToTargetUsersAndHrAdmin = model.RestrictToTargetUsersAndHrAdmin,
                 ImageUrl = model.Image == null ? null : await AddUpdateCalenderItemImage(model.Image)
             };
             result = await _calendarRepository.AddOne(newItem);
@@ -176,7 +262,7 @@ public class CalendarServices : ICalendarServices
                 result.Success = false;
                 return result;
             }
-            if (existingItem != null && existingItem.Name == model.Name && existingItem.Id != model.Id)
+            if (existingItem != null && existingItem.Name == model.Name && existingItem.Id != model.Id && !model.RestrictToTargetUsersAndHrAdmin)
             {
                 result.Success = false;
                 return result;
@@ -200,6 +286,8 @@ public class CalendarServices : ICalendarServices
             existingCalendarItem.Type = model.Type;
             existingCalendarItem.Description = model.Description;
             existingCalendarItem.Recurring = model.Recurring;
+            existingCalendarItem.TargetUserIds = model.TargetUserIds;
+            existingCalendarItem.RestrictToTargetUsersAndHrAdmin = model.RestrictToTargetUsersAndHrAdmin;
             result = await _calendarRepository.Update(whereCondition, existingCalendarItem);
             result.ResourceId = existingCalendarItem.Id;
         }
