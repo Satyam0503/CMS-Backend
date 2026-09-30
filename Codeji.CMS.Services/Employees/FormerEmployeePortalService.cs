@@ -247,9 +247,16 @@ public sealed class FormerEmployeePortalService(
     public async Task<Result> VerifyPostExitContact(string token)
     {
         if (string.IsNullOrWhiteSpace(token)) return new Result { Success = false, Message = "POST_EXIT_CONTACT_TOKEN_INVALID" };
-        var exit = await exits.FirstOrDefault(x => !x.IsDeleted && x.PostExitAccess != null && x.PostExitAccess.PersonalEmailVerificationExpiresAtUtc >= DateTime.UtcNow && x.PostExitAccess.PersonalEmailVerificationTokenHash == Hash(token), withDefaultFilter: false);
-        if (exit is null) return new Result { Success = false, Message = "POST_EXIT_CONTACT_TOKEN_INVALID_OR_EXPIRED" };
-        exit.PostExitAccess!.PersonalEmailVerified = true; exit.PostExitAccess.PersonalEmailVerifiedAtUtc = DateTime.UtcNow; exit.PostExitAccess.PersonalEmailVerificationTokenHash = null; exit.PostExitAccess.PersonalEmailVerificationExpiresAtUtc = null;
+        var tokenHash = Hash(token);
+        var exit = await exits.FirstOrDefault(x => !x.IsDeleted && x.PostExitAccess != null && x.PostExitAccess.PersonalEmailVerificationExpiresAtUtc >= DateTime.UtcNow && x.PostExitAccess.PersonalEmailVerificationTokenHash == tokenHash, withDefaultFilter: false);
+        if (exit is null)
+        {
+            var alreadyVerified = await exits.FirstOrDefault(x => !x.IsDeleted && x.PostExitAccess != null && x.PostExitAccess.PersonalEmailVerified && x.PostExitAccess.PersonalEmailVerifiedTokenHash == tokenHash, withDefaultFilter: false);
+            if (alreadyVerified is not null)
+                return new Result { Success = true, Message = "POST_EXIT_CONTACT_ALREADY_VERIFIED" };
+            return new Result { Success = false, Message = "POST_EXIT_CONTACT_TOKEN_INVALID_OR_EXPIRED" };
+        }
+        exit.PostExitAccess!.PersonalEmailVerified = true; exit.PostExitAccess.PersonalEmailVerifiedAtUtc = DateTime.UtcNow; exit.PostExitAccess.PersonalEmailVerifiedTokenHash = tokenHash; exit.PostExitAccess.PersonalEmailVerificationTokenHash = null; exit.PostExitAccess.PersonalEmailVerificationExpiresAtUtc = null;
         exit.Version++; exit.UpdatedBy = "post-exit-contact-verification"; exit.UpdatedDate = DateTime.UtcNow;
         exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "PostExitContactVerified", ActorUserId = "post-exit-contact-verification" });
         return await exits.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == exit.CompanyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == exit.Version - 1 && !x.IsDeleted), exit);

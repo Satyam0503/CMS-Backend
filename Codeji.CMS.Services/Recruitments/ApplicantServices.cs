@@ -149,7 +149,7 @@ namespace Codeji.CMS.Services.Recruitments
 
         private async Task LogNewApplication(Applicant applicant)
         {
-            var vacancy = await _jobVacancyService.GetVacancyById(applicant.VacancyId);
+            var vacancy = await _jobVacancyService.GetVacancyById(applicant.VacancyId, applicant.CompanyId);
             ApplicantLogs log = new()
             {
                 CompanyId = applicant.CompanyId,
@@ -284,6 +284,8 @@ namespace Codeji.CMS.Services.Recruitments
 
             var vacancy = await _jobVacancyRepository.FirstOrDefault(v => v.JobId == model.VacancyId && !v.IsDeleted && v.Status);
             if (vacancy is null) return new Result { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "The job is no longer available.", ErrorCode = RecruitmentErrorCodes.JobNotFound };
+            var company = await _companyRepository.FirstOrDefault(c => c.CompanyId == vacancy.CompanyId && c.Status && !c.IsDeleted && c.CareerPortalEnabled);
+            if (company is null) return new Result { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "The job is no longer available.", ErrorCode = RecruitmentErrorCodes.JobNotFound };
             if (!string.Equals(vacancy.ApplicationMode, "Internal", StringComparison.OrdinalIgnoreCase))
                 return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "This job accepts applications through an external link.", ErrorCode = RecruitmentErrorCodes.ExternalApplication };
             if (vacancy.ExpiresAt.HasValue && vacancy.ExpiresAt.Value <= DateTime.UtcNow || vacancy.ApplicationDeadline.HasValue && vacancy.ApplicationDeadline.Value <= DateTime.UtcNow)
@@ -431,7 +433,7 @@ namespace Codeji.CMS.Services.Recruitments
             var vacancyIds = applicantList.Select(a => a.VacancyId).Where(v => !string.IsNullOrEmpty(v)).Distinct().ToList();
             List<JobVacancy> vacancies = vacancyIds.Count == 0
                 ? []
-                : (await _jobVacancyRepository.GetAll(v => vacancyIds.Contains(v.JobId))).ToList();
+                : (await _jobVacancyRepository.GetAll(v => vacancyIds.Contains(v.JobId) && v.CompanyId == companyId)).ToList();
             List<ApplicantViewModel> data = (from applicant in applicantList
                                              join vacancy in vacancies on applicant.VacancyId equals vacancy.JobId
                                              select new ApplicantViewModel
@@ -634,7 +636,7 @@ namespace Codeji.CMS.Services.Recruitments
 
         private async Task SendEmailToApplicant(Applicant applicant)
         {
-            var vacancy = await _jobVacancyService.GetVacancyById(applicant.VacancyId);
+            var vacancy = await _jobVacancyService.GetVacancyById(applicant.VacancyId, applicant.CompanyId);
             if (vacancy is null) return;
             var currentUser = await _middlewareService.GetUserById(CurrentContext.UserId(_httpContextAccessor));
             EnumsHelper.MailType? templateType = applicant.ActivityType switch
@@ -686,7 +688,7 @@ namespace Codeji.CMS.Services.Recruitments
 
         private async Task SendApplicationAlertToRecruitmentTeam(Applicant applicant)
         {
-            JobVacancy? vacancy = await _jobVacancyRepository.FirstOrDefault(x => x.JobId == applicant.VacancyId);
+            JobVacancy? vacancy = await _jobVacancyRepository.FirstOrDefault(x => x.JobId == applicant.VacancyId && x.CompanyId == applicant.CompanyId);
             if (vacancy == null || string.IsNullOrWhiteSpace(vacancy.CompanyId)) return;
 
             Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == vacancy.CompanyId);

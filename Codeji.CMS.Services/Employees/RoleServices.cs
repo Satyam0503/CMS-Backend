@@ -1,4 +1,4 @@
-﻿using System.Data;
+using System.Data;
 using System.Linq.Expressions;
 using System.Reflection;
 using MapsterMapper;
@@ -303,9 +303,11 @@ public class RoleServices : IRoleService
         // Older databases can contain more than one global template for a role type.
         // A company must still receive exactly one Administrator, HR Manager, and
         // Employee role, and deleted templates must never be copied.
-        List<Roles> roles = _RolesRepository.Get(x => x.IsDefault &&
+        List<Roles> roles = (await _RolesRepository.GetAll(x => x.IsDefault &&
                                                    string.IsNullOrEmpty(x.CompanyId) &&
-                                                   !x.IsDeleted)
+                                                   !x.IsDeleted,
+                                                   WithDeletedObjects: false,
+                                                   withDefaultFilter: false))
             .GroupBy(x => x.RoleType)
             .Select(group => group
                 .OrderByDescending(x => x.UpdatedDate)
@@ -313,7 +315,7 @@ public class RoleServices : IRoleService
                 .First())
             .ToList();
         roles = await EnsureDefaultRoleTemplatesAsync(roles);
-        var existingCompanyRoles = (await _RolesRepository.GetAll(x => x.CompanyId == companyId && !x.IsDeleted))
+        var existingCompanyRoles = (await _RolesRepository.GetAll(x => x.CompanyId == companyId && !x.IsDeleted, WithDeletedObjects: false, withDefaultFilter: false))
             .GroupBy(x => x.RoleType)
             .ToDictionary(group => group.Key, group => group.OrderByDescending(x => x.UpdatedDate).ThenByDescending(x => x.CreatedDate).First());
         List<Roles> rolesToCreate = roles.Where(role => !existingCompanyRoles.ContainsKey(role.RoleType)).ToList();

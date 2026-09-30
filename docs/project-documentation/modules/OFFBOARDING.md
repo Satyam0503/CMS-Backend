@@ -39,7 +39,14 @@ The **Offboarding, Clearance & Former Employee Portal Module** is one of the mos
 |---|---|---|---|
 | `src/app/modules/offboarding/pages/OffboardingDashboard.tsx` | HR command center listing all active `EmployeeExit` cases by stage (`Initiated`, `NoticePeriod`, `ClearanceInProgress`, `ReadyForSettlement`, `Completed`). | `GET /api/employee-exit` | HR Admin |
 | `src/app/modules/offboarding/pages/ExitCaseDetailPage.tsx` | Multi-tab workspace covering Clearances, Handover, Assets, Benefits, Exit Interview, Documents, and Final Settlement. | `GET /api/employee-exit/{id}`, `POST /api/employee-exit/{id}/complete` | HR / Department Clearers |
-| `src/app/modules/offboarding/pages/FormerEmployeePortalPage.tsx` | Public token-authenticated portal (`/former-employee`) for separated staff to download payslips, FnF statement, and relieving letters. | `GET /api/public/former-employee/summary`, `GET /api/public/former-employee/documents` | Former Employee |
+| `src/app/modules/formerEmployeePortal/FormerEmployeePortalExperience.tsx` | Responsive alumni self-service hub (`/former-employee`) with desktop sticky pill nav and mobile bottom bar. | `GET /api/public/former-employee/*` | Separated Employee |
+| `src/app/modules/formerEmployeePortal/components/AlumniAuthView.tsx` | Two-column passwordless sign-in with auto-advancing 6-digit OTP, paste support, 30s resend throttle, 5m expiry. | `POST /api/public/former-employee/request-otp`, `POST /api/public/former-employee/verify-otp` | Separated Employee |
+| `src/app/modules/formerEmployeePortal/components/AlumniDocumentPreviewModal.tsx` | Accessible modal viewer for inline PDF/image rendering with zoom and fullscreen; immune to popup blockers. | Local blob stream rendering | Separated Employee |
+| `src/app/modules/formerEmployeePortal/components/AlumniDocumentVault.tsx` | Searchable document vault with category filter chips (`Letters`, `Financial`, `Tax`) and format badges (PDF, DOCX, XLSX). | `GET /api/public/former-employee/documents` | Separated Employee |
+| `src/app/modules/formerEmployeePortal/components/AlumniRequestDesk.tsx` | Service desk with status tabs, copyable reference IDs, request submission modal, and direct `evidenceId` download links. | `POST /api/public/former-employee/requests`, `GET /api/public/former-employee/requests` | Separated Employee |
+| `src/app/modules/formerEmployeePortal/components/AlumniCredentialCard.tsx` | Official digital alumni credential card with dynamic company branding, tenure calculation, and "Copy Service Summary". | Rendered from exit demographic snapshot | Separated Employee |
+| `src/app/modules/formerEmployeePortal/components/AlumniJourneyStepper.tsx` | 5-stage offboarding milestone tracker (Notice, Clearances, FnF Settlement, Letters, Alumni Record). | Case status progression | Separated Employee |
+| `src/app/modules/formerEmployeePortal/components/AlumniHelpCenter.tsx` | Searchable post-employment FAQ accordion (FnF settlement timeline, PF transfer, Form 16, portal access). | Self-service guidance | Separated Employee |
 
 ---
 
@@ -47,7 +54,7 @@ The **Offboarding, Clearance & Former Employee Portal Module** is one of the mos
 | Backend File | Responsibility | Dependencies |
 |---|---|---|
 | `Controllers/EmployeeExitController.cs` | Full lifecycle endpoints for initiating, approving, clearing, settling, and completing employee exits. | `IEmployeeExitService`, `IOffboardingPolicyResolver` |
-| `Controllers/PublicFormerEmployeePortalController.cs` | `[AllowAnonymous]` controller authenticating `FormerEmployeeAccessToken` bearer headers/query tokens for post-exit document downloads. | `IFormerEmployeePortalService` |
+| `Controllers/PublicFormerEmployeePortalController.cs` | Rate-limited `[AllowAnonymous]` controller managing OTP issuance, OTP verification, document retrieval, and request submission. | `IFormerEmployeePortalService` |
 | `Services/OffboardingPolicyResolver.cs` | Resolves `EmployeeExitPolicy` using 3-tier specificity (`Department -> Role -> Company`) and constructs `EmployeeExitPolicySnapshot`. | `IMongoRepository<EmployeeExitPolicy>` |
 | `Services/EmployeeExitService.cs` | Enforces all clearance gates, manages handover/interview/document items, updates `EmployeeLifecycle`, deactivates `EmpUser`, and writes `EmployeeExitOutbox`. | `IMongoRepository<EmployeeExit>`, `IMongoRepository<EmployeeExitAuditEvent>`, `IEmployeeLifecycleService` |
 | `Services/HostedServices/EmployeeExitOutboxProcessor.cs` | Background `HostedService` polling `EmployeeExitOutbox` to dispatch reliable asynchronous notifications and alumni portal access links. | `IMongoRepository<EmployeeExitOutbox>`, `INotificationService` |
@@ -61,7 +68,11 @@ The **Offboarding, Clearance & Former Employee Portal Module** is one of the mos
 | `PUT` | `/api/employee-exit/{id}/clearance` | Updates department clearance item status (`Approved` / `Pending` / `Blocked`). | JWT (`offboarding:update`) | `UpdateClearanceItemDto` | Appends `EmployeeExitAuditEvent` |
 | `POST` | `/api/employee-exit/{id}/exit-interview` | Submits exit interview responses (`EmployeeExitInterview`). | JWT (`offboarding:create`) | `SubmitExitInterviewDto` | Satisfies `RequireExitInterview` gate |
 | `POST` | `/api/employee-exit/{id}/complete` | Finalizes separation after all clearance and FnF gates pass. | JWT (`offboarding:approve`) | None | Sets `EmpUser.IsActive = false`, revokes `RefreshToken`, creates `FormerEmployeeAccessToken` |
-| `GET` | `/api/public/former-employee/summary` | Returns exit documents, FnF summary, and payslips for separated employee. | `FormerEmployeeAccessToken` (`[AllowAnonymous]`) | `FormerEmployeeSummaryDto` | Updates `LastAccessedAtUtc` on token |
+| `POST` | `/api/public/former-employee/request-otp` | Sends a 6-digit OTP to the verified post-exit email address. | Anonymous (Rate-limited) | `{ Email }` -> `{ Success, ThrottledSeconds }` | Dispatches OTP notification via outbox |
+| `POST` | `/api/public/former-employee/verify-otp` | Verifies 6-digit OTP and returns a session token. | Anonymous (Rate-limited) | `{ Email, Otp }` -> `{ SessionToken, ExpiresAt }` | Initializes rate-limited alumni session |
+| `GET` | `/api/public/former-employee/summary` | Returns exit documents, FnF summary, and payslips for separated employee. | `X-Former-Employee-Session` | `FormerEmployeeSummaryDto` | Tracks `LastAccessedAtUtc` on token |
+| `POST` | `/api/public/former-employee/requests` | Submits a post-exit service request to HR. | `X-Former-Employee-Session` | `CreateAlumniRequestDto` | Appends request to `EmployeeExit.FormerEmployeeRequests` |
+| `GET` | `/api/public/former-employee/documents/{id}/download` | Securely streams verified exit letters or FnF statements. | `X-Former-Employee-Session` | Streams file binary | Updates `SeenByFormerEmployeeAtUtc` audit flag |
 
 ---
 
@@ -127,6 +138,29 @@ flowchart TD
     KT & IT & Int & FnF --> Gate{"All Policy Gates Satisfied?"}
     Gate -->|No| Block["Block Exit Completion"]
     Gate -->|Yes| Complete["Complete Exit:\n1. EmpUser.IsActive = false\n2. Revoke RefreshTokens\n3. Create EmployeeExitAttendanceCutoff\n4. Issue FormerEmployeeAccessToken\n5. Enqueue EmployeeExitOutbox"]
+```
+
+### 9.1 Former Employee Portal (Alumni Experience) Architecture
+Governed by [`FORMER_EMPLOYEE_PORTAL_SPRINT_PLAN.md`](file:///D:/CMS/FORMER_EMPLOYEE_PORTAL_SPRINT_PLAN.md), the former employee self-service interface provides separated staff with secure, zero-trust access to post-exit records without requiring an active internal Active Directory / JWT account.
+
+```text
+[Alumni User]
+     │
+     ├── 1. Magic Token URL (Initial Invite)
+     └── 2. Personal Email + 6-Digit OTP (Subsequent Access)
+             │
+             ▼
+[PublicFormerEmployeePortalController.cs] (Rate-Limited, Strict Tenant Isolation)
+             │
+             ▼ (X-Former-Employee-Session)
+[FormerEmployeePortalExperience.tsx]
+   ├── AlumniAuthView: 6-digit auto-advancing OTP, 30s resend throttle, 5m expiration
+   ├── AlumniDocumentVault: Category filters, format badges, and live search
+   ├── AlumniDocumentPreviewModal: Inline modal PDF/image viewer immune to browser popup blockers
+   ├── AlumniRequestDesk: Post-exit service requests, status tabs, copyable IDs, evidence downloads
+   ├── AlumniCredentialCard: Dynamic company branding, career tenure calculation, Copy Summary
+   ├── AlumniJourneyStepper: 5-stage offboarding milestone visualization
+   └── AlumniHelpCenter: Post-employment FAQ accordion (FnF timeline, PF transfer, Form 16)
 ```
 
 ---

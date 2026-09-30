@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using MongoDB.Bson.Serialization.Attributes;
 using Codeji.CMS.Utility.Enums;
 
@@ -35,6 +35,11 @@ namespace Codeji.CMS.Repository.Entities.Company
         public DateTime? CreatedDate { get; set; } = DateTime.UtcNow;
         public string UpdatedBy { get; set; }
         public DateTime? UpdatedDate { get; set; }
+        public DateTime? TermsAcceptedAtUtc { get; set; }
+        public string TermsVersion { get; set; } = string.Empty;
+        public string RegistrationEmailNormalized { get; set; } = string.Empty;
+        public string ProvisioningState { get; set; } = string.Empty;
+        public string? ProvisioningLastError { get; set; }
         public bool IsDeleted { get; set; }
         /// <summary>Tenant defaults for employee notification delivery. Personal preferences may opt out.</summary>
         public Dictionary<EnumsHelper.NotificationPreferenceType, bool> NotificationPreferences { get; set; } = new();
@@ -54,4 +59,3 @@ namespace Codeji.CMS.Repository.Entities.Company
         public string Theme { get; set; } = "system";
     }
 }
-

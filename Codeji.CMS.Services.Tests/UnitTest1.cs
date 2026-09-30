@@ -409,8 +409,12 @@ public class EmployeeServiceBulkImportTests
         fixture.JobTitlesRepository.Verify(r => r.AddOne(It.Is<JobTitles>(j => j.Titles.Any(t => t.Label == "AI Engineer"))), Times.Once);
     }
 
-    [Fact]
-    public async Task CalculateEmployeeFinalSettlement_UsesDraftPayrollForLastWorkedMonth()
+    [Theory]
+    [InlineData(false, "DRAFT", "PENDING", 1175, 100, 65)]
+    [InlineData(true, "DRAFT", "PENDING", 0, 0, 0)]
+    [InlineData(false, "PROCESSED", "PENDING", 0, 0, 0)]
+    [InlineData(false, "DRAFT", "PAID", 0, 0, 0)]
+    public async Task CalculateEmployeeFinalSettlement_DoesNotDoubleCountPublishedPayroll(bool isProcessed, string workflowStatus, string paymentStatus, decimal expectedSalary, decimal expectedBonus, decimal expectedDeductions)
     {
         var fixture = CreateFixture(dbDuplicateExists: false);
         SetExitContext(fixture, "hr-user");
@@ -449,16 +453,37 @@ public class EmployeeServiceBulkImportTests
             BasicPay = 1000m,
             Bonus = 100m,
             PaidDays = 30f,
-            IsProcessed = false,
+            IsProcessed = isProcessed,
+            WorkflowStatus = workflowStatus,
+            PaymentStatus = paymentStatus,
             CreatedAt = new DateTime(2026, 9, 18, 9, 0, 0, DateTimeKind.Utc),
             Allowance = new Allowance { HRA = 100m, LTA = 50m, OtherAllowance = 25m },
             Deduction = new Deduction { IncomeTax = 10m, HealthInsurance = 20m, EPF = 30m, ESIC = 5m, LossOfPay = 0m }
         };
         payrollRepo.Setup(x => x.GetAll(It.IsAny<System.Linq.Expressions.Expression<Func<EmpPayRoll, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync([draftPayroll]);
 
+        EmployeeFinalSettlement? persistedSettlement = null;
         var settlementRepo = new Mock<IMongoDbRepository<EmployeeFinalSettlement>>();
         settlementRepo.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeFinalSettlement, bool>>>(), It.IsAny<bool>())).ReturnsAsync((EmployeeFinalSettlement?)null);
-        settlementRepo.Setup(x => x.AddOne(It.IsAny<EmployeeFinalSettlement>())).ReturnsAsync(new Result { Success = true });
+        var mongoClient = new Mock<IMongoClient>();
+        var session = new Mock<IClientSessionHandle>();
+        session.SetupGet(x => x.IsInTransaction).Returns(true);
+        session.Setup(x => x.WithTransactionAsync(It.IsAny<Func<IClientSessionHandle, CancellationToken, Task<bool>>>(), It.IsAny<TransactionOptions>(), It.IsAny<CancellationToken>())).Returns((Func<IClientSessionHandle, CancellationToken, Task<bool>> callback, TransactionOptions _, CancellationToken token) => callback(session.Object, token));
+        mongoClient.Setup(x => x.StartSessionAsync(It.IsAny<ClientSessionOptions>(), It.IsAny<CancellationToken>())).ReturnsAsync(session.Object);
+        var settlementCollection = new Mock<IMongoCollection<EmployeeFinalSettlement>>();
+        settlementRepo.Setup(x => x.GetCollection()).Returns(settlementCollection.Object);
+        settlementCollection.Setup(x => x.InsertOneAsync(session.Object, It.IsAny<EmployeeFinalSettlement>(), It.IsAny<InsertOneOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<IClientSessionHandle, EmployeeFinalSettlement, InsertOneOptions, CancellationToken>((_, document, _, _) => persistedSettlement = document)
+            .Returns(Task.CompletedTask);
+        settlementCollection.Setup(x => x.ReplaceOneAsync(session.Object, It.IsAny<FilterDefinition<EmployeeFinalSettlement>>(), It.IsAny<EmployeeFinalSettlement>(), It.IsAny<ReplaceOptions>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ReplaceOneResult.Acknowledged(1, 1, null));
+        var payrollCollection = new Mock<IMongoCollection<EmpPayRoll>>();
+        payrollRepo.Setup(x => x.GetCollection()).Returns(payrollCollection.Object);
+        payrollRepo.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmpPayRoll, bool>>>(), It.IsAny<bool>())).ReturnsAsync(draftPayroll);
+        payrollCollection.Setup(x => x.ReplaceOneAsync(session.Object, It.IsAny<FilterDefinition<EmpPayRoll>>(), It.IsAny<EmpPayRoll>(), It.IsAny<ReplaceOptions>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ReplaceOneResult.Acknowledged(1, 1, null));
+        var exitCollection = new Mock<IMongoCollection<EmployeeExit>>();
+
+        fixture.EmployeeExitRepository.Setup(x => x.GetCollection()).Returns(exitCollection.Object);
+        exitCollection.Setup(x => x.ReplaceOneAsync(session.Object, It.IsAny<FilterDefinition<EmployeeExit>>(), It.IsAny<EmployeeExit>(), It.IsAny<ReplaceOptions>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ReplaceOneResult.Acknowledged(1, 1, null));
 
         var service = new EmployeeService(
             fixture.EducationRepository.Object,
@@ -491,14 +516,92 @@ public class EmployeeServiceBulkImportTests
             fixture.Logger.Object,
             employeeExitRepository: fixture.EmployeeExitRepository.Object,
             employeeFinalSettlementRepository: settlementRepo.Object,
-            employeePayrollRepository: payrollRepo.Object);
+            employeePayrollRepository: payrollRepo.Object,
+            mongoClient: mongoClient.Object);
 
         var result = await service.CalculateEmployeeFinalSettlement(new CalculateEmployeeFinalSettlementRequest { EmployeeExitId = "exit-1", Version = 5 });
 
         Assert.True(result.Success);
-        settlementRepo.Verify(x => x.AddOne(It.Is<EmployeeFinalSettlement>(s => s.Status == "Calculated" && s.SourcePayrollId == "payroll-1" && s.NetPayable > 0)), Times.Once);
+        settlementCollection.Verify(x => x.InsertOneAsync(session.Object, It.Is<EmployeeFinalSettlement>(s => s.Status == "Calculated" && s.SourcePayrollId == "payroll-1" && s.SalaryPayable == expectedSalary && s.BonusesAndIncentives == expectedBonus && s.Deductions == expectedDeductions), It.IsAny<InsertOneOptions>(), It.IsAny<CancellationToken>()), Times.Once);
+        session.Verify(x => x.WithTransactionAsync(It.IsAny<Func<IClientSessionHandle, CancellationToken, Task<bool>>>(), It.IsAny<TransactionOptions>(), It.IsAny<CancellationToken>()), Times.Once);
+
+        if (expectedSalary > 0)
+        {
+            Assert.NotNull(persistedSettlement);
+            persistedSettlement!.Status = "Approved";
+            persistedSettlement.Version++;
+            exit.Version++;
+            settlementRepo.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeFinalSettlement, bool>>>(), It.IsAny<bool>())).ReturnsAsync(persistedSettlement);
+            var mismatchedPayment = await service.UpdateEmployeeFinalSettlementPayment(new UpdateEmployeeFinalSettlementPaymentRequest { EmployeeExitId = "exit-1", Status = "Paid", PaidAmount = persistedSettlement.NetPayable + 1 });
+            Assert.False(mismatchedPayment.Success);
+            Assert.Equal(StatusCodes.Status400BadRequest, mismatchedPayment.StatusCode);
+            var paymentResult = await service.UpdateEmployeeFinalSettlementPayment(new UpdateEmployeeFinalSettlementPaymentRequest
+            {
+                EmployeeExitId = "exit-1", Status = "Paid", PaidAmount = persistedSettlement.NetPayable, PaymentReference = "FNF-001"
+            });
+            Assert.True(paymentResult.Success);
+            Assert.True(draftPayroll.IsProcessed);
+            Assert.Equal("PAID", draftPayroll.PaymentStatus);
+            Assert.Equal("PAID", draftPayroll.WorkflowStatus);
+            payrollCollection.Verify(x => x.ReplaceOneAsync(session.Object, It.IsAny<FilterDefinition<EmpPayRoll>>(), It.IsAny<EmpPayRoll>(), It.IsAny<ReplaceOptions>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
     }
 
+    [Fact]
+    public async Task CalculateEmployeeFinalSettlement_WhenExitVersionConflicts_DoesNotCommitTransaction()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false);
+        SetExitContext(fixture, "hr-user");
+        fixture.RoleService.Setup(x => x.VerifyUserAccess(It.IsAny<string>(), It.IsAny<string[]>(), "hr-user", "company-1", null)).ReturnsAsync(true);
+        var exit = new EmployeeExit
+        {
+            CompanyId = "company-1", EmployeeExitId = "exit-1", EmployeeUserId = "employee-1",
+            Status = "NoticePeriod", IsActive = true, Version = 5,
+            LastWorkingDate = DateTime.UtcNow.Date.AddDays(-1), AuditHistory = []
+        };
+        fixture.EmployeeExitRepository.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeExit, bool>>>(), It.IsAny<bool>())).ReturnsAsync(exit);
+        fixture.EmployeeRepository.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmpUser, bool>>>(), It.IsAny<bool>())).ReturnsAsync(new EmpUser
+        {
+            CompanyId = "company-1", UserId = "employee-1", EmployeeId = "emp-1", FirstName = "Former", LastName = "Employee", Email = "former.employee@example.com"
+        });
+        var payrollRepo = new Mock<IMongoDbRepository<EmpPayRoll>>();
+        payrollRepo.Setup(x => x.GetAll(It.IsAny<System.Linq.Expressions.Expression<Func<EmpPayRoll, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync([
+            new EmpPayRoll { Id = "payroll-1", CompanyId = "company-1", EmployeeId = "emp-1", UserId = "employee-1", PayMonth = new DateTime(exit.LastWorkingDate.Year, exit.LastWorkingDate.Month, 1), PaidDate = DateTime.UtcNow, BasicPay = 0m, PaidDays = 0f, Allowance = new Allowance(), Deduction = new Deduction(), DeductionLines = [] }
+        ]);
+        var settlementRepo = new Mock<IMongoDbRepository<EmployeeFinalSettlement>>();
+        settlementRepo.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<EmployeeFinalSettlement, bool>>>(), It.IsAny<bool>())).ReturnsAsync((EmployeeFinalSettlement?)null);
+        var session = new Mock<IClientSessionHandle>();
+        session.Setup(x => x.WithTransactionAsync(It.IsAny<Func<IClientSessionHandle, CancellationToken, Task<bool>>>(), It.IsAny<TransactionOptions>(), It.IsAny<CancellationToken>()))
+            .Returns((Func<IClientSessionHandle, CancellationToken, Task<bool>> callback, TransactionOptions _, CancellationToken token) => callback(session.Object, token));
+        var mongoClient = new Mock<IMongoClient>();
+        mongoClient.Setup(x => x.StartSessionAsync(It.IsAny<ClientSessionOptions>(), It.IsAny<CancellationToken>())).ReturnsAsync(session.Object);
+        var settlementCollection = new Mock<IMongoCollection<EmployeeFinalSettlement>>();
+        settlementRepo.Setup(x => x.GetCollection()).Returns(settlementCollection.Object);
+        settlementCollection.Setup(x => x.InsertOneAsync(session.Object, It.IsAny<EmployeeFinalSettlement>(), It.IsAny<InsertOneOptions>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        var exitCollection = new Mock<IMongoCollection<EmployeeExit>>();
+        fixture.EmployeeExitRepository.Setup(x => x.GetCollection()).Returns(exitCollection.Object);
+        exitCollection.Setup(x => x.ReplaceOneAsync(session.Object, It.IsAny<FilterDefinition<EmployeeExit>>(), It.IsAny<EmployeeExit>(), It.IsAny<ReplaceOptions>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ReplaceOneResult.Acknowledged(0, 0, null));
+
+        var service = new EmployeeService(
+            fixture.EducationRepository.Object, fixture.Mapper.Object, fixture.CertificationRepository.Object, fixture.SummaryRepository.Object,
+            fixture.EmployeeRepository.Object, fixture.EmployeeIdSequenceRepository.Object, fixture.RolesRepository.Object, fixture.RoleService.Object,
+            fixture.EmployeeSkillsRepository.Object, fixture.CompanyRepository.Object, fixture.MailTemplateRepository.Object, fixture.PriorityTaskQueue.Object,
+            fixture.MiddlewareService.Object, fixture.HttpContextAccessor.Object, fixture.DepartmentRepository.Object, fixture.SkillsRepository.Object,
+            fixture.WorkHistoryRepository.Object, fixture.UserNotificationRepository.Object, fixture.NotificationsRepository.Object, fixture.JobTitlesRepository.Object,
+            fixture.CustomAttributeRepository.Object, fixture.CustomAttributeValueRepository.Object, fixture.NotificationService.Object,
+            fixture.NotificationPreferenceRepository.Object, fixture.UserSecurityTokenRepository.Object, fixture.OfficeScheduleRepository.Object,
+            fixture.EmployeeScheduleAssignmentRepository.Object, fixture.Logger.Object,
+            employeeExitRepository: fixture.EmployeeExitRepository.Object, employeeFinalSettlementRepository: settlementRepo.Object,
+            employeePayrollRepository: payrollRepo.Object, mongoClient: mongoClient.Object);
+
+        var result = await service.CalculateEmployeeFinalSettlement(new CalculateEmployeeFinalSettlementRequest { EmployeeExitId = "exit-1", Version = 5 });
+
+        Assert.False(result.Success);
+        Assert.Equal(StatusCodes.Status409Conflict, result.StatusCode);
+        Assert.Equal("FINAL_SETTLEMENT_CHANGED_RELOAD_AND_RETRY", result.Message);
+        settlementCollection.Verify(x => x.InsertOneAsync(session.Object, It.IsAny<EmployeeFinalSettlement>(), It.IsAny<InsertOneOptions>(), It.IsAny<CancellationToken>()), Times.Once);
+        exitCollection.Verify(x => x.ReplaceOneAsync(session.Object, It.IsAny<FilterDefinition<EmployeeExit>>(), It.IsAny<EmployeeExit>(), It.IsAny<ReplaceOptions>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
     private static EmployeeServiceFixture CreateFixture(bool dbDuplicateExists)
     {
         var fixture = new EmployeeServiceFixture();

@@ -173,6 +173,7 @@ builder.Services.AddHostedService<BirthDayAndAnniversaryNotificationHostedServic
 builder.Services.AddHostedService<LeaveAccrualHostedService>();
 builder.Services.AddHostedService<Codeji.CMS.Services.CareerPortal.CareerNotificationWorker>();
 builder.Services.AddHostedService<Codeji.CMS.Services.Recruitments.RecruitmentEmailOutboxWorker>();
+builder.Services.AddHostedService<Codeji.CMS.Services.Recruitments.RecruitmentRetentionWorker>();
 builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceOutboxWorker>();
 builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceReminderHostedService>();
 builder.Services.AddHostedService<EmployeeExitOutboxWorker>();
@@ -289,6 +290,11 @@ builder.Services.AddScoped<IMongoDbRepository<EmployeeLifecycleCase>, MongoRepos
 builder.Services.AddScoped<IEmployeeLifecycleCaseService, EmployeeLifecycleCaseService>();
 builder.Services.AddScoped<IEmployeeLifecyclePolicyService, EmployeeLifecyclePolicyService>();
 builder.Services.AddScoped<IMongoDbRepository<EmpPayRoll>, MongoRepository<EmpPayRoll>>();
+builder.Services.AddScoped<IMongoDbRepository<PayrollRun>, MongoRepository<PayrollRun>>();
+builder.Services.AddScoped<IMongoDbRepository<PayrollRunEmployee>, MongoRepository<PayrollRunEmployee>>();
+builder.Services.AddScoped<IMongoDbRepository<PayrollPaymentBatch>, MongoRepository<PayrollPaymentBatch>>();
+builder.Services.AddScoped<IMongoDbRepository<PayrollAdjustment>, MongoRepository<PayrollAdjustment>>();
+
 builder.Services.AddScoped<IMongoDbRepository<RefreshToken>, MongoRepository<RefreshToken>>();
 builder.Services.AddScoped<IMongoDbRepository<EmployeeExit>, MongoRepository<EmployeeExit>>();
 builder.Services.AddScoped<IMongoDbRepository<EmployeeExitPolicy>, MongoRepository<EmployeeExitPolicy>>();
@@ -355,10 +361,10 @@ if (!Directory.Exists(uploadsPath))
     Directory.CreateDirectory(uploadsPath);
 }
 
-// CORS first — UseStaticFiles is terminal middleware, so the CORS middleware
+// CORS first â€” UseStaticFiles is terminal middleware, so the CORS middleware
 // never gets a chance to attach headers to /fs/* responses. We move UseCors
 // above static files for canonical ordering and ALSO attach CORS headers
-// directly via OnPrepareResponse below — that's the only path that actually
+// directly via OnPrepareResponse below â€” that's the only path that actually
 // works for static-file responses.
 app.UseCors(corsName);
 
@@ -385,7 +391,7 @@ app.UseStaticFiles(new StaticFileOptions
         }
         catch (UriFormatException)
         {
-            // Malformed Origin header — silently skip, response gets no CORS
+            // Malformed Origin header â€” silently skip, response gets no CORS
             // headers and the browser blocks (correct behavior).
         }
     }
@@ -426,7 +432,7 @@ app.MapHub<ChatHub>("/chathub", options =>
 // Configure controller routes
 app.MapControllers();
 // Add security headers.
-// Use indexer assignment (not .Add) so duplicate keys don't throw — .NET 10's
+// Use indexer assignment (not .Add) so duplicate keys don't throw â€” .NET 10's
 // IHeaderDictionary.Add throws ArgumentException on existing keys (ASP0019).
 app.Use(async (context, next) =>
 {

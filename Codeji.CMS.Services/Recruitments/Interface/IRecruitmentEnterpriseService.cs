@@ -15,9 +15,11 @@ public interface IRecruitmentEnterpriseService
  Task<Result<string>> UpsertSla(RecruitmentStageSlaPolicyCommand command,string actor);
  Task<Result<string>> UpsertConfig(RecruitmentEnterpriseConfigCommand command,string actor);
  Task<Result<RecruitmentEnterpriseConfig>> GetConfig();
+ Task<Result<RecruitmentReadinessDto>> GetReadiness();
  Task<Result<string>> Link(RecruitmentRelationshipLinkCommand command,string actor);
  Task<Result<string>> Enqueue(RecruitmentAutomationEventCommand command,string actor);
 }
+
 
 
 

@@ -20,6 +20,7 @@ public sealed class RecruitmentOffer : BaseClass
     public DateTime? SentAtUtc { get; set; }
     public DateTime? ExpiresAtUtc { get; set; }
     public DateTime? RespondedAtUtc { get; set; }
+    public DateTime? ViewedAtUtc { get; set; }
     public string? LastCommandIdempotencyKey { get; set; }
     public int Version { get; set; } = 1;
 }

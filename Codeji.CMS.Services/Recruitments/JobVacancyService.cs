@@ -220,15 +220,20 @@ namespace Codeji.CMS.Services.Recruitments
             return result;
         }
 
-        public async Task<JobVacancyModel?> GetVacancyById(string vacancyId)
+        public async Task<JobVacancyModel?> GetVacancyById(string vacancyId, string? companyId = null)
         {
-            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-            JobVacancy? data = await _jobVacancyRepo.FirstOrDefault(x => x.JobId == vacancyId && (string.IsNullOrWhiteSpace(companyId) || x.CompanyId == companyId));
-            if (data == null) return null;
-            var result = _mapper.Map<JobVacancyModel>(data);
-            return result;
-        }
+            var owningCompanyId = string.IsNullOrWhiteSpace(companyId)
+                ? CurrentContext.CompanyId(_httpContextAccessor)
+                : companyId.Trim();
+            if (string.IsNullOrWhiteSpace(vacancyId) || string.IsNullOrWhiteSpace(owningCompanyId))
+                return null;
 
+            JobVacancy? data = await _jobVacancyRepo.FirstOrDefault(x =>
+                x.JobId == vacancyId.Trim() &&
+                x.CompanyId == owningCompanyId &&
+                !x.IsDeleted);
+            return data is null ? null : _mapper.Map<JobVacancyModel>(data);
+        }
         public async Task<Result> DeleteJobVacancy(string vacancyId)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);

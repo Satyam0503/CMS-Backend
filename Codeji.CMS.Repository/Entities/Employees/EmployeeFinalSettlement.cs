@@ -30,6 +30,9 @@ public sealed class EmployeeFinalSettlement : BaseClass
     /// <summary>Processed payroll used as the immutable automatic calculation source.</summary>
     public string? SourcePayrollId { get; set; }
     public DateTime? SourcePayrollMonth { get; set; }
+    /// <summary>Immutable PayrollRun source used when the legacy EmpPayRoll row is unavailable.</summary>
+    public string? SourcePayrollRunId { get; set; }
+    public string? SourcePayrollRunEmployeeId { get; set; }
     public DateTime? CalculatedAtUtc { get; set; }
     public DateTime? ApprovedAtUtc { get; set; }
     public string? ApprovedByUserId { get; set; }

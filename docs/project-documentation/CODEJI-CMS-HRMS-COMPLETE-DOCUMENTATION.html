@@ -1372,13 +1372,29 @@
 <li>If <span class="math-inline">(<span class="math-text">LhdCount</span> + <span class="math-text">EdCount</span> + <span class="math-text">LhdEdCount</span>) &gt; <span class="math-text">CombinedLhdEdMonthlyLimit</span></span>, creates an <code>AttendancePayrollException</code> (<code>Status = &quot;PENDING_REVIEW&quot;</code>).</li>
 <li><code>AttendanceMonthLock.ValidateAndLock()</code> blocks month locking until <strong>zero</strong> <code>PENDING_REVIEW</code> exceptions remain.</li>
 </ul>
+<h3>Enterprise 4-Tab Attendance Export Architecture (<code>AttendanceService.cs</code>)</h3>
+<p>The monthly attendance reporting engine (<code>GET /api/admin/attendance/export/monthly</code>) generates a production-grade 4-tab OpenXML workbook (<code>attendance-report-YYYY-MM.xlsx</code>):</p>
+<ol>
+<li><strong>Attendance Muster Tab</strong>: Horizontal calendar matrix with status badge + IST punch times, soft pastel color coding (<code>#E8F5E9</code> Present, <code>#FEE2E2</code> Absent, <code>#FEF3C7</code> Half Day, <code>#E0F2FE</code> WFH), sanitized remarks (raw GUIDs and error traces stripped), right-side monthly summary rollups, and bottom daily staff totals.</li>
+<li><strong>Daily Punch Logs Tab</strong>: Flat audit ledger with zebra striping, day-of-week, IST check-in/out, hours worked, late/early flags, and sanitized notes.</li>
+<li><strong>Monthly Summary Tab</strong>: Payroll-ready totals with formula <code>=SUM(...)</code> Grand Totals, DOJ, expected vs eligible days, and highlighted LOP warnings.</li>
+<li><strong>Legend &amp; Policy Tab</strong>: Company metadata, status color glossary, paid-day multipliers (<code>1.0x</code>, <code>0.5x</code>, <code>0.0x</code>), and calculation formulas.</li>
+</ol>
 <hr>
 <h2>PART X — COMPENSATION, SALARY STRUCTURE &amp; AUTOMATED PAYROLL ENGINE</h2>
 <h3>Automated Payroll Formula (<code>AutoPayrollServices.cs</code>)</h3>
 <ol>
-<li><strong>Gate Check</strong>: Verifies period is open, <code>MonthlyAttendanceSummary.IsApproved &amp;&amp; IsLocked == true</code>, and zero <code>PENDING_REVIEW</code> exceptions exist.</li>
+<li><strong>Gate Check &amp; Lock Verification</strong>:
+<ul>
+<li>Verifies payroll period is open.</li>
+<li>Requires <code>MonthlyAttendanceSummary.IsApproved &amp;&amp; IsLocked == true</code>.</li>
+<li><code>AttendanceLockBlockingModal.tsx</code> provides an interactive pre-run modal blocking execution if attendance is unlocked.</li>
+<li>Enforces zero <code>PENDING_REVIEW</code> exceptions in <code>AttendancePayrollException</code>.</li>
+</ul>
+</li>
 <li><strong>Divisor Resolution (<code>PayrollCalculationRules.ResolveDivisor</code>)</strong>:<ul>
-<li><code>FIXED_30_DAYS</code> <span class="math-inline"> &rarr;  30</span></li>
+<li><code>FIXED_30_DAYS</code> <span class="math-inline"> &rarr;  30</span> (Standard monthly baseline)</li>
+<li><code>FIXED_26_DAYS</code> <span class="math-inline"> &rarr;  26</span> (Excludes standard weekly rest days)</li>
 <li><code>WORKING_DAYS</code> <span class="math-inline"> &rarr;  <span class="math-text">CompanyWorkingCalendarService.GetWorkingDaysInMonth</span>(Y, M)</span></li>
 <li><code>CALENDAR_DAYS</code> <span class="math-inline"> &rarr;  <span class="math-text">DateTime.DaysInMonth</span>(Y, M)</span></li>
 </ul>
@@ -1388,6 +1404,12 @@
 <div class="math-block"><span class="math-text">LossOfPayDeduction</span> = <span class="math-text">TotalLossOfPayDays</span>  &times;   &le; ft(\frac{<span class="math-text">GrossPay</span>}{<span class="math-text">Divisor</span>})</div>
 <div class="math-block"><span class="math-text">TotalDeduction</span> = <span class="math-text">LossOfPayDeduction</span> + <span class="math-text">EPF</span> + <span class="math-text">ESIC</span> + <span class="math-text">HealthInsurance</span> + <span class="math-text">IncomeTax</span></div>
 <div class="math-block"><span class="math-text">NetSalary</span> = <span class="math-text">GrossPay</span> - <span class="math-text">TotalDeduction</span></div></li>
+<li><strong>Disbursement &amp; Payment Batches (<code>PayrollPaymentBatchController.cs</code>)</strong>:
+<ul>
+<li>Multi-stage lifecycle: <code>Draft</code> &rarr; <code>Processed</code> &rarr; <code>PaymentPending</code> &rarr; <code>Paid</code> &rarr; <code>Closed</code>.</li>
+<li>Supports atomic bank disbursement recording (<code>RecordPayrollPaymentModal.tsx</code>) with optimistic lock guards preventing concurrent double-payment.</li>
+</ul>
+</li>
 <li><strong>Payslip PDF Rendering</strong>: Compiles <code>Templates/SalarySlipTemplate.html</code> via <code>PdfService</code> into <code>/fs/salary-slips/{id}.pdf</code>.</li>
 </ol>
 <hr>
@@ -1396,9 +1418,21 @@
 <li><strong>Policy Snapshot (<code>OffboardingPolicyResolver.cs</code>)</strong>: Resolves <code>EmployeeExitPolicy</code> (<code>Department -&gt; Role -&gt; Company</code>) and freezes <code>EmployeeExitPolicySnapshot</code> on <code>EmployeeExit</code>.</li>
 <li><strong>Multi-Department Clearances</strong>: Tracks IT, Finance, Admin, Manager, and HR sign-offs (<code>EmployeeExitClearanceTemplate</code>), knowledge transfer (<code>EmployeeExitHandoverItem</code>), physical hardware returns &amp; damage deductions (<code>EmployeeExitAsset</code>), benefit terminations (<code>EmployeeExitBenefitItem</code>), and <code>EmployeeExitInterview</code>.</li>
 <li><strong>Full &amp; Final Settlement (<code>EmployeeFinalSettlement.cs</code>)</strong>:<div class="math-block"><span class="math-text">NetPayable</span> = (<span class="math-text">SalaryPayable</span>_{<span class="math-text">SourcePayrollId</span>} + <span class="math-text">LeaveEncashment</span> + <span class="math-text">Reimbursements</span> + <span class="math-text">Bonuses</span>) - (<span class="math-text">Deductions</span> + <span class="math-text">NoticeRecovery</span> + <span class="math-text">OutstandingDues</span>)</div>
-- classifies `Direction` as `PayableToEmployee`, `ReceivableFromEmployee`, or `ZeroSettlement`.</li>
-<li><strong>Exit Completion &amp; Former Employee Portal (<code>PublicFormerEmployeePortalController.cs</code>)</strong>:<ul>
-<li>Deactivates <code>EmpUser.IsActive</code>, revokes all <code>RefreshToken</code> sessions, creates <code>EmployeeExitAttendanceCutoff</code>, enqueues <code>EmployeeExitOutbox</code>, and issues a SHA-256 hashed <code>FormerEmployeeAccessToken</code> for <code>/former-employee</code>.</li>
+- Classifies <code>Direction</code> as <code>PayableToEmployee</code>, <code>ReceivableFromEmployee</code>, or <code>ZeroSettlement</code>.</li>
+<li><strong>Exit Completion &amp; Former Employee Portal (<code>FormerEmployeePortalExperience.tsx</code>)</strong>:<ul>
+<li>Deactivates <code>EmpUser.IsActive</code>, revokes all <code>RefreshToken</code> sessions, creates <code>EmployeeExitAttendanceCutoff</code>, and enqueues <code>EmployeeExitOutbox</code>.</li>
+<li>Governed by a 6-sprint production roadmap (<code>FORMER_EMPLOYEE_PORTAL_SPRINT_PLAN.md</code>).</li>
+<li>Modular architecture decomposed into 8 isolated components:
+<ul>
+<li><code>AlumniAuthView.tsx</code>: Passwordless authentication via 6-digit OTP with 30s resend throttling and 5m expiry.</li>
+<li><code>AlumniDocumentPreviewModal.tsx</code>: Popup-free inline document viewer for PDF payslips, relieving letters, and FnF statements.</li>
+<li><code>AlumniDocumentVault.tsx</code>: Categorized document storage with filter chips and format badges.</li>
+<li><code>AlumniRequestDesk.tsx</code>: Post-exit ticket desk with direct evidence downloading and HR review pipeline.</li>
+<li><code>AlumniCredentialCard.tsx</code>: Digital alumni credential card with calculated tenure and copyable summary.</li>
+<li><code>AlumniJourneyStepper.tsx</code>: 5-step offboarding progression visualizer.</li>
+<li><code>AlumniHelpCenter.tsx</code>: Self-service FAQ addressing settlement timelines, PF transfer, and tax compliance.</li>
+</ul>
+</li>
 </ul>
 </li>
 </ol>
@@ -10691,6 +10725,12 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 <td>Employee / HR</td>
 </tr>
 <tr>
+<td><code>src/app/modules/attendance/EmployeeAttendance.tsx</code></td>
+<td>Monthly attendance report view with calendar grid, punch modal, and 4-tab Excel export trigger.</td>
+<td><code>GET /api/admin/attendance/export/monthly</code></td>
+<td>HR / Admin</td>
+</tr>
+<tr>
 <td><code>src/app/modules/attendance/components/MonthlySummaryTable.tsx</code></td>
 <td>Displays employee monthly rollup (<code>PresentDays</code>, <code>UnpaidDays</code>, <code>LhdCount</code>, <code>EdCount</code>, lock state).</td>
 <td><code>GET /api/attendance/monthly-summary</code></td>
@@ -10715,8 +10755,13 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 </thead>
 <tbody><tr>
 <td><code>Controllers/AttendanceController.cs</code></td>
-<td>Handles check-in, check-out, regularization, monthly summary generation, and month locking.</td>
-<td><code>IAttendanceService</code>, <code>IAttendancePenaltyService</code></td>
+<td>Handles check-in, check-out, regularization, monthly summary generation, month locking, and monthly 4-tab Excel workbook export.</td>
+<td><code>IAttendanceService</code>, <code>IAttendancePenaltyService</code>, <code>IAdminAttendanceService</code></td>
+</tr>
+<tr>
+<td><code>Services/AttendanceService.cs</code></td>
+<td><code>ExportMonthlyAttendanceAsync</code> generates closedXML 4-tab workbook (<code>Attendance Muster</code>, <code>Daily Punch Logs</code>, <code>Monthly Summary</code>, <code>Legend &amp; Policy</code>) with sanitized remarks and pastel styling.</td>
+<td><code>IMongoDbRepository&lt;EmpUser&gt;</code>, <code>IAttendanceRepository</code>, <code>IMongoDbRepository&lt;AttendanceDaySegment&gt;</code>, <code>ICompanyWorkingCalendarService</code></td>
 </tr>
 <tr>
 <td><code>Services/AttendanceStatusCalculationService.cs</code></td>
@@ -10748,6 +10793,14 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 </tr>
 </thead>
 <tbody><tr>
+<td><code>GET</code></td>
+<td><code>/api/admin/attendance/export/monthly?year={y}&amp;month={m}</code></td>
+<td>Exports production-ready 4-tab Excel workbook (<code>attendance-report-YYYY-MM.xlsx</code>).</td>
+<td>JWT (<code>attendance:read</code>)</td>
+<td>Stream <code>application/vnd.openxmlformats-officedocument.spreadsheetml.sheet</code></td>
+<td>Generates 4 worksheets: Muster, Punch Logs, Payroll Summary, Legend</td>
+</tr>
+<tr>
 <td><code>POST</code></td>
 <td><code>/api/attendance/check-in</code></td>
 <td>Records employee daily check-in timestamp.</td>
@@ -10889,6 +10942,37 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
     HRResolve --&gt; ReadyLock
     ReadyLock --&gt; Lock["AttendanceMonthLock.ValidateAndLock()\nIsLocked = true, IsApproved = true"]</pre>
       </div>
+    <h3>9.1 Enterprise 4-Tab Attendance Export Architecture</h3>
+    <p>The monthly export (<code>GET /api/admin/attendance/export/monthly</code>) generates a comprehensive OpenXML Excel workbook (<code>attendance-report-YYYY-MM.xlsx</code>) structured across 4 dedicated worksheets:</p>
+    <ol>
+    <li><strong>Tab 1 — Attendance Muster (<code>Attendance Muster</code>)</strong>:
+    <ul>
+    <li><strong>Demographic Columns</strong>: <code>Employee ID</code>, <code>Employee Name</code>, <code>Department</code>, <code>Designation</code> (frozen horizontally across scrolling).</li>
+    <li><strong>Daily Matrix (Days 1 to 28/30/31)</strong>: Compact status code badge (<code>P</code>, <code>A</code>, <code>HD</code>, <code>WFH</code>, <code>PL</code>, <code>WO</code>, <code>H</code>) with IST punch timestamps (<code>09:15 - 18:30</code>).</li>
+    <li><strong>Sanitization Engine</strong>: Strips internal GUIDs and system audit notes; replaces raw database strings with clean human tags (e.g. <code>&quot;Approved WFH&quot;</code>, <code>&quot;Approved Leave&quot;</code>).</li>
+    <li><strong>Pastel Styling</strong>: Soft sage (<code>#E8F5E9</code> fill / <code>#166534</code> text) for Present, soft rose (<code>#FEE2E2</code> / <code>#991B1B</code>) for Absent, warm amber (<code>#FEF3C7</code> / <code>#92400E</code>) for Half Day, soft sky (<code>#E0F2FE</code> / <code>#0369A1</code>) for WFH, and slate tint (<code>#F8FAFC</code> / <code>#64748B</code>) for Weekends.</li>
+    <li><strong>Monthly Rollup</strong>: Right-side sticky summary columns (<code>Present</code>, <code>Half Days</code>, <code>WFH</code>, <code>Paid Leaves</code>, <code>Absent / LOP</code>, <code>Weekly Offs</code>, <code>Holidays</code>, <code>Working Days</code>, <code>Total Paid Days</code>, <code>Late In</code>, <code>Early Exit</code>).</li>
+    <li><strong>Bottom Summaries</strong>: Daily aggregate rows for <code>TOTAL STAFF PRESENT</code> and <code>TOTAL STAFF ABSENT</code>.</li>
+    </ul>
+    </li>
+    <li><strong>Tab 2 — Daily Punch Logs (<code>Daily Punch Logs</code>)</strong>:
+    <ul>
+    <li>Flat tabular audit table: <code>Date</code>, <code>Day</code>, <code>Employee ID</code>, <code>Employee Name</code>, <code>Department</code>, <code>Designation</code>, <code>Status</code>, <code>Check-In (IST)</code>, <code>Check-Out (IST)</code>, <code>Hours</code>, <code>Late?</code>, <code>Early Exit?</code>, <code>Day Type</code>, <code>Remarks</code>.</li>
+    <li>Alternating zebra striping with Excel auto-filters; ideal for compliance audits and PivotTables.</li>
+    </ul>
+    </li>
+    <li><strong>Tab 3 — Monthly Summary (<code>Monthly Summary</code>)</strong>:
+    <ul>
+    <li>Payroll-ready reconciliation: <code>Employee ID</code>, <code>Name</code>, <code>Department</code>, <code>Designation</code>, <code>Date of Joining</code>, <code>Expected Work Days</code>, <code>Eligible Work Days</code>, <code>Present Days</code>, <code>Half Days</code>, <code>WFH Days</code>, <code>Paid Leaves</code>, <code>Absent / LOP</code>, <code>Weekly Offs</code>, <code>Holidays</code>, <code>Total Paid Days</code>, <code>Total Unpaid Days</code>, <code>Work Hours</code>, <code>Late Count</code>, <code>Early Exit Count</code>, <code>Payroll Status</code>.</li>
+    <li>Native <code>=SUM(...)</code> Grand Totals row. Highlighting LOP &gt; 0 in soft red.</li>
+    </ul>
+    </li>
+    <li><strong>Tab 4 — Legend &amp; Policy (<code>Legend &amp; Policy</code>)</strong>:
+    <ul>
+    <li>Organization metadata, status code matrix with preview badges, paid factor multipliers (<code>1.0x</code>, <code>0.5x</code>, <code>0.0x</code>), and calculation formulas (Payable Days, Eligible Days, LOP rules).</li>
+    </ul>
+    </li>
+    </ol>
     <hr>
 <h2>10. State Machine</h2>
 
@@ -11868,25 +11952,32 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 </tbody></table>
 <hr>
 <h2>7. Database Model</h2>
-<h3><code>PayrollDivisorPolicy</code> (<code>CMS-Backend-Core/Codeji.CMS.Repository/Entities/PayrollDivisorPolicy.cs</code>)</h3>
+<h3><code>PayrollDivisorPolicy</code> (<code>CMS-Backend-Core/Codeji.CMS.Repository/Entities/Employees/PayrollDivisorPolicy.cs</code>)</h3>
 <ul>
 <li><code>Id</code> (<code>string</code>, PK)</li>
 <li><code>CompanyId</code> (<code>string</code>, FK)</li>
-<li><code>DivisorType</code> (<code>string</code>, <code>&quot;FIXED_30_DAYS&quot;</code> | <code>&quot;WORKING_DAYS&quot;</code> | <code>&quot;CALENDAR_DAYS&quot;</code>)</li>
-<li><code>IncludeHolidaysInWorkingDays</code> (<code>bool</code>)</li>
+<li><code>DivisorPolicy</code> (<code>string</code>, <code>&quot;FIXED_30_DAYS&quot;</code> | <code>&quot;FIXED_26_DAYS&quot;</code> | <code>&quot;WORKING_DAYS&quot;</code> | <code>&quot;CALENDAR_DAYS&quot;</code>)</li>
+<li><code>PayrollMode</code> (<code>string</code>, e.g. <code>&quot;Standard&quot;</code>)</li>
+<li><code>LopCalculationBase</code> (<code>string</code>, e.g. <code>&quot;FIXED_GROSS&quot;</code>)</li>
+<li><code>EpfMode</code> (<code>string</code>, e.g. <code>&quot;CAPPED_CEILING&quot;</code>, <code>EpfWageCeiling = 15000</code>)</li>
+<li><code>EsicMode</code> (<code>string</code>, e.g. <code>&quot;STATUTORY&quot;</code>)</li>
+<li><code>TdsMode</code> (<code>string</code>, e.g. <code>&quot;AUTO_NEW_REGIME&quot;</code>)</li>
+<li><code>RequireAttendanceLock</code> (<code>bool</code>, default <code>true</code> — blocks payroll generation until monthly attendance is finalized)</li>
+<li><code>EffectiveFrom</code> / <code>EffectiveTo</code> (<code>DateTime</code>)</li>
 <li><code>IsActive</code> (<code>bool</code>)</li>
-<li><code>UpdatedByUserId</code> (<code>string</code>)</li>
-<li><code>UpdatedAtUtc</code> (<code>DateTime</code>)</li>
+<li><code>Version</code> (<code>int</code>)</li>
 </ul>
 <hr>
 <h2>8. Business Rules</h2>
 <ul>
 <li><strong>Divisor Resolution Rule (<code>PayrollCalculationRules.ResolveDivisor</code>)</strong>:<ul>
-<li><code>&quot;FIXED_30_DAYS&quot;</code> <span class="math-inline"> &rarr; </span> Always returns <code>30</code>.</li>
+<li><code>&quot;FIXED_30_DAYS&quot;</code> <span class="math-inline"> &rarr; </span> Always returns <code>30</code> (standard 30-day corporate compensation basis).</li>
+<li><code>&quot;FIXED_26_DAYS&quot;</code> <span class="math-inline"> &rarr; </span> Always returns <code>26</code> (excluding 4 statutory weekly rest days).</li>
 <li><code>&quot;WORKING_DAYS&quot;</code> <span class="math-inline"> &rarr; </span> Returns <code>eligibleWorkingDays</code> from <code>CompanyWorkingCalendarService</code>.</li>
 <li><code>&quot;CALENDAR_DAYS&quot;</code> (Default) <span class="math-inline"> &rarr; </span> Returns <code>DateTime.DaysInMonth(year, month)</code>.</li>
 </ul>
 </li>
+<li><strong>Pre-Payroll Lock Gate</strong>: When <code>RequireAttendanceLock = true</code>, <code>AutoPayrollServices</code> strictly rejects execution if the targeted month in <code>MonthlyAttendanceSummary</code> has <code>IsLocked != true</code>.</li>
 <li><strong>Closed Period Protection</strong>: Changes to <code>PayrollDivisorPolicy</code> apply only to open/unprocessed payroll months and never retroactively mutate closed <code>PayrollEntity</code> records.</li>
 </ul>
 <hr>
@@ -12037,6 +12128,24 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 <td>Payroll Admin</td>
 </tr>
 <tr>
+<td><code>src/app/modules/payrollsettings/PayrollSettings.tsx</code></td>
+<td>Company-wide payroll configuration: salary templates, statutory limits, and divisor policies.</td>
+<td><code>GET /api/payroll/divisor-policy</code>, <code>PUT /api/payroll/divisor-policy</code></td>
+<td>Payroll Admin</td>
+</tr>
+<tr>
+<td><code>src/app/modules/payrollsettings/components/AttendanceLockBlockingModal.tsx</code></td>
+<td>Hard verification gate preventing payroll generation if monthly attendance summaries remain unlocked.</td>
+<td><code>GET /api/attendance/month-lock-status</code></td>
+<td>Payroll Admin</td>
+</tr>
+<tr>
+<td><code>src/app/modules/payroll/components/RecordPayrollPaymentModal.tsx</code></td>
+<td>Batch payment recording and bank disbursement tracking with audit history.</td>
+<td><code>POST /api/payroll/payments/batch</code></td>
+<td>Accounts / HR</td>
+</tr>
+<tr>
 <td><code>src/app/modules/payroll/pages/MySalarySlipsPage.tsx</code></td>
 <td>Employee self-service page listing monthly payslips with download action.</td>
 <td><code>GET /api/payroll/my-slips</code>, <code>GET /api/payroll/{id}/download-slip</code></td>
@@ -12064,9 +12173,19 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 <td><code>IPayRollServices</code></td>
 </tr>
 <tr>
+<td><code>Controllers/PayrollPaymentBatchController.cs</code></td>
+<td>Manages salary disbursement batches, payment confirmation, and banking audit trail.</td>
+<td><code>IPayrollPaymentBatchService</code></td>
+</tr>
+<tr>
 <td><code>Services/AutoPayrollServices.cs</code></td>
 <td>Batch engine that verifies <code>PayrollPeriodRules</code>, queries locked attendance, resolves salary models, computes net salary, and calls <code>PdfService</code>.</td>
 <td><code>IMongoRepository&lt;PayrollEntity&gt;</code>, <code>IMongoRepository&lt;MonthlyAttendanceSummary&gt;</code>, <code>ISalaryService</code>, <code>IPdfService</code>, <code>IPayrollDivisorPolicyService</code></td>
+</tr>
+<tr>
+<td><code>Services/PayRoll/PayrollCalculationRules.cs</code></td>
+<td>Pure calculation engine for daily rate derivation using <code>FIXED_30_DAYS</code>, <code>FIXED_26_DAYS</code>, <code>CALENDAR_DAYS</code>, or <code>WORKING_DAYS</code>.</td>
+<td><code>PayrollDivisorPolicy</code></td>
 </tr>
 <tr>
 <td><code>Services/PdfService.cs</code></td>
@@ -12090,7 +12209,7 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 <tbody><tr>
 <td><code>POST</code></td>
 <td><code>/api/autopayroll/generate</code></td>
-<td>Generates batch payroll for specified month and year.</td>
+<td>Generates batch payroll for specified month and year (blocked if attendance unlocked).</td>
 <td>JWT (<code>payroll:create</code>)</td>
 <td><code>{ Year, Month }</code> -&gt; <code>PayrollBatchResultDto</code></td>
 <td>Creates <code>PayrollEntity</code> records, renders payslip PDFs</td>
@@ -12102,6 +12221,22 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 <td>JWT (<code>payroll:read</code>)</td>
 <td><code>PayrollSummaryDto</code></td>
 <td>None</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/payroll/divisor-policy</code></td>
+<td>Retrieves active company salary proration divisor policy.</td>
+<td>JWT (<code>payroll:read</code>)</td>
+<td><code>PayrollDivisorPolicyDto</code></td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>PUT</code></td>
+<td><code>/api/payroll/divisor-policy</code></td>
+<td>Updates company salary proration divisor (<code>FIXED_30</code>, <code>FIXED_26</code>, <code>CALENDAR</code>, <code>WORKING_DAYS</code>).</td>
+<td>JWT (<code>payroll:update</code>)</td>
+<td><code>PayrollDivisorPolicyDto</code></td>
+<td>Affects subsequent daily salary rate calculations</td>
 </tr>
 <tr>
 <td><code>POST</code></td>
@@ -13032,10 +13167,52 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 <td>HR / Department Clearers</td>
 </tr>
 <tr>
-<td><code>src/app/modules/offboarding/pages/FormerEmployeePortalPage.tsx</code></td>
-<td>Public token-authenticated portal (<code>/former-employee</code>) for separated staff to download payslips, FnF statement, and relieving letters.</td>
-<td><code>GET /api/public/former-employee/summary</code>, <code>GET /api/public/former-employee/documents</code></td>
-<td>Former Employee</td>
+<td><code>src/app/modules/formerEmployeePortal/FormerEmployeePortalExperience.tsx</code></td>
+<td>Master single-page production alumni experience orchestrating authentication, document vault, service desk, digital credential card, milestone stepper, and FAQ help center.</td>
+<td><code>GET /api/public/former-employee/summary</code>, <code>GET /api/public/former-employee/documents</code>, <code>POST /api/public/former-employee/requests</code></td>
+<td>Separated Employee</td>
+</tr>
+<tr>
+<td><code>src/app/modules/formerEmployeePortal/components/AlumniAuthView.tsx</code></td>
+<td>Zero-trust authentication view handling direct invite token redemption and passwordless 6-digit OTP verification with auto-advance and countdown.</td>
+<td><code>POST /api/public/former-employee/request-otp</code>, <code>POST /api/public/former-employee/verify-otp</code></td>
+<td>Separated Employee</td>
+</tr>
+<tr>
+<td><code>src/app/modules/formerEmployeePortal/components/AlumniDocumentVault.tsx</code></td>
+<td>Searchable, categorized document grid (Relieving letters, Payslips, FnF sheets, Form 16) with format badges and inline preview triggers.</td>
+<td><code>GET /api/public/former-employee/documents</code></td>
+<td>Separated Employee</td>
+</tr>
+<tr>
+<td><code>src/app/modules/formerEmployeePortal/components/AlumniDocumentPreviewModal.tsx</code></td>
+<td>In-app modal viewer for PDFs and high-resolution images, eliminating browser popup blocker issues with zoom and download controls.</td>
+<td>Document streaming endpoints</td>
+<td>Separated Employee</td>
+</tr>
+<tr>
+<td><code>src/app/modules/formerEmployeePortal/components/AlumniRequestDesk.tsx</code></td>
+<td>Post-exit request submission and tracking desk with status filtering (<code>Pending</code>, <code>Approved</code>, <code>Declined</code>) and evidence attachments.</td>
+<td><code>POST /api/public/former-employee/requests</code></td>
+<td>Separated Employee</td>
+</tr>
+<tr>
+<td><code>src/app/modules/formerEmployeePortal/components/AlumniCredentialCard.tsx</code></td>
+<td>Official digital alumni credential card with dynamic company branding, tenure calculation, and "Copy Service Summary".</td>
+<td>Rendered from exit demographic snapshot</td>
+<td>Separated Employee</td>
+</tr>
+<tr>
+<td><code>src/app/modules/formerEmployeePortal/components/AlumniJourneyStepper.tsx</code></td>
+<td>5-stage offboarding milestone tracker (Notice, Clearances, FnF Settlement, Letters, Alumni Record).</td>
+<td>Case status progression</td>
+<td>Separated Employee</td>
+</tr>
+<tr>
+<td><code>src/app/modules/formerEmployeePortal/components/AlumniHelpCenter.tsx</code></td>
+<td>Searchable post-employment FAQ accordion (FnF settlement timeline, PF transfer, Form 16, portal access).</td>
+<td>Self-service guidance</td>
+<td>Separated Employee</td>
 </tr>
 </tbody></table>
 <hr>
@@ -13055,7 +13232,7 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 </tr>
 <tr>
 <td><code>Controllers/PublicFormerEmployeePortalController.cs</code></td>
-<td><code>[AllowAnonymous]</code> controller authenticating <code>FormerEmployeeAccessToken</code> bearer headers/query tokens for post-exit document downloads.</td>
+<td>Rate-limited <code>[AllowAnonymous]</code> controller managing OTP issuance, OTP verification, document retrieval, and request submission.</td>
 <td><code>IFormerEmployeePortalService</code></td>
 </tr>
 <tr>
@@ -13120,12 +13297,44 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 <td>Sets <code>EmpUser.IsActive = false</code>, revokes <code>RefreshToken</code>, creates <code>FormerEmployeeAccessToken</code></td>
 </tr>
 <tr>
+<td><code>POST</code></td>
+<td><code>/api/public/former-employee/request-otp</code></td>
+<td>Sends a 6-digit OTP to the verified post-exit email address.</td>
+<td>Anonymous (Rate-limited)</td>
+<td><code>{ Email }</code> -&gt; <code>{ Success, ThrottledSeconds }</code></td>
+<td>Dispatches OTP notification via outbox</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/public/former-employee/verify-otp</code></td>
+<td>Verifies 6-digit OTP and returns a session token.</td>
+<td>Anonymous (Rate-limited)</td>
+<td><code>{ Email, Otp }</code> -&gt; <code>{ SessionToken, ExpiresAt }</code></td>
+<td>Initializes rate-limited alumni session</td>
+</tr>
+<tr>
 <td><code>GET</code></td>
 <td><code>/api/public/former-employee/summary</code></td>
 <td>Returns exit documents, FnF summary, and payslips for separated employee.</td>
-<td><code>FormerEmployeeAccessToken</code> (<code>[AllowAnonymous]</code>)</td>
+<td><code>X-Former-Employee-Session</code></td>
 <td><code>FormerEmployeeSummaryDto</code></td>
-<td>Updates <code>LastAccessedAtUtc</code> on token</td>
+<td>Tracks <code>LastAccessedAtUtc</code> on token</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/public/former-employee/requests</code></td>
+<td>Submits a post-exit service request to HR.</td>
+<td><code>X-Former-Employee-Session</code></td>
+<td><code>CreateAlumniRequestDto</code></td>
+<td>Appends request to <code>EmployeeExit.FormerEmployeeRequests</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/public/former-employee/documents/{id}/download</code></td>
+<td>Securely streams verified exit letters or FnF statements.</td>
+<td><code>X-Former-Employee-Session</code></td>
+<td>Streams file binary</td>
+<td>Updates <code>SeenByFormerEmployeeAtUtc</code> audit flag</td>
 </tr>
 </tbody></table>
 <hr>
@@ -13198,6 +13407,63 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
     Gate --&gt;|No| Block["Block Exit Completion"]
     Gate --&gt;|Yes| Complete["Complete Exit:\n1. EmpUser.IsActive = false\n2. Revoke RefreshTokens\n3. Create EmployeeExitAttendanceCutoff\n4. Issue FormerEmployeeAccessToken\n5. Enqueue EmployeeExitOutbox"]</pre>
       </div>
+    <hr>
+    <h3>9.1 Former Employee Portal (Alumni Experience) Architecture &amp; 6-Sprint Roadmap</h3>
+    <p>Governed by <code>FORMER_EMPLOYEE_PORTAL_SPRINT_PLAN.md</code>, the former employee self-service interface provides separated staff with secure, zero-trust access to post-exit records without requiring an active internal corporate directory / JWT account.</p>
+
+    <div class="diagram-wrapper">
+      <div class="diagram-header">ZERO-TRUST ALUMNI PORTAL BOUNDARY &amp; DATA FLOW</div>
+      <pre class="mermaid">flowchart TD
+    Alumni["Alumni User\n(Separated Staff)"] --&gt;|1. Magic Invite Token\n2. Email + 6-Digit OTP| AuthAPI["PublicFormerEmployeePortalController\n(Rate-Limited &amp; Strict Tenant Isolation)"]
+    AuthAPI --&gt;|Validate SHA-256 Hash| Session["Issue X-Former-Employee-Session Token\n(Scoped strictly to EmployeeExitId)"]
+    Session --&gt; Experience["FormerEmployeePortalExperience.tsx"]
+    Experience --&gt; Comp1["AlumniAuthView\n(Auto-advancing 6-digit OTP, 30s resend, 5m expiry)"]
+    Experience --&gt; Comp2["AlumniDocumentVault\n(Category filters, format badges, search)"]
+    Experience --&gt; Comp3["AlumniDocumentPreviewModal\n(In-app PDF/image viewer, popup-safe)"]
+    Experience --&gt; Comp4["AlumniRequestDesk\n(Post-exit HR requests, status tracker)"]
+    Experience --&gt; Comp5["AlumniCredentialCard\n(Branded alumni card, tenure, copy summary)"]
+    Experience --&gt; Comp6["AlumniJourneyStepper\n(5-stage offboarding milestone tracker)"]
+    Experience --&gt; Comp7["AlumniHelpCenter\n(Searchable FAQ accordion: FnF, PF, Form 16)"]</pre>
+    </div>
+
+    <h4>Enterprise 6-Sprint Roadmap Breakdown</h4>
+    <ol>
+    <li><strong>Sprint 1: Architecture &amp; Design Shell</strong>:
+      <ul>
+        <li>Unified enterprise design tokens (Deep Slate <code>#0F172A</code>, Corporate Teal <code>#008B90</code>, Soft Card Surfaces <code>#FFFFFF</code>, Crisp Borders <code>#E2E8F0</code>).</li>
+        <li>Elimination of absolute offset hacks in favor of responsive CSS grid. Dynamic company branding and sticky navigation.</li>
+      </ul>
+    </li>
+    <li><strong>Sprint 2: Zero-Trust Authentication, One-Time Code Flow &amp; Session Resilience</strong>:
+      <ul>
+        <li>Two-column responsive layout with alumni value proposition and authentication card.</li>
+        <li>High-usability 6-digit OTP component with auto-advance, backspace navigation, paste handling, 30s resend throttle, and 5-minute expiry timer.</li>
+      </ul>
+    </li>
+    <li><strong>Sprint 3: Enterprise Document Vault &amp; Multi-Format Inline Previewer</strong>:
+      <ul>
+        <li>Categorized filters (<code>All</code>, <code>Letters &amp; Certificates</code>, <code>Financial &amp; F&amp;F</code>, <code>Tax &amp; Form 16</code>) and format badges.</li>
+        <li><strong>Inline Document Preview Modal</strong>: In-app modal viewer for PDFs and images with zoom, fullscreen, and download controls, eliminating browser popup blocker issues.</li>
+      </ul>
+    </li>
+    <li><strong>Sprint 4: Alumni Service Desk &amp; Request Lifecycle Tracking</strong>:
+      <ul>
+        <li>Status filter tabs (<code>All Requests</code>, <code>Pending</code>, <code>Issued / Approved</code>, <code>Declined</code>).</li>
+        <li>Modal for raising requests (Relieving Letter, Experience Certificate, FnF Statement, Form 16, Record Updates).</li>
+      </ul>
+    </li>
+    <li><strong>Sprint 5: Alumni Credential Card &amp; Journey Milestone Stepper</strong>:
+      <ul>
+        <li>Official digital credential card with tenure calculations and "Copy Service Summary" clipboard action.</li>
+        <li>5-stage visual stepper (Notice, Clearances, FnF Settlement, Letters, Alumni Record).</li>
+      </ul>
+    </li>
+    <li><strong>Sprint 6: Polish, Accessibility &amp; Production Verification</strong>:
+      <ul>
+        <li>WCAG 2.1 AA keyboard accessibility, screen reader announcements, zero-trust session revocation gates, and end-to-end audit tracking.</li>
+      </ul>
+    </li>
+    </ol>
     <hr>
 <h2>10. State Machine</h2>
 
@@ -14091,6 +14357,18 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 <td>HR / Finance</td>
 </tr>
 <tr>
+<td><code>src/app/modules/attendance/EmployeeAttendance.tsx</code></td>
+<td>Monthly attendance report view with calendar grid, punch modal, and 4-tab Excel export trigger.</td>
+<td><code>GET /api/admin/attendance/export/monthly</code></td>
+<td>HR / Admin</td>
+</tr>
+<tr>
+<td><code>src/app/modules/payroll/components/PayRollTable.tsx</code></td>
+<td>Monthly payroll register with disbursement audit, bank export trigger, and payslip downloads.</td>
+<td><code>GET /api/payroll/reports/bank-disbursement</code></td>
+<td>Accounts / HR</td>
+</tr>
+<tr>
 <td><code>src/app/modules/recruitment/components/RecruitmentAuditExportModal.tsx</code></td>
 <td>Dialog to select date ranges and trigger recruitment audit CSV download.</td>
 <td><code>GET /api/recruitment/audit-export</code></td>
@@ -14108,6 +14386,16 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 </tr>
 </thead>
 <tbody><tr>
+<td><code>Services/AttendanceService.cs</code></td>
+<td><code>ExportMonthlyAttendanceAsync</code> generates closedXML 4-tab workbook (<code>Attendance Muster</code>, <code>Daily Punch Logs</code>, <code>Monthly Summary</code>, <code>Legend &amp; Policy</code>) with sanitized remarks and pastel styling.</td>
+<td><code>IMongoDbRepository&lt;EmpUser&gt;</code>, <code>IAttendanceRepository&lt;AttendanceDaySegment&gt;</code>, <code>ICompanyWorkingCalendarService</code></td>
+</tr>
+<tr>
+<td><code>Controllers/PayrollReportsController.cs</code></td>
+<td>Exposes bank disbursement reports, variance comparisons, and cost center summaries.</td>
+<td><code>IPayrollReportsService</code></td>
+</tr>
+<tr>
 <td><code>Services/RecruitmentAuditExportService.cs</code></td>
 <td>Streams applicant history, stage progressions, and interviewer remarks as formatted CSV.</td>
 <td><code>IMongoRepository&lt;Applicant&gt;</code>, <code>IMongoRepository&lt;ApplicantLogs&gt;</code></td>
@@ -14119,7 +14407,7 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 </tr>
 <tr>
 <td><code>Controllers/AttendanceController.cs</code></td>
-<td>Exposes locked <code>MonthlyAttendanceSummary</code> datasets.</td>
+<td>Exposes locked <code>MonthlyAttendanceSummary</code> datasets and monthly muster export stream.</td>
 <td><code>IAttendanceService</code></td>
 </tr>
 </tbody></table>
@@ -14138,6 +14426,14 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 </thead>
 <tbody><tr>
 <td><code>GET</code></td>
+<td><code>/api/admin/attendance/export/monthly?year={y}&amp;month={m}</code></td>
+<td>Exports production-ready 4-tab Excel workbook (<code>attendance-report-YYYY-MM.xlsx</code>).</td>
+<td>JWT (<code>attendance:read</code>)</td>
+<td>Stream <code>application/vnd.openxmlformats-officedocument.spreadsheetml.sheet</code></td>
+<td>Generates 4 worksheets: Muster, Punch Logs, Payroll Summary, Legend</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
 <td><code>/api/recruitment/audit-export</code></td>
 <td>Streams recruitment audit log CSV file.</td>
 <td>JWT (<code>recruitment:read</code>)</td>
@@ -14150,6 +14446,14 @@ Action: Updating bank account details and adding AWS Certification</code></pre><
 <td>Exports employee-level payroll breakdown for target month/year.</td>
 <td>JWT (<code>payroll:read</code>)</td>
 <td><code>List&lt;PayrollEntityDto&gt;</code></td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/payroll/reports/bank-disbursement?year={y}&amp;month={m}</code></td>
+<td>Generates bank-compliant disbursement transfer register with account numbers and net pay.</td>
+<td>JWT (<code>payroll:read</code>)</td>
+<td><code>BankDisbursementReportDto</code></td>
 <td>None</td>
 </tr>
 <tr>

@@ -25,9 +25,10 @@ public sealed class RecruitmentScorecardService(
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(reviewerUserId)) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Company, reviewer, and idempotency key are required.");
         if (command.Criteria is null || command.Criteria.Count == 0 || command.Criteria.Any(x => string.IsNullOrWhiteSpace(x.Name) || x.Rating is < 1 or > 5)) return Fail(result, RecruitmentErrorCodes.ScorecardInvalid, "At least one criterion with a rating from 1 to 5 is required.");
         var roundNumber = command.RoundNumber <= 0 ? 1 : command.RoundNumber;
+        RecruitmentInterview? interview = null;
         if (!string.IsNullOrWhiteSpace(command.InterviewId) && interviews is not null)
         {
-            var interview = await interviews.FirstOrDefault(x => x.CompanyId == companyId && x.InterviewId == command.InterviewId && !x.IsDeleted);
+            interview = await interviews.FirstOrDefault(x => x.CompanyId == companyId && x.InterviewId == command.InterviewId && !x.IsDeleted);
             if (interview is null) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Reviewer is not assigned to this interview.");
             roundNumber = interview.RoundNumber > 0 ? interview.RoundNumber : roundNumber;
             if (interview.PanelistUserIds.Length > 0 && !interview.PanelistUserIds.Contains(reviewerUserId, StringComparer.OrdinalIgnoreCase))
@@ -46,7 +47,8 @@ public sealed class RecruitmentScorecardService(
             ? await scorecards.FirstOrDefault(x => x.CompanyId == companyId && x.ScorecardId == command.ScorecardId && !x.IsDeleted)
             : await scorecards.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && x.ReviewerUserId == reviewerUserId && (x.LastCommandIdempotencyKey == key || (x.RoundNumber == roundNumber && (string.IsNullOrEmpty(command.InterviewId) || x.InterviewId == command.InterviewId))) && !x.IsDeleted);
         if (existing is not null && existing.LastCommandIdempotencyKey == key) return Ok(result, existing.ScorecardId, "Scorecard command already applied.");
-        if (existing is not null && !string.Equals(existing.ReviewerUserId, actorUserId, StringComparison.OrdinalIgnoreCase) && !string.Equals(existing.CreatedBy, actorUserId, StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(CurrentContext.AdminUserId(context)))
+        var isOrganizerOrAdmin = (interview is not null && string.Equals(interview.CreatedBy, actorUserId, StringComparison.OrdinalIgnoreCase)) || !string.IsNullOrWhiteSpace(CurrentContext.AdminUserId(context));
+        if (existing is not null && !isOrganizerOrAdmin && !string.Equals(existing.ReviewerUserId, actorUserId, StringComparison.OrdinalIgnoreCase) && !string.Equals(existing.CreatedBy, actorUserId, StringComparison.OrdinalIgnoreCase))
             return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Only the assigned interviewer can update this scorecard.", StatusCodes.Status403Forbidden);
         if (existing is null)
         {

@@ -5,6 +5,7 @@ namespace Codeji.CMS.Repository.Entities.Employees;
 /// <summary>
 /// Tenant-owned separation audit record. Never delete it as part of employee cleanup.
 /// </summary>
+[BsonIgnoreExtraElements]
 public sealed class EmployeeExit : BaseClass
 {
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
@@ -248,6 +249,7 @@ public sealed class EmployeeExitReminder
     public DateTime? SentAtUtc { get; set; }
 }
 
+[BsonIgnoreExtraElements]
 public sealed class EmployeeExitPostExitAccess
 {
     public string? PersonalEmail { get; set; }
@@ -255,6 +257,7 @@ public sealed class EmployeeExitPostExitAccess
     public DateTime? PersonalEmailVerificationExpiresAtUtc { get; set; }
     public bool PersonalEmailVerified { get; set; }
     public DateTime? PersonalEmailVerifiedAtUtc { get; set; }
+    public string? PersonalEmailVerifiedTokenHash { get; set; }
     public string? Mobile { get; set; }
     public bool Enabled { get; set; }
     public string AcknowledgementStatus { get; set; } = "Pending"; // Pending, Viewed, Acknowledged, Disputed, Refused, ClosedWithoutAcknowledgement

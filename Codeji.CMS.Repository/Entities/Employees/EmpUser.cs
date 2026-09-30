@@ -11,6 +11,7 @@ public class EmpUser : BaseClass
     public required string FirstName { get; set; }
     public required string? LastName { get; set; }
     public required string Email { get; set; }
+    public string EmailNormalized { get; set; } = string.Empty;
     public string Password { get; set; }
     public string Gender { get; set; }
     public string EmployeeId { get; set; }
@@ -62,5 +63,6 @@ public sealed class EmployeeContractChange
     public DateTime ChangedAtUtc { get; set; } = DateTime.UtcNow;
     public string? Reason { get; set; }
 }
+
 
 

@@ -85,9 +85,22 @@ public static class ServicesRegistration
         services.AddScoped<ILeaveAttendanceReconciliationService, LeaveAttendanceReconciliationService>();
         services.AddScoped<IWorkFromHomeService, WorkFromHomeService>();
         services.AddScoped<IPayrollDivisorPolicyService, PayrollDivisorPolicyService>();
+        services.AddScoped<IPayrollConfigurationService, PayrollConfigurationService>();
+        services.AddScoped<IPayrollTemplateService, PayrollTemplateService>();
+        services.AddScoped<IEmployeeSalaryStructureService, EmployeeSalaryStructureService>();
+        services.AddScoped<IEmployeeSalaryImportService, EmployeeSalaryImportService>();
+        services.AddScoped<IPayrollRunService, PayrollRunService>();
+        services.AddScoped<IPayrollRunWorkflowService, PayrollRunWorkflowService>();
+        services.AddScoped<IPayrollRunCalculationService, PayrollRunCalculationService>();
+        services.AddScoped<IPayrollRunReviewService, PayrollRunReviewService>();
+        services.AddScoped<IPayrollPaymentBatchService, PayrollPaymentBatchService>();
+        services.AddScoped<IPayrollAdjustmentService, PayrollAdjustmentService>();
+        services.AddScoped<IPayrollReportsService, PayrollReportsService>();
         return services;
     }
 }
+
+
 
 
 

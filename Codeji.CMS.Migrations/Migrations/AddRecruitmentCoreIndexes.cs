@@ -35,7 +35,8 @@ public sealed class AddRecruitmentCoreIndexes : IMigration
     {
         try
         {
-            var filter = new BsonDocument("LastCommandIdempotencyKey", new BsonDocument { { "$type", "string" }, { "$ne", "" } });
+            // MongoDB deployments used by this project reject `$ne` in partial index expressions. A lexicographic `$gt: ""` preserves the non-empty-string intent while remaining supported by partial indexes on the target server.
+            var filter = new BsonDocument("LastCommandIdempotencyKey", new BsonDocument { { "$type", "string" }, { "$gt", "" } });
             await db.GetCollection<BsonDocument>(collection).Indexes.CreateOneAsync(new CreateIndexModel<BsonDocument>(new BsonDocument(fields.Select(x => new BsonElement(x, 1))), new CreateIndexOptions<BsonDocument> { Name = name, Unique = true, PartialFilterExpression = filter }));
         }
         catch (MongoCommandException exception) when (exception.Code == 11000)

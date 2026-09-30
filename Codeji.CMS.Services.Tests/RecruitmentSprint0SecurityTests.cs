@@ -96,6 +96,34 @@ ActionType = "AcceptOffer",
         external.Verify(x => x.Validate("raw-token", true), Times.Never);
     }
 
+    [Fact]
+    public async Task Offer_response_link_allows_a_candidate_decline()
+    {
+        var external = new Mock<IRecruitmentExternalActionService>();
+        external.Setup(x => x.Validate("response-token", false)).ReturnsAsync(new Result<RecruitmentExternalActionTokenDto>
+        {
+            Success = true,
+            MethodResult = new RecruitmentExternalActionTokenDto { CompanyId = "company-a", ActionType = "OfferResponse", ApplicantId = "app-1", OfferId = "offer-1" }
+        });
+        external.Setup(x => x.Validate("response-token", true)).ReturnsAsync(new Result<RecruitmentExternalActionTokenDto> { Success = true, MethodResult = new RecruitmentExternalActionTokenDto() });
+        var applicants = Repository<Applicant>();
+        applicants.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new Applicant { CompanyId = "company-a", ApplicantId = "app-1", Email = "candidate@example.com", Phone = "1" });
+        var offers = Repository<RecruitmentOffer>();
+        offers.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentOffer, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new RecruitmentOffer { CompanyId = "company-a", OfferId = "offer-1", ApplicantId = "app-1", Status = RecruitmentOfferStatus.Sent, Version = 3 });
+        offers.Setup(x => x.UpdateMany(It.IsAny<MongoDB.Driver.FilterDefinition<RecruitmentOffer>>(), It.IsAny<MongoDB.Driver.UpdateDefinition<RecruitmentOffer>>(), It.IsAny<bool>()))
+            .ReturnsAsync(new Result { Success = true });
+        var outbox = Repository<RecruitmentEmailOutbox>();
+        outbox.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentEmailOutbox, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync((RecruitmentEmailOutbox?)null);
+        outbox.Setup(x => x.AddOne(It.IsAny<RecruitmentEmailOutbox>())).ReturnsAsync(new Result { Success = true });
+        var service = new RecruitmentCandidateActionService(external.Object, applicants.Object, offers.Object, Repository<RecruitmentInterview>().Object, outbox.Object);
+
+        var result = await service.RespondToOffer(new RecruitmentCandidateOfferActionCommand { Token = "response-token", Decision = "Declined", IdempotencyKey = "candidate-command-003" });
+
+        Assert.True(result.Success);
+        external.Verify(x => x.Validate("response-token", true), Times.Once);
+    }
     private static Mock<IMongoDbRepository<T>> Repository<T>() where T : class
         => new();
 }

@@ -14,29 +14,49 @@ public class AddAttendancePayrollPolicyIndexes : IMigration
         var migrations = db.GetCollection<Migration>("Migration");
         if (await migrations.Find(x => x.Id == Id).AnyAsync()) return;
 
-        await CreateUnique(db, "AttendancePayrollException", "ux_exception_company_employee_month_type", "CompanyId", "EmployeeId", "PayrollMonth", "ExceptionType");
-        await CreateUnique(db, "MonthlyAttendanceSummary", "ux_summary_company_employee_month", "CompanyId", "EmployeeId", "PayrollMonth");
-        await CreateUnique(db, "AttendancePenaltyPolicy", "ux_policy_company_version", "CompanyId", "Version");
-        await CreateUnique(db, "PayrollDivisorPolicy", "ux_divisor_company_version", "CompanyId", "Version");
-        await CreateUnique(db, "EmpPayRoll", "ux_payroll_company_employee_month", "CompanyId", "EmployeeId", "PayMonth");
-        await CreateUnique(db, "Attendance", "ux_attendance_user_date", "UserId", "Date");
+        var completed = true;
+        completed &= await CreateUnique(db, "AttendancePayrollException", "ux_exception_company_employee_month_type", "CompanyId", "EmployeeId", "PayrollMonth", "ExceptionType");
+        completed &= await CreateUnique(db, "MonthlyAttendanceSummary", "ux_summary_company_employee_month", "CompanyId", "EmployeeId", "PayrollMonth");
+        completed &= await CreateUnique(db, "AttendancePenaltyPolicy", "ux_policy_company_version", "CompanyId", "Version");
+        completed &= await CreateUnique(db, "PayrollDivisorPolicy", "ux_divisor_company_version", "CompanyId", "Version");
+        completed &= await CreateUnique(db, "EmpPayRoll", "ux_payroll_company_employee_month", "CompanyId", "EmployeeId", "PayMonth");
+        completed &= await CreateUnique(db, "Attendance", "ux_attendance_user_date", "UserId", "Date");
 
-        await migrations.InsertOneAsync(new Migration { Id = Id, ExecutedAt = DateTime.UtcNow });
+        // A duplicate-key conflict means the unique index could not be created.
+        // Do not mark this migration complete; after legacy duplicates are repaired,
+        // the migration must be retried so tenant/payroll uniqueness is enforced.
+        if (completed)
+            await migrations.InsertOneAsync(new Migration { Id = Id, ExecutedAt = DateTime.UtcNow });
     }
 
-    private static async Task CreateUnique(IMongoDatabase db, string collectionName, string indexName, params string[] fields)
+    private static async Task<bool> CreateUnique(IMongoDatabase db, string collectionName, string indexName, params string[] fields)
     {
+        var collection = db.GetCollection<BsonDocument>(collectionName);
+        var existing = await collection.Indexes.ListAsync();
+        var existingIndexes = await existing.ToListAsync();
         var keys = new BsonDocument(fields.Select(x => new BsonElement(x, 1)));
+        var matchingIndex = existingIndexes.FirstOrDefault(index =>
+            index.TryGetValue("name", out var name) && name.IsString && name.AsString == indexName);
+        if (matchingIndex is not null)
+        {
+            var isUnique = matchingIndex.TryGetValue("unique", out var unique) && unique.IsBoolean && unique.AsBoolean;
+            var hasExpectedKeys = matchingIndex.TryGetValue("key", out var existingKeys)
+                && existingKeys.IsBsonDocument
+                && existingKeys.AsBsonDocument.ToJson() == keys.ToJson();
+            if (isUnique && hasExpectedKeys) return true;
+            throw new InvalidOperationException($"Index {indexName} exists with an incompatible definition.");
+        }
+
         try
         {
-            await db.GetCollection<BsonDocument>(collectionName).Indexes.CreateOneAsync(
+            await collection.Indexes.CreateOneAsync(
                 new CreateIndexModel<BsonDocument>(keys, new CreateIndexOptions { Name = indexName, Unique = true }));
+            return true;
         }
         catch (MongoCommandException exception) when (exception.Code == 11000)
         {
-            // Do not make the entire migration runner unusable because unrelated
-            // legacy data needs a separate, domain-specific consolidation decision.
-            Console.WriteLine($"Skipped {indexName}: {collectionName} contains legacy duplicate keys.");
+            Console.WriteLine($"Skipped {indexName}: {collectionName} contains legacy duplicate keys; migration will retry later.");
+            return false;
         }
     }
 }

@@ -45,22 +45,29 @@ The **Payroll Settings & Divisor Policy Module** controls how the payroll engine
 ---
 
 ## 7. Database Model
-### `PayrollDivisorPolicy` (`CMS-Backend-Core/Codeji.CMS.Repository/Entities/PayrollDivisorPolicy.cs`)
+### `PayrollDivisorPolicy` (`CMS-Backend-Core/Codeji.CMS.Repository/Entities/Employees/PayrollDivisorPolicy.cs`)
 - `Id` (`string`, PK)
 - `CompanyId` (`string`, FK)
-- `DivisorType` (`string`, `"FIXED_30_DAYS"` | `"WORKING_DAYS"` | `"CALENDAR_DAYS"`)
-- `IncludeHolidaysInWorkingDays` (`bool`)
+- `DivisorPolicy` (`string`, `"FIXED_30_DAYS"` | `"FIXED_26_DAYS"` | `"WORKING_DAYS"` | `"CALENDAR_DAYS"`)
+- `PayrollMode` (`string`, e.g. `"Standard"`)
+- `LopCalculationBase` (`string`, e.g. `"FIXED_GROSS"`)
+- `EpfMode` (`string`, e.g. `"CAPPED_CEILING"`, `EpfWageCeiling = 15000`)
+- `EsicMode` (`string`, e.g. `"STATUTORY"`)
+- `TdsMode` (`string`, e.g. `"AUTO_NEW_REGIME"`)
+- `RequireAttendanceLock` (`bool`, default `true` — blocks payroll generation until monthly attendance is finalized)
+- `EffectiveFrom` / `EffectiveTo` (`DateTime`)
 - `IsActive` (`bool`)
-- `UpdatedByUserId` (`string`)
-- `UpdatedAtUtc` (`DateTime`)
+- `Version` (`int`)
 
 ---
 
 ## 8. Business Rules
 - **Divisor Resolution Rule (`PayrollCalculationRules.ResolveDivisor`)**:
-  - `"FIXED_30_DAYS"` $\rightarrow$ Always returns `30`.
+  - `"FIXED_30_DAYS"` $\rightarrow$ Always returns `30` (standard 30-day corporate compensation basis).
+  - `"FIXED_26_DAYS"` $\rightarrow$ Always returns `26` (excluding 4 statutory weekly rest days).
   - `"WORKING_DAYS"` $\rightarrow$ Returns `eligibleWorkingDays` from `CompanyWorkingCalendarService`.
   - `"CALENDAR_DAYS"` (Default) $\rightarrow$ Returns `DateTime.DaysInMonth(year, month)`.
+- **Pre-Payroll Lock Gate**: When `RequireAttendanceLock = true`, `AutoPayrollServices` strictly rejects execution if the targeted month in `MonthlyAttendanceSummary` has `IsLocked != true`.
 - **Closed Period Protection**: Changes to `PayrollDivisorPolicy` apply only to open/unprocessed payroll months and never retroactively mutate closed `PayrollEntity` records.
 
 ---

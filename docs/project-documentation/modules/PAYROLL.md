@@ -37,6 +37,9 @@ The **Payroll Processing Module** is the core financial compensation engine of *
 |---|---|---|---|
 | `src/app/modules/payroll/pages/PayrollDashboard.tsx` | Monthly payroll summary, gross payout, deductions breakdown, and generation trigger button. | `GET /api/autopayroll/summary`, `POST /api/autopayroll/generate` | Payroll Admin |
 | `src/app/modules/payroll/components/PayrollApprovalTable.tsx` | Detailed employee-by-employee compensation review table with LOP and net pay. | `GET /api/autopayroll/records` | Payroll Admin |
+| `src/app/modules/payrollsettings/PayrollSettings.tsx` | Company-wide payroll configuration: salary templates, statutory limits, and divisor policies. | `GET /api/payroll/divisor-policy`, `PUT /api/payroll/divisor-policy` | Payroll Admin |
+| `src/app/modules/payrollsettings/components/AttendanceLockBlockingModal.tsx` | Hard verification gate preventing payroll generation if monthly attendance summaries remain unlocked. | `GET /api/attendance/month-lock-status` | Payroll Admin |
+| `src/app/modules/payroll/components/RecordPayrollPaymentModal.tsx` | Batch payment recording and bank disbursement tracking with audit history. | `POST /api/payroll/payments/batch` | Accounts / HR |
 | `src/app/modules/payroll/pages/MySalarySlipsPage.tsx` | Employee self-service page listing monthly payslips with download action. | `GET /api/payroll/my-slips`, `GET /api/payroll/{id}/download-slip` | Employee |
 
 ---
@@ -46,7 +49,9 @@ The **Payroll Processing Module** is the core financial compensation engine of *
 |---|---|---|
 | `Controllers/AutoPayrollController.cs` | API endpoints to trigger batch payroll, fetch payroll run summaries, and publish payslips. | `IAutoPayrollServices` |
 | `Controllers/PayRollController.cs` | Endpoints for single-employee payroll queries, manual adjustments, and payslip PDF downloads. | `IPayRollServices` |
+| `Controllers/PayrollPaymentBatchController.cs` | Manages salary disbursement batches, payment confirmation, and banking audit trail. | `IPayrollPaymentBatchService` |
 | `Services/AutoPayrollServices.cs` | Batch engine that verifies `PayrollPeriodRules`, queries locked attendance, resolves salary models, computes net salary, and calls `PdfService`. | `IMongoRepository<PayrollEntity>`, `IMongoRepository<MonthlyAttendanceSummary>`, `ISalaryService`, `IPdfService`, `IPayrollDivisorPolicyService` |
+| `Services/PayRoll/PayrollCalculationRules.cs` | Pure calculation engine for daily rate derivation using `FIXED_30_DAYS`, `FIXED_26_DAYS`, `CALENDAR_DAYS`, or `WORKING_DAYS`. | `PayrollDivisorPolicy` |
 | `Services/PdfService.cs` | Renders HTML template `SalarySlipTemplate.html` into PDF byte streams stored under `/fs/`. | `TemplateEngine`, file system storage |
 
 ---
@@ -54,8 +59,10 @@ The **Payroll Processing Module** is the core financial compensation engine of *
 ## 6. API Documentation
 | Method | URL | Purpose | Auth / Permission | Request / Response | Side Effects |
 |---|---|---|---|---|---|
-| `POST` | `/api/autopayroll/generate` | Generates batch payroll for specified month and year. | JWT (`payroll:create`) | `{ Year, Month }` -> `PayrollBatchResultDto` | Creates `PayrollEntity` records, renders payslip PDFs |
+| `POST` | `/api/autopayroll/generate` | Generates batch payroll for specified month and year (blocked if attendance unlocked). | JWT (`payroll:create`) | `{ Year, Month }` -> `PayrollBatchResultDto` | Creates `PayrollEntity` records, renders payslip PDFs |
 | `GET` | `/api/autopayroll/summary` | Retrieves aggregate payroll costs, deductions, and headcounts. | JWT (`payroll:read`) | `PayrollSummaryDto` | None |
+| `GET` | `/api/payroll/divisor-policy` | Retrieves active company salary proration divisor policy. | JWT (`payroll:read`) | `PayrollDivisorPolicyDto` | None |
+| `PUT` | `/api/payroll/divisor-policy` | Updates company salary proration divisor (`FIXED_30`, `FIXED_26`, `CALENDAR`, `WORKING_DAYS`). | JWT (`payroll:update`) | `PayrollDivisorPolicyDto` | Affects subsequent daily salary rate calculations |
 | `POST` | `/api/autopayroll/publish` | Publishes approved payroll to employees, enabling payslip downloads. | JWT (`payroll:approve`) | `{ Year, Month }` | Updates `IsPublished = true`, sends SignalR notifications |
 | `GET` | `/api/payroll/{id}/download-slip` | Streams employee payslip PDF file. | JWT (`payroll:read`) | Streams `application/pdf` | None |
 

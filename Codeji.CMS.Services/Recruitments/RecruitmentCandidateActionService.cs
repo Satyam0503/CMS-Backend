@@ -18,16 +18,25 @@ public sealed class RecruitmentCandidateActionService(
     IMongoDbRepository<RecruitmentPreboardingCase>? preboardingCases = null,
     IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null) : IRecruitmentCandidateActionService
 {
+    public async Task<Result<string>> RecordOfferView(RecruitmentCandidateOfferViewCommand command)
+    {
+        if (string.IsNullOrWhiteSpace(command.Token)) return Fail(RecruitmentErrorCodes.InvalidRequest, "A valid action link is required.");
+        var token = await external.Validate(command.Token.Trim(), false);
+        var item = token.MethodResult;
+        if (!token.Success || item is null || item.ActionType is not ("OfferResponse" or "AcceptOffer" or "DeclineOffer" or "RequestOfferChange") || string.IsNullOrWhiteSpace(item.OfferId)) return Fail(RecruitmentErrorCodes.InvalidRequest, "This offer link is invalid or expired.", StatusCodes.Status410Gone);
+        var updated = await offers.UpdateMany(Builders<RecruitmentOffer>.Filter.Where(x => x.CompanyId == item.CompanyId && x.OfferId == item.OfferId && x.ApplicantId == item.ApplicantId && x.Status == RecruitmentOfferStatus.Sent && x.ViewedAtUtc == null && !x.IsDeleted), Builders<RecruitmentOffer>.Update.Set(x => x.ViewedAtUtc, DateTime.UtcNow));
+        return updated.Success ? Ok(item.OfferId, "Offer view recorded.") : Ok(item.OfferId, "Offer view already recorded.");
+    }
     public async Task<Result<string>> RespondToOffer(RecruitmentCandidateOfferActionCommand command)
     {
         if (string.IsNullOrWhiteSpace(command.Token) || string.IsNullOrWhiteSpace(command.IdempotencyKey) || command.IdempotencyKey.Trim().Length < 12)
             return Fail(RecruitmentErrorCodes.InvalidRequest, "A valid action link and idempotency key are required.");
         var token = await external.Validate(command.Token.Trim(), false);
-        if (!token.Success || token.MethodResult is null || string.IsNullOrWhiteSpace(token.MethodResult.CompanyId) || token.MethodResult.ActionType is not ("AcceptOffer" or "DeclineOffer" or "RequestOfferChange"))
+        if (!token.Success || token.MethodResult is null || string.IsNullOrWhiteSpace(token.MethodResult.CompanyId) || token.MethodResult.ActionType is not ("OfferResponse" or "AcceptOffer" or "DeclineOffer" or "RequestOfferChange"))
             return Fail(RecruitmentErrorCodes.InvalidRequest, "This offer link is invalid or expired.", StatusCodes.Status410Gone);
         var decision = command.Decision.Trim();
         var requestedAction = token.MethodResult.ActionType;
-        if ((requestedAction == "AcceptOffer" && decision != "Accepted") ||
+        if ((requestedAction != "OfferResponse" && requestedAction == "AcceptOffer" && decision != "Accepted") ||
             (requestedAction == "DeclineOffer" && decision != "Declined") ||
             (requestedAction == "RequestOfferChange" && decision != "RequestOfferChange"))
             return Fail(RecruitmentErrorCodes.InvalidRequest, "The decision does not match this action link.");
@@ -89,17 +98,26 @@ public sealed class RecruitmentCandidateActionService(
         var interview = await interviews.FirstOrDefault(x => x.InterviewId == t.InterviewId && x.CompanyId == t.CompanyId && x.ApplicantId == t.ApplicantId && !x.IsDeleted);
         var applicant = await applicants.FirstOrDefault(x => x.CompanyId == t.CompanyId && x.ApplicantId == t.ApplicantId && !x.IsDeleted);
         if (interview is null || applicant is null) return Fail(RecruitmentErrorCodes.InvalidRequest, "This interview is no longer available.", StatusCodes.Status410Gone);
-        var consumed = await external.Validate(command.Token.Trim(), true);
-        if (!consumed.Success) return Fail(RecruitmentErrorCodes.ConcurrencyConflict, "This action link was already used.", StatusCodes.Status409Conflict);
         var starts = command.StartsAtUtc.HasValue ? DateTime.SpecifyKind(command.StartsAtUtc.Value, DateTimeKind.Utc) : interview.StartsAtUtc;
         var ends = command.EndsAtUtc.HasValue ? DateTime.SpecifyKind(command.EndsAtUtc.Value, DateTimeKind.Utc) : interview.EndsAtUtc;
         if (ends <= starts) return Fail(RecruitmentErrorCodes.InvalidRequest, "Interview end must be after start.");
-        var updated = await interviews.UpdateMany(Builders<RecruitmentInterview>.Filter.Where(x => x.CompanyId == interview.CompanyId && x.InterviewId == interview.InterviewId && x.Version == interview.Version && !x.IsDeleted), Builders<RecruitmentInterview>.Update.Set(x => x.StartsAtUtc, starts).Set(x => x.EndsAtUtc, ends).Set(x => x.TimeZoneId, command.TimeZoneId?.Trim() ?? interview.TimeZoneId).Set(x => x.Location, command.Location?.Trim() ?? interview.Location).Set(x => x.MeetingUrl, command.MeetingUrl?.Trim() ?? interview.MeetingUrl).Set(x => x.Status, RecruitmentInterviewStatus.Confirmed).Set(x => x.LastCommandIdempotencyKey, command.IdempotencyKey.Trim()).Inc(x => x.Version, 1));
+        var oldTimeZone = interview.TimeZoneId;
+        var oldLocation = interview.Location;
+        var oldMeetingUrl = interview.MeetingUrl;
+        var oldStatus = interview.Status;
+        var oldVersion = interview.Version;
+        var key = command.IdempotencyKey.Trim();
+        var updated = await interviews.UpdateMany(Builders<RecruitmentInterview>.Filter.Where(x => x.CompanyId == interview.CompanyId && x.InterviewId == interview.InterviewId && x.Version == oldVersion && !x.IsDeleted), Builders<RecruitmentInterview>.Update.Set(x => x.StartsAtUtc, starts).Set(x => x.EndsAtUtc, ends).Set(x => x.TimeZoneId, command.TimeZoneId?.Trim() ?? interview.TimeZoneId).Set(x => x.Location, command.Location?.Trim() ?? interview.Location).Set(x => x.MeetingUrl, command.MeetingUrl?.Trim() ?? interview.MeetingUrl).Set(x => x.Status, RecruitmentInterviewStatus.Confirmed).Set(x => x.LastCommandIdempotencyKey, key).Inc(x => x.Version, 1));
         if (!updated.Success) return Fail(RecruitmentErrorCodes.ConcurrencyConflict, "The interview changed before confirmation was saved.", StatusCodes.Status409Conflict);
-        await Queue(interview.CompanyId, $"interview-confirmed:{interview.InterviewId}:{command.IdempotencyKey.Trim()}", "InterviewConfirmed", applicant.Email, "Interview confirmed", $"<p>Your interview has been confirmed for {starts:O}.</p>");
+        var consumed = await external.Validate(command.Token.Trim(), true);
+        if (!consumed.Success)
+        {
+            await interviews.UpdateMany(Builders<RecruitmentInterview>.Filter.Where(x => x.CompanyId == interview.CompanyId && x.InterviewId == interview.InterviewId && x.Version == oldVersion + 1 && x.LastCommandIdempotencyKey == key && !x.IsDeleted), Builders<RecruitmentInterview>.Update.Set(x => x.StartsAtUtc, interview.StartsAtUtc).Set(x => x.EndsAtUtc, interview.EndsAtUtc).Set(x => x.TimeZoneId, oldTimeZone).Set(x => x.Location, oldLocation).Set(x => x.MeetingUrl, oldMeetingUrl).Set(x => x.Status, oldStatus).Set(x => x.LastCommandIdempotencyKey, interview.LastCommandIdempotencyKey).Set(x => x.Version, oldVersion));
+            return Fail(RecruitmentErrorCodes.ConcurrencyConflict, "This action link was already used.", StatusCodes.Status409Conflict);
+        }
+        await Queue(interview.CompanyId, $"interview-confirmed:{interview.InterviewId}:{key}", "InterviewConfirmed", applicant.Email, "Interview confirmed", $"<p>Your interview has been confirmed for {starts:O}.</p>");
         return Ok(interview.InterviewId, "Interview confirmed successfully.");
     }
-
     private async Task Queue(string companyId, string dedupe, string type, string email, string subject, string html)
     {
         var existing = await outbox.FirstOrDefault(x => x.CompanyId == companyId && x.DedupeKey == dedupe && !x.IsDeleted);
@@ -109,6 +127,7 @@ public sealed class RecruitmentCandidateActionService(
     private static Result<string> Fail(string code, string message, int status = 400) => new() { Success = false, StatusCode = status, ErrorCode = code, Message = message };
     private static Result<string> Ok(string value, string message) => new() { Success = true, StatusCode = 200, MethodResult = value, Message = message };
 }
+
 
 
 

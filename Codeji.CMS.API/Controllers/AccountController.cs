@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using MapsterMapper;
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
@@ -110,6 +110,8 @@ namespace Codeji.CMS.API.Controllers
         //Registering Company
         [HttpPost]
         [Route("account/register")]
+        [AllowAnonymous]
+        [EnableRateLimiting("account-sensitive")]
         public async Task<Result> Register([FromBody] CompanyRequestModel companyModel)
         {
             //Validating Company Registration
@@ -282,5 +284,3 @@ namespace Codeji.CMS.API.Controllers
         // }
     }
 }
-
-

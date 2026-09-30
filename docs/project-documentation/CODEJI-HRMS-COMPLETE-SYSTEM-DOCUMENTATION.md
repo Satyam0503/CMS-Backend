@@ -154,14 +154,26 @@ Given effective shift schedule (`StartTime`, `EndTime`, `CheckInAllowedUntil = S
 - If $(\text{LhdCount} + \text{EdCount} + \text{LhdEdCount}) > \text{CombinedLhdEdMonthlyLimit}$, creates an `AttendancePayrollException` (`Status = "PENDING_REVIEW"`).
 - `AttendanceMonthLock.ValidateAndLock()` blocks month locking until **zero** `PENDING_REVIEW` exceptions remain.
 
+### Enterprise 4-Tab Attendance Export Architecture (`AttendanceService.cs`)
+The monthly attendance reporting engine (`GET /api/admin/attendance/export/monthly`) generates a production-grade 4-tab OpenXML workbook (`attendance-report-YYYY-MM.xlsx`):
+1. **Attendance Muster Tab**: Horizontal calendar matrix with status badge + IST punch times, soft pastel color coding (`#E8F5E9` Present, `#FEE2E2` Absent, `#FEF3C7` Half Day, `#E0F2FE` WFH), sanitized remarks (raw GUIDs stripped), right-side monthly summary rollups, and bottom daily staff totals.
+2. **Daily Punch Logs Tab**: Flat audit ledger with zebra striping, day-of-week, IST check-in/out, hours worked, late/early flags, and sanitized notes.
+3. **Monthly Summary Tab**: Payroll-ready totals with formula `=SUM(...)` Grand Totals, DOJ, expected vs eligible days, and highlighted LOP warnings.
+4. **Legend & Policy Tab**: Company metadata, status color glossary, paid-day multipliers (`1.0x`, `0.5x`, `0.0x`), and calculation formulas.
+
 ---
 
 ## PART X — COMPENSATION, SALARY STRUCTURE & AUTOMATED PAYROLL ENGINE
 
 ### Automated Payroll Formula (`AutoPayrollServices.cs`)
-1. **Gate Check**: Verifies period is open, `MonthlyAttendanceSummary.IsApproved && IsLocked == true`, and zero `PENDING_REVIEW` exceptions exist.
+1. **Gate Check & Lock Verification**:
+   - Verifies payroll period is open.
+   - Requires `MonthlyAttendanceSummary.IsApproved && IsLocked == true`.
+   - `AttendanceLockBlockingModal.tsx` provides an interactive pre-run modal blocking execution if attendance is unlocked.
+   - Enforces zero `PENDING_REVIEW` exceptions in `AttendancePayrollException`.
 2. **Divisor Resolution (`PayrollCalculationRules.ResolveDivisor`)**:
-   - `FIXED_30_DAYS` $\rightarrow 30$
+   - `FIXED_30_DAYS` $\rightarrow 30$ (Standard monthly baseline)
+   - `FIXED_26_DAYS` $\rightarrow 26$ (Excludes standard weekly rest days)
    - `WORKING_DAYS` $\rightarrow \text{CompanyWorkingCalendarService.GetWorkingDaysInMonth}(Y, M)$
    - `CALENDAR_DAYS` $\rightarrow \text{DateTime.DaysInMonth}(Y, M)$
 3. **Earnings & Deductions**:
@@ -170,7 +182,10 @@ Given effective shift schedule (`StartTime`, `EndTime`, `CheckInAllowedUntil = S
    $$\text{LossOfPayDeduction} = \text{TotalLossOfPayDays} \times \left(\frac{\text{GrossPay}}{\text{Divisor}}\right)$$
    $$\text{TotalDeduction} = \text{LossOfPayDeduction} + \text{EPF} + \text{ESIC} + \text{HealthInsurance} + \text{IncomeTax}$$
    $$\text{NetSalary} = \text{GrossPay} - \text{TotalDeduction}$$
-4. **Payslip PDF Rendering**: Compiles `Templates/SalarySlipTemplate.html` via `PdfService` into `/fs/salary-slips/{id}.pdf`.
+4. **Disbursement & Payment Batches (`PayrollPaymentBatchController.cs`)**:
+   - Multi-stage lifecycle: `Draft` $\rightarrow$ `Processed` $\rightarrow$ `PaymentPending` $\rightarrow$ `Paid` $\rightarrow$ `Closed`.
+   - Supports atomic bank disbursement recording (`RecordPayrollPaymentModal.tsx`) with optimistic lock guards preventing concurrent double-payment.
+5. **Payslip PDF Rendering**: Compiles `Templates/SalarySlipTemplate.html` via `PdfService` into `/fs/salary-slips/{id}.pdf`.
 
 ---
 
@@ -180,9 +195,18 @@ Given effective shift schedule (`StartTime`, `EndTime`, `CheckInAllowedUntil = S
 2. **Multi-Department Clearances**: Tracks IT, Finance, Admin, Manager, and HR sign-offs (`EmployeeExitClearanceTemplate`), knowledge transfer (`EmployeeExitHandoverItem`), physical hardware returns & damage deductions (`EmployeeExitAsset`), benefit terminations (`EmployeeExitBenefitItem`), and `EmployeeExitInterview`.
 3. **Full & Final Settlement (`EmployeeFinalSettlement.cs`)**:
    $$\text{NetPayable} = (\text{SalaryPayable}_{\text{SourcePayrollId}} + \text{LeaveEncashment} + \text{Reimbursements} + \text{Bonuses}) - (\text{Deductions} + \text{NoticeRecovery} + \text{OutstandingDues})$$
-   - classifies `Direction` as `PayableToEmployee`, `ReceivableFromEmployee`, or `ZeroSettlement`.
-4. **Exit Completion & Former Employee Portal (`PublicFormerEmployeePortalController.cs`)**:
-   - Deactivates `EmpUser.IsActive`, revokes all `RefreshToken` sessions, creates `EmployeeExitAttendanceCutoff`, enqueues `EmployeeExitOutbox`, and issues a SHA-256 hashed `FormerEmployeeAccessToken` for `/former-employee`.
+   - Classifies `Direction` as `PayableToEmployee`, `ReceivableFromEmployee`, or `ZeroSettlement`.
+4. **Exit Completion & Former Employee Portal (`FormerEmployeePortalExperience.tsx`)**:
+   - Deactivates `EmpUser.IsActive`, revokes all `RefreshToken` sessions, creates `EmployeeExitAttendanceCutoff`, and enqueues `EmployeeExitOutbox`.
+   - Governed by a 6-sprint production roadmap (`FORMER_EMPLOYEE_PORTAL_SPRINT_PLAN.md`).
+   - Modular architecture decomposed into 8 isolated components:
+     - `AlumniAuthView.tsx`: Passwordless authentication via 6-digit OTP with 30s resend throttling and 5m expiry.
+     - `AlumniDocumentPreviewModal.tsx`: Popup-free inline document viewer for PDF payslips, relieving letters, and FnF statements.
+     - `AlumniDocumentVault.tsx`: Categorized document storage with filter chips and format badges.
+     - `AlumniRequestDesk.tsx`: Post-exit ticket desk with direct evidence downloading and HR review pipeline.
+     - `AlumniCredentialCard.tsx`: Digital alumni credential card with calculated tenure and copyable summary.
+     - `AlumniJourneyStepper.tsx`: 5-step offboarding progression visualizer.
+     - `AlumniHelpCenter.tsx`: Self-service FAQ addressing settlement timelines, PF transfer, and tax compliance.
 
 ---
 

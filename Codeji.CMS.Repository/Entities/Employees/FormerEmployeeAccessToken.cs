@@ -8,16 +8,38 @@ public sealed class FormerEmployeeAccessToken : BaseClass
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
     public string FormerEmployeeAccessTokenId { get; set; } = string.Empty;
     public string EmployeeExitId { get; set; } = string.Empty;
-    public string TokenHash { get; set; } = string.Empty;
-    public DateTime ExpiresAtUtc { get; set; }
+
+    [BsonIgnoreIfNull]
+    public string? TokenHash { get; set; }
+
+    [BsonIgnoreIfNull]
+    public DateTime? ExpiresAtUtc { get; set; }
+
+    [BsonIgnoreIfNull]
     public DateTime? UsedAtUtc { get; set; }
+
+    [BsonIgnoreIfNull]
     public DateTime? RevokedAtUtc { get; set; }
+
     public int Attempts { get; set; }
+
+    [BsonIgnoreIfNull]
     public string? SessionTokenHash { get; set; }
+
+    [BsonIgnoreIfNull]
     public DateTime? SessionExpiresAtUtc { get; set; }
+
+    [BsonIgnoreIfNull]
     public DateTime? SessionRevokedAtUtc { get; set; }
+
+    [BsonIgnoreIfNull]
     public string? OtpHash { get; set; }
+
+    [BsonIgnoreIfNull]
     public DateTime? OtpExpiresAtUtc { get; set; }
+
     public int OtpAttempts { get; set; }
+
+    [BsonIgnoreIfNull]
     public DateTime? OtpUsedAtUtc { get; set; }
 }

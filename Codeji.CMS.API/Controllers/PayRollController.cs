@@ -57,7 +57,7 @@ public class PayRollController : BaseApiController
         try
         {
             var userId = CurrentContext.UserId(_httpContextAccessor);
-            var (pdfByte, pdfName) = await _payRollServices.GenerateEmpSalarySlip(model, userId);
+            var (pdfByte, pdfName) = await _payRollServices.GenerateEmpSalarySlip(model, userId, CurrentContext.CompanyId(_httpContextAccessor));
             Response.Headers.Append("Access-Control-Expose-Headers", "Content-Disposition");
             return File(pdfByte, "application/pdf", pdfName);
         }
@@ -100,6 +100,17 @@ public class PayRollController : BaseApiController
     }
 
     [HttpPost]
+    [Route("ValidatePayrollData")]
+    [ModulePermission(AppModule.PayRoll, [Permission.Create, Permission.Edit])]
+    public async Task<Result<string>> ValidatePayrollData([FromBody] PayrollValidationRequestDto model)
+    {
+        if (!ModelState.IsValid)
+            return new Result<string> { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Invalid payroll validation request." };
+        if (!PayrollPeriodRules.IsClosedPeriod(model.PayMonth, DateTime.UtcNow))
+            return new Result<string> { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Only a completed payroll month can be validated." };
+        return await _payRollServices.ValidatePayrollData(model, CurrentContext.CompanyId(_httpContextAccessor));
+    }
+    [HttpPost]
     [Route("UploadPayloadData")]
     [ModulePermission(AppModule.PayRoll, [Permission.Create, Permission.Edit])]
     public async Task<ActionResult<Result<string>>> UploadPayloadData([FromBody] EmplyeePayRollRequestDto model)
@@ -126,6 +137,49 @@ public class PayRollController : BaseApiController
             return result;
         }
         return result;
+    }
+
+    [HttpPost]
+    [Route("ClosePayrollMonth")]
+    [ModulePermission(AppModule.PayRoll, [Permission.Create, Permission.Edit])]
+    public async Task<Result> ClosePayrollMonth([FromBody] ProcessPayrollRequestDto model)
+    {
+        if (!ModelState.IsValid)
+            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Invalid payroll month." };
+        return await _payRollServices.ClosePayrollMonth(model.PayMonth, CurrentContext.CompanyId(_httpContextAccessor), CurrentContext.UserId(_httpContextAccessor));
+    }
+    [HttpPost]
+    [Route("GetPayrollAuditHistory")]
+    [ModulePermission(AppModule.PayRoll, Permission.View)]
+    public async Task<Result<List<PayrollAuditEventDto>>> GetPayrollAuditHistory([FromBody] PayrollAuditHistoryRequestDto model)
+    {
+        if (!ModelState.IsValid)
+            return new Result<List<PayrollAuditEventDto>> { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Invalid payroll audit request." };
+        return await _payRollServices.GetPayrollAuditHistory(model.PayrollId, CurrentContext.CompanyId(_httpContextAccessor));
+    }
+
+    [HttpPost]
+    [Route("RecordPayrollPayment")]
+    [ModulePermission(AppModule.PayRoll, [Permission.Create, Permission.Edit])]
+    public async Task<Result> RecordPayrollPayment([FromBody] RecordPayrollPaymentRequestDto model)
+    {
+        if (!ModelState.IsValid)
+            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Invalid payment request." };
+        return await _payRollServices.RecordPayrollPayment(
+            model,
+            CurrentContext.CompanyId(_httpContextAccessor),
+            CurrentContext.UserId(_httpContextAccessor));
+    }
+    [HttpPost]
+    [Route("ApprovePayrollMonth")]
+    [ModulePermission(AppModule.PayRoll, [Permission.Create, Permission.Edit])]
+    public async Task<Result> ApprovePayrollMonth([FromBody] ProcessPayrollRequestDto model)
+    {
+        if (!ModelState.IsValid)
+            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Invalid payroll month." };
+        if (!PayrollPeriodRules.IsClosedPeriod(model.PayMonth, DateTime.UtcNow))
+            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Only a completed payroll month can be approved." };
+        return await _payRollServices.ApprovePayrollMonth(model.PayMonth, CurrentContext.CompanyId(_httpContextAccessor), CurrentContext.UserId(_httpContextAccessor));
     }
 
     [HttpPost]

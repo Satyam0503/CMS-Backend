@@ -53,4 +53,15 @@ public class PayrollCalculationSnapshotDto
     public string? PolicyId { get; set; }
     public int PolicyVersion { get; set; }
     public int AttendanceSummaryVersion { get; set; }
+    public string? PayrollAssignmentId { get; set; }
+    public string? PayGroupId { get; set; }
+    public string? SalaryTemplateId { get; set; }
+    public string? ResolvedPolicyProfileId { get; set; }
+    public int ResolvedPolicyVersion { get; set; }
+    public string EpfMode { get; set; } = "CAPPED_CEILING";
+    public decimal EpfWageCeiling { get; set; } = 15000m;
+    public string EsicMode { get; set; } = "STATUTORY";
+    public decimal EsicWageCeiling { get; set; } = 21000m;
+    public string TdsMode { get; set; } = "AUTO_NEW_REGIME";
+
 }

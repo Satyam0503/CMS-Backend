@@ -23,7 +23,7 @@ public sealed class AddRecruitmentReliabilityIndexes : IMigration
 
     private static Task CreateUniqueString(IMongoDatabase db, string collection, string name, params string[] fields)
     {
-        var filter = new BsonDocument(fields[^1], new BsonDocument { { "$type", "string" }, { "$ne", "" } });
+        var filter = new BsonDocument(fields[^1], new BsonDocument { { "$type", "string" }, { "$gt", "" } });
         return CreateIndex(db, collection, name, fields, filter);
     }
 

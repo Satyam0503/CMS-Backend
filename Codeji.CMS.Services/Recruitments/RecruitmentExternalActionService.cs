@@ -22,7 +22,7 @@ public sealed class RecruitmentExternalActionService(
 {
     private static readonly HashSet<string> AllowedActions = new(StringComparer.OrdinalIgnoreCase)
     {
-        "ScheduleInterview", "RescheduleInterview", "CancelInterview", "AcceptOffer", "DeclineOffer", "RequestOfferChange", "Preboarding"
+        "ScheduleInterview", "RescheduleInterview", "CancelInterview", "OfferResponse", "AcceptOffer", "DeclineOffer", "RequestOfferChange", "Preboarding"
     };
 
     public async Task<Result<RecruitmentExternalActionTokenDto>> Issue(RecruitmentExternalActionIssueCommand command, string actor)
@@ -51,7 +51,7 @@ public sealed class RecruitmentExternalActionService(
             if (interviews is not null && interview is null) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "Interview does not belong to the candidate.", 404);
             if (interview is not null && command.ResourceVersion.HasValue && command.ResourceVersion.Value != interview.Version) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.ConcurrencyConflict, "Interview has changed. Refresh and issue a new link.", 409);
         }
-        if (action is "AcceptOffer" or "DeclineOffer" or "RequestOfferChange")
+        if (action is "OfferResponse" or "AcceptOffer" or "DeclineOffer" or "RequestOfferChange")
         {
             if (string.IsNullOrWhiteSpace(offerId)) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "Offer is required for this action.");
             var offer = offers is null ? null : await offers.FirstOrDefault(x => x.CompanyId == companyId && x.OfferId == offerId && x.ApplicantId == applicantId && !x.IsDeleted);

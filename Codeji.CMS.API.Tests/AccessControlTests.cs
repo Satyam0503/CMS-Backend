@@ -11,6 +11,10 @@ public class AccessControlTests : ApiTestBase
     [InlineData("api/User/GetAllEmployees")]
     [InlineData("api/Roles/GetRoles")]
     [InlineData("api/PayRoll/ProcessPayrollMonth")]
+    [InlineData("api/PayRoll/RecordPayrollPayment")]
+    [InlineData("api/PayRoll/ClosePayrollMonth")]
+    [InlineData("api/PayRoll/ValidatePayrollData")]
+    [InlineData("api/PayRoll/GetPayrollAuditHistory")]
     [InlineData("api/Salary/GetCompanySalaries")]
     [InlineData("api/attendance/GetAttendance")]
     [InlineData("api/LeaveManagement/GetAllLeaveRequests")]
@@ -48,3 +52,4 @@ public class AccessControlTests : ApiTestBase
     }
 
 }
+

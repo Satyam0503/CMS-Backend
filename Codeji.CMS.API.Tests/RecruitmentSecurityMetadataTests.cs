@@ -16,13 +16,17 @@ public sealed class RecruitmentSecurityMetadataTests
     {
         var controllers = new[]
         {
+            typeof(ApplicantsController),
+            typeof(JobVacancyController),
             typeof(RecruitmentApplicationController),
             typeof(RecruitmentAuditController),
             typeof(RecruitmentCandidatePrivacyController),
+            typeof(RecruitmentCandidateShareController),
             typeof(RecruitmentDuplicateController),
             typeof(RecruitmentEnterpriseController),
             typeof(RecruitmentHiringDecisionController),
             typeof(RecruitmentOnboardingController),
+            typeof(RecruitmentOfferNegotiationController),
             typeof(RecruitmentPlanningController),
             typeof(RecruitmentResumeExtractionController),
             typeof(RecruitmentScreeningController),

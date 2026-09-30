@@ -33,6 +33,7 @@ The **Attendance Module** is a core operational engine in **Codeji CMS / HRMS** 
 | File | Responsibility | Calls | Used By |
 |---|---|---|---|
 | `src/app/modules/attendance/pages/AttendancePage.tsx` | Main attendance calendar, daily punch widget, and status legend (`P`, `HD`, `LHD`, `ED`, `LHD+ED`). | `GET /api/attendance`, `POST /api/attendance/check-in`, `POST /api/attendance/check-out` | Employee / HR |
+| `src/app/modules/attendance/EmployeeAttendance.tsx` | Monthly attendance report view with calendar grid, punch modal, and 4-tab Excel export trigger. | `GET /api/admin/attendance/export/monthly` | HR / Admin |
 | `src/app/modules/attendance/components/MonthlySummaryTable.tsx` | Displays employee monthly rollup (`PresentDays`, `UnpaidDays`, `LhdCount`, `EdCount`, lock state). | `GET /api/attendance/monthly-summary` | HR / Payroll Admin |
 | `src/app/modules/attendance/components/PenaltyExceptionsModal.tsx` | Lists `PENDING_REVIEW` exceptions from `AttendancePayrollException` for HR approval or waiver. | `GET /api/attendance-penalty/exceptions`, `POST /api/attendance-penalty/resolve` | HR Admin |
 
@@ -41,7 +42,8 @@ The **Attendance Module** is a core operational engine in **Codeji CMS / HRMS** 
 ## 5. Backend Implementation
 | Backend File | Responsibility | Dependencies |
 |---|---|---|
-| `Controllers/AttendanceController.cs` | Handles check-in, check-out, regularization, monthly summary generation, and month locking. | `IAttendanceService`, `IAttendancePenaltyService` |
+| `Controllers/AttendanceController.cs` | Handles check-in, check-out, regularization, monthly summary generation, month locking, and monthly 4-tab Excel workbook export. | `IAttendanceService`, `IAttendancePenaltyService`, `IAdminAttendanceService` |
+| `Services/AttendanceService.cs` | `ExportMonthlyAttendanceAsync` generates closedXML 4-tab workbook (`Attendance Muster`, `Daily Punch Logs`, `Monthly Summary`, `Legend & Policy`) with sanitized remarks and pastel styling. | `IMongoDbRepository<EmpUser>`, `IAttendanceRepository`, `IMongoDbRepository<AttendanceDaySegment>`, `ICompanyWorkingCalendarService` |
 | `Services/AttendanceStatusCalculationService.cs` | Pure deterministic calculation of daily status (`P`, `HD`, `LHD`, `ED`, `LHD+ED`) from punch times and `CompanyOfficeSchedule`. | `EffectiveOfficeScheduleService` |
 | `Services/AttendancePenaltyService.cs` | Evaluates monthly `LHD`/`ED` counts against `AttendancePenaltyPolicy.CombinedLhdEdMonthlyLimit`, creates `AttendancePayrollException`, and enforces `AttendanceMonthLock.ValidateAndLock()`. | `IMongoRepository<AttendancePenaltyPolicy>`, `IMongoRepository<AttendancePayrollException>`, `IMongoRepository<AttendanceMonthLock>` |
 | `Services/HostedServices/AttendanceReminderHostedService.cs` | Periodic `BackgroundService` that checks `AttendanceReminderSetting` and sends check-in/out notifications via `NotificationService`. | `IMongoRepository<AttendanceReminderDispatchLog>` |
@@ -51,6 +53,7 @@ The **Attendance Module** is a core operational engine in **Codeji CMS / HRMS** 
 ## 6. API Documentation
 | Method | URL | Purpose | Auth / Permission | Request / Response | Side Effects |
 |---|---|---|---|---|---|
+| `GET` | `/api/admin/attendance/export/monthly?year={y}&month={m}` | Exports production-ready 4-tab Excel workbook (`attendance-report-YYYY-MM.xlsx`). | JWT (`attendance:read`) | Stream `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | Generates 4 worksheets: Muster, Punch Logs, Payroll Summary, Legend |
 | `POST` | `/api/attendance/check-in` | Records employee daily check-in timestamp. | JWT (`attendance:create`) | `CheckInRequestDto` -> `AttendanceDto` | Checks `EmployeeExitAttendanceCutoff`; calculates initial status |
 | `POST` | `/api/attendance/check-out` | Records employee daily check-out and computes worked hours & `Status`. | JWT (`attendance:update`) | `CheckOutRequestDto` -> `AttendanceDto` | Runs `AttendanceStatusCalculationService.CalculateStatus` |
 | `PUT` | `/api/attendance/{id}/regularize` | HR/Manager manual override of punch times or status. | JWT (`attendance:update`) | `RegularizeAttendanceDto` | Writes immutable `AttendanceAuditLog` (`PreviousValue`, `NewValue`, `Reason`) |
@@ -146,6 +149,25 @@ flowchart TD
     HRResolve --> ReadyLock
     ReadyLock --> Lock["AttendanceMonthLock.ValidateAndLock()\nIsLocked = true, IsApproved = true"]
 ```
+
+### 9.1 Enterprise 4-Tab Attendance Export Architecture
+The monthly export (`GET /api/admin/attendance/export/monthly`) generates a comprehensive OpenXML Excel workbook (`attendance-report-YYYY-MM.xlsx`) structured across 4 dedicated worksheets:
+
+1. **Tab 1 — Attendance Muster (`Attendance Muster`)**:
+   - **Demographic Columns**: `Employee ID`, `Employee Name`, `Department`, `Designation` (frozen horizontally across scrolling).
+   - **Daily Matrix (Days 1 to 28/30/31)**: Compact status code badge (`P`, `A`, `HD`, `WFH`, `PL`, `WO`, `H`) with IST punch timestamps (`09:15 - 18:30`).
+   - **Sanitization Engine**: Strips internal GUIDs and system audit notes; replaces raw database strings with clean human tags (e.g. `"Approved WFH"`, `"Approved Leave"`).
+   - **Pastel Styling**: Soft sage (`#E8F5E9` fill / `#166534` text) for Present, soft rose (`#FEE2E2` / `#991B1B`) for Absent, warm amber (`#FEF3C7` / `#92400E`) for Half Day, soft sky (`#E0F2FE` / `#0369A1`) for WFH, and slate tint (`#F8FAFC` / `#64748B`) for Weekends.
+   - **Monthly Rollup**: Right-side sticky summary columns (`Present`, `Half Days`, `WFH`, `Paid Leaves`, `Absent / LOP`, `Weekly Offs`, `Holidays`, `Working Days`, `Total Paid Days`, `Late In`, `Early Exit`).
+   - **Bottom Summaries**: Daily aggregate rows for `TOTAL STAFF PRESENT` and `TOTAL STAFF ABSENT`.
+2. **Tab 2 — Daily Punch Logs (`Daily Punch Logs`)**:
+   - Flat tabular audit table: `Date`, `Day`, `Employee ID`, `Employee Name`, `Department`, `Designation`, `Status`, `Check-In (IST)`, `Check-Out (IST)`, `Hours`, `Late?`, `Early Exit?`, `Day Type`, `Remarks`.
+   - Alternating zebra striping with Excel auto-filters; ideal for compliance audits and PivotTables.
+3. **Tab 3 — Monthly Summary (`Monthly Summary`)**:
+   - Payroll-ready reconciliation: `Employee ID`, `Name`, `Department`, `Designation`, `Date of Joining`, `Expected Work Days`, `Eligible Work Days`, `Present Days`, `Half Days`, `WFH Days`, `Paid Leaves`, `Absent / LOP`, `Weekly Offs`, `Holidays`, `Total Paid Days`, `Total Unpaid Days`, `Work Hours`, `Late Count`, `Early Exit Count`, `Payroll Status`.
+   - Native `=SUM(...)` Grand Totals row. Highlighting LOP > 0 in soft red.
+4. **Tab 4 — Legend & Policy (`Legend & Policy`)**:
+   - Organization metadata, status code matrix with preview badges, paid factor multipliers (`1.0x`, `0.5x`, `0.0x`), and calculation formulas (Payable Days, Eligible Days, LOP rules).
 
 ---
 

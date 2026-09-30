@@ -57,6 +57,8 @@ public sealed class RecruitmentCandidateInterviewActionCommand
     [System.ComponentModel.DataAnnotations.Required] public string IdempotencyKey { get; set; } = string.Empty;
 }
 
+public sealed class RecruitmentCandidateOfferViewCommand { [System.ComponentModel.DataAnnotations.Required] public string Token { get; set; } = string.Empty; }
+
 public sealed class RecruitmentCandidateOfferActionCommand
 {
     [System.ComponentModel.DataAnnotations.Required] public string Token { get; set; } = string.Empty;

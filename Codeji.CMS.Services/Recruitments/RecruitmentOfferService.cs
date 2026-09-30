@@ -4,6 +4,7 @@ using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
@@ -83,6 +84,7 @@ public sealed class RecruitmentOfferService(
                 ExpiresAtUtc = command.ExpiresAtUtc.HasValue ? DateTime.SpecifyKind(command.ExpiresAtUtc.Value, DateTimeKind.Utc) : null,
                 ApprovalReference = command.ApprovalReference?.Trim(),
                 Status = initialStatus,
+                SentAtUtc = string.Equals(initialStatus, RecruitmentOfferStatus.Sent, StringComparison.OrdinalIgnoreCase) ? DateTime.UtcNow : null,
                 LastCommandIdempotencyKey = idempotencyKey,
                 CreatedBy = actorUserId,
                 UpdatedBy = actorUserId
@@ -134,6 +136,8 @@ public sealed class RecruitmentOfferService(
         existing.StartDateUtc = command.StartDateUtc.HasValue ? DateTime.SpecifyKind(command.StartDateUtc.Value, DateTimeKind.Utc) : null;
         existing.ExpiresAtUtc = command.ExpiresAtUtc.HasValue ? DateTime.SpecifyKind(command.ExpiresAtUtc.Value, DateTimeKind.Utc) : null;
         existing.Status = command.Status.Trim();
+        if (string.Equals(existing.Status, RecruitmentOfferStatus.Sent, StringComparison.OrdinalIgnoreCase) && !string.Equals(previousStatus, RecruitmentOfferStatus.Sent, StringComparison.OrdinalIgnoreCase))
+            existing.SentAtUtc = DateTime.UtcNow;
         if (string.Equals(existing.Status, RecruitmentOfferStatus.Accepted, StringComparison.OrdinalIgnoreCase) && !existing.RespondedAtUtc.HasValue)
             existing.RespondedAtUtc = DateTime.UtcNow;
         existing.LastCommandIdempotencyKey = idempotencyKey;
@@ -179,7 +183,7 @@ public sealed class RecruitmentOfferService(
                 if (issuanceKey.Length < 12) issuanceKey = issuanceKey.PadRight(12, '0');
                 var tokenResult = await externalActions.Issue(new RecruitmentExternalActionIssueCommand
                 {
-                    ActionType = "AcceptOffer",
+                    ActionType = "OfferResponse",
                     ApplicantId = applicant.ApplicantId,
                     VacancyId = applicant.VacancyId,
                     OfferId = offer.OfferId,
@@ -189,15 +193,17 @@ public sealed class RecruitmentOfferService(
                     ResourceVersion = offer.Version
                 }, actorUserId);
 
-                var tokenParam = tokenResult.MethodResult?.RawToken ?? string.Empty;
+                var tokenParam = tokenResult.Success ? tokenResult.MethodResult?.RawToken : null;
+                if (string.IsNullOrWhiteSpace(tokenParam) || !TryBuildCandidateOfferUrl(tokenParam, out var offerUrl))
+                    return;
                 await externalActions.QueueEmail(new RecruitmentEmailQueueCommand
                 {
                     DedupeKey = $"offer-email:{offer.OfferId}:{idempotencyKey}",
                     EventType = "OfferSent",
                     RecipientEmail = applicant.Email.Trim(),
-                    Subject = $"Job Offer — {applicant.FirstName} {applicant.LastName}".Trim(),
-                    HtmlBody = $"<p>Dear {System.Net.WebUtility.HtmlEncode(applicant.FirstName)},</p><p>We are pleased to extend an offer ({System.Net.WebUtility.HtmlEncode(offer.Currency)} {offer.TotalCtc:N2}).</p>" +
-                               (!string.IsNullOrWhiteSpace(tokenParam) ? $"<p>Action token: <code>{System.Net.WebUtility.HtmlEncode(tokenParam)}</code></p>" : string.Empty)
+                    Subject = HtmlTemplate.Render(config?.OfferLetterSubjectTemplate ?? "Your offer for [JobTitle]", new { CandidateName = $"{applicant.FirstName} {applicant.LastName}".Trim(), JobTitle = applicant.VacancyId, Currency = offer.Currency, TotalCtc = offer.TotalCtc.ToString("N2") }),
+                    HtmlBody = HtmlTemplate.Render(config?.OfferLetterBodyTemplate ?? "<p>Dear [CandidateName],</p><p>We are pleased to offer you the [JobTitle] position.</p><p>Compensation: [Currency] [TotalCtc]</p>", new { CandidateName = $"{applicant.FirstName} {applicant.LastName}".Trim(), JobTitle = applicant.VacancyId, Currency = offer.Currency, TotalCtc = offer.TotalCtc.ToString("N2") }) +
+                               $"<p><a href=\"{System.Net.WebUtility.HtmlEncode(offerUrl)}\">Review your offer</a></p><p>This secure link expires in 24 hours.</p>"
                 }, actorUserId);
             }
 
@@ -239,6 +245,15 @@ public sealed class RecruitmentOfferService(
         }
     }
 
+    private static bool TryBuildCandidateOfferUrl(string token, out string offerUrl)
+    {
+        offerUrl = string.Empty;
+        var appUrl = ConfigManager.AppSettings?.AppUrl?.Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(appUrl) || !Uri.TryCreate(appUrl, UriKind.Absolute, out var baseUri) || baseUri.Scheme is not ("http" or "https"))
+            return false;
+        offerUrl = $"{appUrl}/candidate/offer?token={Uri.EscapeDataString(token)}";
+        return true;
+    }
     private static Result<string> Ok(Result<string> result, string id, string message) { result.Success = true; result.StatusCode = StatusCodes.Status200OK; result.MethodResult = id; result.Message = message; return result; }
     private static Result<string> Fail(Result<string> result, string code, string message, int status = StatusCodes.Status400BadRequest) { result.ErrorCode = code; result.StatusCode = status; result.Message = message; return result; }
 }

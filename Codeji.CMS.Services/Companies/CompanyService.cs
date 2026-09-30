@@ -94,88 +94,187 @@ namespace Codeji.CMS.Services
 
         public async Task<Result> Register(CompanyRequestModel companyModel)
         {
-            Result result = new Result();
+            if (!companyModel.AcceptTerms)
+                return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Terms must be accepted." };
 
-            // Email is globally unique in the employee identity model; check before
-            // creating anything so a duplicate registration email can't slip past the
-            // application layer the way legacy data did.
-            bool emailExists = await _userRepo.Exist(e =>
-                e.Email.Equals(companyModel.Email, StringComparison.OrdinalIgnoreCase));
-            if (emailExists)
+            var email = companyModel.Email.Trim();
+            var normalizedEmail = email.ToLowerInvariant();
+
+            // Registration intentionally performs a global identity lookup: there is no
+            // tenant context yet. Normal repository filters deny such reads by design.
+            var existingUser = await _userRepo.FirstOrDefault(
+                user => user.EmailNormalized == normalizedEmail || user.Email == email,
+                WithDeletedObjects: false,
+                withDefaultFilter: false);
+
+            Company? company = null;
+            if (existingUser is not null)
             {
-                result.StatusCode = CustomStatusCode.EmployeeAlreadyExist;
-                result.Message = "An employee/user with this email address already exists.";
-                return result;
+                company = await _companyRepo.FirstOrDefault(
+                    item => item.CompanyId == existingUser.CompanyId && !item.IsDeleted,
+                    WithDeletedObjects: false,
+                    withDefaultFilter: false);
+
+                var resumable = company is { Status: false } &&
+                                string.Equals(company.RegistrationEmailNormalized, normalizedEmail, StringComparison.Ordinal) &&
+                                AuthenticationHandler.VerifyPassword(companyModel.Password, existingUser.Password);
+                if (!resumable)
+                    return new Result { Success = false, StatusCode = CustomStatusCode.EmployeeAlreadyExist, Message = "An employee/user with this email address already exists." };
+            }
+            else
+            {
+                company = await _companyRepo.FirstOrDefault(
+                    item => item.RegistrationEmailNormalized == normalizedEmail && !item.Status && !item.IsDeleted,
+                    WithDeletedObjects: false,
+                    withDefaultFilter: false);
             }
 
-            string companyId = Guid.NewGuid().ToString();
-            //Add Default Role
-            List<Roles> adminRole = await _roleService.AddDefaultRole(companyId);
-            var administratorRole = adminRole.FirstOrDefault(x => x.RoleType == 1 && !x.IsDeleted);
-            if (administratorRole is null)
-            {
-                return new Result { Success = false, StatusCode = StatusCodes.Status500InternalServerError, Message = "The company administrator role is not configured." };
-            }
+            var companyId = company?.CompanyId ?? Guid.NewGuid().ToString();
+            var userId = existingUser?.UserId ??
+                         (!string.IsNullOrWhiteSpace(company?.PrimaryContact) ? company.PrimaryContact : Guid.NewGuid().ToString());
 
-            EmpUser user = new EmpUser()
+            if (company is null)
             {
-                UserId = Guid.NewGuid().ToString(),
-                Email = companyModel.Email,
-                FirstName = companyModel.FirstName,
-                LastName = companyModel.LastName,
-                CompanyId = companyId,
-                Password = AuthenticationHandler.HashedPassword(companyModel.Password),
-                RoleId = administratorRole.RolesId,
-                Status = true,
-                IsEmailVerified = false
-            };
-            //Company Creation and Addition in DB
-            Company company = new Company()
-            {
-                CompanyId = companyId,
-                PrimaryContact = user.UserId,
-                CompanyName = companyModel.CompanyName,
-                CareerSlug = await BuildUniqueCareerSlug(companyModel.CompanyName, companyId),
-                PublicCompanyCode = await BuildUniquePublicCompanyCode(),
-                CareerPortalEnabled = true,
-                PublishJobsToMasterPortal = true,
-                DefaultLanguage = Languages.English,
-                // All supported UI languages are enabled by default so the language
-                // switcher and per-attribute translation columns are usable immediately;
-                // an admin can still narrow this later from Company Info.
-                ApplicationLanguage = [Languages.English, Languages.Mandarin, Languages.Spanish, Languages.Japanese, Languages.German, Languages.French],
-                Status = true,
-            };
-
-          
-
-            result = await _companyRepo.AddOne(company);
-            if (result.Success)
-            {
-                // The registering administrator is also the first employee in the
-                // company. Use the same company-owned atomic sequence as every
-                // subsequent employee instead of bypassing EmployeeService.
-                user.EmployeeId = await _employeeService.ReserveNextEmployeeId(companyId);
-                var userResult = await _userRepo.AddOne(user);
-                if (!userResult.Success)
+                company = new Company
                 {
-                    return new Result { Success = false, StatusCode = StatusCodes.Status500InternalServerError, Message = "The company administrator account could not be created." };
+                    CompanyId = companyId,
+                    PrimaryContact = userId,
+                    CompanyName = companyModel.CompanyName.Trim(),
+                    CareerSlug = await BuildUniqueCareerSlug(companyModel.CompanyName, companyId),
+                    PublicCompanyCode = await BuildUniquePublicCompanyCode(),
+                    CareerPortalEnabled = true,
+                    PublishJobsToMasterPortal = true,
+                    DefaultLanguage = Languages.English,
+                    ApplicationLanguage = [Languages.English, Languages.Mandarin, Languages.Spanish, Languages.Japanese, Languages.German, Languages.French],
+                    Status = false,
+                    TermsAcceptedAtUtc = DateTime.UtcNow,
+                    TermsVersion = "2026-09-23",
+                    RegistrationEmailNormalized = normalizedEmail,
+                    ProvisioningState = "Pending",
+                };
+                var companyAdd = await _companyRepo.AddOne(company);
+                if (!companyAdd.Success)
+                {
+                    var concurrentRegistration = await _companyRepo.FirstOrDefault(
+                        item => item.RegistrationEmailNormalized == normalizedEmail && !item.Status && !item.IsDeleted,
+                        WithDeletedObjects: false,
+                        withDefaultFilter: false);
+                    if (concurrentRegistration is not null)
+                        return new Result
+                        {
+                            Success = false,
+                            StatusCode = StatusCodes.Status409Conflict,
+                            Message = "Registration is already being provisioned. Retry with the same email."
+                        };
+                    return companyAdd;
                 }
-                await _attendanceStatusService.EnsureCompanyDefaults(companyId);
-                await EnsureRecruitmentDefaults(companyId, user.UserId);
-                await SendCompanyUserVerificationEmail(user, company);
-                await SeedDefaultDepartmentsAndJobTitles(company, user.UserId);
-                return result;
             }
-            return result;
+
+            try
+            {
+                var roles = await _roleService.AddDefaultRole(companyId);
+                var administratorRole = roles.FirstOrDefault(role => role.RoleType == 1 && !role.IsDeleted);
+                if (administratorRole is null)
+                    return await FailProvisioning(company, "The company administrator role is not configured.");
+
+                var user = existingUser;
+                if (user is null)
+                {
+                    user = new EmpUser
+                    {
+                        UserId = userId,
+                        Email = email,
+                        EmailNormalized = normalizedEmail,
+                        FirstName = companyModel.FirstName,
+                        LastName = companyModel.LastName,
+                        CompanyId = companyId,
+                        Password = AuthenticationHandler.HashedPassword(companyModel.Password),
+                        RoleId = administratorRole.RolesId,
+                        Status = true,
+                        IsEmailVerified = false,
+                        EmployeeId = await _employeeService.ReserveNextEmployeeId(companyId),
+                    };
+                    var userAdd = await _userRepo.AddOne(user);
+                    if (!userAdd.Success)
+                        return await FailProvisioning(company, "The company administrator account could not be created.");
+                }
+
+                await _attendanceStatusService.EnsureCompanyDefaults(companyId);
+                var recruitmentDefaults = await EnsureRecruitmentDefaults(companyId, user.UserId);
+                if (!recruitmentDefaults.Success)
+                    return await FailProvisioning(company, "The recruitment defaults could not be created.");
+
+                var validToken = await _userSecurityTokenRepo.FirstOrDefault(token =>
+                    token.UserId == user.UserId &&
+                    token.Type == EnumsHelper.SecurityTokenType.EmailVerification &&
+                    !token.IsUsed &&
+                    token.Expiry > DateTime.UtcNow);
+                if (validToken is null)
+                {
+                    var verification = await SendCompanyUserVerificationEmail(user, company);
+                    if (!verification.Success)
+                        return await FailProvisioning(company, "The administrator verification token could not be created.");
+                }
+
+                await SeedDefaultDepartmentsAndJobTitles(company, user.UserId);
+
+                company.PrimaryContact = user.UserId;
+                company.Status = true;
+                company.ProvisioningState = "Active";
+                company.ProvisioningLastError = null;
+                company.UpdatedDate = DateTime.UtcNow;
+                var activation = await _companyRepo.Update(
+                    Builders<Company>.Filter.Where(item => item.CompanyId == companyId && !item.IsDeleted && !item.Status),
+                    company);
+                if (!activation.Success)
+                    return await FailProvisioning(company, "The company was provisioned but could not be activated.");
+
+                return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = "OK" };
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "Company provisioning failed for {CompanyId}", companyId);
+                return await FailProvisioning(company, "Company provisioning could not be completed. Retry registration with the same email.");
+            }
         }
 
-        private async Task EnsureRecruitmentDefaults(string companyId, string createdBy)
+        private async Task<Result> FailProvisioning(Company company, string message)
         {
-            if (await _recruitmentConfigRepo.Exist(x => x.CompanyId == companyId && !x.IsDeleted)) return;
-            await _recruitmentConfigRepo.AddOne(new RecruitmentEnterpriseConfig { CompanyId = companyId, Locations = [], EnableSla = true, EnableAutomation = true, DefaultTimezone = "Asia/Kolkata", ConfigSource = "SystemDefault", DefaultVersion = 1, OverriddenFields = [], CreatedBy = createdBy, UpdatedBy = createdBy });
+            company.Status = false;
+            company.ProvisioningState = "Failed";
+            company.ProvisioningLastError = message;
+            company.UpdatedDate = DateTime.UtcNow;
+            await _companyRepo.Update(
+                Builders<Company>.Filter.Where(item => item.CompanyId == company.CompanyId && !item.IsDeleted && !item.Status),
+                company);
+            return new Result { Success = false, StatusCode = StatusCodes.Status500InternalServerError, Message = message };
         }
-        private async Task SendCompanyUserVerificationEmail(EmpUser user, Company company)
+
+        private async Task<Result> EnsureRecruitmentDefaults(string companyId, string createdBy)
+        {
+            var existing = await _recruitmentConfigRepo.FirstOrDefault(
+                config => config.CompanyId == companyId && !config.IsDeleted,
+                WithDeletedObjects: false,
+                withDefaultFilter: false);
+            if (existing is not null)
+                return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = "OK" };
+
+            return await _recruitmentConfigRepo.AddOne(new RecruitmentEnterpriseConfig
+            {
+                CompanyId = companyId,
+                Locations = [],
+                EnableSla = false,
+                EnableAutomation = false,
+                DefaultTimezone = "UTC",
+                DefaultCandidateRetentionDays = 730,
+                ConfigSource = "SystemDefault",
+                DefaultVersion = 1,
+                OverriddenFields = [],
+                CreatedBy = createdBy,
+                UpdatedBy = createdBy
+            });
+        }
+        private async Task<Result> SendCompanyUserVerificationEmail(EmpUser user, Company company)
         {
             string token = TokenHelper.GenerateToken();
             string tokenHash = TokenHelper.ComputeSha256Hash(token);
@@ -188,7 +287,8 @@ namespace Codeji.CMS.Services
                 Expiry = DateTime.UtcNow.AddHours(tokenExpiryHours),
                 Type = EnumsHelper.SecurityTokenType.EmailVerification
             };
-            await _userSecurityTokenRepo.AddOne(securityToken);
+            var tokenResult = await _userSecurityTokenRepo.AddOne(securityToken);
+            if (!tokenResult.Success) return tokenResult;
 
             string verifyLink = EmailVerificationUrlBuilder.Build(ConfigManager.AppSettings.APIUrl, token);
             string body = HtmlTemplate.Render(
@@ -203,7 +303,7 @@ namespace Codeji.CMS.Services
                     LinkExpiryTime = $"{tokenExpiryHours} hours"
                 });
 
-            await _middlewareService.EmailSendAndSave(new EmpEmailLogs()
+            await _middlewareService.EmailSendAndSave(new EmpEmailLogs
             {
                 UserTo = user.UserId,
                 Subject = $"Verify your email for {company.CompanyName}",
@@ -212,8 +312,8 @@ namespace Codeji.CMS.Services
                 Email = user.Email,
                 UserFrom = user.UserId,
             });
+            return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = "OK" };
         }
-
         // Seeds the generic set of departments and job titles for a freshly created company.
         // Idempotent (skips when records already exist for the company) and never propagates
         // failures — registration must not fail because a default seed could not be inserted.
@@ -225,7 +325,7 @@ namespace Codeji.CMS.Services
                     ? company.ApplicationLanguage
                     : new List<string> { company.DefaultLanguage ?? Languages.English };
 
-                bool hasDepartments = await _departmentRepo.Exist(d => d.CompanyId == company.CompanyId);
+                bool hasDepartments = await _departmentRepo.FirstOrDefault(d => d.CompanyId == company.CompanyId, WithDeletedObjects: false, withDefaultFilter: false) is not null;
                 if (!hasDepartments)
                 {
                     var departments = DefaultCompanySeeds.BuildDepartments(company.CompanyId, languages, createdBy);
@@ -235,7 +335,7 @@ namespace Codeji.CMS.Services
                     }
                 }
 
-                var companyDepartments = (await _departmentRepo.GetAll(d => d.CompanyId == company.CompanyId && !d.IsDeleted)).ToList();
+                var companyDepartments = (await _departmentRepo.GetAll(d => d.CompanyId == company.CompanyId && !d.IsDeleted, WithDeletedObjects: false, withDefaultFilter: false)).ToList();
                 var departmentIds = companyDepartments
                     .Select(d => new { Name = d.Titles.FirstOrDefault(t => t.Language == Languages.English)?.Label ?? d.Titles.FirstOrDefault()?.Label, d.DepartmentId })
                     .Where(x => !string.IsNullOrWhiteSpace(x.Name))
@@ -243,7 +343,7 @@ namespace Codeji.CMS.Services
                     .Where(x => x.Count() == 1)
                     .ToDictionary(x => x.Key, x => x.Single().DepartmentId, StringComparer.OrdinalIgnoreCase);
 
-                bool hasJobTitles = await _jobTitleRepo.Exist(j => j.CompanyId == company.CompanyId);
+                bool hasJobTitles = await _jobTitleRepo.FirstOrDefault(j => j.CompanyId == company.CompanyId, WithDeletedObjects: false, withDefaultFilter: false) is not null;
                 if (!hasJobTitles)
                 {
                     var jobTitles = DefaultCompanySeeds.BuildJobTitles(company.CompanyId, languages, departmentIds, createdBy);
@@ -337,9 +437,11 @@ namespace Codeji.CMS.Services
             if (string.IsNullOrEmpty(baseSlug)) baseSlug = "company";
 
             string candidate = baseSlug;
-            for (int suffix = 2; await _companyRepo.Exist(x =>
-                x.CareerSlug == candidate &&
-                (string.IsNullOrEmpty(currentCompanyId) || x.CompanyId != currentCompanyId)); suffix++)
+            for (int suffix = 2; await _companyRepo.FirstOrDefault(
+                    x => x.CareerSlug == candidate &&
+                         (string.IsNullOrEmpty(currentCompanyId) || x.CompanyId != currentCompanyId),
+                    WithDeletedObjects: false,
+                    withDefaultFilter: false) is not null; suffix++)
                 candidate = $"{baseSlug}-{suffix}";
 
             return candidate;
@@ -355,7 +457,7 @@ namespace Codeji.CMS.Services
             {
                 code = RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
             }
-            while (await _companyRepo.Exist(x => x.PublicCompanyCode == code));
+            while (await _companyRepo.FirstOrDefault(x => x.PublicCompanyCode == code, WithDeletedObjects: false, withDefaultFilter: false) is not null);
 
             return code;
         }
@@ -1030,10 +1132,4 @@ namespace Codeji.CMS.Services
         }
     }
 }
-
-
-
-
-
-
 

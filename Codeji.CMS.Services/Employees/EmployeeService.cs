@@ -24,12 +24,14 @@ using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Services.PayRoll;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Employees
@@ -70,6 +72,8 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoDbRepository<EmployeeExitClearanceTemplate>? _employeeExitClearanceTemplateRepository;
         readonly IMongoDbRepository<EmployeeFinalSettlement>? _employeeFinalSettlementRepository;
         readonly IMongoDbRepository<EmpPayRoll>? _employeePayrollRepository;
+        readonly IMongoDbRepository<PayrollRun>? _payrollRunsRepository;
+        readonly IMongoDbRepository<PayrollRunEmployee>? _payrollRunEmployeesRepository;
         readonly IMongoDbRepository<LeaveRequest>? _leaveRequestRepository;
         readonly IMongoDbRepository<WorkFromHomeRequest>? _workFromHomeRequestRepository;
         readonly IMongoDbRepository<EmployeeExitAttendanceCutoff>? _employeeExitAttendanceCutoffRepository;
@@ -113,6 +117,8 @@ namespace Codeji.CMS.Services.Employees
             , IMongoDbRepository<EmployeeExitClearanceTemplate>? employeeExitClearanceTemplateRepository = null
             , IMongoDbRepository<EmployeeFinalSettlement>? employeeFinalSettlementRepository = null
             , IMongoDbRepository<EmpPayRoll>? employeePayrollRepository = null
+            , IMongoDbRepository<PayrollRun>? payrollRunsRepository = null
+            , IMongoDbRepository<PayrollRunEmployee>? payrollRunEmployeesRepository = null
             , IMongoDbRepository<LeaveRequest>? leaveRequestRepository = null
             , IMongoDbRepository<WorkFromHomeRequest>? workFromHomeRequestRepository = null
             , IMongoDbRepository<EmployeeExitAttendanceCutoff>? employeeExitAttendanceCutoffRepository = null
@@ -156,6 +162,8 @@ namespace Codeji.CMS.Services.Employees
             _employeeExitClearanceTemplateRepository = employeeExitClearanceTemplateRepository;
             _employeeFinalSettlementRepository = employeeFinalSettlementRepository;
             _employeePayrollRepository = employeePayrollRepository;
+            _payrollRunsRepository = payrollRunsRepository;
+            _payrollRunEmployeesRepository = payrollRunEmployeesRepository;
             _leaveRequestRepository = leaveRequestRepository;
             _workFromHomeRequestRepository = workFromHomeRequestRepository;
             _employeeExitAttendanceCutoffRepository = employeeExitAttendanceCutoffRepository;
@@ -280,6 +288,7 @@ namespace Codeji.CMS.Services.Employees
                 FirstName = model.FirstName,
                 LastName = model.LastName,
                 Email = model.Email,
+                EmailNormalized = model.Email.ToLowerInvariant(),
                 EmployeeId = model.EmployeeId,
                 CompanyId = companyId,
                 RoleId = model.RoleId ?? string.Empty,
@@ -2271,30 +2280,72 @@ if (specialLeaveError is not null)
             var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && (x.Status == "NoticePeriod" || EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.Status)));
             if (exit is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             if (DateTime.UtcNow.Date < exit.LastWorkingDate.Date) return new Result { Success = false, Message = "LAST_WORKING_DATE_NOT_REACHED" };
-            var settlement = await _employeeFinalSettlementRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && !x.IsDeleted)
-                ?? new EmployeeFinalSettlement { CompanyId = companyId, CreatedBy = actorUserId, EmployeeExitId = exit.EmployeeExitId, EmployeeUserId = exit.EmployeeUserId };
-            if (string.IsNullOrWhiteSpace(settlement.EmployeeFinalSettlementId) || settlement.Status != "Calculated") return new Result { Success = false, Message = "FINAL_SETTLEMENT_NOT_CALCULATED" };
-            settlement.Status = "Approved"; settlement.ApprovedByUserId = actorUserId; settlement.ApprovedAtUtc = DateTime.UtcNow; settlement.UpdatedBy = actorUserId; settlement.UpdatedDate = DateTime.UtcNow;
-            var saved = string.IsNullOrWhiteSpace(settlement.EmployeeFinalSettlementId) ? await _employeeFinalSettlementRepository.AddOne(settlement) : await _employeeFinalSettlementRepository.Update(Builders<EmployeeFinalSettlement>.Filter.Eq(x => x.EmployeeFinalSettlementId, settlement.EmployeeFinalSettlementId), settlement);
-            if (!saved.Success) return saved;
-            exit.Version++; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "FinalSettlementApproved", ActorUserId = actorUserId });
-            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version), exit);
+            var settlement = await _employeeFinalSettlementRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && !x.IsDeleted);
+            if (settlement is null || string.IsNullOrWhiteSpace(settlement.EmployeeFinalSettlementId) || settlement.Status != "Calculated")
+                return new Result { Success = false, Message = "FINAL_SETTLEMENT_NOT_CALCULATED" };
+
+            var expectedSettlementVersion = settlement.Version;
+            settlement.Status = "Approved";
+            settlement.ApprovedByUserId = actorUserId;
+            settlement.ApprovedAtUtc = DateTime.UtcNow;
+            settlement.UpdatedBy = actorUserId;
+            settlement.UpdatedDate = DateTime.UtcNow;
+            settlement.Version++;
+            exit.Version++;
+            exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "FinalSettlementApproved", ActorUserId = actorUserId });
+            return await PersistFinalSettlementAndExitAsync(settlement, exit, companyId, actorUserId, request.Version, expectedSettlementVersion, isNewSettlement: false);
         }
 
         public async Task<Result> UpdateEmployeeFinalSettlementPayment(UpdateEmployeeFinalSettlementPaymentRequest request)
         {
-            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
-            if (_employeeFinalSettlementRepository is null || request is null || request.Status is not ("PaymentInitiated" or "Paid" or "PaymentFailed" or "Disputed") || request.PaidAmount < 0 || !await IsHrExitActor(companyId, actorUserId)) return new Result { Success = false, Message = "FINAL_SETTLEMENT_PAYMENT_FORBIDDEN" };
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (_employeeFinalSettlementRepository is null || request is null || request.Status is not ("PaymentInitiated" or "Paid" or "PaymentFailed" or "Disputed") || request.PaidAmount < 0 || !await IsHrExitActor(companyId, actorUserId))
+                return new Result { Success = false, Message = "FINAL_SETTLEMENT_PAYMENT_FORBIDDEN" };
+
+            var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted);
             var settlement = await _employeeFinalSettlementRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted);
-            if (settlement is null || settlement.Status is not ("Approved" or "PaymentInitiated" or "PaymentFailed" or "Disputed")) return new Result { Success = false, Message = "FINAL_SETTLEMENT_NOT_APPROVED" };
-            settlement.Status = request.Status; settlement.PaidAmount = request.PaidAmount; settlement.PaymentReference = request.PaymentReference?.Trim(); settlement.PaymentMethod = request.PaymentMethod?.Trim(); settlement.UpdatedBy = actorUserId; settlement.UpdatedDate = DateTime.UtcNow; settlement.Version++;
+            if (exit is null || settlement is null || settlement.Status is not ("Approved" or "PaymentInitiated" or "PaymentFailed" or "Disputed"))
+                return new Result { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "FINAL_SETTLEMENT_NOT_APPROVED" };
+            if (request.Status == "Paid" && request.PaidAmount != settlement.NetPayable)
+                return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "FINAL_SETTLEMENT_PAID_AMOUNT_MISMATCH" };
+
+            var expectedSettlementVersion = settlement.Version;
+            var expectedExitVersion = exit.Version;
+            settlement.Status = request.Status;
+            settlement.PaidAmount = request.PaidAmount;
+            settlement.PaymentReference = request.PaymentReference?.Trim();
+            settlement.PaymentMethod = request.PaymentMethod?.Trim();
+            settlement.UpdatedBy = actorUserId;
+            settlement.UpdatedDate = DateTime.UtcNow;
+            settlement.Version++;
             if (request.Status == "PaymentInitiated") settlement.PaymentInitiatedAtUtc = DateTime.UtcNow;
             if (request.Status == "Paid") settlement.PaidAtUtc = DateTime.UtcNow;
             if (request.Status == "PaymentFailed") settlement.PaymentFailureReason = request.Reason?.Trim();
             if (request.Status == "Disputed") settlement.DisputeReason = request.Reason?.Trim();
-            return await _employeeFinalSettlementRepository.Update(Builders<EmployeeFinalSettlement>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeFinalSettlementId == settlement.EmployeeFinalSettlementId), settlement);
-        }
 
+            EmpPayRoll? sourcePayroll = null;
+            if (request.Status == "Paid" && settlement.SalaryPayable + settlement.BonusesAndIncentives > 0 && !string.IsNullOrWhiteSpace(settlement.SourcePayrollRunId))
+            {
+                if (!await IsPayrollRunSourceAvailableForPayment(companyId, settlement))
+                    return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "FINAL_SETTLEMENT_SOURCE_PAYROLL_CHANGED_RECALCULATE" };
+            }
+            else if (request.Status == "Paid" && settlement.SalaryPayable + settlement.BonusesAndIncentives > 0)
+            {
+                if (_employeePayrollRepository is null || string.IsNullOrWhiteSpace(settlement.SourcePayrollId))
+                    return new Result { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, Message = "FINAL_SETTLEMENT_SOURCE_PAYROLL_NOT_AVAILABLE" };
+                sourcePayroll = await _employeePayrollRepository.FirstOrDefault(x => x.CompanyId == companyId && x.Id == settlement.SourcePayrollId);
+                if (sourcePayroll is null || IsPayrollAlreadyProcessedForSettlement(sourcePayroll))
+                    return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "FINAL_SETTLEMENT_SOURCE_PAYROLL_CHANGED_RECALCULATE" };
+                MarkPayrollPaidViaFinalSettlement(sourcePayroll, actorUserId, request.EmployeeExitId, settlement);
+            }
+
+            exit.Version++;
+            exit.UpdatedBy = actorUserId;
+            exit.UpdatedDate = DateTime.UtcNow;
+            exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = $"FinalSettlement{request.Status}", ActorUserId = actorUserId, Notes = request.Status == "Paid" ? $"amount={request.PaidAmount}; payroll={settlement.SourcePayrollId ?? settlement.SourcePayrollRunId ?? "none"}" : request.Reason?.Trim() });
+            return await PersistFinalSettlementAndExitAsync(settlement, exit, companyId, actorUserId, expectedExitVersion, expectedSettlementVersion, isNewSettlement: false, sourcePayroll: sourcePayroll);
+        }
         public async Task<Result> CalculateEmployeeFinalSettlement(CalculateEmployeeFinalSettlementRequest request)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
@@ -2302,58 +2353,221 @@ if (specialLeaveError is not null)
             var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && (x.Status == "NoticePeriod" || EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.Status)));
             if (exit is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             if (DateTime.UtcNow.Date < exit.LastWorkingDate.Date) return new Result { Success = false, Message = "LAST_WORKING_DATE_NOT_REACHED" };
-            if (_employeePayrollRepository is null) return new Result { Success = false, Message = "FINAL_PAYROLL_NOT_CONFIGURED" };
+            if (_employeeFinalSettlementRepository is null || (_employeePayrollRepository is null && (_payrollRunsRepository is null || _payrollRunEmployeesRepository is null))) return new Result { Success = false, Message = "FINAL_PAYROLL_NOT_CONFIGURED" };
             var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == exit.EmployeeUserId && !x.IsDeleted);
             if (employee is null) return new Result { Success = false, Message = "EMPLOYEE_NOT_FOUND" };
-            // HR must be able to calculate the exit settlement before the month-end payroll has
-            // been published. The payroll is still the authoritative source when available, but a
-            // pending/draft payroll must not block the exit case. Payroll documents have historically
-            // been linked by either UserId or EmployeeId, so both tenant-scoped identifiers are used
-            // here; otherwise a valid generated payroll can be mistaken for a zero-value settlement.
+            // HR may calculate before month-end publication. Payroll remains the source snapshot;
+            // tenant and stable employee identifiers avoid missing historical rows with stale user links.
             var lastWorkingMonthStart = new DateTime(exit.LastWorkingDate.Year, exit.LastWorkingDate.Month, 1);
-            var payrolls = await _employeePayrollRepository.GetAll(x => x.CompanyId == companyId
-                && (x.UserId == exit.EmployeeUserId || x.EmployeeId == employee.EmployeeId)
-                && x.PayMonth == lastWorkingMonthStart);
-            var payroll = payrolls
-                .OrderByDescending(x => x.IsProcessed)
-                .ThenByDescending(x => x.ProcessedAt ?? x.PaidDate)
-                .ThenByDescending(x => x.CreatedAt)
-                .FirstOrDefault();
-            if (payroll is null)
+            EmpPayRoll? payroll = null;
+            if (_employeePayrollRepository is not null)
+            {
+                var payrolls = await _employeePayrollRepository.GetAll(x => x.CompanyId == companyId
+                    && (x.UserId == exit.EmployeeUserId || x.EmployeeId == employee.EmployeeId)
+                    && x.PayMonth == lastWorkingMonthStart);
+                payroll = payrolls
+                    .OrderByDescending(x => x.IsProcessed)
+                    .ThenByDescending(x => x.ProcessedAt ?? x.PaidDate)
+                    .ThenByDescending(x => x.CreatedAt)
+                    .FirstOrDefault();
+            }
+
+            PayrollFinalSettlementSource? payrollRunSource = null;
+            if (payroll is null && _payrollRunsRepository is not null && _payrollRunEmployeesRepository is not null)
+                payrollRunSource = await new PayrollFinalSettlementSourceResolver(_payrollRunsRepository, _payrollRunEmployeesRepository)
+                    .Resolve(companyId, employee.EmployeeId, lastWorkingMonthStart);
+            if (payroll is null && payrollRunSource is null)
                 return new Result { Success = false, Message = "FINAL_MONTH_PAYROLL_NOT_AVAILABLE" };
-            var settlement = await _employeeFinalSettlementRepository!.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && !x.IsDeleted)
+            var settlement = await _employeeFinalSettlementRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && !x.IsDeleted)
                 ?? new EmployeeFinalSettlement { CompanyId = companyId, CreatedBy = actorUserId, EmployeeExitId = exit.EmployeeExitId, EmployeeUserId = exit.EmployeeUserId };
-            // Payment is final. Recalculation after payment would silently replace an
-            // audited paid amount with a new value from payroll.
-            if (!string.IsNullOrWhiteSpace(settlement.EmployeeFinalSettlementId) && settlement.Status == "Paid")
-                return new Result { Success = false, Message = "FINAL_SETTLEMENT_ALREADY_PAID" };
+            var isNewSettlement = string.IsNullOrWhiteSpace(settlement.EmployeeFinalSettlementId);
+            if (isNewSettlement) settlement.EmployeeFinalSettlementId = $"final-settlement-{companyId}-{exit.EmployeeExitId}";
+            if (!isNewSettlement && settlement.Status is not ("Pending" or "Calculated"))
+                return new Result { Success = false, Message = "FINAL_SETTLEMENT_CANNOT_BE_RECALCULATED_AFTER_APPROVAL_OR_PAYMENT" };
+            var expectedSettlementVersion = settlement.Version;
             var approvedNoticeRecovery = exit.NoticeAdjustments.Where(x => x.Status == "Approved" && (x.Type is "Recovery" or "PartialWaiver")).Sum(x => x.RecoveryAmount);
-            var salaryPayable = payroll.BasicPay + payroll.Allowance.HRA + payroll.Allowance.LTA + payroll.Allowance.OtherAllowance;
-            var deductions = payroll.Deduction.LossOfPay + payroll.Deduction.IncomeTax + payroll.Deduction.HealthInsurance + payroll.Deduction.EPF + payroll.Deduction.ESIC + payroll.DeductionLines.Sum(x => x.Amount);
-            settlement.SalaryPayable = salaryPayable; settlement.Reimbursements = 0; settlement.LeaveEncashment = 0; settlement.BonusesAndIncentives = payroll.Bonus; settlement.Deductions = deductions; settlement.NoticeRecovery = approvedNoticeRecovery; settlement.OutstandingDues = 0;
-            settlement.SourcePayrollId = payroll.Id; settlement.SourcePayrollMonth = payroll.PayMonth;
+            // The regular last-month payroll is authoritative once published: its earnings,
+            // bonus and deductions must not be added a second time to the F&F amount.
+            var payrollAlreadyProcessed = payroll is not null
+                ? IsPayrollAlreadyProcessedForSettlement(payroll)
+                : payrollRunSource!.AlreadyProcessed;
+            var salaryPayable = payrollAlreadyProcessed
+                ? 0m
+                : payroll is not null
+                    ? payroll.BasicPay + payroll.Allowance.HRA + payroll.Allowance.LTA + payroll.Allowance.OtherAllowance
+                    : payrollRunSource!.GrossAmount;
+            var payrollBonus = payrollAlreadyProcessed || payroll is null ? 0m : payroll.Bonus;
+            var deductions = payrollAlreadyProcessed
+                ? 0m
+                : payroll is not null
+                    ? payroll.Deduction.LossOfPay + payroll.Deduction.IncomeTax + payroll.Deduction.HealthInsurance + payroll.Deduction.EPF + payroll.Deduction.ESIC + payroll.DeductionLines.Sum(x => x.Amount)
+                    : payrollRunSource!.DeductionAmount;
+            settlement.SalaryPayable = salaryPayable; settlement.Reimbursements = 0; settlement.LeaveEncashment = 0; settlement.BonusesAndIncentives = payrollBonus; settlement.Deductions = deductions; settlement.NoticeRecovery = approvedNoticeRecovery; settlement.OutstandingDues = 0;
+            settlement.SourcePayrollId = payroll?.Id;
+            settlement.SourcePayrollMonth = payroll?.PayMonth ?? payrollRunSource?.PayrollMonth;
+            settlement.SourcePayrollRunId = payrollRunSource?.PayrollRunId;
+            settlement.SourcePayrollRunEmployeeId = payrollRunSource?.PayrollRunEmployeeId;
             settlement.NetPayable = settlement.SalaryPayable + settlement.Reimbursements + settlement.LeaveEncashment + settlement.BonusesAndIncentives - settlement.Deductions - settlement.NoticeRecovery - settlement.OutstandingDues; settlement.Status = "Calculated"; settlement.CalculatedAtUtc = DateTime.UtcNow; settlement.UpdatedBy = actorUserId; settlement.UpdatedDate = DateTime.UtcNow;
-            var saved = string.IsNullOrWhiteSpace(settlement.EmployeeFinalSettlementId) ? await _employeeFinalSettlementRepository.AddOne(settlement) : await _employeeFinalSettlementRepository.Update(Builders<EmployeeFinalSettlement>.Filter.Eq(x => x.EmployeeFinalSettlementId, settlement.EmployeeFinalSettlementId), settlement);
-            if (!saved.Success) return saved;
-            exit.Version++; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "FinalSettlementCalculated", ActorUserId = actorUserId, Notes = $"net={settlement.NetPayable}; noticeRecovery={approvedNoticeRecovery}; payroll={payroll?.Id ?? "pending-monthly-payroll"}" });
-            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && !x.IsDeleted), exit);
+            settlement.Version++;
+            exit.Version++;
+            var sourceNote = payroll is not null ? $"payroll={payroll.Id}" : $"payrollRun={payrollRunSource!.PayrollRunId}; line={payrollRunSource.PayrollRunEmployeeId}";
+            exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "FinalSettlementCalculated", ActorUserId = actorUserId, Notes = $"net={settlement.NetPayable}; noticeRecovery={approvedNoticeRecovery}; {sourceNote}" });
+            return await PersistFinalSettlementAndExitAsync(settlement, exit, companyId, actorUserId, request.Version, expectedSettlementVersion, isNewSettlement);
         }
 
         public async Task<Result> MarkEmployeeFinalSettlementPaid(MarkEmployeeFinalSettlementPaidRequest request)
         {
-            var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
-            if (!await IsHrExitActor(companyId, actorUserId) || request is null) return new Result { Success = false, Message = "FINAL_SETTLEMENT_FORBIDDEN" };
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (!await IsHrExitActor(companyId, actorUserId) || request is null)
+                return new Result { Success = false, Message = "FINAL_SETTLEMENT_FORBIDDEN" };
             var exit = await _employeeExitRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == request.EmployeeExitId && !x.IsDeleted && (x.Status == "NoticePeriod" || EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.Status)));
             if (exit is null || exit.Version != request.Version) return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             var settlement = await _employeeFinalSettlementRepository!.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && !x.IsDeleted);
             if (settlement is null || settlement.Status != "Approved") return new Result { Success = false, Message = "FINAL_SETTLEMENT_NOT_APPROVED" };
-            settlement.Status = "Paid"; settlement.PaidAtUtc = DateTime.UtcNow; settlement.UpdatedBy = actorUserId; settlement.UpdatedDate = DateTime.UtcNow;
-            var saved = await _employeeFinalSettlementRepository.Update(Builders<EmployeeFinalSettlement>.Filter.Eq(x => x.EmployeeFinalSettlementId, settlement.EmployeeFinalSettlementId), settlement);
-            if (!saved.Success) return saved;
-            exit.Version++; exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "FinalSettlementPaid", ActorUserId = actorUserId });
-            return await _employeeExitRepository.Update(Builders<EmployeeExit>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && x.Version == request.Version && !x.IsDeleted), exit);
+            if (settlement.NetPayable < 0) return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "FINAL_SETTLEMENT_HAS_RECOVERY_BALANCE" };
+            var expectedSettlementVersion = settlement.Version;
+            settlement.Status = "Paid";
+            settlement.PaidAmount = Math.Max(0m, settlement.NetPayable);
+            settlement.PaidAtUtc = DateTime.UtcNow;
+            settlement.UpdatedBy = actorUserId;
+            settlement.UpdatedDate = DateTime.UtcNow;
+            settlement.Version++;
+
+            EmpPayRoll? sourcePayroll = null;
+            if (settlement.SalaryPayable + settlement.BonusesAndIncentives > 0 && !string.IsNullOrWhiteSpace(settlement.SourcePayrollRunId))
+            {
+                if (!await IsPayrollRunSourceAvailableForPayment(companyId, settlement))
+                    return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "FINAL_SETTLEMENT_SOURCE_PAYROLL_CHANGED_RECALCULATE" };
+            }
+            else if (settlement.SalaryPayable + settlement.BonusesAndIncentives > 0)
+            {
+                if (_employeePayrollRepository is null || string.IsNullOrWhiteSpace(settlement.SourcePayrollId))
+                    return new Result { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, Message = "FINAL_SETTLEMENT_SOURCE_PAYROLL_NOT_AVAILABLE" };
+                sourcePayroll = await _employeePayrollRepository.FirstOrDefault(x => x.CompanyId == companyId && x.Id == settlement.SourcePayrollId);
+                if (sourcePayroll is null || IsPayrollAlreadyProcessedForSettlement(sourcePayroll))
+                    return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "FINAL_SETTLEMENT_SOURCE_PAYROLL_CHANGED_RECALCULATE" };
+                MarkPayrollPaidViaFinalSettlement(sourcePayroll, actorUserId, request.EmployeeExitId, settlement);
+            }
+
+            var expectedExitVersion = exit.Version;
+            exit.Version++;
+            exit.AuditHistory.Add(new EmployeeExitAuditEvent { Action = "FinalSettlementPaid", ActorUserId = actorUserId, Notes = $"amount={settlement.PaidAmount}; payroll={settlement.SourcePayrollId ?? settlement.SourcePayrollRunId ?? "none"}" });
+            return await PersistFinalSettlementAndExitAsync(settlement, exit, companyId, actorUserId, expectedExitVersion, expectedSettlementVersion, isNewSettlement: false, sourcePayroll: sourcePayroll);
+        }
+        private async Task<bool> IsPayrollRunSourceAvailableForPayment(string companyId, EmployeeFinalSettlement settlement)
+        {
+            if (_payrollRunsRepository is null || _payrollRunEmployeesRepository is null || string.IsNullOrWhiteSpace(settlement.SourcePayrollRunId) || string.IsNullOrWhiteSpace(settlement.SourcePayrollRunEmployeeId)) return false;
+            var run = await _payrollRunsRepository.FirstOrDefault(x => x.CompanyId == companyId && x.Id == settlement.SourcePayrollRunId && x.RunType == "FINAL_SETTLEMENT");
+            if (run is null || run.Status is "PROCESSED" or "PAID" or "CLOSED") return false;
+            var line = await _payrollRunEmployeesRepository.FirstOrDefault(x => x.CompanyId == companyId && x.PayrollRunId == run.Id && x.Id == settlement.SourcePayrollRunEmployeeId);
+            return line is not null && line.Status is not "PROCESSED" and not "PAID" and not "CLOSED";
+        }
+        private static bool IsPayrollAlreadyProcessedForSettlement(EmpPayRoll payroll) =>
+            payroll.IsProcessed ||
+            string.Equals(payroll.WorkflowStatus, "PROCESSED", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(payroll.WorkflowStatus, "PAID", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(payroll.WorkflowStatus, "CLOSED", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(payroll.PaymentStatus, "PAID", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(payroll.PaymentStatus, "CLOSED", StringComparison.OrdinalIgnoreCase);
+        private static void MarkPayrollPaidViaFinalSettlement(EmpPayRoll payroll, string actorUserId, string employeeExitId, EmployeeFinalSettlement settlement)
+        {
+            var now = DateTime.UtcNow;
+            payroll.IsProcessed = true;
+            payroll.WorkflowStatus = "PAID";
+            payroll.PaymentStatus = "PAID";
+            payroll.ProcessedAt = now;
+            payroll.ProcessedBy = actorUserId;
+            payroll.PaymentDate = now;
+            payroll.PaymentRecordedBy = actorUserId;
+            payroll.PaymentReference = settlement.PaymentReference;
+            payroll.PaymentMethod = settlement.PaymentMethod ?? "FINAL_SETTLEMENT";
+            payroll.AuditHistory.Add(new PayrollAuditEvent
+            {
+                Action = "PaidViaFinalSettlement",
+                ActorId = actorUserId,
+                OccurredAtUtc = now,
+                Notes = $"EmployeeExitId={employeeExitId}; settlement={settlement.EmployeeFinalSettlementId}"
+            });
+        }
+        private async Task<Result> PersistFinalSettlementAndExitAsync(
+            EmployeeFinalSettlement settlement,
+            EmployeeExit exit,
+            string companyId,
+            string actorUserId,
+            int expectedExitVersion,
+            int expectedSettlementVersion,
+            bool isNewSettlement,
+            EmpPayRoll? sourcePayroll = null)
+        {
+            if (_mongoClient is null)
+                return new Result { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, Message = "FINAL_SETTLEMENT_TRANSACTION_NOT_CONFIGURED" };
+
+            var now = DateTime.UtcNow;
+            settlement.CompanyId = companyId;
+            settlement.UpdatedBy = actorUserId;
+            settlement.UpdatedDate = now;
+            exit.CompanyId = companyId;
+            exit.UpdatedBy = actorUserId;
+            exit.UpdatedDate = now;
+            var settlementFilter = Builders<EmployeeFinalSettlement>.Filter.Where(x =>
+                x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId &&
+                x.EmployeeFinalSettlementId == settlement.EmployeeFinalSettlementId &&
+                x.Version == expectedSettlementVersion && !x.IsDeleted);
+            var exitFilter = Builders<EmployeeExit>.Filter.Where(x =>
+                x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId &&
+                x.Version == expectedExitVersion && !x.IsDeleted);
+
+            try
+            {
+                using var session = await _mongoClient.StartSessionAsync(cancellationToken: CancellationToken.None);
+                await session.WithTransactionAsync(async (transactionSession, cancellationToken) =>
+                {
+                    if (isNewSettlement)
+                    {
+                        settlement.CreatedBy = actorUserId;
+                        settlement.CreatedDate ??= now;
+                        await _employeeFinalSettlementRepository!.GetCollection().InsertOneAsync(transactionSession, settlement, cancellationToken: cancellationToken);
+                    }
+                    else
+                    {
+                        var settlementWrite = await _employeeFinalSettlementRepository!.GetCollection().ReplaceOneAsync(
+                            transactionSession, settlementFilter, settlement, cancellationToken: cancellationToken);
+                        if (settlementWrite.MatchedCount != 1) throw new FinalSettlementConcurrencyException();
+                    }
+
+                    if (sourcePayroll is not null)
+                    {
+                        var processedStatusFilter = Builders<EmpPayRoll>.Filter.Or(Builders<EmpPayRoll>.Filter.Regex(x => x.WorkflowStatus, new BsonRegularExpression("^(PROCESSED|PAID|CLOSED)$", "i")), Builders<EmpPayRoll>.Filter.Regex(x => x.PaymentStatus, new BsonRegularExpression("^(PAID|CLOSED)$", "i")));
+                        var payrollFilter = Builders<EmpPayRoll>.Filter.Eq(x => x.CompanyId, companyId) & Builders<EmpPayRoll>.Filter.Eq(x => x.Id, sourcePayroll.Id) & Builders<EmpPayRoll>.Filter.Eq(x => x.IsProcessed, false) & Builders<EmpPayRoll>.Filter.Not(processedStatusFilter);
+                        var payrollWrite = await _employeePayrollRepository!.GetCollection().ReplaceOneAsync(transactionSession, payrollFilter, sourcePayroll, cancellationToken: cancellationToken);
+                        if (payrollWrite.MatchedCount != 1) throw new FinalSettlementConcurrencyException();
+                    }
+
+                    var exitWrite = await _employeeExitRepository.GetCollection().ReplaceOneAsync(
+                        transactionSession, exitFilter, exit, cancellationToken: cancellationToken);
+                    if (exitWrite.MatchedCount != 1) throw new FinalSettlementConcurrencyException();
+                    return true;
+                });
+                return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = "OK" };
+            }
+            catch (FinalSettlementConcurrencyException)
+            {
+                return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "FINAL_SETTLEMENT_CHANGED_RELOAD_AND_RETRY" };
+            }
+            catch (MongoCommandException ex) when (ex.Code == 20)
+            {
+                _logger.LogError(ex, "MongoDB transactions are unavailable for final settlement {EmployeeExitId}", exit.EmployeeExitId);
+                return new Result { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, Message = "FINAL_SETTLEMENT_REQUIRES_MONGODB_TRANSACTIONS" };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Final settlement transaction failed for exit {EmployeeExitId}", exit.EmployeeExitId);
+                return new Result { Success = false, StatusCode = StatusCodes.Status500InternalServerError, Message = "FINAL_SETTLEMENT_TRANSACTION_FAILED" };
+            }
         }
 
+        private sealed class FinalSettlementConcurrencyException : Exception { }
         public async Task<Result> GenerateEmployeeExitDocument(GenerateEmployeeExitDocumentRequest request)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor); var actorUserId = CurrentContext.UserId(_httpContextAccessor);
@@ -3496,7 +3710,7 @@ if (specialLeaveError is not null)
             return settlement is null ? null : new EmployeeFinalSettlementDto
             {
                 Status = settlement.Status, SalaryPayable = settlement.SalaryPayable, Deductions = settlement.Deductions,
-                NoticeRecovery = settlement.NoticeRecovery, NetPayable = settlement.NetPayable, SourcePayrollId = settlement.SourcePayrollId,
+                NoticeRecovery = settlement.NoticeRecovery, NetPayable = settlement.NetPayable, SourcePayrollId = settlement.SourcePayrollId, SourcePayrollRunId = settlement.SourcePayrollRunId, SourcePayrollRunEmployeeId = settlement.SourcePayrollRunEmployeeId,
                 SourcePayrollMonth = settlement.SourcePayrollMonth, CalculatedAtUtc = settlement.CalculatedAtUtc,
                 ApprovedAtUtc = settlement.ApprovedAtUtc, PaidAtUtc = settlement.PaidAtUtc
             };

@@ -4,6 +4,8 @@ using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Employees.Interface;
+using Codeji.CMS.Services.PayRoll;
+using Codeji.CMS.DTO.PayRoll;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
@@ -22,7 +24,7 @@ public sealed class RecruitmentHandoffService(
     IMongoDbRepository<RecruitmentOnboardingCase>? onboardingCases = null,
     IMongoDbRepository<RecruitmentOffer>? offers = null,
     IMongoDbRepository<RecruitmentJobApplication>? applications = null,
-    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null) : IRecruitmentHandoffService
+    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null, IEmployeeSalaryStructureService? salaries = null) : IRecruitmentHandoffService
 {
     public async Task<Result<string>> HandoffToPreboarding(CandidateHandoffRequest request, string actorUserId)
     {
@@ -70,9 +72,11 @@ public sealed class RecruitmentHandoffService(
         var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
         var startupFastTrack = config is not null && (!config.RequirePreboardingBeforeHandoff || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase));
 
+        RecruitmentOffer? acceptedOffer = null;
+
         if (offers is not null)
         {
-            var acceptedOffer = await offers.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.Status == RecruitmentOfferStatus.Accepted && !x.IsDeleted);
+            acceptedOffer = await offers.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.Status == RecruitmentOfferStatus.Accepted && !x.IsDeleted);
             if (acceptedOffer is null && request.AutoCompletePreboarding)
             {
                 // If an offer is Sent or Approved and HR confirms handoff with AutoCompletePreboarding, mark it Accepted automatically
@@ -163,6 +167,32 @@ public sealed class RecruitmentHandoffService(
             result.StatusCode = invite.StatusCode == 0 ? StatusCodes.Status400BadRequest : invite.StatusCode;
             result.Message = invite.Message;
             return result;
+        }
+
+        if (salaries is not null && acceptedOffer is not null)
+        {
+            var components = new List<EmployeeSalaryComponentValueDto>
+            {
+                new() { ComponentCode = "BASIC", ComponentName = "Basic Pay", Kind = "EARNING", Value = acceptedOffer.Salary, CalculationType = "FIXED", IsTaxable = true, IsRecurring = true }
+            };
+            components.AddRange(acceptedOffer.CompensationComponents.Select(item => new EmployeeSalaryComponentValueDto
+            {
+                ComponentCode = item.Key.Trim().ToUpperInvariant(), ComponentName = item.Key.Trim(), Kind = "EARNING", Value = item.Value, CalculationType = "FIXED", IsTaxable = true, IsRecurring = true
+            }));
+            var effectiveFrom = (acceptedOffer.StartDateUtc ?? DateTime.UtcNow).Date;
+            var salaryDraft = await salaries.SaveDraft(companyId, actorUserId, new EmployeeSalaryStructureDto
+            {
+                EmployeeId = request.EmployeeId.Trim(), UserId = invite.MethodResult.UserId, OfferId = acceptedOffer.OfferId, OfferVersion = acceptedOffer.Version,
+                Currency = acceptedOffer.Currency, PaymentFrequency = "MONTHLY", AnnualCtc = acceptedOffer.TotalCtc, MonthlyGross = acceptedOffer.TotalCtc / 12m,
+                EffectiveFrom = effectiveFrom, Status = "DRAFT", ApprovalStatus = "DRAFT", Source = "OFFER_HANDOFF", Version = 1, Components = components
+            });
+            if (!salaryDraft.Success)
+            {
+                result.ErrorCode = RecruitmentErrorCodes.InvalidRequest;
+                result.StatusCode = salaryDraft.StatusCode == 0 ? StatusCodes.Status409Conflict : salaryDraft.StatusCode;
+                result.Message = $"Employee created, but offer compensation could not be staged for payroll: {salaryDraft.Message}";
+                return result;
+            }
         }
 
         var handoff = new RecruitmentHandoff

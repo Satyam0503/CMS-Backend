@@ -39,7 +39,7 @@ public class AttendanceStatusService : IAttendanceStatusService
     public async Task EnsureCompanyDefaults(string companyId)
     {
         if (string.IsNullOrWhiteSpace(companyId)) throw new ArgumentException("Company id is required.", nameof(companyId));
-        var existingStatuses = (await _repository.GetAll(x => x.CompanyId == companyId)).ToList();
+        var existingStatuses = (await _repository.GetAll(x => x.CompanyId == companyId, WithDeletedObjects: false, withDefaultFilter: false)).ToList();
         if (existingStatuses.Count > 0)
         {
             // UL-HALF was a legacy duplicate of HD. Unpaid Leave now uses UL for a

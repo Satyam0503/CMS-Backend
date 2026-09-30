@@ -20,6 +20,7 @@ public sealed class RecruitmentCandidateShareService(
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(actorUserId) || string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(command.ApplicantId) || string.IsNullOrWhiteSpace(command.SharedWithUserId)) return Fail("Company, applicant, target user, actor, and idempotency key are required.");
         if (!string.Equals(command.Scope?.Trim(), "View", StringComparison.OrdinalIgnoreCase)) return Fail("Only View sharing is supported.");
         if (command.ExpiresAtUtc.HasValue && command.ExpiresAtUtc.Value <= DateTime.UtcNow) return Fail("Share expiry must be in the future.");
+        if (command.ExpiresAtUtc.HasValue && command.ExpiresAtUtc.Value > DateTime.UtcNow.AddDays(365)) return Fail("Share expiry cannot be more than 365 days in the future.");
         var applicant = await applicants.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId.Trim() && !x.IsDeleted);
         if (applicant is null) return Fail("Applicant was not found in the current company.", StatusCodes.Status404NotFound);
         var target = await employees.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == command.SharedWithUserId.Trim() && x.Status && !x.IsDeleted);
@@ -44,7 +45,10 @@ public sealed class RecruitmentCandidateShareService(
     public async Task<Result<RecruitmentCandidateShareItem>> GetForApplicant(string applicantId)
     {
         var companyId = CurrentContext.CompanyId(context); if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(applicantId)) return new Result<RecruitmentCandidateShareItem> { Success = false, StatusCode = 400, Message = "Company and applicant are required." };
-        var rows = (await shares.GetAll(x => x.CompanyId == companyId && x.ApplicantId == applicantId.Trim() && !x.IsDeleted && x.RevokedAtUtc == null && (!x.ExpiresAtUtc.HasValue || x.ExpiresAtUtc > DateTime.UtcNow))).Select(x => new RecruitmentCandidateShareItem { ShareId = x.ShareId, ApplicantId = x.ApplicantId, SharedWithUserId = x.SharedWithUserId, Scope = x.Scope, ExpiresAtUtc = x.ExpiresAtUtc, RevokedAtUtc = x.RevokedAtUtc }).ToList();
+        var normalizedApplicantId = applicantId.Trim();
+        var applicant = await applicants.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == normalizedApplicantId && !x.IsDeleted);
+        if (applicant is null) return new Result<RecruitmentCandidateShareItem> { Success = false, StatusCode = 404, Message = "Applicant was not found in the current company." };
+        var rows = (await shares.GetAll(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted && x.RevokedAtUtc == null && (!x.ExpiresAtUtc.HasValue || x.ExpiresAtUtc > DateTime.UtcNow))).Select(x => new RecruitmentCandidateShareItem { ShareId = x.ShareId, ApplicantId = x.ApplicantId, SharedWithUserId = x.SharedWithUserId, Scope = x.Scope, ExpiresAtUtc = x.ExpiresAtUtc, RevokedAtUtc = x.RevokedAtUtc }).ToList();
         return new Result<RecruitmentCandidateShareItem> { Success = true, StatusCode = 200, MethodResults = rows, TotalRecords = rows.Count, Message = "Explicit candidate shares loaded." };
     }
     private static Result<string> Ok(string id, string message) => new() { Success = true, StatusCode = 200, MethodResult = id, Message = message };

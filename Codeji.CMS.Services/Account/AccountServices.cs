@@ -89,6 +89,17 @@ public class AccountServices : IAccountServices
             result.StatusCode = CustomStatusCode.InvalidCredential;
             return result;
         }
+        // A newly registered tenant remains inactive until provisioning completes.
+        // Keep the check tenant-scoped and fail closed when the company record exists.
+        var loginCompany = await FindSingleForAnonymousAuthAsync(_companyRepository, x =>
+            x.CompanyId == user.CompanyId && !x.IsDeleted);
+        if (loginCompany is not null && !loginCompany.Status)
+        {
+            result.Success = false;
+            result.StatusCode = CustomStatusCode.InvalidCredential;
+            return result;
+        }
+
         // Account access is an independent lifecycle dimension. Legacy
         // EmpUser.Status only represents the employee record and must not
         // allow a Locked, TemporarilyDisabled, Suspended, or Closed account

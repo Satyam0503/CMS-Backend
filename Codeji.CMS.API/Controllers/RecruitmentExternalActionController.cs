@@ -6,6 +6,7 @@ using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Codeji.CMS.API.Controllers;
 
@@ -21,10 +22,11 @@ public sealed class RecruitmentExternalActionController(IRecruitmentExternalActi
     [Authorize, HttpPost("{actionTokenId}/Revoke"), ModulePermission(AppModule.Applications, Permission.Edit)]
     public Task<Result<string>> Revoke(string actionTokenId) => service.Revoke(actionTokenId, CurrentContext.UserId(context));
 
-    [AllowAnonymous, HttpGet("Validate")]
+    [AllowAnonymous, EnableRateLimiting("career-sensitive"), HttpGet("Validate")]
     public Task<Result<RecruitmentExternalActionTokenDto>> Validate([FromQuery] string token) => service.Validate(token, false);
 
-    [AllowAnonymous, HttpPost("Consume")]
+    [AllowAnonymous, EnableRateLimiting("career-sensitive"), HttpPost("Consume")]
     public Task<Result<RecruitmentExternalActionTokenDto>> Consume([FromBody] RecruitmentExternalActionConsumeCommand command) => service.Validate(command.Token, true);
 }
+
 

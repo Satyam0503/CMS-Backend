@@ -21,10 +21,12 @@ public sealed class RecruitmentEnterpriseController(IRecruitmentEnterpriseServic
  [HttpPost("QueueFeedbackReminders"), ModulePermission(AppModule.Applications, Permission.Edit)] public Task<Result<int>> QueueFeedbackReminders([FromQuery]string? vacancyId)=>service.QueueFeedbackReminders(vacancyId,CurrentContext.UserId(context));
  [HttpPost("UpsertSlaPolicy"), ModulePermission(AppModule.Jobs, Permission.Edit)] public Task<Result<string>> UpsertSlaPolicy([FromBody]RecruitmentStageSlaPolicyCommand command)=>service.UpsertSla(command,CurrentContext.UserId(context));
  [HttpGet("Config"), ModulePermission(AppModule.Jobs, Permission.View)] public Task<Result<Codeji.CMS.Repository.Entities.Recruitments.RecruitmentEnterpriseConfig>> Config()=>service.GetConfig();
+ [HttpGet("Readiness"), ModulePermission(AppModule.Jobs, Permission.View)] public Task<Result<RecruitmentReadinessDto>> Readiness()=>service.GetReadiness();
  [HttpPost("UpsertConfig"), ModulePermission(AppModule.Jobs, Permission.Edit)] public Task<Result<string>> UpsertConfig([FromBody]RecruitmentEnterpriseConfigCommand command)=>service.UpsertConfig(command,CurrentContext.UserId(context));
  [HttpPost("LinkRelationship"), ModulePermission(AppModule.Applications, Permission.Edit)] public Task<Result<string>> LinkRelationship([FromBody]RecruitmentRelationshipLinkCommand command)=>service.Link(command,CurrentContext.UserId(context));
  [HttpPost("QueueAutomation"), ModulePermission(AppModule.Applications, Permission.Edit)] public Task<Result<string>> QueueAutomation([FromBody]RecruitmentAutomationEventCommand command)=>service.Enqueue(command,CurrentContext.UserId(context));
 }
+
 
 
 

@@ -161,8 +161,8 @@ public class RolePermissionTests
             new Roles { RolesId = "employee", RoleType = 3, IsDefault = true, Titles = "Employee", CreatedDate = DateTime.UtcNow, UserRoles = [] },
         };
         fixture.RoleRepository
-            .Setup(x => x.Get(It.IsAny<Expression<Func<Roles, bool>>>(), null, false))
-            .Returns((Expression<Func<Roles, bool>> predicate, object? _, bool _) => templates.Where(predicate.Compile()).AsQueryable());
+            .Setup(x => x.GetAll(It.IsAny<Expression<Func<Roles, bool>>>(), false, false))
+            .ReturnsAsync((Expression<Func<Roles, bool>> predicate, bool _, bool _) => templates.Where(predicate.Compile()));
         fixture.RolePermissionRepository
             .Setup(x => x.GetAll(It.IsAny<Expression<Func<RolePermission, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
             .ReturnsAsync([
@@ -177,6 +177,7 @@ public class RolePermissionTests
 
         Assert.Equal(new[] { 1, 2, 3, 4 }, roles.Select(x => x.RoleType).Order());
         fixture.RoleRepository.Verify(x => x.AddMany(It.Is<IEnumerable<Roles>>(saved => saved.Count() == 4)), Times.Once);
+        fixture.RoleRepository.Verify(x => x.GetAll(It.IsAny<Expression<Func<Roles, bool>>>(), false, false), Times.Exactly(2));
         fixture.RolePermissionRepository.Verify(x => x.AddMany(It.Is<IEnumerable<RolePermission>>(saved =>
             saved.Count() == 2 && saved.All(x => x.CompanyId == "company-1"))), Times.Once);
     }

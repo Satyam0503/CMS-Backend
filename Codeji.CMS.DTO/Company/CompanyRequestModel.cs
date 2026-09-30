@@ -1,4 +1,4 @@
-﻿
+
 namespace Codeji.CMS.DTO.RequestModels.Company
 {
     public class CompanyRequestModel
@@ -11,5 +11,8 @@ namespace Codeji.CMS.DTO.RequestModels.Company
 
         public required string Email { get; set; }
         public required string Password { get; set; }
+
+        [System.ComponentModel.DataAnnotations.Range(typeof(bool), "true", "true", ErrorMessage = "Terms must be accepted.")]
+        public bool AcceptTerms { get; set; }
     }
 }

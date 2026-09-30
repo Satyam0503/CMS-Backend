@@ -26,6 +26,8 @@ The **Reporting & Log Export Module** aggregates operational metrics and audit t
 | File | Responsibility | Calls | Used By |
 |---|---|---|---|
 | `src/app/modules/reports/pages/ReportsDashboard.tsx` | Central reporting hub with export cards for Attendance, Payroll, Leave, and Hiring. | `GET /api/reports/available` | HR / Finance |
+| `src/app/modules/attendance/EmployeeAttendance.tsx` | Monthly attendance report view with calendar grid, punch modal, and 4-tab Excel export trigger. | `GET /api/admin/attendance/export/monthly` | HR / Admin |
+| `src/app/modules/payroll/components/PayRollTable.tsx` | Monthly payroll register with disbursement audit, bank export trigger, and payslip downloads. | `GET /api/payroll/reports/bank-disbursement` | Accounts / HR |
 | `src/app/modules/recruitment/components/RecruitmentAuditExportModal.tsx` | Dialog to select date ranges and trigger recruitment audit CSV download. | `GET /api/recruitment/audit-export` | HR Admin |
 
 ---
@@ -33,17 +35,21 @@ The **Reporting & Log Export Module** aggregates operational metrics and audit t
 ## 5. Backend Implementation
 | Backend File | Responsibility | Dependencies |
 |---|---|---|
+| `Services/AttendanceService.cs` | `ExportMonthlyAttendanceAsync` generates closedXML 4-tab workbook (`Attendance Muster`, `Daily Punch Logs`, `Monthly Summary`, `Legend & Policy`) with sanitized remarks and pastel styling. | `IMongoDbRepository<EmpUser>`, `IAttendanceRepository`, `IMongoDbRepository<AttendanceDaySegment>`, `ICompanyWorkingCalendarService` |
+| `Controllers/PayrollReportsController.cs` | Exposes bank disbursement reports, variance comparisons, and cost center summaries. | `IPayrollReportsService` |
 | `Services/RecruitmentAuditExportService.cs` | Streams applicant history, stage progressions, and interviewer remarks as formatted CSV. | `IMongoRepository<Applicant>`, `IMongoRepository<ApplicantLogs>` |
 | `Controllers/AutoPayrollController.cs` | Exposes monthly payroll summary reports and export registers. | `IAutoPayrollServices` |
-| `Controllers/AttendanceController.cs` | Exposes locked `MonthlyAttendanceSummary` datasets. | `IAttendanceService` |
+| `Controllers/AttendanceController.cs` | Exposes locked `MonthlyAttendanceSummary` datasets and monthly muster export stream. | `IAttendanceService` |
 
 ---
 
 ## 6. API Documentation
 | Method | URL | Purpose | Auth / Permission | Request / Response | Side Effects |
 |---|---|---|---|---|---|
+| `GET` | `/api/admin/attendance/export/monthly?year={y}&month={m}` | Exports production-ready 4-tab Excel workbook (`attendance-report-YYYY-MM.xlsx`). | JWT (`attendance:read`) | Stream `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | Generates 4 worksheets: Muster, Punch Logs, Payroll Summary, Legend |
 | `GET` | `/api/recruitment/audit-export` | Streams recruitment audit log CSV file. | JWT (`recruitment:read`) | Streams `text/csv` | Logs export audit event |
 | `GET` | `/api/autopayroll/records` | Exports employee-level payroll breakdown for target month/year. | JWT (`payroll:read`) | `List<PayrollEntityDto>` | None |
+| `GET` | `/api/payroll/reports/bank-disbursement?year={y}&month={m}` | Generates bank-compliant disbursement transfer register with account numbers and net pay. | JWT (`payroll:read`) | `BankDisbursementReportDto` | None |
 | `GET` | `/api/attendance/monthly-summary` | Retrieves complete monthly attendance summaries for company employees. | JWT (`attendance:read`) | `List<MonthlyAttendanceSummaryDto>` | None |
 
 ---
