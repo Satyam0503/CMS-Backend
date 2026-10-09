@@ -51,6 +51,42 @@ if (args.Contains("inspect-attendance", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+if (args.Contains("inspect-payroll-policy-profile-index", StringComparer.OrdinalIgnoreCase))
+{
+    var profiles = db.GetCollection<BsonDocument>("PayrollPolicyProfile");
+    var duplicateGroups = await profiles.Aggregate()
+        .Group(new BsonDocument
+        {
+            { "_id", new BsonDocument { { "CompanyId", "$CompanyId" }, { "Name", "$Name" }, { "EffectiveFrom", "$EffectiveFrom" } } },
+            { "count", new BsonDocument("$sum", 1) }
+        })
+        .Match(new BsonDocument("count", new BsonDocument("$gt", 1)))
+        .ToListAsync();
+    using var indexCursor = await profiles.Indexes.ListAsync();
+    var indexList = await indexCursor.ToListAsync();
+    var repairId = new RepairPayrollPolicyProfileVersionIndex().Id;
+    var migrationApplied = await db.GetCollection<BsonDocument>("Migration")
+        .Find(Builders<BsonDocument>.Filter.Eq("_id", repairId)).AnyAsync();
+
+    Console.WriteLine($"Database: {db.DatabaseNamespace.DatabaseName}");
+    Console.WriteLine($"Profile count: {await profiles.CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty)}");
+    Console.WriteLine($"Duplicate company/name/effective-from groups: {duplicateGroups.Count}");
+    Console.WriteLine($"Legacy company/version index present: {indexList.Any(x => x.GetValue("name", "").AsString == "ux_policy_profile_company_version")}");
+    Console.WriteLine($"Replacement company/name/start index present: {indexList.Any(x => x.GetValue("name", "").AsString == "ux_policy_profile_company_name_start")}");
+    Console.WriteLine($"Repair migration recorded: {migrationApplied}");
+    foreach (var duplicate in duplicateGroups)
+        Console.WriteLine($"Duplicate key: {duplicate["_id"]}; count: {duplicate["count"]}");
+    return;
+}
+
+if (args.Contains("repair-payroll-policy-profile-index", StringComparer.OrdinalIgnoreCase))
+{
+    var repair = new RepairPayrollPolicyProfileVersionIndex();
+    await repair.ExecuteAsync(db);
+    Console.WriteLine($"Applied targeted migration {repair.Id} to database {db.DatabaseNamespace.DatabaseName}.");
+    return;
+}
+
 if (args.Contains("inspect-lifecycle-policies", StringComparer.OrdinalIgnoreCase))
 {
     var companies = db.GetCollection<BsonDocument>("Company");

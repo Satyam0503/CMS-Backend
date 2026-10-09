@@ -15,6 +15,12 @@ public sealed class CreatePayrollRunRequestDto
     public string? IdempotencyKey { get; set; }
 }
 
+public sealed class CancelPayrollRunRequestDto
+{
+    [Required, StringLength(500, MinimumLength = 5)]
+    public string Reason { get; set; } = string.Empty;
+}
+
 public sealed class PayrollRunDto
 {
     public string Id { get; set; } = string.Empty;
@@ -48,6 +54,9 @@ public sealed class PayrollComponentSnapshotDto
     public string? BaseComponentCode { get; set; }
     public decimal Value { get; set; }
     public bool IsTaxable { get; set; }
+    public bool IsRecurring { get; set; } = true;
+    public bool IsStatutory { get; set; }
+    public bool IsEmployerContribution { get; set; }
     public int SortOrder { get; set; }
 }
 
@@ -55,12 +64,35 @@ public sealed class PayrollEmployeeInputSnapshotDto
 {
     public string? AssignmentId { get; set; }
     public int AssignmentVersion { get; set; }
+    public string? SalaryStructureId { get; set; }
+    public int SalaryStructureVersion { get; set; }
+    public List<PayrollSalaryStructureSnapshotDto> SalaryStructures { get; set; } = [];
     public string? SalaryTemplateId { get; set; }
     public int SalaryTemplateVersion { get; set; }
     public string? PayGroupId { get; set; }
     public int PayGroupVersion { get; set; }
     public string? PolicyProfileId { get; set; }
     public int PolicyProfileVersion { get; set; }
+    public string EpfMode { get; set; } = string.Empty;
+    public decimal EpfWageCeiling { get; set; }
+    public decimal EpfEmployeeRatePercent { get; set; }
+    public decimal EpfEmployerRatePercent { get; set; }
+    public string EsicMode { get; set; } = string.Empty;
+    public decimal EsicWageCeiling { get; set; }
+    public decimal EsicEmployeeRatePercent { get; set; }
+    public decimal EsicEmployerRatePercent { get; set; }
+    public string TdsMode { get; set; } = string.Empty;
+    public bool? RequireAttendanceLock { get; set; }
+    public List<PayrollComponentSnapshotDto> Components { get; set; } = [];
+}
+
+public sealed class PayrollSalaryStructureSnapshotDto
+{
+    public string SalaryStructureId { get; set; } = string.Empty;
+    public int Version { get; set; }
+    public string? PayGroupId { get; set; }
+    public DateTime EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
     public List<PayrollComponentSnapshotDto> Components { get; set; } = [];
 }
 

@@ -11,6 +11,23 @@ namespace Codeji.CMS.Services.Tests;
 public sealed class EmployeeSalaryImportServiceTests
 {
     [Fact]
+    public async Task Submit_RejectsAggregateDeductionBeforeSavingAnySalary()
+    {
+        var employees = Repository(new[] { new EmpUser { CompanyId = "company-1", EmployeeId = "e1", FirstName = "Test", LastName = "Employee", Email = "test@example.com" } });
+        var salaries = Repository(Array.Empty<EmployeeSalaryStructure>());
+        var salaryService = new Mock<IEmployeeSalaryStructureService>();
+        var service = new EmployeeSalaryImportService(employees.Object, salaries.Object, salaryService.Object);
+        var row = Row(2, "e1");
+        row.Components.Add(new EmployeeSalaryComponentValueDto { ComponentCode = " total_deductions ", ComponentName = "Total", Kind = "DEDUCTION", Value = 500 });
+        var preview = await service.Preview("company-1", new[] { row });
+        Assert.False(preview[0].IsValid);
+        Assert.Contains(preview[0].Errors, error => error.Contains("aggregate"));
+        var submitted = await service.Submit("company-1", "actor", new[] { row });
+        Assert.False(submitted.Success);
+        salaryService.Verify(x => x.SaveDraft(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<EmployeeSalaryStructureDto>()), Times.Never);
+    }
+
+    [Fact]
     public async Task Preview_RejectsUnknownTenantEmployeeAndDuplicateRows()
     {
         var employees = Repository(new[] { new EmpUser { CompanyId = "company-1", EmployeeId = "e1", FirstName = "Test", LastName = "Employee", Email = "test@example.com" } });
@@ -34,6 +51,76 @@ public sealed class EmployeeSalaryImportServiceTests
         Assert.Contains(result[0].Errors, x => x.Contains("EffectiveTo"));
         Assert.Contains(result[0].Errors, x => x.Contains("AnnualCtc"));
         Assert.Contains(result[0].Errors, x => x.Contains("component"));
+    }
+
+    [Fact]
+    public async Task Preview_RejectsUnsupportedPaymentFrequency()
+    {
+        var employees = Repository(new[] { new EmpUser { CompanyId = "company-1", EmployeeId = "e1", FirstName = "Test", LastName = "Employee", Email = "test@example.com" } });
+        var salaries = Repository(Array.Empty<EmployeeSalaryStructure>());
+        var service = new EmployeeSalaryImportService(employees.Object, salaries.Object, Mock.Of<IEmployeeSalaryStructureService>());
+        var row = Row(2, "e1");
+        row.PaymentFrequency = "YEARLY";
+
+        var result = await service.Preview("company-1", new[] { row });
+
+        Assert.False(result[0].IsValid);
+        Assert.Contains(result[0].Errors, x => x.Contains("monthly payroll", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("MONTH")]
+    public async Task Submit_NormalizesMissingOrAbbreviatedMonthlyFrequency(string frequency)
+    {
+        var employees = Repository(new[] { new EmpUser { CompanyId = "company-1", EmployeeId = "e1", FirstName = "Test", LastName = "Employee", Email = "test@example.com" } });
+        var salaries = Repository(Array.Empty<EmployeeSalaryStructure>());
+        var salaryService = new Mock<IEmployeeSalaryStructureService>();
+        salaryService.Setup(x => x.SaveDraft(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<EmployeeSalaryStructureDto>()))
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result<EmployeeSalaryStructureDto> { Success = true });
+        var service = new EmployeeSalaryImportService(employees.Object, salaries.Object, salaryService.Object);
+        var row = Row(2, "e1");
+        row.PaymentFrequency = frequency;
+        row.AnnualCtcSource = "SPREADSHEET";
+
+        var result = await service.Submit("company-1", "actor", new[] { row });
+
+        Assert.True(result.Success);
+        salaryService.Verify(x => x.SaveDraft("company-1", "actor", It.Is<EmployeeSalaryStructureDto>(draft => draft.PaymentFrequency == "MONTHLY" && draft.AnnualCtcSource == "SPREADSHEET")), Times.Once);
+    }
+
+    [Fact]
+    public async Task Preview_RejectsDuplicateComponentCodesIgnoringCaseAndWhitespace()
+    {
+        var employees = Repository(new[] { new EmpUser { CompanyId = "company-1", EmployeeId = "e1", FirstName = "Test", LastName = "Employee", Email = "test@example.com" } });
+        var salaries = Repository(Array.Empty<EmployeeSalaryStructure>());
+        var service = new EmployeeSalaryImportService(employees.Object, salaries.Object, Mock.Of<IEmployeeSalaryStructureService>());
+        var row = Row(2, "e1");
+        row.Components.Add(new EmployeeSalaryComponentValueDto { ComponentCode = " basic ", ComponentName = "Second basic", Kind = "EARNING", CalculationType = "FIXED", Value = 5000m });
+
+        var result = await service.Preview("company-1", new[] { row });
+
+        Assert.False(result[0].IsValid);
+        Assert.Contains(result[0].Errors, x => x.Contains("duplicated", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Preview_RejectsFormulaWithMissingBaseBeforeImportSubmission()
+    {
+        var employees = Repository(new[] { new EmpUser { CompanyId = "company-1", EmployeeId = "e1", FirstName = "Test", LastName = "Employee", Email = "test@example.com" } });
+        var salaries = Repository(Array.Empty<EmployeeSalaryStructure>());
+        var service = new EmployeeSalaryImportService(employees.Object, salaries.Object, Mock.Of<IEmployeeSalaryStructureService>());
+        var row = Row(2, "e1");
+        row.Components.Add(new EmployeeSalaryComponentValueDto
+        {
+            ComponentCode = "HRA", ComponentName = "House Rent Allowance", Kind = "EARNING",
+            CalculationType = "PERCENT_OF_COMPONENT", BaseComponentCode = "MISSING", Value = 40m
+        });
+
+        var result = await service.Preview("company-1", new[] { row });
+
+        Assert.False(result[0].IsValid);
+        Assert.Contains(result[0].Errors, x => x.Contains("references missing component", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

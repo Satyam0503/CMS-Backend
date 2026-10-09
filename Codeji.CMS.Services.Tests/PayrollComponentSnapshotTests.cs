@@ -10,6 +10,123 @@ namespace Codeji.CMS.Services.Tests;
 public sealed class PayrollComponentSnapshotTests
 {
     [Fact]
+    public async Task GetEmployees_ReturnsSalaryStructureVersionAndComponentHistory()
+    {
+        var runs = Repository(new[]
+        {
+            new PayrollRun
+            {
+                Id = "run-1", CompanyId = "company-1", PeriodStart = new DateTime(2026, 9, 1),
+                PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 1)
+            }
+        });
+        var lines = Repository(new[]
+        {
+            new PayrollRunEmployee
+            {
+                CompanyId = "company-1", PayrollRunId = "run-1", EmployeeId = "employee-1",
+                InputSnapshot = new PayrollEmployeeInputSnapshot
+                {
+                    SalaryStructureId = "salary-1", SalaryStructureVersion = 8,
+                    SalaryStructures =
+                    [
+                        new PayrollSalaryStructureSnapshot
+                        {
+                            SalaryStructureId = "salary-1", Version = 8, EffectiveFrom = new DateTime(2026, 9, 1),
+                            Components = [new PayrollComponentSnapshot { Code = "BONUS", Name = "One-time bonus", Kind = "EARNING", Value = 5000, IsRecurring = false, IsTaxable = true }]
+                        }
+                    ]
+                }
+            }
+        });
+        var service = new PayrollRunService(runs.Object, lines.Object,
+            Repository<EmpUser>().Object, Repository<PayrollDivisorPolicy>().Object);
+
+        var result = await service.GetEmployees("company-1", "run-1");
+
+        Assert.True(result.Success);
+        var snapshot = Assert.Single(result.MethodResult!).InputSnapshot;
+        Assert.Equal("salary-1", snapshot.SalaryStructureId);
+        Assert.Equal(8, snapshot.SalaryStructureVersion);
+        var component = Assert.Single(Assert.Single(snapshot.SalaryStructures).Components);
+        Assert.Equal("BONUS", component.Code);
+        Assert.False(component.IsRecurring);
+    }
+
+    [Fact]
+    public async Task Create_SnapshotsApprovedSalaryStructureVersionsOverlappingPayrollMonth()
+    {
+        var runs = Repository<PayrollRun>();
+        var lines = Repository<PayrollRunEmployee>();
+        PayrollRunEmployee[] captured = [];
+        var employees = Repository(new[]
+        {
+            new EmpUser { CompanyId = "company-1", EmployeeId = "employee-1", UserId = "user-1", FirstName = "One", LastName = "User", Email = "one@example.com", Status = true, DateOfJoining = "2026-01-01" }
+        });
+        lines.Setup(x => x.AddMany(It.IsAny<IEnumerable<PayrollRunEmployee>>()))
+            .Callback<IEnumerable<PayrollRunEmployee>>(rows => captured = rows.ToArray())
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+        var salaries = Repository(new[]
+        {
+            new EmployeeSalaryStructure
+            {
+                Id = "salary-sept-1", CompanyId = "company-1", EmployeeId = "employee-1", PayGroupId = "salary-group", Version = 4,
+                EffectiveFrom = new DateTime(2026, 9, 1), EffectiveTo = new DateTime(2026, 9, 14),
+                Status = "ACTIVE", ApprovalStatus = "APPROVED",
+                Components = [new EmployeeSalaryComponentValue { ComponentCode = "BASIC", ComponentName = "Basic", Kind = "EARNING", Value = 60000, IsRecurring = true }]
+            },
+            new EmployeeSalaryStructure
+            {
+                Id = "salary-sept-2", CompanyId = "company-1", EmployeeId = "employee-1", PayGroupId = "salary-group", Version = 5,
+                EffectiveFrom = new DateTime(2026, 9, 15), Status = "ACTIVE", ApprovalStatus = "APPROVED",
+                Components = [new EmployeeSalaryComponentValue { ComponentCode = "BASIC", ComponentName = "Basic", Kind = "EARNING", Value = 70000, IsRecurring = true }]
+            },
+            new EmployeeSalaryStructure
+            {
+                Id = "unapproved", CompanyId = "company-1", EmployeeId = "employee-1", Version = 6,
+                EffectiveFrom = new DateTime(2026, 9, 20), Status = "PENDING_REVIEW", ApprovalStatus = "SUBMITTED",
+                Components = [new EmployeeSalaryComponentValue { ComponentCode = "BASIC", ComponentName = "Basic", Kind = "EARNING", Value = 99999 }]
+            },
+            new EmployeeSalaryStructure
+            {
+                Id = "other-tenant", CompanyId = "company-2", EmployeeId = "employee-1", Version = 1,
+                EffectiveFrom = new DateTime(2026, 9, 1), Status = "ACTIVE", ApprovalStatus = "APPROVED",
+                Components = [new EmployeeSalaryComponentValue { ComponentCode = "BASIC", ComponentName = "Basic", Kind = "EARNING", Value = 1 }]
+            }
+        });
+        var groups = Repository(new[]
+        {
+            new PayrollPayGroup { Id = "salary-group", CompanyId = "company-1", Name = "Salary group", PolicyProfileId = "salary-policy", EffectiveFrom = new DateTime(2026, 1, 1) }
+        });
+        var profiles = Repository(new[]
+        {
+            new PayrollPolicyProfile { Id = "salary-policy", CompanyId = "company-1", Name = "Salary policy", EffectiveFrom = new DateTime(2026, 1, 1), ApprovalStatus = "APPROVED", Version = 7 }
+        });
+
+        var service = new PayrollRunService(
+            runs.Object, lines.Object, employees.Object, Repository<PayrollDivisorPolicy>().Object,
+            payGroups: groups.Object, policyProfiles: profiles.Object, employeeSalaryStructures: salaries.Object);
+        var result = await service.Create("company-1", "actor-1", new CreatePayrollRunRequestDto
+        {
+            PeriodStart = new DateTime(2026, 9, 1), PeriodEnd = new DateTime(2026, 9, 30),
+            PayDate = new DateTime(2026, 10, 1)
+        });
+
+        Assert.True(result.Success);
+        var snapshot = Assert.Single(captured).InputSnapshot;
+        Assert.Equal("salary-sept-1", captured[0].SalaryRecordId);
+        Assert.Equal("salary-sept-1", snapshot.SalaryStructureId);
+        Assert.Equal(4, snapshot.SalaryStructureVersion);
+        Assert.Equal("salary-group", captured[0].PayGroupId);
+        Assert.Equal("salary-group", snapshot.PayGroupId);
+        Assert.Equal("salary-policy", snapshot.PolicyProfileId);
+        Assert.Equal(7, snapshot.PolicyProfileVersion);
+        Assert.Equal(2, snapshot.SalaryStructures.Count);
+        Assert.Equal(new[] { "salary-sept-1", "salary-sept-2" }, snapshot.SalaryStructures.Select(x => x.SalaryStructureId));
+        Assert.Equal(60000, Assert.Single(snapshot.Components).Value);
+    }
+
+    [Fact]
     public async Task Create_SnapshotsResolvedTemplateComponentsAndKeepsTenantScope()
     {
         var runRepo = Repository<PayrollRun>();
@@ -17,8 +134,8 @@ public sealed class PayrollComponentSnapshotTests
         PayrollRunEmployee[] captured = [];
         var employees = Repository(new[]
         {
-            new EmpUser { CompanyId = "company-1", EmployeeId = "employee-1", UserId = "user-1", FirstName = "One", LastName = "User", Email = "one@example.com" },
-            new EmpUser { CompanyId = "company-2", EmployeeId = "employee-2", UserId = "user-2", FirstName = "Other", LastName = "Tenant", Email = "other@example.com" }
+            new EmpUser { CompanyId = "company-1", EmployeeId = "employee-1", UserId = "user-1", FirstName = "One", LastName = "User", Email = "one@example.com", Status = true, DateOfJoining = "2026-01-01" },
+            new EmpUser { CompanyId = "company-2", EmployeeId = "employee-2", UserId = "user-2", FirstName = "Other", LastName = "Tenant", Email = "other@example.com", Status = true, DateOfJoining = "2026-01-01" }
         });
         var template = new SalaryTemplate
         {
@@ -37,7 +154,8 @@ public sealed class PayrollComponentSnapshotTests
         var policies = Repository(new[] { new PayrollPolicyProfile { Id = "policy-1", CompanyId = "company-1", Name = "Default", EffectiveFrom = new DateTime(2026, 1, 1), Version = 3, ApprovalStatus = "APPROVED" } });
 
         lineRepo.Setup(x => x.AddMany(It.IsAny<IEnumerable<PayrollRunEmployee>>()))
-            .Callback<IEnumerable<PayrollRunEmployee>>(rows => captured = rows.ToArray());
+            .Callback<IEnumerable<PayrollRunEmployee>>(rows => captured = rows.ToArray())
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
 
         var service = new PayrollRunService(
             runRepo.Object, lineRepo.Object, employees.Object, Repository<PayrollDivisorPolicy>().Object,

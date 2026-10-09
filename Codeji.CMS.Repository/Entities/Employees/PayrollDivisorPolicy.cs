@@ -11,8 +11,12 @@ public class PayrollDivisorPolicy : BaseClass
     public string LopCalculationBase { get; set; } = "FIXED_GROSS";
     public string EpfMode { get; set; } = "CAPPED_CEILING";
     public decimal EpfWageCeiling { get; set; } = 15000m;
+    public decimal EpfEmployeeRatePercent { get; set; } = 12m;
+    public decimal EpfEmployerRatePercent { get; set; } = 12m;
     public string EsicMode { get; set; } = "STATUTORY";
     public decimal EsicWageCeiling { get; set; } = 21000m;
+    public decimal EsicEmployeeRatePercent { get; set; } = 0.75m;
+    public decimal EsicEmployerRatePercent { get; set; } = 3.25m;
     public string TdsMode { get; set; } = "AUTO_NEW_REGIME";
     public bool RequireAttendanceLock { get; set; } = true;
     public DateTime EffectiveFrom { get; set; }

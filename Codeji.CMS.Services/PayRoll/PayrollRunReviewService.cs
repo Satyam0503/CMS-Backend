@@ -5,7 +5,7 @@ using MongoDB.Driver;
 namespace Codeji.CMS.Services.PayRoll;
 public sealed class PayrollRunReviewDto
 {
- public string RunId {get;set;}=string.Empty; public string Status {get;set;}=string.Empty; public int EmployeeCount{get;set;} public int CalculatedCount{get;set;} public int BlockedCount{get;set;} public int SkippedCount{get;set;} public decimal GrossTotal{get;set;} public decimal DeductionTotal{get;set;} public decimal NetTotal{get;set;} public bool CanApprove{get;set;} public List<string> BlockingEmployeeIds{get;set;}=[];
+ public string RunId {get;set;}=string.Empty; public string Status {get;set;}=string.Empty; public int EmployeeCount{get;set;} public int CalculatedCount{get;set;} public int BlockedCount{get;set;} public int SkippedCount{get;set;} public decimal GrossTotal{get;set;} public decimal DeductionTotal{get;set;} public decimal NetTotal{get;set;} public bool IsReviewed{get;set;} public bool CanApprove{get;set;} public List<string> BlockingEmployeeIds{get;set;}=[];
 }
 public sealed class PayrollRunReviewRequestDto { public string? Comment{get;set;} }
 public interface IPayrollRunReviewService
@@ -19,7 +19,7 @@ public sealed class PayrollRunReviewService(IMongoDbRepository<PayrollRun> runs,
  {
   var run=await runs.FirstOrDefault(x=>x.CompanyId==c&&x.Id==id); if(run is null)return Fail<PayrollRunReviewDto>(404,"Payroll run was not found.");
   var rows=(await employees.GetAll(x=>x.CompanyId==c&&x.PayrollRunId==id)).ToList(); var blocked=rows.Where(x=>x.Status=="BLOCKED").Select(x=>x.EmployeeId).ToList();
-  return new Result<PayrollRunReviewDto>{Success=true,MethodResult=new PayrollRunReviewDto{RunId=id,Status=run.Status,EmployeeCount=rows.Count,CalculatedCount=rows.Count(x=>x.Status=="CALCULATED"),BlockedCount=blocked.Count,SkippedCount=rows.Count(x=>x.Status=="SKIPPED"),GrossTotal=run.GrossTotal,DeductionTotal=run.DeductionTotal,NetTotal=run.NetTotal,BlockingEmployeeIds=blocked,CanApprove=run.Status=="CALCULATED"&&blocked.Count==0&&rows.Count==run.EmployeeCount}};
+  return new Result<PayrollRunReviewDto>{Success=true,MethodResult=new PayrollRunReviewDto{RunId=id,Status=run.Status,EmployeeCount=rows.Count,CalculatedCount=rows.Count(x=>x.Status=="CALCULATED"),BlockedCount=blocked.Count,SkippedCount=rows.Count(x=>x.Status=="SKIPPED"),GrossTotal=run.GrossTotal,DeductionTotal=run.DeductionTotal,NetTotal=run.NetTotal,BlockingEmployeeIds=blocked,IsReviewed=!string.IsNullOrWhiteSpace(run.ReviewedBy)&&run.ReviewedAtUtc is not null,CanApprove=run.Status=="CALCULATED"&&blocked.Count==0&&rows.Count==run.EmployeeCount}};
  }
  public async Task<Result> Record(string c,string id,string actor,PayrollRunReviewRequestDto request)
  {

@@ -58,7 +58,10 @@ public sealed class PayrollLifecycleIntegrationTests
         var reviewView = await review.Get("company-1", run.Id);
         Assert.True(reviewView.Success);
         Assert.True(reviewView.MethodResult!.CanApprove);
+        Assert.False(reviewView.MethodResult.IsReviewed);
         Assert.True((await review.Record("company-1", run.Id, "reviewer", new PayrollRunReviewRequestDto { Comment = "Checked totals" })).Success);
+        reviewView = await review.Get("company-1", run.Id);
+        Assert.True(reviewView.MethodResult!.IsReviewed);
         Assert.True((await workflow.Approve("company-1", run.Id, "approver")).Success);
         Assert.True((await workflow.Process("company-1", run.Id, "processor")).Success);
 
@@ -66,7 +69,7 @@ public sealed class PayrollLifecycleIntegrationTests
         Assert.True(createdBatch.Success);
         Assert.Equal(65200m, createdBatch.MethodResult!.TotalNetAmount);
         Assert.True((await payment.Submit("company-1", createdBatch.MethodResult.Id, "payment-operator", new PaymentBatchRequestDto { ProviderReference = "bank-file-2026-09" })).Success);
-        Assert.True((await payment.Reconcile("company-1", createdBatch.MethodResult.Id, "reconciler", new PaymentBatchRequestDto { Note = "Bank settlement confirmed" })).Success);
+        Assert.True((await payment.Reconcile("company-1", createdBatch.MethodResult.Id, "reconciler", new PaymentBatchRequestDto { Note = "Bank settlement confirmed", PaymentConfirmed = true })).Success);
         Assert.True((await workflow.Close("company-1", run.Id, "closer")).Success);
 
         Assert.Equal("CLOSED", run.Status);

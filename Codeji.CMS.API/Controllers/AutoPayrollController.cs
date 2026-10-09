@@ -38,13 +38,14 @@ public class AutoPayrollController : BaseApiController
     {
         var result = new Result();
 
-        var currentPeriod = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
         var requestPeriod = new DateTime(model.PayMonth.Year, model.PayMonth.Month, 1);
         if (!PayrollPeriodRules.IsClosedPeriod(requestPeriod, DateTime.UtcNow))
         {
             result.Success = false;
+            result.StatusCode = StatusCodes.Status422UnprocessableEntity;
+            result.ErrorCode = "PAYROLL_PERIOD_NOT_CLOSED";
             result.Message = "Payroll can be processed only for a completed month.";
-            return Ok(result);
+            return UnprocessableEntity(result);
         }
 
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -57,7 +58,7 @@ public class AutoPayrollController : BaseApiController
             // unreviewed or mutable attendance data.
             var attendanceLock = await _attendancePenaltyService.ValidateAndLock(companyId, userId, requestPeriod);
             if (!attendanceLock.Success)
-                return Ok(attendanceLock);
+                return StatusCode(attendanceLock.StatusCode >= 400 ? attendanceLock.StatusCode : 409, attendanceLock);
 
             result = await _autoPayRollServices.GeneratePayrollForMonthAsync(companyId, requestPeriod);
         }
@@ -73,6 +74,6 @@ public class AutoPayrollController : BaseApiController
             });
         }
 
-        return Ok(result);
+        return result.Success ? Ok(result) : StatusCode(result.StatusCode >= 400 ? result.StatusCode : 409, result);
     }
 }

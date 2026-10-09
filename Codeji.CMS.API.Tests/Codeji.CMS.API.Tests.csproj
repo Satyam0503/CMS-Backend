@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="../tools/PayrollReadOnlyValidation/ReadOnlyRequestPolicy.cs" Link="ReadOnlyRequestPolicy.cs" />
   </ItemGroup>
 
   <ItemGroup>

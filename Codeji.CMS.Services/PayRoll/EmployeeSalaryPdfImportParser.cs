@@ -8,8 +8,13 @@ namespace Codeji.CMS.Services.PayRoll;
 
 public static class EmployeeSalaryPdfImportParser
 {
-    private static readonly string[] RequiredNumericLabels = ["Basic Pay", "HRA", "LTA", "Other Allowance", "Bonus", "Health Insurance", "Total Deductions"];
-    public static EmployeeSalaryPdfImportParseResult Parse(Stream pdf, int rowNumber = 1)
+    private static readonly string[] RequiredNumericLabels = ["Basic Pay", "HRA", "LTA", "Other Allowance", "Bonus", "Health Insurance"];
+    private static readonly string[] AllLabels = RequiredNumericLabels
+        .Concat(["Annual CTC (INR)", "Annual CTC", "Total Deductions", "Employee Id", "Employee ID", "Employee Code", "Effective From", "Joining Date", "Start Date"])
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderByDescending(label => label.Length)
+        .ToArray();
+    public static EmployeeSalaryPdfImportParseResult Parse(Stream pdf, int rowNumber = 1, string? employeeIdFallback = null, DateTime? effectiveFromFallback = null)
     {
         var result = new EmployeeSalaryPdfImportParseResult();
         if (pdf is null || !pdf.CanRead || (pdf.CanSeek && pdf.Length == 0)) { result.Errors.Add("A readable PDF is required."); return result; }
@@ -27,10 +32,19 @@ public static class EmployeeSalaryPdfImportParser
         }
 
         var employeeId = MatchText(text, "Employee Id", "Employee ID", "Employee Code");
+        if (string.IsNullOrWhiteSpace(employeeId)) employeeId = employeeIdFallback;
         var effectiveFromText = MatchText(text, "Effective From", "Joining Date", "Start Date");
-        if (string.IsNullOrWhiteSpace(employeeId)) result.Errors.Add("Employee Id is missing from the PDF.");
-        if (!DateTime.TryParse(effectiveFromText, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var effectiveFrom))
+        if (string.IsNullOrWhiteSpace(employeeId)) result.Errors.Add("Employee Id is missing from the PDF and onboarding context.");
+        DateTime effectiveFrom;
+        if (DateTime.TryParse(effectiveFromText, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsedEffectiveFrom))
+            effectiveFrom = parsedEffectiveFrom.Date;
+        else if (string.IsNullOrWhiteSpace(effectiveFromText) && effectiveFromFallback.HasValue)
+            effectiveFrom = effectiveFromFallback.Value.Date;
+        else
+        {
+            effectiveFrom = default;
             result.Errors.Add("Effective From or Joining Date is missing or invalid.");
+        }
 
         var values = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
         foreach (var label in RequiredNumericLabels)
@@ -40,6 +54,21 @@ public static class EmployeeSalaryPdfImportParser
             else values[label] = value;
         }
 
+        var totalText = MatchText(text, "Total Deductions");
+        if (!string.IsNullOrWhiteSpace(totalText))
+        {
+            if (!TryMoney(totalText, out var total))
+                result.Errors.Add("Total Deductions is invalid.");
+            else if (values.TryGetValue("Health Insurance", out var itemizedTotal) && total != itemizedTotal)
+                result.Errors.Add("Total Deductions does not match the supported itemized deductions. Review and itemize the difference before importing.");
+        }
+        decimal? annualCtc = null;
+        var annualCtcText = MatchText(text, "Annual CTC (INR)", "Annual CTC");
+        if (!string.IsNullOrWhiteSpace(annualCtcText))
+        {
+            if (!TryMoney(annualCtcText, out var parsedAnnualCtc)) result.Errors.Add("Annual CTC is invalid.");
+            else annualCtc = parsedAnnualCtc;
+        }
         if (result.Errors.Count > 0) return result;
         var components = new List<EmployeeSalaryComponentValueDto>
         {
@@ -48,14 +77,14 @@ public static class EmployeeSalaryPdfImportParser
             Component("LTA", "LTA", values["LTA"], "EARNING"),
             Component("OTHER_ALLOWANCE", "Other Allowance", values["Other Allowance"], "EARNING"),
             Component("BONUS", "Bonus", values["Bonus"], "EARNING"),
-            Component("HEALTH_INSURANCE", "Health Insurance", values["Health Insurance"], "DEDUCTION"),
-            Component("TOTAL_DEDUCTIONS", "Total Deductions", values["Total Deductions"], "DEDUCTION")
+            Component("HEALTH_INSURANCE", "Health Insurance", values["Health Insurance"], "DEDUCTION")
         };
         var gross = components.Where(x => x.Kind == "EARNING").Sum(x => x.Value);
         result.Row = new EmployeeSalaryImportRowDto
         {
             RowNumber = rowNumber, EmployeeId = employeeId.Trim(), EffectiveFrom = effectiveFrom.Date,
-            Currency = "INR", PaymentFrequency = "MONTHLY", MonthlyGross = gross, AnnualCtc = gross * 12, Components = components
+            Currency = "INR", PaymentFrequency = "MONTHLY", MonthlyGross = gross, AnnualCtc = annualCtc ?? gross * 12,
+            AnnualCtcSource = annualCtc.HasValue ? "OFFER_PDF" : "ANNUALIZED_GROSS_ESTIMATE", Components = components
         };
         return result;
     }
@@ -68,12 +97,14 @@ public static class EmployeeSalaryPdfImportParser
 
     private static string MatchText(string text, params string[] labels)
     {
-        foreach (var label in labels)
-        {
-            var match = Regex.Match(text, $@"(?im)^\s*{Regex.Escape(label)}\s*[:\-]?\s*(?<value>.+?)\s*$");
-            if (match.Success) return match.Groups["value"].Value.Trim();
-        }
-        return string.Empty;
+        var normalized = Regex.Replace(text, @"\s+", " ").Trim();
+        var requestedLabels = string.Join("|", labels.Select(Regex.Escape));
+        var knownLabels = string.Join("|", AllLabels.Select(Regex.Escape));
+        var match = Regex.Match(
+            normalized,
+            $@"(?:{requestedLabels})\s*[:\-]?\s*(?<value>.*?)(?=(?:\s*{knownLabels})\s*[:\-]\s*|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return match.Success ? match.Groups["value"].Value.Trim() : string.Empty;
     }
 
     private static bool TryMoney(string value, out decimal result) =>

@@ -35,6 +35,20 @@ public sealed class PayrollControllerContractTests
         Assert.Equal(AppModule.PayRoll, permission.Module);
         Assert.Contains(Permission.View, permission.Permissions);
         Assert.NotEmpty(method.GetCustomAttributes<HttpPostAttribute>());
-    }}
+    }
+
+    [Fact]
+    public void Payroll_run_approval_requires_admin_and_payroll_approve_permission()
+    {
+        var method = typeof(PayrollRunWorkflowController).GetMethod("Approve", BindingFlags.Instance | BindingFlags.Public);
+        Assert.NotNull(method);
+        var permission = method!.GetCustomAttributes<ModulePermissionAttribute>().Single();
+        var authorization = method.GetCustomAttribute<AuthorizeAttribute>();
+        Assert.Equal(AppModule.PayRoll, permission.Module);
+        Assert.Contains(Permission.Approve, permission.Permissions);
+        Assert.NotNull(authorization);
+        Assert.Equal("AdminOnly", authorization!.Policy);
+    }
+}
 
 

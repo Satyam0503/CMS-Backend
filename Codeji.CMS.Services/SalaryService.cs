@@ -127,7 +127,8 @@ namespace Codeji.CMS.Services
                     companyId);
             }
             var activeSalaryByUserId = activeSalaries
-                .GroupBy(s => s.UserId)
+                .Where(s => s.UserId.HasValue)
+                .GroupBy(s => s.UserId!.Value)
                 .ToDictionary(
                     group => group.Key,
                     group => group.OrderByDescending(s => s.EffectiveFrom).First());

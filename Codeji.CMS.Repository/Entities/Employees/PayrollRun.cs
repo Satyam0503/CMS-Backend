@@ -13,10 +13,12 @@ public sealed class PayrollRun
     public required DateTime PayDate { get; set; }
     public string RunType { get; set; } = "REGULAR";
     public string Status { get; set; } = "DRAFT";
+    public bool IsActive { get; set; } = true;
     public string PopulationType { get; set; } = "ALL_ELIGIBLE";
     public string? DepartmentId { get; set; }
     public string? PayGroupId { get; set; }
     public string? IdempotencyKey { get; set; }
+    public string? RequestFingerprint { get; set; }
     public int Version { get; set; } = 1;
     public PayrollConfigurationSnapshot ConfigurationSnapshot { get; set; } = new();
     public int EmployeeCount { get; set; }
@@ -47,8 +49,13 @@ public sealed class PayrollConfigurationSnapshot
     public string LopCalculationBase { get; set; } = "FIXED_GROSS";
     public string EpfMode { get; set; } = "CAPPED_CEILING";
     public decimal EpfWageCeiling { get; set; }
+    public decimal EpfEmployeeRatePercent { get; set; } = 12m;
+    public decimal EpfEmployerRatePercent { get; set; } = 12m;
     public string EsicMode { get; set; } = "STATUTORY";
+    public decimal EsicWageCeiling { get; set; } = 21000m;
     public string TdsMode { get; set; } = "AUTO_NEW_REGIME";
+    public decimal EsicEmployeeRatePercent { get; set; } = 0.75m;
+    public decimal EsicEmployerRatePercent { get; set; } = 3.25m;
     public bool RequireAttendanceLock { get; set; }
     public DateTime CapturedAtUtc { get; set; }
 }
@@ -81,12 +88,25 @@ public sealed class PayrollEmployeeInputSnapshot
 {
     public string? AssignmentId { get; set; }
     public int AssignmentVersion { get; set; }
+    public string? SalaryStructureId { get; set; }
+    public int SalaryStructureVersion { get; set; }
+    public List<PayrollSalaryStructureSnapshot> SalaryStructures { get; set; } = [];
     public string? SalaryTemplateId { get; set; }
     public int SalaryTemplateVersion { get; set; }
     public string? PayGroupId { get; set; }
     public int PayGroupVersion { get; set; }
     public string? PolicyProfileId { get; set; }
     public int PolicyProfileVersion { get; set; }
+    public string EpfMode { get; set; } = string.Empty;
+    public decimal EpfWageCeiling { get; set; } = 15000m;
+    public decimal EpfEmployeeRatePercent { get; set; } = 12m;
+    public decimal EpfEmployerRatePercent { get; set; } = 12m;
+    public string EsicMode { get; set; } = string.Empty;
+    public decimal EsicWageCeiling { get; set; } = 21000m;
+    public decimal EsicEmployeeRatePercent { get; set; } = 0.75m;
+    public decimal EsicEmployerRatePercent { get; set; } = 3.25m;
+    public string TdsMode { get; set; } = string.Empty;
+    public bool? RequireAttendanceLock { get; set; }
     public List<PayrollComponentSnapshot> Components { get; set; } = [];
 }
 
@@ -110,7 +130,20 @@ public sealed class PayrollComponentSnapshot
     public string? BaseComponentCode { get; set; }
     public decimal Value { get; set; }
     public bool IsTaxable { get; set; }
+    public bool IsRecurring { get; set; } = true;
+    public bool IsStatutory { get; set; }
+    public bool IsEmployerContribution { get; set; }
     public int SortOrder { get; set; }
+}
+
+public sealed class PayrollSalaryStructureSnapshot
+{
+    public string SalaryStructureId { get; set; } = string.Empty;
+    public int Version { get; set; }
+    public string? PayGroupId { get; set; }
+    public DateTime EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+    public List<PayrollComponentSnapshot> Components { get; set; } = [];
 }
 
 public sealed class PayrollRunAuditEvent

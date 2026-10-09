@@ -116,8 +116,10 @@ public class PayRollServices : IPayRollServices
             salarySlipModel.HealthInsurance = payRoll.Deduction.HealthInsurance;
             salarySlipModel.EPF = payRoll.Deduction.EPF;
             salarySlipModel.ESIC = payRoll.Deduction.ESIC;
+            salarySlipModel.EsicEmployeeLabel = PayrollPayslipEarningsHtml.GetEsicEmployeeLabel(payRoll);
+            salarySlipModel.OtherDeductions = PayrollDeductionLineTotals.AdditionalAmount(payRoll.DeductionLines);
             salarySlipModel.GrossPay = payRoll.BasicPay + payRoll.Allowance.HRA + payRoll.Allowance.LTA + payRoll.Bonus + payRoll.Allowance.OtherAllowance;
-            salarySlipModel.TotalDeduction = payRoll.Deduction.IncomeTax + payRoll.Deduction.HealthInsurance + payRoll.Deduction.LossOfPay + payRoll.Deduction.EPF + payRoll.Deduction.ESIC;
+            salarySlipModel.TotalDeduction = payRoll.Deduction.IncomeTax + payRoll.Deduction.HealthInsurance + payRoll.Deduction.LossOfPay + payRoll.Deduction.EPF + payRoll.Deduction.ESIC + salarySlipModel.OtherDeductions;
             salarySlipModel.NetSalary = salarySlipModel.GrossPay - salarySlipModel.TotalDeduction;
             salarySlipModel.NetSalaryInWords = IndianCurrencyWords.ToWords(salarySlipModel.NetSalary);
 
@@ -131,6 +133,8 @@ public class PayRollServices : IPayRollServices
             }
 
             string templateContent = HtmlTemplate.Render(fileContent, salarySlipModel);
+            templateContent = templateContent.Replace("{{OtherAllowanceRows}}", PayrollPayslipEarningsHtml.RenderOtherAllowanceRows(payRoll), StringComparison.Ordinal);
+            templateContent = templateContent.Replace("{{OtherDeductionRows}}", PayrollPayslipEarningsHtml.RenderOtherDeductionRows(payRoll), StringComparison.Ordinal);
             // logic to generate pdfs
             byte[] pdfBytes = await _pdfService.GeneratePdfFormHtml(templateContent);
             string pdfName = $"{empUser.FirstName} {empUser.LastName}_{payRoll.PayMonth.ToString("MMM yyyy")}_Salary_slip.pdf";
@@ -196,10 +200,19 @@ public class PayRollServices : IPayRollServices
             {
                 errors.Add($"Row {i + 1} ({row.EmployeeId}): missing {string.Join(", ", rowMissingFields)}.");
             }
+            if (row.EarningLines.Any(x => string.IsNullOrWhiteSpace(x.Code) || string.IsNullOrWhiteSpace(x.Description) || x.Amount < 0))
+                errors.Add($"Row {i + 1} ({row.EmployeeId}): earning component lines need a code, name, and non-negative amount.");
+            if (row.EarningLines.Count > 0 && PayrollCalculationRules.RoundMoney(row.EarningLines.Sum(x => x.Amount)) != PayrollCalculationRules.RoundMoney(row.OtherAllowance ?? 0m))
+                errors.Add($"Row {i + 1} ({row.EmployeeId}): itemized other earnings must equal the Other Allowance total.");
             if ((row.BasicPay ?? 0) < 0 || (row.HRA ?? 0) < 0 || (row.LTA ?? 0) < 0 || (row.OtherAllowance ?? 0) < 0 ||
                 (row.Bonus ?? 0) < 0 || (row.LossOfPayDays ?? 0) < 0 || (row.LossOfPay ?? 0) < 0 || (row.IncomeTax ?? 0) < 0 ||
                 (row.HealthInsurance ?? 0) < 0 || (row.EPF ?? 0) < 0 || (row.ESIC ?? 0) < 0 || (row.PaidDays ?? 0) < 0)
                 errors.Add($"Row {i + 1} ({row.EmployeeId}): earnings, deductions, and day values cannot be negative.");
+            if (row.DeductionLines.Any(x => string.IsNullOrWhiteSpace(x.Code) || string.IsNullOrWhiteSpace(x.Description) || x.Amount < 0))
+                errors.Add($"Row {i + 1} ({row.EmployeeId}): deduction component lines need a code, name, and non-negative amount.");
+            if (CalculateNetPay(row.BasicPay, row.HRA, row.LTA, row.OtherAllowance, row.Bonus,
+                    row.LossOfPay, row.IncomeTax, row.HealthInsurance, row.EPF, row.ESIC, row.DeductionLines) < 0m)
+                errors.Add($"Row {i + 1} ({row.EmployeeId}): deductions exceed gross earnings; review the amounts before uploading payroll.");
         }
 
         foreach (var duplicate in payData.Select((row, index) => (row, index)).Where(x => !string.IsNullOrWhiteSpace(x.row.EmployeeId))
@@ -208,6 +221,13 @@ public class PayRollServices : IPayRollServices
 
         return errors;
     }
+
+    private static decimal CalculateNetPay(decimal? basicPay, decimal? hra, decimal? lta, decimal? otherAllowance,
+        decimal? bonus, decimal? lossOfPay, decimal? incomeTax, decimal? healthInsurance, decimal? epf, decimal? esic,
+        IEnumerable<PayrollDeductionLineDto>? deductionLines) => PayrollCalculationRules.RoundMoney(
+            (basicPay ?? 0m) + (hra ?? 0m) + (lta ?? 0m) + (otherAllowance ?? 0m) + (bonus ?? 0m) -
+            (lossOfPay ?? 0m) - (incomeTax ?? 0m) - (healthInsurance ?? 0m) - (epf ?? 0m) - (esic ?? 0m) -
+            PayrollDeductionLineTotals.AdditionalAmount(deductionLines));
 
     public async Task<Result<string>> ValidatePayrollData(PayrollValidationRequestDto model, string companyId)
     {
@@ -292,7 +312,9 @@ public class PayRollServices : IPayRollServices
                                HealthInsurance = RoundAmount(payItem.HealthInsurance),
                                EPF = RoundAmount(payItem.EPF),
                                ESIC = RoundAmount(payItem.ESIC)
-                           }
+                           },
+                           DeductionLines = MapDeductionLines(payItem.DeductionLines),
+                           EarningLines = MapEarningLines(payItem.EarningLines)
                        };
 
         var tasks = new List<Task>();
@@ -390,12 +412,14 @@ public class PayRollServices : IPayRollServices
                             HRA = payRoll?.Allowance.HRA ?? null,
                             LTA = payRoll?.Allowance.LTA ?? null,
                             OtherAllowance = payRoll?.Allowance.OtherAllowance ?? null,
+                            EarningLines = payRoll?.EarningLines.Select(x => new PayrollEarningLineDto { Code = x.Code, Description = x.Description, Amount = x.Amount }).ToList() ?? [],
                             LossOfPayDays = payRoll?.Deduction.LossOfPayDays ?? null,
                             LossOfPay = payRoll?.Deduction.LossOfPay ?? null,
                             IncomeTax = payRoll?.Deduction.IncomeTax ?? null,
                             HealthInsurance = payRoll?.Deduction.HealthInsurance ?? null,
                             EPF = payRoll?.Deduction.EPF ?? null,
                             ESIC = payRoll?.Deduction.ESIC ?? null,
+                            DeductionLines = payRoll?.DeductionLines.Select(x => new PayrollDeductionLineDto { Code = x.Code, Description = x.Description, DayFraction = x.DayFraction, Amount = x.Amount, SourceId = x.SourceId }).ToList() ?? [],
                             IsProcessed = payRoll != null && (payRoll.IsProcessed || IsPayrollInProcessedState(payRoll)),
                             ApprovalStatus = payRoll?.ApprovalStatus,
                             WorkflowStatus = payRoll == null ? "DRAFT" : GetEffectiveWorkflowStatus(payRoll),
@@ -449,8 +473,16 @@ public class PayRollServices : IPayRollServices
         model.PayMonth = new DateTime(model.PayMonth.Year, model.PayMonth.Month, 1);
         var monetaryValues = new[] { model.BasicPay, model.Bonus ?? 0, model.HRA ?? 0, model.LTA ?? 0, model.OtherAllowance ?? 0,
             model.LossOfPay ?? 0, model.IncomeTax ?? 0, model.HealthInsurance ?? 0, model.EPF ?? 0, model.ESIC ?? 0 };
-        if (monetaryValues.Any(x => x < 0) || model.PaidDays < 0 || (model.LossOfPayDays ?? 0) < 0)
+        if (monetaryValues.Any(x => x < 0) || model.PaidDays < 0 || (model.LossOfPayDays ?? 0) < 0 ||
+            model.EarningLines.Any(x => string.IsNullOrWhiteSpace(x.Code) || string.IsNullOrWhiteSpace(x.Description) || x.Amount < 0) ||
+            (model.EarningLines.Count > 0 && PayrollCalculationRules.RoundMoney(model.EarningLines.Sum(x => x.Amount)) != PayrollCalculationRules.RoundMoney(model.OtherAllowance ?? 0m)))
             return new Result { Success=false, StatusCode=StatusCodes.Status400BadRequest, Message="Earnings, deductions, and day values cannot be negative." };
+        if (model.DeductionLines.Any(x => string.IsNullOrWhiteSpace(x.Code) || string.IsNullOrWhiteSpace(x.Description) || x.Amount < 0))
+            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Deduction component lines need a code, name, and non-negative amount." };
+        var calculatedNetPay = CalculateNetPay(model.BasicPay, model.HRA, model.LTA, model.OtherAllowance, model.Bonus,
+            model.LossOfPay, model.IncomeTax, model.HealthInsurance, model.EPF, model.ESIC, model.DeductionLines);
+        if (calculatedNetPay < 0m)
+            return new Result { Success = false, StatusCode = StatusCodes.Status422UnprocessableEntity, ErrorCode = "PAYROLL_NET_NEGATIVE", Message = "Deductions exceed gross earnings. Review the payroll inputs; this employee's payroll was not saved." };
         EmpUser? empUser = await _employeeRepository.FirstOrDefault(e => e.EmployeeId == model.EmployeeId && e.CompanyId == companyId);
         if (empUser == null) return result;
         if (await _empPayRollRepository.Exist(p => p.CompanyId == companyId &&
@@ -512,6 +544,7 @@ public class PayRollServices : IPayRollServices
                     ESIC = model.ESIC ?? 0
                 },
                 DeductionLines = MapDeductionLines(model.DeductionLines),
+                EarningLines = MapEarningLines(model.EarningLines),
                 CalculationSnapshot = MapSnapshot(model.CalculationSnapshot)
             };
             try
@@ -550,6 +583,7 @@ public class PayRollServices : IPayRollServices
         {
             // update existing
             Expression<Func<EmpPayRoll, bool>> updateExpression = p => p.Id == payRoll.Id && p.CompanyId == companyId && p.EmployeeId == empUser.EmployeeId && p.PayMonth == model.PayMonth;
+            var otherAllowanceChanged = PayrollCalculationRules.RoundMoney(payRoll.Allowance.OtherAllowance) != PayrollCalculationRules.RoundMoney(model.OtherAllowance ?? 0m);
             payRoll.UserId = empUser.UserId; // self-heal a stale UserId link found via the unique key
             payRoll.BasicPay = model.BasicPay;
             payRoll.Bonus = model.Bonus ?? 0;
@@ -565,7 +599,12 @@ public class PayRollServices : IPayRollServices
             payRoll.Deduction.HealthInsurance = model.HealthInsurance ?? 0;
             payRoll.Deduction.EPF = model.EPF ?? 0;
             payRoll.Deduction.ESIC = model.ESIC ?? 0;
-            payRoll.DeductionLines = MapDeductionLines(model.DeductionLines);
+            if (model.ReplaceDeductionLines || model.DeductionLines.Count > 0)
+                payRoll.DeductionLines = MapDeductionLines(model.DeductionLines);
+            if (model.ReplaceEarningLines || model.EarningLines.Count > 0)
+                payRoll.EarningLines = MapEarningLines(model.EarningLines);
+            else if (otherAllowanceChanged)
+                payRoll.EarningLines = [];
             payRoll.CalculationSnapshot = MapSnapshot(model.CalculationSnapshot);
             result = await _empPayRollRepository.Update(updateExpression, payRoll);
         }
@@ -633,7 +672,7 @@ public class PayRollServices : IPayRollServices
         if (!IsEffectivelyProcessed(payroll))
             return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "Payroll must be processed before payment is recorded." };
         var grossPay = payroll.BasicPay + (payroll.Allowance?.HRA ?? 0m) + (payroll.Allowance?.LTA ?? 0m) + (payroll.Allowance?.OtherAllowance ?? 0m) + payroll.Bonus;
-        var totalDeductions = (payroll.Deduction?.LossOfPay ?? 0m) + (payroll.Deduction?.IncomeTax ?? 0m) + (payroll.Deduction?.HealthInsurance ?? 0m) + (payroll.Deduction?.EPF ?? 0m) + (payroll.Deduction?.ESIC ?? 0m);
+        var totalDeductions = (payroll.Deduction?.LossOfPay ?? 0m) + (payroll.Deduction?.IncomeTax ?? 0m) + (payroll.Deduction?.HealthInsurance ?? 0m) + (payroll.Deduction?.EPF ?? 0m) + (payroll.Deduction?.ESIC ?? 0m) + PayrollDeductionLineTotals.AdditionalAmount(payroll.DeductionLines);
         if (grossPay - totalDeductions <= 0m)
             return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "Payroll has no positive net payable amount and cannot be recorded as a payment." };
         if (IsPaymentFinal(payroll))
@@ -738,14 +777,33 @@ public class PayRollServices : IPayRollServices
         Code = x.Code, Description = x.Description, DayFraction = x.DayFraction, Amount = x.Amount, SourceId = x.SourceId
     }).ToList();
 
+    private static List<PayrollEarningLine> MapEarningLines(IEnumerable<PayrollEarningLineDto> lines) => lines.Select(x => new PayrollEarningLine
+    {
+        Code = x.Code.Trim().ToUpperInvariant(), Description = x.Description.Trim(), Amount = RoundAmount(x.Amount)
+    }).ToList();
+
     private static PayrollCalculationSnapshot? MapSnapshot(PayrollCalculationSnapshotDto? x) => x == null ? null : new PayrollCalculationSnapshot
     {
         PayrollMonth=x.PayrollMonth, JoiningDateUsed=x.JoiningDateUsed, ExitDateUsed=x.ExitDateUsed,
         EligibleFrom=x.EligibleFrom, EligibleTo=x.EligibleTo, DivisorPolicy=x.DivisorPolicy, Divisor=x.Divisor, DivisorPolicyVersion=x.DivisorPolicyVersion,
         LhdCount=x.LhdCount, EdCount=x.EdCount, CombinedCount=x.CombinedCount, AllowedCount=x.AllowedCount,
-        ExceededCount=x.ExceededCount, ExceptionDecision=x.ExceptionDecision, PenaltyDayFraction=x.PenaltyDayFraction, PayrollAssignmentId=x.PayrollAssignmentId, PayGroupId=x.PayGroupId, SalaryTemplateId=x.SalaryTemplateId, ResolvedPolicyProfileId=x.ResolvedPolicyProfileId, ResolvedPolicyVersion=x.ResolvedPolicyVersion, EpfMode=x.EpfMode, EpfWageCeiling=x.EpfWageCeiling, EsicMode=x.EsicMode, EsicWageCeiling=x.EsicWageCeiling, TdsMode=x.TdsMode,
+        ExceededCount=x.ExceededCount, ExceptionDecision=x.ExceptionDecision, PenaltyDayFraction=x.PenaltyDayFraction, PayrollAssignmentId=x.PayrollAssignmentId, PayGroupId=x.PayGroupId, SalaryTemplateId=x.SalaryTemplateId, ResolvedPolicyProfileId=x.ResolvedPolicyProfileId, ResolvedPolicyVersion=x.ResolvedPolicyVersion, EpfMode=x.EpfMode, EpfWageCeiling=x.EpfWageCeiling, EpfEmployeeRatePercent=x.EpfEmployeeRatePercent, EpfEmployerRatePercent=x.EpfEmployerRatePercent, EsicMode=x.EsicMode, EsicWageCeiling=x.EsicWageCeiling, EsicEmployeeRatePercent=x.EsicEmployeeRatePercent, EsicEmployerRatePercent=x.EsicEmployerRatePercent, TdsMode=x.TdsMode,
         PenaltyAmount=x.PenaltyAmount, PolicyId=x.PolicyId, PolicyVersion=x.PolicyVersion,
-        AttendanceSummaryVersion=x.AttendanceSummaryVersion
+        AttendanceSummaryVersion=x.AttendanceSummaryVersion,
+        PayrollAssignmentVersion=x.PayrollAssignmentVersion, PayGroupVersion=x.PayGroupVersion, SalaryTemplateVersion=x.SalaryTemplateVersion,
+        SalaryRevisions=x.SalaryRevisions.Select(s => new PayrollSalaryRevisionReference { SalaryStructureId=s.SalaryStructureId, Version=s.Version }).ToList(),
+        SalaryStructures=x.SalaryStructures.Select(s => new PayrollSalaryStructureSnapshot
+        {
+            SalaryStructureId=s.SalaryStructureId, Version=s.Version, PayGroupId=s.PayGroupId,
+            EffectiveFrom=s.EffectiveFrom, EffectiveTo=s.EffectiveTo,
+            Components=s.Components.Select(c => new PayrollComponentSnapshot
+            {
+                Code=c.Code, Name=c.Name, Kind=c.Kind, CalculationType=c.CalculationType,
+                BaseComponentCode=c.BaseComponentCode, Value=c.Value, IsTaxable=c.IsTaxable,
+                IsRecurring=c.IsRecurring, IsStatutory=c.IsStatutory,
+                IsEmployerContribution=c.IsEmployerContribution, SortOrder=c.SortOrder
+            }).ToList()
+        }).ToList()
     };
     public async Task<Result> ApprovePayrollMonth(DateTime payMonth, string companyId, string approvedBy)
     {

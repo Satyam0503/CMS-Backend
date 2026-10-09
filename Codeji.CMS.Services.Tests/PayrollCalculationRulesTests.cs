@@ -1,5 +1,29 @@
+using Codeji.CMS.Repository.Entities.Employees;
 public class PayrollCalculationRulesTests
 {
+    [Fact]
+    public void Automatic_tds_rejects_non_taxable_earning_without_rule_specific_exemption_inputs()
+    {
+        var issue = PayrollCalculationRules.FindUnsupportedAutomaticTdsTreatment(
+            [new PayrollComponentSnapshot { Code = "MEAL", Name = "Meal", Kind = "EARNING", IsTaxable = false }],
+            "AUTO_NEW_REGIME");
+
+        Assert.Contains("exemption category, eligibility, or evidence", issue);
+        Assert.Contains("MEAL", issue);
+    }
+
+    [Fact]
+    public void Automatic_tds_accepts_taxable_earnings_and_manual_mode_does_not_project_them()
+    {
+        var taxable = new[] { new PayrollComponentSnapshot { Code = "BASIC", Name = "Basic", Kind = "EARNING", IsTaxable = true } };
+        var nonTaxableDeduction = new[] { new PayrollComponentSnapshot { Code = "LOAN", Name = "Loan recovery", Kind = "DEDUCTION", IsTaxable = false } };
+
+        Assert.Null(PayrollCalculationRules.FindUnsupportedAutomaticTdsTreatment(taxable, "AUTO_NEW_REGIME"));
+        Assert.Null(PayrollCalculationRules.FindUnsupportedAutomaticTdsTreatment(nonTaxableDeduction, "AUTO_NEW_REGIME"));
+        Assert.Null(PayrollCalculationRules.FindUnsupportedAutomaticTdsTreatment(
+            [new PayrollComponentSnapshot { Code = "MEAL", Name = "Meal", Kind = "EARNING", IsTaxable = false }], "MANUAL_ONLY"));
+    }
+
     [Theory]
     [InlineData("CALENDAR_DAYS", 31, 22, 31)]
     [InlineData("FIXED_30_DAYS", 31, 22, 30)]
@@ -55,6 +79,26 @@ public class PayrollCalculationRulesTests
     }
 
     [Theory]
+    [InlineData("CAPPED_CEILING", 15000, 10, 1500)]
+    [InlineData("ACTUAL_BASIC_12", 12345.67, 10.5, 1296.30)]
+    public void Calculates_epf_from_configured_rate_without_intermediate_rounding(
+        string epfMode,
+        decimal earnedBasicAfterLop,
+        decimal ratePercent,
+        decimal expectedEpf)
+    {
+        var epf = PayrollCalculationRules.CalculateMonthlyEpf(epfMode, earnedBasicAfterLop, 15000m, ratePercent);
+        Assert.Equal(expectedEpf, epf);
+    }
+
+    [Fact]
+    public void Uses_configured_esic_employee_rate()
+    {
+        var esic = PayrollCalculationRules.CalculateMonthlyEsic("STATUTORY", 20000m, 20000m, 21000m, 1m);
+        Assert.Equal(200m, esic);
+    }
+
+    [Theory]
     [InlineData("EXEMPT", 18000, 18000, 0)]
     [InlineData("STATUTORY", 18000, 18000, 135)]
     [InlineData("STATUTORY", 18500, 18500, 139)] // 18500 * 0.0075 = 138.75 -> ceiling to next rupee = 139
@@ -105,6 +149,19 @@ public class PayrollCalculationRulesTests
 
         Assert.Equal(10400m, monthlyTds);
     }
+
+    [Theory]
+    [InlineData("AUTO_NEW_REGIME")]
+    [InlineData("auto_old_regime")]
+    [InlineData("MANUAL_ONLY")]
+    [InlineData(null)]
+    [InlineData("")]
+    public void Accepts_only_supported_tds_modes_with_legacy_blank_default(string? tdsMode) =>
+        Assert.True(PayrollCalculationRules.IsSupportedTdsMode(tdsMode));
+
+    [Fact]
+    public void Rejects_unknown_tds_mode_instead_of_silently_using_new_regime() =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => PayrollCalculationRules.CalculateAnnualIncomeTaxWithCess(1675000m, "AUTO_NEW_REGIMEE"));
 
     [Theory]
     [InlineData("A", 1)]

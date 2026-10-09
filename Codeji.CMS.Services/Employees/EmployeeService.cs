@@ -2400,7 +2400,7 @@ if (specialLeaveError is not null)
             var deductions = payrollAlreadyProcessed
                 ? 0m
                 : payroll is not null
-                    ? payroll.Deduction.LossOfPay + payroll.Deduction.IncomeTax + payroll.Deduction.HealthInsurance + payroll.Deduction.EPF + payroll.Deduction.ESIC + payroll.DeductionLines.Sum(x => x.Amount)
+                    ? payroll.Deduction.LossOfPay + payroll.Deduction.IncomeTax + payroll.Deduction.HealthInsurance + payroll.Deduction.EPF + payroll.Deduction.ESIC + PayrollDeductionLineTotals.AdditionalAmount(payroll.DeductionLines)
                     : payrollRunSource!.DeductionAmount;
             settlement.SalaryPayable = salaryPayable; settlement.Reimbursements = 0; settlement.LeaveEncashment = 0; settlement.BonusesAndIncentives = payrollBonus; settlement.Deductions = deductions; settlement.NoticeRecovery = approvedNoticeRecovery; settlement.OutstandingDues = 0;
             settlement.SourcePayrollId = payroll?.Id;

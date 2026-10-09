@@ -11,6 +11,39 @@ namespace Codeji.CMS.Services.Tests;
 public sealed class PayrollTemplateServiceTests
 {
     [Fact]
+    public async Task DeletePolicyDraft_DeletesOnlyMatchingCompanyDraftVersion()
+    {
+        var policies = Repository<PayrollPolicyProfile>();
+        policies.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<PayrollPolicyProfile, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(new PayrollPolicyProfile { Id = "policy-1", CompanyId = "company-1", Name = "Draft", ApprovalStatus = "DRAFT", Version = 3 });
+        policies.Setup(x => x.Delete(It.IsAny<FilterDefinition<PayrollPolicyProfile>>()))
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+        var service = new PayrollTemplateService(policies.Object, Repository<SalaryTemplate>().Object, Repository<PayrollPayGroup>().Object);
+
+        var result = await service.DeletePolicyDraft("company-1", "policy-1", 3);
+
+        Assert.True(result.Success);
+        policies.Verify(x => x.Delete(It.IsAny<FilterDefinition<PayrollPolicyProfile>>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("SUBMITTED")]
+    [InlineData("APPROVED")]
+    public async Task DeletePolicyDraft_PreservesSubmittedAndApprovedHistory(string status)
+    {
+        var policies = Repository<PayrollPolicyProfile>();
+        policies.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<PayrollPolicyProfile, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(new PayrollPolicyProfile { Id = "policy-1", CompanyId = "company-1", Name = "Policy", ApprovalStatus = status, Version = 3 });
+        var service = new PayrollTemplateService(policies.Object, Repository<SalaryTemplate>().Object, Repository<PayrollPayGroup>().Object);
+
+        var result = await service.DeletePolicyDraft("company-1", "policy-1", 3);
+
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        policies.Verify(x => x.Delete(It.IsAny<FilterDefinition<PayrollPolicyProfile>>()), Times.Never);
+    }
+
+    [Fact]
     public async Task SavePolicy_RejectsUnsupportedDivisorBeforePersistence()
     {
         var policies = Repository<PayrollPolicyProfile>();
@@ -243,6 +276,36 @@ public sealed class PayrollTemplateServiceTests
     }
 
     [Fact]
+    public async Task SavePolicy_RejectsEditingApprovedVersionAndRequiresNewDatedVersion()
+    {
+        var policies = Repository<PayrollPolicyProfile>();
+        var approved = new PayrollPolicyProfile
+        {
+            Id = "approved-policy", CompanyId = "company-1", Name = "Company rules",
+            Version = 4, ApprovalStatus = "APPROVED", EffectiveFrom = new DateTime(2026, 9, 1),
+            EpfMode = "EXEMPT", EsicMode = "EXEMPT", TdsMode = "MANUAL_ONLY"
+        };
+        policies.Setup(x => x.FirstOrDefault(
+                It.IsAny<Expression<Func<PayrollPolicyProfile, bool>>>(), false, true))
+            .ReturnsAsync(approved);
+        var service = new PayrollTemplateService(
+            policies.Object, Repository<SalaryTemplate>().Object, Repository<PayrollPayGroup>().Object);
+
+        var result = await service.SavePolicy("company-1", "actor", new PayrollPolicyProfileDto
+        {
+            Id = approved.Id, Version = approved.Version, Name = approved.Name,
+            EffectiveFrom = approved.EffectiveFrom, EpfMode = "EXEMPT", EsicMode = "EXEMPT",
+            TdsMode = "MANUAL_ONLY", EpfEmployeeRatePercent = 10m
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Contains("immutable", result.Message, StringComparison.OrdinalIgnoreCase);
+        policies.Verify(x => x.Update(
+            It.IsAny<FilterDefinition<PayrollPolicyProfile>>(), It.IsAny<PayrollPolicyProfile>()), Times.Never);
+    }
+
+    [Fact]
     public async Task SavePolicy_RejectsDuplicateNameAndStartDate()
     {
         var policies = Repository<PayrollPolicyProfile>();
@@ -267,7 +330,7 @@ public sealed class PayrollTemplateServiceTests
     {
         var policies = Repository<PayrollPolicyProfile>();
         var approved = new PayrollPolicyProfile { Id = "policy-1", CompanyId = "company-1", Name = "Approved", ApprovalStatus = "APPROVED", Version = 3, EffectiveFrom = new DateTime(2026, 9, 1), EpfMode = "CAPPED_CEILING", EsicMode = "STATUTORY" };
-        policies.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<PayrollPolicyProfile, bool>>>(), It.IsAny<bool>())).ReturnsAsync(approved);
+        policies.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<PayrollPolicyProfile, bool>>>(), false, true)).ReturnsAsync(approved);
         var service = new PayrollTemplateService(policies.Object, Repository<SalaryTemplate>().Object, Repository<PayrollPayGroup>().Object);
 
         var result = await service.SavePolicy("company-1", "actor", new PayrollPolicyProfileDto
@@ -296,6 +359,120 @@ public sealed class PayrollTemplateServiceTests
         Assert.False(result.Success);
         Assert.Equal(400, result.StatusCode);
         components.Verify(x => x.AddOne(It.IsAny<PayrollSalaryComponentDefinition>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SaveComponent_AppendsNewEffectiveVersionWithoutRewritingHistory()
+    {
+        var prior = new PayrollSalaryComponentDefinition
+        {
+            Id = "bonus-v1", CompanyId = "company-1", Code = "BONUS", Name = "Bonus",
+            Kind = "EARNING", CalculationType = "FIXED", IsTaxable = true,
+            EffectiveFrom = new DateTime(2026, 1, 1), IsActive = true, Version = 1
+        };
+        var components = Repository<PayrollSalaryComponentDefinition>();
+        PayrollSalaryComponentDefinition? closedPrior = null;
+        components.Setup(x => x.GetAll(It.IsAny<Expression<Func<PayrollSalaryComponentDefinition, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .Returns((Expression<Func<PayrollSalaryComponentDefinition, bool>> predicate, bool _, bool _) =>
+                Task.FromResult<IEnumerable<PayrollSalaryComponentDefinition>>(new[] { prior }.Where(predicate.Compile()).ToArray()));
+        components.Setup(x => x.Update(It.IsAny<FilterDefinition<PayrollSalaryComponentDefinition>>(), It.IsAny<PayrollSalaryComponentDefinition>()))
+            .Callback<FilterDefinition<PayrollSalaryComponentDefinition>, PayrollSalaryComponentDefinition>((_, value) => closedPrior = value)
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+        var service = new PayrollTemplateService(Repository<PayrollPolicyProfile>().Object, Repository<SalaryTemplate>().Object, Repository<PayrollPayGroup>().Object, components.Object);
+
+        var result = await service.SaveComponent("company-1", "actor", new PayrollSalaryComponentDto
+        {
+            Id = prior.Id, Version = prior.Version, Code = "BONUS", Name = "Bonus",
+            Kind = "EARNING", CalculationType = "FIXED", IsTaxable = true,
+            EffectiveFrom = new DateTime(2026, 10, 5), IsActive = false
+        });
+
+        Assert.True(result.Success);
+        Assert.True(prior.IsActive);
+        Assert.Equal(new DateTime(2026, 1, 1), prior.EffectiveFrom);
+        Assert.Equal(new DateTime(2026, 10, 4), closedPrior?.EffectiveTo);
+        components.Verify(x => x.Update(It.IsAny<FilterDefinition<PayrollSalaryComponentDefinition>>(), It.IsAny<PayrollSalaryComponentDefinition>()), Times.Once);
+        components.Verify(x => x.AddOne(It.Is<PayrollSalaryComponentDefinition>(revision =>
+            revision.Id == string.Empty && revision.CompanyId == "company-1" && revision.Code == "BONUS" &&
+            revision.EffectiveFrom == new DateTime(2026, 10, 5) && !revision.IsActive && revision.Version == 2)), Times.Once);
+    }
+
+    [Fact]
+    public async Task SaveComponent_RejectsRevisionAtOrBeforeLatestStart()
+    {
+        var prior = new PayrollSalaryComponentDefinition
+        {
+            Id = "meal-v1", CompanyId = "company-1", Code = "MEAL", Name = "Meal",
+            Kind = "EARNING", CalculationType = "FIXED", EffectiveFrom = new DateTime(2026, 10, 8),
+            IsActive = true, Version = 1
+        };
+        var components = Repository<PayrollSalaryComponentDefinition>();
+        components.Setup(x => x.GetAll(It.IsAny<Expression<Func<PayrollSalaryComponentDefinition, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync([prior]);
+        var service = new PayrollTemplateService(Repository<PayrollPolicyProfile>().Object, Repository<SalaryTemplate>().Object, Repository<PayrollPayGroup>().Object, components.Object);
+
+        var result = await service.SaveComponent("company-1", "actor", new PayrollSalaryComponentDto
+        {
+            Id = prior.Id, Version = prior.Version, Code = "MEAL", Name = "Meal",
+            Kind = "EARNING", CalculationType = "FIXED", EffectiveFrom = prior.EffectiveFrom
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        components.Verify(x => x.Update(It.IsAny<FilterDefinition<PayrollSalaryComponentDefinition>>(), It.IsAny<PayrollSalaryComponentDefinition>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SaveTemplate_RejectsComponentDisabledAtTemplateStart()
+    {
+        var definitions = new[]
+        {
+            new PayrollSalaryComponentDefinition { Id = "bonus-v1", CompanyId = "company-1", Code = "BONUS", Name = "Bonus", Kind = "EARNING", CalculationType = "FIXED", IsTaxable = true, EffectiveFrom = new DateTime(2026, 1, 1), IsActive = true, Version = 1 },
+            new PayrollSalaryComponentDefinition { Id = "bonus-v2", CompanyId = "company-1", Code = "BONUS", Name = "Bonus", Kind = "EARNING", CalculationType = "FIXED", IsTaxable = true, EffectiveFrom = new DateTime(2026, 10, 1), IsActive = false, Version = 2 }
+        };
+        var components = Repository<PayrollSalaryComponentDefinition>();
+        components.Setup(x => x.GetAll(It.IsAny<Expression<Func<PayrollSalaryComponentDefinition, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .Returns((Expression<Func<PayrollSalaryComponentDefinition, bool>> predicate, bool _, bool _) => Task.FromResult<IEnumerable<PayrollSalaryComponentDefinition>>(definitions.Where(predicate.Compile()).ToArray()));
+        var templates = Repository<SalaryTemplate>();
+        var service = new PayrollTemplateService(Repository<PayrollPolicyProfile>().Object, templates.Object, Repository<PayrollPayGroup>().Object, components.Object);
+
+        var result = await service.SaveTemplate("company-1", "actor", new SalaryTemplateDto
+        {
+            Name = "Monthly salary", EffectiveFrom = new DateTime(2026, 10, 1),
+            Components = [new PayrollSalaryTemplateComponentDto { ComponentId = "bonus-v1", Code = "BONUS", Name = "Bonus", Value = 1000m }]
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal(400, result.StatusCode);
+        templates.Verify(x => x.AddOne(It.IsAny<SalaryTemplate>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SaveTemplate_MapsTheEligibleHistoricalComponentVersionWhenTemplateEndsBeforeChange()
+    {
+        var definitions = new[]
+        {
+            new PayrollSalaryComponentDefinition { Id = "bonus-v1", CompanyId = "company-1", Code = "BONUS", Name = "Bonus v1", Kind = "EARNING", CalculationType = "FIXED", IsTaxable = true, EffectiveFrom = new DateTime(2026, 1, 1), IsActive = true, Version = 1 },
+            new PayrollSalaryComponentDefinition { Id = "bonus-v2", CompanyId = "company-1", Code = "BONUS", Name = "Bonus v2", Kind = "EARNING", CalculationType = "FIXED", IsTaxable = false, EffectiveFrom = new DateTime(2026, 10, 1), IsActive = true, Version = 2 }
+        };
+        var components = Repository<PayrollSalaryComponentDefinition>();
+        components.Setup(x => x.GetAll(It.IsAny<Expression<Func<PayrollSalaryComponentDefinition, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .Returns((Expression<Func<PayrollSalaryComponentDefinition, bool>> predicate, bool _, bool _) => Task.FromResult<IEnumerable<PayrollSalaryComponentDefinition>>(definitions.Where(predicate.Compile()).ToArray()));
+        var templates = Repository<SalaryTemplate>();
+        SalaryTemplate? saved = null;
+        templates.Setup(x => x.AddOne(It.IsAny<SalaryTemplate>())).Callback<SalaryTemplate>(value => saved = value).ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+        var service = new PayrollTemplateService(Repository<PayrollPolicyProfile>().Object, templates.Object, Repository<PayrollPayGroup>().Object, components.Object);
+
+        var result = await service.SaveTemplate("company-1", "actor", new SalaryTemplateDto
+        {
+            Name = "Q3 salary", EffectiveFrom = new DateTime(2026, 7, 1), EffectiveTo = new DateTime(2026, 9, 30),
+            Components = [new PayrollSalaryTemplateComponentDto { ComponentId = "bonus-v1", Code = "BONUS", Name = "Bonus", Value = 1000m }]
+        });
+
+        Assert.True(result.Success);
+        Assert.Equal("bonus-v1", saved?.Components.Single().ComponentId);
+        Assert.Equal("Bonus v1", saved?.Components.Single().Name);
+        Assert.True(saved?.Components.Single().IsTaxable);
     }
     [Fact]
     public async Task ApprovePolicy_IsTenantScopedAndRequiresSubmittedState()
@@ -348,6 +525,28 @@ public sealed class PayrollTemplateServiceTests
         Assert.False(result.Success);
         Assert.Equal(403, result.StatusCode);
         policies.Verify(x => x.Update(It.IsAny<FilterDefinition<PayrollPolicyProfile>>(), It.IsAny<PayrollPolicyProfile>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ApprovePolicy_AllowsCompanyAdministratorToApproveTheirOwnSubmission()
+    {
+        var policies = Repository<PayrollPolicyProfile>();
+        var policy = new PayrollPolicyProfile
+        {
+            Id = "policy-1", CompanyId = "company-1", Name = "Statutory", ApprovalStatus = "SUBMITTED",
+            CreatedBy = "admin", SubmittedBy = "admin", Version = 2, EffectiveFrom = new DateTime(2026, 9, 1),
+            StatutoryJurisdiction = "IN-KA", FinancialYear = "2026-27", StatutoryRuleVersion = "reviewed-2026-09"
+        };
+        policies.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<PayrollPolicyProfile, bool>>>(), It.IsAny<bool>())).ReturnsAsync(policy);
+        policies.Setup(x => x.Update(It.IsAny<FilterDefinition<PayrollPolicyProfile>>(), It.IsAny<PayrollPolicyProfile>())).ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+        var service = new PayrollTemplateService(policies.Object, Repository<SalaryTemplate>().Object, Repository<PayrollPayGroup>().Object);
+
+        var result = await service.ApprovePolicy("company-1", "admin", "policy-1", 2, isCompanyAdministrator: true);
+
+        Assert.True(result.Success);
+        Assert.Equal("APPROVED", policy.ApprovalStatus);
+        Assert.Equal("admin", policy.ApprovedBy);
+        Assert.NotNull(policy.ApprovedAtUtc);
     }
     private static Mock<IMongoDbRepository<TEntity>> Repository<TEntity>()
     {

@@ -7,6 +7,7 @@ public sealed class EmployeeSalaryImportRowDto
     public string Currency { get; set; } = "INR";
     public string PaymentFrequency { get; set; } = "MONTHLY";
     public decimal? AnnualCtc { get; set; }
+    public string? AnnualCtcSource { get; set; }
     public decimal? MonthlyGross { get; set; }
     public DateTime EffectiveFrom { get; set; }
     public DateTime? EffectiveTo { get; set; }

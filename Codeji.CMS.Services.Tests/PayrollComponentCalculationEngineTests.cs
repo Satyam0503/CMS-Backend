@@ -6,6 +6,24 @@ namespace Codeji.CMS.Services.Tests;
 public sealed class PayrollComponentCalculationEngineTests
 {
     [Fact]
+    public void Monthly_totals_exclude_one_time_earnings_and_deductions_but_keep_formula_values()
+    {
+        var result = PayrollComponentCalculationEngine.Calculate(
+        [
+            new() { Code = "BASIC", Name = "Basic", Kind = "EARNING", Value = 30000 },
+            new() { Code = "BONUS", Name = "Bonus", Kind = "EARNING", Value = 3000, IsRecurring = false },
+            new() { Code = "RECOVERY", Name = "Recovery", Kind = "DEDUCTION", Value = 1500, IsRecurring = false },
+            new() { Code = "LOAN", Name = "Loan", Kind = "DEDUCTION", Value = 500 }
+        ]);
+        Assert.True(result.Success);
+        Assert.Equal(30000m, result.Gross);
+        Assert.Equal(500m, result.Deductions);
+        Assert.Equal(29500m, result.Net);
+        Assert.Equal(3000m, result.Values["BONUS"]);
+        Assert.Equal(1500m, result.Values["RECOVERY"]);
+    }
+
+    [Fact]
     public void CalculatesFixedComponentPercentagesAndRoundsEachLine()
     {
         var result = PayrollComponentCalculationEngine.Calculate(
@@ -22,6 +40,24 @@ public sealed class PayrollComponentCalculationEngineTests
         Assert.Equal(1500.02m, result.Gross);
         Assert.Equal(150m, result.Deductions);
         Assert.Equal(1350.02m, result.Net);
+    }
+
+    [Fact]
+    public void ExcludesEmployerAndStatutoryComponentsFromEmployeeGrossAndDeductions()
+    {
+        var result = PayrollComponentCalculationEngine.Calculate(
+        [
+            new() { Code = "BASIC", Name = "Basic", Kind = "EARNING", Value = 50000 },
+            new() { Code = "ER_EPF", Name = "Employer PF", Kind = "EARNING", Value = 6000, IsStatutory = true, IsEmployerContribution = true },
+            new() { Code = "PF", Name = "Employee PF", Kind = "DEDUCTION", Value = 1800, IsStatutory = true },
+            new() { Code = "ADVANCE", Name = "Advance", Kind = "DEDUCTION", Value = 1000 }
+        ]);
+
+        Assert.True(result.Success);
+        Assert.Equal(50000, result.Gross);
+        Assert.Equal(1000, result.Deductions);
+        Assert.Equal(49000, result.Net);
+        Assert.Equal(4, result.Values.Count);
     }
 
     [Fact]
@@ -88,5 +124,13 @@ public sealed class PayrollComponentCalculationEngineTests
 
         Assert.False(result.Success);
         Assert.Equal("PAYROLL_COMPONENT_VALUE_INVALID", result.ErrorCode);
+    }
+
+    [Fact]
+    public void BlocksWhenRecurringDeductionsExceedRecurringGross()
+    {
+        var result = PayrollComponentCalculationEngine.Calculate([new() { Code = "BASIC", Name = "Basic", Kind = "EARNING", Value = 1000m }, new() { Code = "LOAN", Name = "Loan", Kind = "DEDUCTION", Value = 1200m }]);
+        Assert.False(result.Success);
+        Assert.Equal("PAYROLL_NET_NEGATIVE", result.ErrorCode);
     }
 }

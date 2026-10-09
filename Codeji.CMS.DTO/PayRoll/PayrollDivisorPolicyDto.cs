@@ -14,9 +14,13 @@ public class PayrollDivisorPolicyDto
     [RegularExpression("EXEMPT|CAPPED_CEILING|ACTUAL_BASIC_12")]
     public string EpfMode { get; set; } = "CAPPED_CEILING";
     public decimal EpfWageCeiling { get; set; } = 15000m;
+    public decimal EpfEmployeeRatePercent { get; set; } = 12m;
+    public decimal EpfEmployerRatePercent { get; set; } = 12m;
     [RegularExpression("EXEMPT|STATUTORY")]
     public string EsicMode { get; set; } = "STATUTORY";
     public decimal EsicWageCeiling { get; set; } = 21000m;
+    public decimal EsicEmployeeRatePercent { get; set; } = 0.75m;
+    public decimal EsicEmployerRatePercent { get; set; } = 3.25m;
     [RegularExpression("AUTO_NEW_REGIME|AUTO_OLD_REGIME|MANUAL_ONLY")]
     public string TdsMode { get; set; } = "AUTO_NEW_REGIME";
     public bool RequireAttendanceLock { get; set; } = true;

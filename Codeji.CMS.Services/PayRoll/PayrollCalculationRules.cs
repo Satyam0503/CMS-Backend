@@ -1,7 +1,28 @@
 using System;
+using Codeji.CMS.Repository.Entities.Employees;
 
 public static class PayrollCalculationRules
 {
+    private static readonly HashSet<string> SupportedTdsModes = new(StringComparer.Ordinal)
+    {
+        "AUTO_NEW_REGIME", "AUTO_OLD_REGIME", "MANUAL_ONLY"
+    };
+
+    public static bool IsSupportedTdsMode(string? tdsMode) =>
+        SupportedTdsModes.Contains(string.IsNullOrWhiteSpace(tdsMode) ? "AUTO_NEW_REGIME" : tdsMode.Trim().ToUpperInvariant());
+
+    public static string? FindUnsupportedAutomaticTdsTreatment(
+        IEnumerable<PayrollComponentSnapshot> components, string? tdsMode)
+    {
+        var mode = string.IsNullOrWhiteSpace(tdsMode) ? "AUTO_NEW_REGIME" : tdsMode.Trim().ToUpperInvariant();
+        if (mode == "MANUAL_ONLY") return null;
+        var unsupported = components.FirstOrDefault(component =>
+            string.Equals(component.Kind, "EARNING", StringComparison.OrdinalIgnoreCase) && !component.IsTaxable);
+        return unsupported is null
+            ? null
+            : $"Automatic TDS cannot safely calculate non-taxable earning '{unsupported.Name}' ({unsupported.Code}) because this payroll version does not capture exemption category, eligibility, or evidence. Resolve the tax treatment with payroll/legal review before processing this employee.";
+    }
+
     public static decimal RoundMoney(decimal value) => Math.Round(value, 2, MidpointRounding.AwayFromZero);
     public static decimal ResolveDivisor(string policy, int calendarDays, decimal eligibleWorkingDays) => policy switch
     {
@@ -50,45 +71,50 @@ public static class PayrollCalculationRules
     public static decimal CalculateMonthlyEpf(
         string? epfMode,
         decimal earnedBasicAfterLop,
-        decimal wageCeiling = 15000m)
+        decimal wageCeiling = 15000m,
+        decimal contributionRatePercent = 12m)
     {
         var cleanBasic = Math.Max(0m, earnedBasicAfterLop);
         if (cleanBasic <= 0m) return 0m;
 
         var mode = string.IsNullOrWhiteSpace(epfMode) ? "CAPPED_CEILING" : epfMode.ToUpperInvariant();
-        return mode switch
+        var contributionBase = mode switch
         {
             "EXEMPT" => 0m,
-            "ACTUAL_BASIC_12" => RoundMoney(cleanBasic * 0.12m),
-            _ => RoundMoney(Math.Min(cleanBasic, wageCeiling <= 0m ? 15000m : wageCeiling) * 0.12m)
+            "ACTUAL_BASIC_12" => cleanBasic,
+            _ => Math.Min(cleanBasic, wageCeiling <= 0m ? 15000m : wageCeiling)
         };
+        return RoundMoney(contributionBase * contributionRatePercent / 100m);
     }
 
     public static decimal CalculateMonthlyEsic(
         string? esicMode,
         decimal contractualFixedGross,
         decimal earnedMonthlyGrossAfterLop,
-        decimal wageCeiling = 21000m)
+        decimal wageCeiling = 21000m,
+        decimal contributionRatePercent = 0.75m)
     {
         var mode = string.IsNullOrWhiteSpace(esicMode) ? "STATUTORY" : esicMode.ToUpperInvariant();
         if (mode == "EXEMPT") return 0m;
         if (contractualFixedGross > (wageCeiling <= 0m ? 21000m : wageCeiling) || earnedMonthlyGrossAfterLop <= 0m) return 0m;
 
         // Statutory ESIC employee contribution is 0.75% of gross wages, rounded up to the next rupee.
-        return Math.Ceiling(earnedMonthlyGrossAfterLop * 0.0075m);
+        return Math.Ceiling(earnedMonthlyGrossAfterLop * contributionRatePercent / 100m);
     }
 
-    public static decimal CalculateEmployerMonthlyEsic(string? esicMode, decimal contractualGross, decimal earnedMonthlyGrossAfterLop, decimal wageCeiling = 21000m)
+    public static decimal CalculateEmployerMonthlyEsic(string? esicMode, decimal contractualGross, decimal earnedMonthlyGrossAfterLop, decimal wageCeiling = 21000m, decimal contributionRatePercent = 3.25m)
     {
         var mode = string.IsNullOrWhiteSpace(esicMode) ? "STATUTORY" : esicMode.ToUpperInvariant();
         if (mode == "EXEMPT" || contractualGross > (wageCeiling <= 0m ? 21000m : wageCeiling) || earnedMonthlyGrossAfterLop <= 0m) return 0m;
-        return Math.Ceiling(earnedMonthlyGrossAfterLop * 0.0325m);
+        return Math.Ceiling(earnedMonthlyGrossAfterLop * contributionRatePercent / 100m);
     }
     public static decimal CalculateAnnualIncomeTaxWithCess(
         decimal annualGrossIncome,
         string? tdsMode = "AUTO_NEW_REGIME")
     {
-        var mode = string.IsNullOrWhiteSpace(tdsMode) ? "AUTO_NEW_REGIME" : tdsMode.ToUpperInvariant();
+        var mode = string.IsNullOrWhiteSpace(tdsMode) ? "AUTO_NEW_REGIME" : tdsMode.Trim().ToUpperInvariant();
+        if (!SupportedTdsModes.Contains(mode))
+            throw new ArgumentOutOfRangeException(nameof(tdsMode), tdsMode, "Unsupported TDS mode. Choose AUTO_NEW_REGIME, AUTO_OLD_REGIME, or MANUAL_ONLY.");
         if (mode == "MANUAL_ONLY" || annualGrossIncome <= 0m)
             return 0m;
 

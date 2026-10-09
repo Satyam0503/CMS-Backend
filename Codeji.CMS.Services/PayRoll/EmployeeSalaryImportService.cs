@@ -99,8 +99,11 @@ public sealed class EmployeeSalaryImportService(IMongoDbRepository<EmpUser> empl
 
             var dto = new EmployeeSalaryStructureDto
             {
-                EmployeeId = row.EmployeeId, Currency = row.Currency, PaymentFrequency = row.PaymentFrequency,
-                AnnualCtc = row.AnnualCtc, MonthlyGross = row.MonthlyGross, EffectiveFrom = row.EffectiveFrom, EffectiveTo = row.EffectiveTo,
+                EmployeeId = row.EmployeeId, Currency = row.Currency,
+                PaymentFrequency = string.IsNullOrWhiteSpace(row.PaymentFrequency) || string.Equals(row.PaymentFrequency.Trim(), "MONTH", StringComparison.OrdinalIgnoreCase)
+                    ? "MONTHLY"
+                    : row.PaymentFrequency.Trim().ToUpperInvariant(),
+                AnnualCtc = row.AnnualCtc, AnnualCtcSource = row.AnnualCtcSource, MonthlyGross = row.MonthlyGross, EffectiveFrom = row.EffectiveFrom, EffectiveTo = row.EffectiveTo,
                 SalaryTemplateId = row.SalaryTemplateId, PayGroupId = row.PayGroupId, EmployeeType = row.EmployeeType,
                 Source = string.IsNullOrWhiteSpace(normalizedBatchId) ? "IMPORT" : $"IMPORT:{normalizedBatchId}", Version = 1,
                 Components = row.Components
@@ -140,8 +143,11 @@ public sealed class EmployeeSalaryImportService(IMongoDbRepository<EmpUser> empl
                 x.RowNumber,
                 EmployeeId = x.EmployeeId.Trim().ToUpperInvariant(),
                 Currency = x.Currency.Trim().ToUpperInvariant(),
-                PaymentFrequency = x.PaymentFrequency.Trim().ToUpperInvariant(),
+                PaymentFrequency = string.IsNullOrWhiteSpace(x.PaymentFrequency) || string.Equals(x.PaymentFrequency.Trim(), "MONTH", StringComparison.OrdinalIgnoreCase)
+                    ? "MONTHLY"
+                    : x.PaymentFrequency.Trim().ToUpperInvariant(),
                 x.AnnualCtc,
+                x.AnnualCtcSource,
                 x.MonthlyGross,
                 EffectiveFrom = x.EffectiveFrom.Date,
                 EffectiveTo = x.EffectiveTo?.Date,
@@ -180,16 +186,41 @@ public sealed class EmployeeSalaryImportService(IMongoDbRepository<EmpUser> empl
         else if (!seen.Add(employeeId)) errors.Add("Employee appears more than once in this import.");
         if (row.EffectiveFrom == default) errors.Add("EffectiveFrom is required.");
         if (row.EffectiveTo.HasValue && row.EffectiveTo.Value.Date < row.EffectiveFrom.Date) errors.Add("EffectiveTo cannot precede EffectiveFrom.");
+        if (!string.IsNullOrWhiteSpace(row.PaymentFrequency) && !string.Equals(row.PaymentFrequency.Trim(), "MONTHLY", StringComparison.OrdinalIgnoreCase) && !string.Equals(row.PaymentFrequency.Trim(), "MONTH", StringComparison.OrdinalIgnoreCase))
+            errors.Add("Only monthly payroll is currently supported.");
         if (row.AnnualCtc.HasValue && row.AnnualCtc.Value < 0) errors.Add("AnnualCtc cannot be negative.");
         if (row.MonthlyGross.HasValue && row.MonthlyGross.Value < 0) errors.Add("MonthlyGross cannot be negative.");
         if (row.Components.Count == 0) errors.Add("At least one salary component is required.");
         var candidateEnd = row.EffectiveTo?.Date ?? DateTime.MaxValue.Date;
         if (existingSalaries.Any(x => string.Equals(x.EmployeeId, employeeId, StringComparison.OrdinalIgnoreCase) && x.EffectiveFrom.Date <= candidateEnd && (x.EffectiveTo?.Date ?? DateTime.MaxValue.Date) >= row.EffectiveFrom.Date))
             errors.Add("Salary effective dates overlap an existing approved or submitted revision.");
+        var componentCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var component in row.Components)
         {
+            if (string.Equals(component.ComponentCode?.Trim(), "TOTAL_DEDUCTIONS", StringComparison.OrdinalIgnoreCase))
+                errors.Add("Total Deductions is an aggregate. Import itemized deduction components instead.");
             if (string.IsNullOrWhiteSpace(component.ComponentCode)) errors.Add("Every component must have a code.");
+            else if (!componentCodes.Add(component.ComponentCode.Trim())) errors.Add($"Component code '{component.ComponentCode.Trim()}' is duplicated.");
             if (component.Value < 0) errors.Add($"Component {component.ComponentCode} cannot be negative.");
+        }
+        if (row.Components.Count > 0 && errors.Count == 0)
+        {
+            var calculation = PayrollComponentCalculationEngine.Calculate(row.Components.Select((component, index) => new PayrollComponentSnapshot
+            {
+                Code = component.ComponentCode.Trim(),
+                Name = component.ComponentName?.Trim() ?? component.ComponentCode.Trim(),
+                Kind = component.Kind,
+                CalculationType = component.CalculationType,
+                BaseComponentCode = component.BaseComponentCode,
+                Value = component.Value,
+                IsTaxable = component.IsTaxable,
+                IsRecurring = component.IsRecurring,
+                IsStatutory = component.IsStatutory,
+                IsEmployerContribution = component.IsEmployerContribution,
+                SortOrder = index
+            }));
+            if (!calculation.Success)
+                errors.Add(calculation.ErrorMessage ?? "Salary component formulas are invalid.");
         }
         return new EmployeeSalaryImportPreviewRowDto { RowNumber = row.RowNumber, EmployeeId = employeeId, IsValid = errors.Count == 0, Errors = errors };
     }

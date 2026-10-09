@@ -54,6 +54,31 @@ public sealed class PayrollValidationTests
         Assert.Equal("Payroll data is ready for upload.", result.Message);
     }
 
+    [Fact]
+    public async Task ValidatePayrollData_RejectsNegativeNetPayFromItemizedAndStatutoryDeductions()
+    {
+        var payroll = new Mock<IMongoDbRepository<EmpPayRoll>>();
+        var employees = new Mock<IMongoDbRepository<EmpUser>>();
+        employees.Setup(x => x.GetAll(It.IsAny<System.Linq.Expressions.Expression<Func<EmpUser, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync([new EmpUser { EmployeeId = "employee-1", CompanyId = "company-1", FirstName = "Test", LastName = "User", Email = "test@example.com" }]);
+        payroll.Setup(x => x.Exist(It.IsAny<System.Linq.Expressions.Expression<Func<EmpPayRoll, bool>>>(), It.IsAny<bool>())).ReturnsAsync(false);
+
+        var result = await CreateService(payroll, employees).ValidatePayrollData(new PayrollValidationRequestDto
+        {
+            PayMonth = new DateTime(2026, 8, 1),
+            PayData = [new EmployeePayRollModel
+            {
+                EmployeeId = "employee-1", BasicPay = 10000m, PaidDays = 31, PaidDate = new DateTime(2026, 8, 31),
+                LossOfPay = 1000m, IncomeTax = 1000m, EPF = 1000m, ESIC = 500m,
+                DeductionLines = [new PayrollDeductionLineDto { Code = "LOAN", Description = "Loan recovery", Amount = 7000m }]
+            }]
+        }, "company-1");
+
+        Assert.False(result.Success);
+        Assert.Contains(result.MethodResults, error => error.Contains("deductions exceed gross earnings", StringComparison.OrdinalIgnoreCase));
+        payroll.Verify(x => x.AddOne(It.IsAny<EmpPayRoll>()), Times.Never);
+    }
+
     private static PayRollServices CreateService(Mock<IMongoDbRepository<EmpPayRoll>> payroll, Mock<IMongoDbRepository<EmpUser>> employees) => new(
         payroll.Object,
         employees.Object,

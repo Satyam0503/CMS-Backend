@@ -67,18 +67,22 @@ public static class PayrollComponentCalculationEngine
         }
 
         var gross = PayrollCalculationRules.RoundMoney(byCode.Values
-            .Where(x => string.Equals(x.Kind, "EARNING", StringComparison.OrdinalIgnoreCase))
+            .Where(x => string.Equals(x.Kind, "EARNING", StringComparison.OrdinalIgnoreCase) &&
+                        x.IsRecurring && !x.IsStatutory && !x.IsEmployerContribution)
             .Sum(x => values[x.Code.Trim()]));
         var deductions = PayrollCalculationRules.RoundMoney(byCode.Values
-            .Where(x => string.Equals(x.Kind, "DEDUCTION", StringComparison.OrdinalIgnoreCase))
+            .Where(x => string.Equals(x.Kind, "DEDUCTION", StringComparison.OrdinalIgnoreCase) &&
+                        x.IsRecurring && !x.IsStatutory && !x.IsEmployerContribution)
             .Sum(x => values[x.Code.Trim()]));
+        if (gross < deductions)
+            return PayrollComponentCalculationOutcome.Invalid("PAYROLL_NET_NEGATIVE", "Recurring employee deductions exceed recurring gross salary. Review the salary structure before payroll can proceed.");
         return new PayrollComponentCalculationOutcome
         {
             Success = true,
             Values = values,
             Gross = Math.Max(0m, gross),
             Deductions = Math.Max(0m, deductions),
-            Net = Math.Max(0m, PayrollCalculationRules.RoundMoney(gross - deductions))
+            Net = PayrollCalculationRules.RoundMoney(gross - deductions)
         };
     }
 
@@ -121,6 +125,8 @@ public static class PayrollComponentCalculationEngine
                 decimal grossBase = 0;
                 foreach (var baseComponent in components.Values
                     .Where(x => string.Equals(x.Kind, "EARNING", StringComparison.OrdinalIgnoreCase) &&
+                                x.IsRecurring &&
+                                !x.IsStatutory && !x.IsEmployerContribution &&
                                 !string.Equals(x.CalculationType, "PERCENT_OF_GROSS", StringComparison.OrdinalIgnoreCase))
                     .OrderBy(x => x.SortOrder).ThenBy(x => x.Code, StringComparer.OrdinalIgnoreCase))
                 {
