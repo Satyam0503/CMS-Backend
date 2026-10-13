@@ -1,4 +1,4 @@
-﻿namespace Codeji.CMS.Utility.Enums
+namespace Codeji.CMS.Utility.Enums
 {
     public static class EnumsHelper
     {
@@ -32,7 +32,10 @@
         {
             Administrator = 1,
             HR = 2,
-            Employee = 3
+            Employee = 3,
+            HRExecutive = 4,
+            Agency = 5,
+            Vendor = 6
         }
         public enum MailType
         {
@@ -46,7 +49,9 @@
             LeaveMailToHR = 7,
             LeaveReplyMail = 8,
             ResignationMail = 9,
-            ResetPassword = 10,
+              ResetPassword = 10,
+              CareerPortal = 11,
+              AttendanceReminder = 12,
         }
         public enum NoticeType
         {
@@ -61,7 +66,9 @@
             LeaveRequestApproved = 3,
             LeaveRequestReject = 4,
             BirthDay = 5,
-            WorkAnniversary = 6
+            WorkAnniversary = 6,
+            WorkFromHomeRequest = 7,
+            WorkFromHomeApproved = 8
         }
         public enum NotificationPreferenceType
         {
@@ -107,6 +114,12 @@
             Yearly,
             None,
         }
+        public enum LeavePolicyType
+        {
+            Leave = 1,
+            WorkFromHome = 2,
+            UnpaidLeave = 3,
+        }
         public enum SecurityTokenType
         {
             Invite,
@@ -117,4 +130,6 @@
         }
     }
 }
+
+
 

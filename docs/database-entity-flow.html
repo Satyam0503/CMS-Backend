@@ -1,0 +1,1340 @@
+<title>Codeji Entity Relationship Diagram</title>
+<style>
+  :root {
+    --ground: #f8f7f5;
+    --surface: #ffffff;
+    --surface-alt: #f0efec;
+    --border: #d4d1cb;
+    --border-light: #e6e4df;
+    --text-primary: #1c1b19;
+    --text-secondary: #5e5c56;
+    --text-tertiary: #908d85;
+    --accent: #2d6a4f;
+    --accent-light: #d8f3dc;
+    --line-color: rgba(0,0,0,0.13);
+    --line-highlight: rgba(0,0,0,0.55);
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.12);
+    --node-shadow: 0 1px 2px rgba(0,0,0,0.06);
+    --domain-bg-alpha: 0.06;
+
+    --c-company: #0891b2;
+    --c-employees: #2563eb;
+    --c-attendance: #7c3aed;
+    --c-leave: #059669;
+    --c-payroll: #d97706;
+    --c-recruitment: #dc2626;
+    --c-career: #db2777;
+    --c-roles: #4f46e5;
+    --c-calendar: #16a34a;
+    --c-notice: #ea580c;
+    --c-notifications: #6366f1;
+    --c-auth: #64748b;
+    --c-system: #78716c;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #131312;
+      --surface: #1c1c1a;
+      --surface-alt: #242422;
+      --border: #333330;
+      --border-light: #2a2a28;
+      --text-primary: #e8e8e6;
+      --text-secondary: #a0a09e;
+      --text-tertiary: #6b6b68;
+      --accent: #52b788;
+      --accent-light: #1a3a2a;
+      --line-color: rgba(255,255,255,0.1);
+      --line-highlight: rgba(255,255,255,0.5);
+      --shadow: 0 1px 3px rgba(0,0,0,0.3);
+      --shadow-lg: 0 4px 12px rgba(0,0,0,0.4);
+      --node-shadow: 0 1px 2px rgba(0,0,0,0.2);
+      --domain-bg-alpha: 0.08;
+
+      --c-company: #22d3ee;
+      --c-employees: #60a5fa;
+      --c-attendance: #a78bfa;
+      --c-leave: #34d399;
+      --c-payroll: #fbbf24;
+      --c-recruitment: #f87171;
+      --c-career: #f472b6;
+      --c-roles: #818cf8;
+      --c-calendar: #4ade80;
+      --c-notice: #fb923c;
+      --c-notifications: #a5b4fc;
+      --c-auth: #94a3b8;
+      --c-system: #a8a29e;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #131312;
+    --surface: #1c1c1a;
+    --surface-alt: #242422;
+    --border: #333330;
+    --border-light: #2a2a28;
+    --text-primary: #e8e8e6;
+    --text-secondary: #a0a09e;
+    --text-tertiary: #6b6b68;
+    --accent: #52b788;
+    --accent-light: #1a3a2a;
+    --line-color: rgba(255,255,255,0.1);
+    --line-highlight: rgba(255,255,255,0.5);
+    --shadow: 0 1px 3px rgba(0,0,0,0.3);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.4);
+    --node-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    --domain-bg-alpha: 0.08;
+
+    --c-company: #22d3ee;
+    --c-employees: #60a5fa;
+    --c-attendance: #a78bfa;
+    --c-leave: #34d399;
+    --c-payroll: #fbbf24;
+    --c-recruitment: #f87171;
+    --c-career: #f472b6;
+    --c-roles: #818cf8;
+    --c-calendar: #4ade80;
+    --c-notice: #fb923c;
+    --c-notifications: #a5b4fc;
+    --c-auth: #94a3b8;
+    --c-system: #a8a29e;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* --- Header --- */
+  #header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border-light);
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  #header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+  }
+  .header-stats {
+    display: flex;
+    gap: 12px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: monospace, monospace;
+  }
+  .header-stats span {
+    padding: 2px 8px;
+    background: var(--surface-alt);
+    border-radius: 4px;
+    border: 1px solid var(--border-light);
+  }
+
+  /* --- Toolbar --- */
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    z-index: 10;
+  }
+  .toolbar-label {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: 4px;
+    font-weight: 500;
+  }
+  .toolbar-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--border);
+    margin: 0 6px;
+  }
+  .domain-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-family: system-ui, sans-serif;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .domain-btn:hover { background: var(--surface-alt); }
+  .domain-btn.active {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+  .domain-btn .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .domain-btn:not(.active) .dot { opacity: 0.35; }
+  .action-btn {
+    padding: 3px 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-family: system-ui, sans-serif;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .action-btn:hover {
+    background: var(--accent-light);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  /* --- Viewport --- */
+  #viewport {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    cursor: grab;
+    background: var(--ground);
+  }
+  #viewport.dragging { cursor: grabbing; }
+
+  #world {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+  }
+
+  #lines-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+  }
+
+  #nodes-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+
+  /* --- Domain Groups --- */
+  .domain-group {
+    position: absolute;
+    border-radius: 6px;
+    border: 1px solid var(--border-light);
+  }
+  .domain-group-label {
+    position: absolute;
+    top: 8px;
+    left: 12px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    opacity: 0.7;
+  }
+  .domain-group-count {
+    position: absolute;
+    top: 7px;
+    right: 10px;
+    font-size: 9px;
+    font-family: monospace, monospace;
+    opacity: 0.45;
+  }
+
+  /* --- Entity Nodes --- */
+  .entity-node {
+    position: absolute;
+    height: 36px;
+    border-radius: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    border-left: 4px solid var(--node-domain-color, var(--border));
+    display: flex;
+    align-items: center;
+    padding: 0 8px 0 8px;
+    cursor: pointer;
+    transition: box-shadow 0.12s, border-color 0.12s;
+    box-shadow: var(--node-shadow);
+    user-select: none;
+  }
+  .entity-node:hover {
+    box-shadow: var(--shadow-lg);
+    z-index: 5;
+  }
+  .entity-node.standalone {
+    border-style: solid solid solid solid;
+    border-left-width: 4px;
+    background: repeating-linear-gradient(
+      -45deg,
+      var(--surface),
+      var(--surface) 6px,
+      var(--surface-alt) 6px,
+      var(--surface-alt) 7px
+    );
+  }
+  .entity-node.highlighted {
+    box-shadow: var(--shadow-lg);
+    z-index: 5;
+    border-color: var(--node-domain-color, var(--accent));
+  }
+  .entity-node.dimmed { opacity: 0.25; }
+  .entity-node .name {
+    font-family: monospace, monospace;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+  .entity-node .issue-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-left: 5px;
+  }
+
+  /* --- Tooltip --- */
+  #tooltip {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    max-width: 380px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: var(--shadow-lg);
+    padding: 12px 14px;
+    pointer-events: none;
+    font-size: 12px;
+  }
+  .tt-header {
+    font-family: monospace, monospace;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tt-domain-badge {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: #fff;
+    font-family: system-ui, sans-serif;
+    font-weight: 600;
+  }
+  .tt-meta {
+    display: flex;
+    gap: 12px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+  .tt-meta span { white-space: nowrap; }
+  .tt-section {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border-light);
+  }
+  .tt-section-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-tertiary);
+    margin-bottom: 3px;
+    font-weight: 600;
+  }
+  .tt-ref {
+    font-family: monospace, monospace;
+    font-size: 11px;
+    color: var(--text-secondary);
+    padding: 1px 0;
+  }
+  .tt-ref .field { color: var(--text-tertiary); }
+  .tt-ref .target { color: var(--accent); font-weight: 500; }
+  .tt-issue {
+    margin-top: 6px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .tt-issue.critical { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+  .tt-issue.high { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+  .tt-issue.medium { background: #fefce8; color: #a16207; border: 1px solid #fef08a; }
+  .tt-issue.low { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .tt-issue.critical { background: #3b1111; color: #f87171; border-color: #5c1d1d; }
+    :root:not([data-theme="light"]) .tt-issue.high { background: #3b2506; color: #fbbf24; border-color: #5c3a0e; }
+    :root:not([data-theme="light"]) .tt-issue.medium { background: #3b3506; color: #facc15; border-color: #5c520e; }
+    :root:not([data-theme="light"]) .tt-issue.low { background: #0c1e3b; color: #60a5fa; border-color: #1e3a5f; }
+  }
+  :root[data-theme="dark"] .tt-issue.critical { background: #3b1111; color: #f87171; border-color: #5c1d1d; }
+  :root[data-theme="dark"] .tt-issue.high { background: #3b2506; color: #fbbf24; border-color: #5c3a0e; }
+  :root[data-theme="dark"] .tt-issue.medium { background: #3b3506; color: #facc15; border-color: #5c520e; }
+  :root[data-theme="dark"] .tt-issue.low { background: #0c1e3b; color: #60a5fa; border-color: #1e3a5f; }
+
+  /* --- Legend --- */
+  #legend {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 7px 20px;
+    background: var(--surface);
+    border-top: 1px solid var(--border-light);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    font-size: 11px;
+    color: var(--text-secondary);
+    z-index: 10;
+  }
+  .legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+  }
+  .legend-swatch {
+    width: 24px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .legend-swatch.base {
+    background: var(--surface);
+  }
+  .legend-swatch.standalone {
+    background: repeating-linear-gradient(
+      -45deg,
+      var(--surface),
+      var(--surface) 3px,
+      var(--surface-alt) 3px,
+      var(--surface-alt) 4px
+    );
+  }
+  .legend-line {
+    width: 28px;
+    height: 2px;
+    flex-shrink: 0;
+    border-radius: 1px;
+  }
+  .legend-line.solid { background: var(--text-tertiary); }
+  .legend-line.dashed {
+    background: transparent;
+    border-top: 2px dashed var(--text-tertiary);
+    height: 0;
+  }
+  .legend-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* --- Zoom Indicator --- */
+  #zoom-indicator {
+    position: absolute;
+    bottom: 50px;
+    right: 16px;
+    font-size: 10px;
+    font-family: monospace, monospace;
+    color: var(--text-tertiary);
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    border-radius: 4px;
+    padding: 2px 8px;
+    z-index: 8;
+    pointer-events: none;
+  }
+</style>
+
+<div id="app">
+  <div id="header">
+    <h1>Codeji CMS &mdash; Entity Relationship Diagram</h1>
+    <div class="header-stats">
+      <span>69 Entities</span>
+      <span>57 Relationships</span>
+      <span>13 Domains</span>
+    </div>
+  </div>
+
+  <div id="toolbar">
+    <span class="toolbar-label">Domains</span>
+    <div id="domain-buttons"></div>
+    <div class="toolbar-sep"></div>
+    <button class="action-btn" id="btn-show-all">Show All</button>
+    <button class="action-btn" id="btn-reset-view">Reset View</button>
+  </div>
+
+  <div id="viewport">
+    <div id="world">
+      <canvas id="lines-canvas"></canvas>
+      <div id="nodes-layer"></div>
+    </div>
+    <div id="zoom-indicator"></div>
+  </div>
+
+  <div id="legend">
+    <span style="font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;font-size:10px;">Legend</span>
+    <span class="legend-item"><span class="legend-swatch base" style="border-left:3px solid var(--accent);"></span> BaseClass</span>
+    <span class="legend-item"><span class="legend-swatch standalone" style="border-left:3px solid var(--accent);"></span> Standalone</span>
+    <span class="legend-item"><span class="legend-line solid"></span> Direct FK</span>
+    <span class="legend-item"><span class="legend-line dashed"></span> Indirect FK</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#ef4444;"></span> Critical</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span> High</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#eab308;"></span> Medium</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#3b82f6;"></span> Low</span>
+  </div>
+
+  <div id="tooltip"></div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ==================== DATA ====================
+
+  var ENTITIES = [
+    // COMPANY (8)
+    { id:'Company', domain:'company', base:false, scope:'tenant', issue:{ level:'high', text:'No BaseClass, missing CreatedBy' } },
+    { id:'Department', domain:'company', base:true, scope:'tenant', issue:null },
+    { id:'JobTitles', domain:'company', base:true, scope:'tenant', issue:null },
+    { id:'CustomAttribute', domain:'company', base:true, scope:'tenant', issue:null },
+    { id:'CustomAttributeValue', domain:'company', base:true, scope:'tenant', issue:null },
+    { id:'LeaveSettings', domain:'company', base:true, scope:'tenant', issue:{ level:'high', text:'No [BsonId]' } },
+    { id:'Policy', domain:'company', base:true, scope:'tenant', issue:null },
+    { id:'PolicyVersion', domain:'company', base:true, scope:'tenant', issue:null },
+    // EMPLOYEES (9)
+    { id:'EmpUser', domain:'employees', base:true, scope:'tenant', issue:{ level:'low', text:'Dates stored as string' } },
+    { id:'EmpSummary', domain:'employees', base:true, scope:'tenant', issue:null },
+    { id:'EmpEducationDetails', domain:'employees', base:true, scope:'tenant', issue:null },
+    { id:'EmpCertificationDetails', domain:'employees', base:true, scope:'tenant', issue:null },
+    { id:'EmpSkills', domain:'employees', base:true, scope:'tenant', issue:null },
+    { id:'EmpWorkHistory', domain:'employees', base:true, scope:'tenant', issue:null },
+    { id:'EmpPayRoll', domain:'employees', base:false, scope:'tenant', issue:{ level:'critical', text:'No BaseClass, payroll untraceable' } },
+    { id:'PayrollDivisorPolicy', domain:'employees', base:true, scope:'tenant', issue:null },
+    { id:'EmployeeIdSequence', domain:'employees', base:true, scope:'tenant', issue:null },
+    // ATTENDANCE (17)
+    { id:'AttendanceModel', domain:'attendance', base:false, scope:'tenant', issue:{ level:'critical', text:'No BaseClass' } },
+    { id:'AttendanceStatusSetting', domain:'attendance', base:false, scope:'tenant', issue:{ level:'medium', text:'No audit trail' } },
+    { id:'WeeklyOffSetting', domain:'attendance', base:true, scope:'tenant', issue:{ level:'high', text:'No [BsonId]' } },
+    { id:'MonthlyAttendanceSummary', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'AttendancePayrollException', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'AttendancePenaltyPolicy', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'AttendanceCorrectionRequest', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'AttendanceAuditEvent', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'AttendanceNotificationOutbox', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'AttendanceDaySegment', domain:'attendance', base:false, scope:'tenant', issue:{ level:'medium', text:'No BaseClass' } },
+    { id:'CompanyOfficeSchedule', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'DepartmentScheduleAssignment', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'EmployeeScheduleAssignment', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'WorkFromHomeRequest', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'WorkFromHomePolicy', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'WorkFromHomeRequestLog', domain:'attendance', base:true, scope:'tenant', issue:null },
+    { id:'AttendanceRemarkOption', domain:'attendance', base:true, scope:'tenant', issue:null },
+    // LEAVE (3)
+    { id:'LeavePolicy', domain:'leave', base:true, scope:'tenant', issue:null },
+    { id:'LeaveRequest', domain:'leave', base:true, scope:'tenant', issue:null },
+    { id:'EmployeeLeaveBalance', domain:'leave', base:true, scope:'tenant', issue:null },
+    // PAYROLL (1)
+    { id:'SalaryModel', domain:'payroll', base:false, scope:'tenant', issue:{ level:'high', text:'In DTO project, Guid IDs' } },
+    // RECRUITMENT (6)
+    { id:'Applicant', domain:'recruitment', base:true, scope:'tenant', issue:null },
+    { id:'ApplicantLogs', domain:'recruitment', base:true, scope:'tenant', issue:null },
+    { id:'JobVacancy', domain:'recruitment', base:true, scope:'tenant', issue:null },
+    { id:'Resume', domain:'recruitment', base:false, scope:'tenant', issue:{ level:'critical', text:'IFormFile stored in entity' } },
+    { id:'MailTemplate', domain:'recruitment', base:false, scope:'global', issue:null },
+    { id:'PublicApplicationToken', domain:'recruitment', base:true, scope:'tenant', issue:null },
+    // CAREER PORTAL (9)
+    { id:'PublicCompanyProfile', domain:'career', base:true, scope:'tenant', issue:null },
+    { id:'CareerSubscriber', domain:'career', base:false, scope:'global', issue:null },
+    { id:'JobAlertSubscription', domain:'career', base:false, scope:'global', issue:null },
+    { id:'CompanyFollower', domain:'career', base:false, scope:'tenant', issue:null },
+    { id:'SavedJob', domain:'career', base:false, scope:'tenant', issue:null },
+    { id:'CareerVisitorPreference', domain:'career', base:false, scope:'global', issue:null },
+    { id:'CareerNotificationOutbox', domain:'career', base:false, scope:'optional-tenant', issue:null },
+    { id:'CareerNotificationDelivery', domain:'career', base:false, scope:'tenant', issue:null },
+    { id:'CareerAnalyticsEvent', domain:'career', base:false, scope:'global', issue:null },
+    // ROLES (5)
+    { id:'Roles', domain:'roles', base:false, scope:'tenant', issue:{ level:'high', text:'Duplicates BaseClass fields' } },
+    { id:'Module', domain:'roles', base:false, scope:'global', issue:null },
+    { id:'Permission', domain:'roles', base:false, scope:'global', issue:null },
+    { id:'ModulePermission', domain:'roles', base:false, scope:'global', issue:null },
+    { id:'RolePermission', domain:'roles', base:true, scope:'tenant', issue:null },
+    // CALENDAR (2)
+    { id:'CalendarEntity', domain:'calendar', base:true, scope:'tenant', issue:null },
+    { id:'Holidays', domain:'calendar', base:true, scope:'tenant', issue:null },
+    // NOTICE (1)
+    { id:'Notice', domain:'notice', base:true, scope:'tenant', issue:null },
+    // NOTIFICATIONS (3)
+    { id:'Notifications', domain:'notifications', base:false, scope:'tenant', issue:null },
+    { id:'UserNotifications', domain:'notifications', base:false, scope:'no-tenant', issue:{ level:'medium', text:'No CompanyId' } },
+    { id:'NotificationPreference', domain:'notifications', base:true, scope:'tenant', issue:null },
+    // AUTH (2)
+    { id:'RefreshToken', domain:'auth', base:false, scope:'no-tenant', issue:null },
+    { id:'UserSecurityToken', domain:'auth', base:false, scope:'no-tenant', issue:null },
+    // SYSTEM (3)
+    { id:'Migration', domain:'system', base:false, scope:'global', issue:null },
+    { id:'Skills', domain:'system', base:false, scope:'global', issue:null },
+    { id:'EmpEmailLogs', domain:'system', base:true, scope:'tenant', issue:null }
+  ];
+
+  var RELATIONSHIPS = [
+    // Company internal
+    { from:'JobTitles', to:'Department', field:'DepartmentId', dashed:false },
+    { from:'CustomAttributeValue', to:'CustomAttribute', field:'CustomAttributeId', dashed:false },
+    { from:'PolicyVersion', to:'Policy', field:'PolicyId', dashed:false },
+    // Employees cross-domain
+    { from:'EmpUser', to:'Roles', field:'RoleId', dashed:false },
+    // Employees internal
+    { from:'EmpSummary', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'EmpEducationDetails', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'EmpCertificationDetails', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'EmpSkills', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'EmpWorkHistory', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'EmpPayRoll', to:'EmpUser', field:'UserId', dashed:false },
+    // Attendance
+    { from:'AttendanceModel', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'AttendanceModel', to:'CompanyOfficeSchedule', field:'ScheduleId', dashed:false },
+    { from:'MonthlyAttendanceSummary', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'AttendancePayrollException', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'AttendancePayrollException', to:'AttendancePenaltyPolicy', field:'PolicyId', dashed:false },
+    { from:'AttendanceCorrectionRequest', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'AttendanceAuditEvent', to:'EmpUser', field:'AttendanceUserId', dashed:false },
+    { from:'AttendanceNotificationOutbox', to:'EmpUser', field:'RecipientUserId', dashed:false },
+    { from:'AttendanceDaySegment', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'DepartmentScheduleAssignment', to:'Department', field:'Department', dashed:false },
+    { from:'DepartmentScheduleAssignment', to:'CompanyOfficeSchedule', field:'ScheduleId', dashed:false },
+    { from:'EmployeeScheduleAssignment', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'EmployeeScheduleAssignment', to:'CompanyOfficeSchedule', field:'ScheduleId', dashed:false },
+    { from:'WorkFromHomeRequest', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'WorkFromHomeRequest', to:'EmpUser', field:'ApproverUserId', dashed:false },
+    { from:'WorkFromHomePolicy', to:'LeavePolicy', field:'LeavePolicyId', dashed:false },
+    { from:'WorkFromHomeRequestLog', to:'WorkFromHomeRequest', field:'RequestId', dashed:false },
+    // Leave
+    { from:'LeaveRequest', to:'EmpUser', field:'EmployeeId', dashed:false },
+    { from:'LeaveRequest', to:'LeavePolicy', field:'LeavePolicyId', dashed:false },
+    { from:'EmployeeLeaveBalance', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'EmployeeLeaveBalance', to:'LeavePolicy', field:'LeavePolicyId', dashed:false },
+    // Payroll
+    { from:'SalaryModel', to:'EmpUser', field:'UserId', dashed:false },
+    // Recruitment
+    { from:'Applicant', to:'JobVacancy', field:'VacancyId', dashed:false },
+    { from:'ApplicantLogs', to:'Applicant', field:'ApplicantId', dashed:false },
+    { from:'ApplicantLogs', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'Resume', to:'Applicant', field:'ApplicantId', dashed:false },
+    { from:'PublicApplicationToken', to:'Applicant', field:'ApplicantId', dashed:false },
+    { from:'PublicApplicationToken', to:'JobVacancy', field:'JobId', dashed:false },
+    // Career Portal
+    { from:'JobAlertSubscription', to:'CareerSubscriber', field:'SubscriberId', dashed:false },
+    { from:'CompanyFollower', to:'CareerSubscriber', field:'SubscriberId', dashed:false },
+    { from:'CompanyFollower', to:'Company', field:'CompanyId', dashed:false },
+    { from:'SavedJob', to:'CareerSubscriber', field:'SubscriberId', dashed:false },
+    { from:'SavedJob', to:'JobVacancy', field:'JobId', dashed:false },
+    { from:'CareerNotificationOutbox', to:'CareerSubscriber', field:'SubscriberId', dashed:false },
+    { from:'CareerNotificationDelivery', to:'CareerSubscriber', field:'SubscriberId', dashed:false },
+    { from:'CareerNotificationDelivery', to:'JobVacancy', field:'JobId', dashed:false },
+    // Roles
+    { from:'ModulePermission', to:'Module', field:'ModuleId', dashed:false },
+    { from:'ModulePermission', to:'Permission', field:'PermissionId', dashed:false },
+    { from:'RolePermission', to:'Roles', field:'RoleId', dashed:false },
+    { from:'RolePermission', to:'ModulePermission', field:'ModulePermissionId', dashed:false },
+    // Notifications
+    { from:'UserNotifications', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'UserNotifications', to:'Notifications', field:'NotificationId', dashed:false },
+    { from:'NotificationPreference', to:'EmpUser', field:'UserId', dashed:false },
+    // Auth
+    { from:'RefreshToken', to:'EmpUser', field:'UserId', dashed:false },
+    { from:'UserSecurityToken', to:'EmpUser', field:'UserId', dashed:false },
+    // Indirect / dashed
+    { from:'LeavePolicy', to:'AttendanceStatusSetting', field:'AttendanceStatusCode', dashed:true },
+    { from:'PublicCompanyProfile', to:'Company', field:'PublicCompanyCode', dashed:true }
+  ];
+
+  var DOMAIN_NAMES = {
+    company:'Company', employees:'Employees', attendance:'Attendance',
+    leave:'Leave', payroll:'Payroll', recruitment:'Recruitment',
+    career:'Career Portal', roles:'Roles', calendar:'Calendar',
+    notice:'Notice', notifications:'Notifications', auth:'Auth', system:'System'
+  };
+
+  var ISSUE_COLORS = { critical:'#ef4444', high:'#f59e0b', medium:'#eab308', low:'#3b82f6' };
+
+  var SCOPE_LABELS = {
+    tenant:'Tenant', global:'Global', 'no-tenant':'No Tenant', 'optional-tenant':'Optional Tenant'
+  };
+
+  // ==================== LAYOUT CONFIG ====================
+
+  var NODE_W = 168, NODE_H = 36, GAP_H = 12, GAP_V = 10;
+  var PAD = 16, PAD_TOP = 34;
+
+  var DOMAIN_LAYOUT = {
+    attendance:  { x:40,   y:80,  cols:4 },
+    employees:   { x:830,  y:80,  cols:3 },
+    company:     { x:1440, y:80,  cols:3 },
+    career:      { x:2050, y:80,  cols:3 },
+    recruitment: { x:40,   y:410, cols:3 },
+    roles:       { x:650,  y:410, cols:3 },
+    leave:       { x:1260, y:410, cols:3 },
+    notifications:{ x:1870,y:410, cols:3 },
+    auth:        { x:40,   y:600, cols:2 },
+    system:      { x:470,  y:600, cols:3 },
+    calendar:    { x:1080, y:600, cols:2 },
+    notice:      { x:1510, y:600, cols:1 },
+    payroll:     { x:1760, y:600, cols:1 }
+  };
+
+  var WORLD_W = 2700, WORLD_H = 760;
+
+  // ==================== STATE ====================
+
+  var entityMap = {};
+  var domainEntities = {};
+  var activeDomains = {};
+  var hoveredEntity = null;
+  var scale = 1, panX = 0, panY = 0;
+  var isDragging = false, dragStartX = 0, dragStartY = 0, dragStartPanX = 0, dragStartPanY = 0;
+  var incomingRefs = {};
+  var outgoingRefs = {};
+  var nodeElements = {};
+
+  // DOM refs
+  var viewport = document.getElementById('viewport');
+  var world = document.getElementById('world');
+  var canvas = document.getElementById('lines-canvas');
+  var nodesLayer = document.getElementById('nodes-layer');
+  var tooltip = document.getElementById('tooltip');
+  var zoomIndicator = document.getElementById('zoom-indicator');
+  var ctx = canvas.getContext('2d');
+
+  // ==================== INIT ====================
+
+  function init() {
+    // Group entities by domain
+    for (var d in DOMAIN_NAMES) {
+      domainEntities[d] = [];
+      activeDomains[d] = true;
+    }
+
+    // Compute node positions
+    ENTITIES.forEach(function(ent) {
+      var dom = ent.domain;
+      var idx = domainEntities[dom].length;
+      domainEntities[dom].push(ent);
+
+      var layout = DOMAIN_LAYOUT[dom];
+      var col = idx % layout.cols;
+      var row = Math.floor(idx / layout.cols);
+
+      ent.x = layout.x + PAD + col * (NODE_W + GAP_H);
+      ent.y = layout.y + PAD_TOP + row * (NODE_H + GAP_V);
+      ent.w = NODE_W;
+      ent.h = NODE_H;
+      ent.visible = true;
+
+      entityMap[ent.id] = ent;
+    });
+
+    // Build ref maps
+    RELATIONSHIPS.forEach(function(rel, i) {
+      rel.index = i;
+      if (!outgoingRefs[rel.from]) outgoingRefs[rel.from] = [];
+      outgoingRefs[rel.from].push(rel);
+      if (!incomingRefs[rel.to]) incomingRefs[rel.to] = [];
+      incomingRefs[rel.to].push(rel);
+    });
+
+    setupCanvas();
+    createDomainGroups();
+    createNodes();
+    createToolbar();
+    setupInteraction();
+    // Defer view reset until layout is computed
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        resetView();
+        drawLines();
+      });
+    });
+  }
+
+  // ==================== CANVAS ====================
+
+  function setupCanvas() {
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = WORLD_W * dpr;
+    canvas.height = WORLD_H * dpr;
+    canvas.style.width = WORLD_W + 'px';
+    canvas.style.height = WORLD_H + 'px';
+    ctx.scale(dpr, dpr);
+  }
+
+  function hexToRgba(hex, alpha) {
+    hex = hex.replace(/^#/, '');
+    if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+    var r = parseInt(hex.substring(0, 2), 16);
+    var g = parseInt(hex.substring(2, 4), 16);
+    var b = parseInt(hex.substring(4, 6), 16);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+  }
+
+  function getDomainColor(domain) {
+    return getComputedStyle(document.documentElement).getPropertyValue('--c-' + domain).trim();
+  }
+
+  function getLineColor() {
+    return getComputedStyle(document.documentElement).getPropertyValue('--line-color').trim();
+  }
+
+  function getLineHighlight() {
+    return getComputedStyle(document.documentElement).getPropertyValue('--line-highlight').trim();
+  }
+
+  function getEdgePoint(node, otherNode) {
+    var cx = node.x + node.w / 2;
+    var cy = node.y + node.h / 2;
+    var ox = otherNode.x + otherNode.w / 2;
+    var oy = otherNode.y + otherNode.h / 2;
+    var dx = ox - cx;
+    var dy = oy - cy;
+    if (dx === 0 && dy === 0) return [cx, cy];
+    var hw = node.w / 2;
+    var hh = node.h / 2;
+    var sx = Math.abs(dx) > 0.001 ? hw / Math.abs(dx) : 1e6;
+    var sy = Math.abs(dy) > 0.001 ? hh / Math.abs(dy) : 1e6;
+    var s = Math.min(sx, sy);
+    return [cx + dx * s, cy + dy * s];
+  }
+
+  function drawArrow(ctx, fx, fy, tx, ty, size) {
+    var a = Math.atan2(ty - fy, tx - fx);
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx - size * Math.cos(a - 0.38), ty - size * Math.sin(a - 0.38));
+    ctx.lineTo(tx - size * Math.cos(a + 0.38), ty - size * Math.sin(a + 0.38));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawLines() {
+    var dpr = window.devicePixelRatio || 1;
+    ctx.clearRect(0, 0, WORLD_W * dpr, WORLD_H * dpr);
+    ctx.save();
+
+    var lineCol = getLineColor();
+    var highlightCol = getLineHighlight();
+
+    // Sort: dimmed first, normal second, highlighted last
+    var sorted = RELATIONSHIPS.slice().sort(function(a, b) {
+      var aH = hoveredEntity && (a.from === hoveredEntity || a.to === hoveredEntity);
+      var bH = hoveredEntity && (b.from === hoveredEntity || b.to === hoveredEntity);
+      if (aH && !bH) return 1;
+      if (!aH && bH) return -1;
+      return 0;
+    });
+
+    sorted.forEach(function(rel) {
+      var src = entityMap[rel.from];
+      var tgt = entityMap[rel.to];
+      if (!src || !tgt) return;
+      if (!activeDomains[src.domain] || !activeDomains[tgt.domain]) return;
+
+      var isHL = hoveredEntity && (rel.from === hoveredEntity || rel.to === hoveredEntity);
+      var isDim = hoveredEntity && !isHL;
+
+      var sp = getEdgePoint(src, tgt);
+      var tp = getEdgePoint(tgt, src);
+
+      // Bezier control offset
+      var mx = (sp[0] + tp[0]) / 2;
+      var my = (sp[1] + tp[1]) / 2;
+      var dx = tp[0] - sp[0];
+      var dy = tp[1] - sp[1];
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 1) return;
+
+      // Hash-based offset for curve variety
+      var hash = ((rel.index * 7 + 13) % 19) / 19;
+      var offsetMag = Math.min(dist * 0.12, 28) * (hash * 2 - 1);
+      var nx = -dy / dist;
+      var ny = dx / dist;
+      var cpx = mx + nx * offsetMag;
+      var cpy = my + ny * offsetMag;
+
+      ctx.beginPath();
+      ctx.moveTo(sp[0], sp[1]);
+      ctx.quadraticCurveTo(cpx, cpy, tp[0], tp[1]);
+
+      if (rel.dashed) {
+        ctx.setLineDash([6, 4]);
+      } else {
+        ctx.setLineDash([]);
+      }
+
+      if (isHL) {
+        var domCol = getDomainColor(src.domain);
+        ctx.strokeStyle = domCol;
+        ctx.lineWidth = 2.5;
+        ctx.globalAlpha = 0.85;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = domCol;
+        ctx.globalAlpha = 0.85;
+        drawArrow(ctx, cpx, cpy, tp[0], tp[1], 9);
+      } else if (isDim) {
+        ctx.strokeStyle = lineCol;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.15;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = lineCol;
+        ctx.globalAlpha = 0.1;
+        drawArrow(ctx, cpx, cpy, tp[0], tp[1], 5);
+      } else {
+        ctx.strokeStyle = lineCol;
+        ctx.lineWidth = 1.2;
+        ctx.globalAlpha = 1;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = lineCol;
+        ctx.globalAlpha = 1;
+        drawArrow(ctx, cpx, cpy, tp[0], tp[1], 6);
+      }
+
+      ctx.globalAlpha = 1;
+    });
+
+    ctx.restore();
+  }
+
+  // ==================== DOM NODES ====================
+
+  function createDomainGroups() {
+    for (var dom in DOMAIN_LAYOUT) {
+      var layout = DOMAIN_LAYOUT[dom];
+      var ents = domainEntities[dom] || [];
+      var cols = layout.cols;
+      var rows = Math.ceil(ents.length / cols);
+      var w = cols * NODE_W + (cols - 1) * GAP_H + PAD * 2;
+      var h = PAD_TOP + rows * NODE_H + (rows - 1) * GAP_V + PAD;
+      var cssColor = 'var(--c-' + dom + ')';
+      var hexColor = getDomainColor(dom);
+
+      var group = document.createElement('div');
+      group.className = 'domain-group';
+      group.dataset.domain = dom;
+      group.style.cssText = 'left:' + layout.x + 'px;top:' + layout.y + 'px;width:' + w + 'px;height:' + h + 'px;';
+      group.style.borderColor = cssColor;
+      group.style.backgroundColor = hexToRgba(hexColor || '#888888', 0.07);
+
+      var label = document.createElement('span');
+      label.className = 'domain-group-label';
+      label.textContent = DOMAIN_NAMES[dom];
+      label.style.color = cssColor;
+      group.appendChild(label);
+
+      var count = document.createElement('span');
+      count.className = 'domain-group-count';
+      count.textContent = ents.length + (ents.length === 1 ? ' entity' : ' entities');
+      count.style.color = cssColor;
+      group.appendChild(count);
+
+      nodesLayer.appendChild(group);
+    }
+  }
+
+  function createNodes() {
+    ENTITIES.forEach(function(ent) {
+      var el = document.createElement('div');
+      el.className = 'entity-node' + (ent.base ? '' : ' standalone');
+      el.dataset.entity = ent.id;
+      el.dataset.domain = ent.domain;
+      el.style.cssText = 'left:' + ent.x + 'px;top:' + ent.y + 'px;width:' + NODE_W + 'px;';
+      el.style.setProperty('--node-domain-color', 'var(--c-' + ent.domain + ')');
+      el.style.borderLeftColor = 'var(--c-' + ent.domain + ')';
+
+      var name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = ent.id;
+      el.appendChild(name);
+
+      if (ent.issue) {
+        var dot = document.createElement('span');
+        dot.className = 'issue-dot';
+        dot.style.background = ISSUE_COLORS[ent.issue.level];
+        el.appendChild(dot);
+      }
+
+      el.addEventListener('mouseenter', function(e) { onNodeEnter(ent, e); });
+      el.addEventListener('mouseleave', function() { onNodeLeave(ent); });
+      el.addEventListener('mousemove', function(e) { moveTooltip(e); });
+
+      nodesLayer.appendChild(el);
+      nodeElements[ent.id] = el;
+    });
+  }
+
+  // ==================== TOOLBAR ====================
+
+  function createToolbar() {
+    var container = document.getElementById('domain-buttons');
+    var domains = Object.keys(DOMAIN_NAMES);
+
+    domains.forEach(function(dom) {
+      var btn = document.createElement('button');
+      btn.className = 'domain-btn active';
+      btn.dataset.domain = dom;
+
+      var dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.style.background = 'var(--c-' + dom + ')';
+      btn.appendChild(dot);
+
+      var txt = document.createTextNode(DOMAIN_NAMES[dom]);
+      btn.appendChild(txt);
+
+      btn.addEventListener('click', function() { toggleDomain(dom); });
+      container.appendChild(btn);
+    });
+
+    document.getElementById('btn-show-all').addEventListener('click', showAll);
+    document.getElementById('btn-reset-view').addEventListener('click', resetView);
+  }
+
+  function toggleDomain(dom) {
+    activeDomains[dom] = !activeDomains[dom];
+    applyFilters();
+  }
+
+  function showAll() {
+    for (var d in activeDomains) activeDomains[d] = true;
+    applyFilters();
+  }
+
+  function applyFilters() {
+    // Update buttons
+    var btns = document.querySelectorAll('.domain-btn');
+    btns.forEach(function(btn) {
+      var d = btn.dataset.domain;
+      if (activeDomains[d]) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+
+    // Update domain groups
+    var groups = document.querySelectorAll('.domain-group');
+    groups.forEach(function(g) {
+      g.style.display = activeDomains[g.dataset.domain] ? '' : 'none';
+    });
+
+    // Update nodes
+    ENTITIES.forEach(function(ent) {
+      var el = nodeElements[ent.id];
+      var vis = activeDomains[ent.domain];
+      ent.visible = vis;
+      el.style.display = vis ? '' : 'none';
+    });
+
+    drawLines();
+  }
+
+  // ==================== TOOLTIP ====================
+
+  function onNodeEnter(ent, e) {
+    hoveredEntity = ent.id;
+
+    // Highlight / dim nodes
+    ENTITIES.forEach(function(other) {
+      var el = nodeElements[other.id];
+      if (!activeDomains[other.domain]) return;
+      var connected = isConnected(ent.id, other.id);
+      if (other.id === ent.id) {
+        el.classList.add('highlighted');
+        el.classList.remove('dimmed');
+      } else if (connected) {
+        el.classList.add('highlighted');
+        el.classList.remove('dimmed');
+      } else {
+        el.classList.add('dimmed');
+        el.classList.remove('highlighted');
+      }
+    });
+
+    drawLines();
+    showTooltip(ent, e);
+  }
+
+  function onNodeLeave(ent) {
+    hoveredEntity = null;
+
+    ENTITIES.forEach(function(other) {
+      var el = nodeElements[other.id];
+      el.classList.remove('highlighted', 'dimmed');
+    });
+
+    drawLines();
+    hideTooltip();
+  }
+
+  function isConnected(id1, id2) {
+    if (id1 === id2) return true;
+    for (var i = 0; i < RELATIONSHIPS.length; i++) {
+      var r = RELATIONSHIPS[i];
+      if ((r.from === id1 && r.to === id2) || (r.from === id2 && r.to === id1)) return true;
+    }
+    return false;
+  }
+
+  function showTooltip(ent, e) {
+    var color = getDomainColor(ent.domain);
+    var out = outgoingRefs[ent.id] || [];
+    var inc = incomingRefs[ent.id] || [];
+
+    var html = '<div class="tt-header">' +
+      '<span>' + ent.id + '</span>' +
+      '<span class="tt-domain-badge" style="background:' + color + ';">' + DOMAIN_NAMES[ent.domain] + '</span>' +
+      '</div>';
+
+    html += '<div class="tt-meta">' +
+      '<span>Type: ' + (ent.base ? 'BaseClass' : 'Standalone') + '</span>' +
+      '<span>Scope: ' + SCOPE_LABELS[ent.scope] + '</span>' +
+      '</div>';
+
+    if (out.length > 0) {
+      html += '<div class="tt-section"><div class="tt-section-title">References (outgoing)</div>';
+      out.forEach(function(r) {
+        html += '<div class="tt-ref"><span class="field">' + r.field + '</span> &rarr; <span class="target">' + r.to + '</span>' +
+          (r.dashed ? ' <span style="color:var(--text-tertiary);font-size:10px;">(indirect)</span>' : '') + '</div>';
+      });
+      html += '</div>';
+    }
+
+    if (inc.length > 0) {
+      html += '<div class="tt-section"><div class="tt-section-title">Referenced by (incoming)</div>';
+      inc.forEach(function(r) {
+        html += '<div class="tt-ref"><span class="target">' + r.from + '</span>.<span class="field">' + r.field + '</span></div>';
+      });
+      html += '</div>';
+    }
+
+    if (!out.length && !inc.length) {
+      html += '<div class="tt-section" style="color:var(--text-tertiary);font-style:italic;">No foreign key relationships</div>';
+    }
+
+    if (ent.issue) {
+      html += '<div class="tt-issue ' + ent.issue.level + '">' +
+        ent.issue.level.toUpperCase() + ': ' + ent.issue.text + '</div>';
+    }
+
+    tooltip.innerHTML = html;
+    tooltip.style.display = 'block';
+    moveTooltip(e);
+  }
+
+  function moveTooltip(e) {
+    var tw = tooltip.offsetWidth;
+    var th = tooltip.offsetHeight;
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var x = e.clientX + 14;
+    var y = e.clientY + 14;
+    if (x + tw > vw - 8) x = e.clientX - tw - 10;
+    if (y + th > vh - 8) y = e.clientY - th - 10;
+    if (x < 4) x = 4;
+    if (y < 4) y = 4;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top = y + 'px';
+  }
+
+  function hideTooltip() {
+    tooltip.style.display = 'none';
+  }
+
+  // ==================== PAN & ZOOM ====================
+
+  function applyTransform() {
+    world.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + scale + ')';
+    zoomIndicator.textContent = Math.round(scale * 100) + '%';
+  }
+
+  function resetView() {
+    var vw = viewport.clientWidth;
+    var vh = viewport.clientHeight;
+    var sx = vw / WORLD_W;
+    var sy = vh / WORLD_H;
+    scale = Math.min(sx, sy) * 0.94;
+    if (scale > 1) scale = 1;
+    panX = (vw - WORLD_W * scale) / 2;
+    panY = (vh - WORLD_H * scale) / 2;
+    applyTransform();
+  }
+
+  function zoomAt(clientX, clientY, factor) {
+    var rect = viewport.getBoundingClientRect();
+    var mx = clientX - rect.left;
+    var my = clientY - rect.top;
+
+    var worldX = (mx - panX) / scale;
+    var worldY = (my - panY) / scale;
+
+    var newScale = scale * factor;
+    newScale = Math.max(0.15, Math.min(4, newScale));
+
+    panX = mx - worldX * newScale;
+    panY = my - worldY * newScale;
+    scale = newScale;
+    applyTransform();
+  }
+
+  function setupInteraction() {
+    // Mouse wheel zoom
+    viewport.addEventListener('wheel', function(e) {
+      e.preventDefault();
+      var factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
+      zoomAt(e.clientX, e.clientY, factor);
+    }, { passive: false });
+
+    // Mouse drag pan
+    viewport.addEventListener('mousedown', function(e) {
+      if (e.button !== 0) return;
+      if (e.target.closest('.entity-node')) return;
+      isDragging = true;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      dragStartPanX = panX;
+      dragStartPanY = panY;
+      viewport.classList.add('dragging');
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', function(e) {
+      if (!isDragging) return;
+      panX = dragStartPanX + (e.clientX - dragStartX);
+      panY = dragStartPanY + (e.clientY - dragStartY);
+      applyTransform();
+    });
+
+    window.addEventListener('mouseup', function() {
+      if (isDragging) {
+        isDragging = false;
+        viewport.classList.remove('dragging');
+      }
+    });
+
+    // Touch support
+    var touchState = { startX:0, startY:0, startPanX:0, startPanY:0, lastDist:0, panning:false };
+
+    viewport.addEventListener('touchstart', function(e) {
+      if (e.touches.length === 1 && !e.target.closest('.entity-node')) {
+        touchState.panning = true;
+        touchState.startX = e.touches[0].clientX;
+        touchState.startY = e.touches[0].clientY;
+        touchState.startPanX = panX;
+        touchState.startPanY = panY;
+      } else if (e.touches.length === 2) {
+        touchState.panning = false;
+        touchState.lastDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+      }
+    }, { passive: true });
+
+    viewport.addEventListener('touchmove', function(e) {
+      if (e.touches.length === 1 && touchState.panning) {
+        e.preventDefault();
+        panX = touchState.startPanX + (e.touches[0].clientX - touchState.startX);
+        panY = touchState.startPanY + (e.touches[0].clientY - touchState.startY);
+        applyTransform();
+      } else if (e.touches.length === 2) {
+        e.preventDefault();
+        var dist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        if (touchState.lastDist > 0) {
+          var cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+          var cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+          zoomAt(cx, cy, dist / touchState.lastDist);
+        }
+        touchState.lastDist = dist;
+      }
+    }, { passive: false });
+
+    viewport.addEventListener('touchend', function() {
+      touchState.panning = false;
+      touchState.lastDist = 0;
+    }, { passive: true });
+
+    // Redraw on theme change
+    var observer = new MutationObserver(function() {
+      setupCanvas();
+      drawLines();
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+    // Also redraw on color-scheme media change
+    if (window.matchMedia) {
+      var mq = window.matchMedia('(prefers-color-scheme: dark)');
+      mq.addEventListener('change', function() {
+        setupCanvas();
+        drawLines();
+      });
+    }
+  }
+
+  // ==================== START ====================
+
+  init();
+
+})();
+</script>

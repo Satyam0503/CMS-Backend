@@ -9,6 +9,7 @@ namespace Codeji.CMS.DTO.Leave.LeaveRequest
         public DateTime StartDate { get; set; }
         public DateTime EndDate { get; set; }
         public bool IsHalfDay { get; set; }
+        public string? HalfDayPeriod { get; set; }
         public required string Reason { get; set; }
     }
 
@@ -20,6 +21,7 @@ namespace Codeji.CMS.DTO.Leave.LeaveRequest
         public DateTime StartDate { get; set; }
         public DateTime EndDate { get; set; }
         public bool IsHalfDay { get; set; }
+        public string? HalfDayPeriod { get; set; }
         public required string Reason { get; set; }
     }
 
@@ -27,5 +29,8 @@ namespace Codeji.CMS.DTO.Leave.LeaveRequest
     {
         public string Comment { get; set; }
         public LeaveRequestStatus Status { get; set; }
+        // Optional during the compatibility migration; new clients must send it
+        // so two reviewers cannot silently apply incompatible decisions.
+        public int? ExpectedVersion { get; set; }
     }
 }

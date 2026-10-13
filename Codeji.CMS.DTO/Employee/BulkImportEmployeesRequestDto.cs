@@ -35,4 +35,6 @@ public class BulkImportEmployeeItemDto
 
     [Required]
     public required string JobRole { get; set; }
+
+    public string Gender { get; set; } = "Not Specified";
 }

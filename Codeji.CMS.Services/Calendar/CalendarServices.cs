@@ -6,10 +6,15 @@ using Codeji.CMS.DTO.Calendar;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Services.Calendar.Interface;
+using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
+using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Codeji.CMS.Utility.middlewares;
 using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.Services.Calendar;
@@ -19,11 +24,79 @@ public class CalendarServices : ICalendarServices
     readonly IMapper _mapper;
     readonly IMongoDbRepository<CalendarEntity> _calendarRepository;
     readonly IMongoDbRepository<EmpUser> _employeeRepository;
-    public CalendarServices(IMapper mapper, IMongoDbRepository<CalendarEntity> calendarRepository, IMongoDbRepository<EmpUser> empRepository)
+    readonly IHttpContextAccessor _context;
+    readonly ILogger<CalendarServices> _logger;
+    string CompanyId => CurrentContext.CompanyId(_context);
+    public CalendarServices(IMapper mapper, IMongoDbRepository<CalendarEntity> calendarRepository, IMongoDbRepository<EmpUser> empRepository, IHttpContextAccessor context, ILogger<CalendarServices> logger)
     {
         _mapper = mapper;
         _calendarRepository = calendarRepository;
         _employeeRepository = empRepository;
+        _context = context;
+        _logger = logger;
+    }
+
+    private async Task<bool> IsCallerHrOrAdminAsync()
+    {
+        var adminId = CurrentContext.AdminUserId(_context);
+        if (!string.IsNullOrWhiteSpace(adminId))
+            return true;
+
+        var roleId = CurrentContext.UserRoleId(_context);
+        var roleService = _context?.HttpContext?.RequestServices?.GetService(typeof(IRoleService)) as IRoleService;
+        if (roleService is not null && !string.IsNullOrWhiteSpace(roleId) && !string.IsNullOrWhiteSpace(CompanyId))
+        {
+            var checks = await Task.WhenAll(
+                roleService.IsRoleTypeMatch(roleId, Roles.Administrator, CompanyId),
+                roleService.IsRoleTypeMatch(roleId, Roles.HR, CompanyId),
+                roleService.IsRoleTypeMatch(roleId, Roles.HRExecutive, CompanyId));
+            if (checks.Any(x => x))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsRestrictedInterviewCalendarItem(CalendarEntity ci)
+    {
+        if (ci.RestrictToTargetUsersAndHrAdmin)
+            return true;
+
+        return !string.IsNullOrWhiteSpace(ci.Name)
+            && ci.Name.StartsWith("Interview:", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(ci.Description)
+            && ci.Description.Contains("panel:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static HashSet<string> ExtractTargetUsers(CalendarEntity ci)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (ci.TargetUserIds is not null)
+        {
+            foreach (var id in ci.TargetUserIds)
+            {
+                if (!string.IsNullOrWhiteSpace(id))
+                    set.Add(id.Trim());
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(ci.CreatedBy))
+            set.Add(ci.CreatedBy.Trim());
+
+        if (!string.IsNullOrWhiteSpace(ci.Description))
+        {
+            var panelIndex = ci.Description.IndexOf("panel:", StringComparison.OrdinalIgnoreCase);
+            if (panelIndex >= 0)
+            {
+                var panelSegment = ci.Description[(panelIndex + "panel:".Length)..];
+                foreach (var part in panelSegment.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (!string.IsNullOrWhiteSpace(part))
+                        set.Add(part.Trim());
+                }
+            }
+        }
+
+        return set;
     }
 
     public async Task<Result<CalendarResponseDto>> GetAllCalendarItems(CalendarFilters filter)
@@ -38,41 +111,73 @@ public class CalendarServices : ICalendarServices
             Expression<Func<CalendarEntity, bool>> expression;
             if (filter.Type == null)
             {
-                expression = cl => cl.Recurring || cl.Date.Year == year;
+                expression = cl => cl.CompanyId == CompanyId && (cl.Recurring || cl.Date.Year == year);
             }
             else if (filter.Type == CalendarResponseItem.Holiday)
             {
-                expression = cl => (cl.Recurring && cl.Type == CalendarItem.Holiday) || (cl.Date.Year == year && cl.Type == CalendarItem.Holiday);
+                expression = cl => cl.CompanyId == CompanyId && ((cl.Recurring && cl.Type == CalendarItem.Holiday) || (cl.Date.Year == year && cl.Type == CalendarItem.Holiday));
             }
             else
             {
-                expression = cl => (cl.Recurring && cl.Type == CalendarItem.Event) || (cl.Date.Year == year && cl.Type == CalendarItem.Event);
+                expression = cl => cl.CompanyId == CompanyId && ((cl.Recurring && cl.Type == CalendarItem.Event) || (cl.Date.Year == year && cl.Type == CalendarItem.Event));
             }
 
-            calendarItems = (await _calendarRepository.GetAll(expression)).Select(ci =>
+            var rawCalendarItems = (await _calendarRepository.GetAll(expression)).ToList();
+            var isHrOrAdmin = await IsCallerHrOrAdminAsync();
+            var currentUserId = CurrentContext.UserId(_context);
+            var callerIdentities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(currentUserId))
             {
-                if (ci.Recurring)
+                callerIdentities.Add(currentUserId.Trim());
+                var callerEmployee = await _employeeRepository.FirstOrDefault(e => e.CompanyId == CompanyId && e.UserId == currentUserId);
+                if (callerEmployee is not null)
                 {
-                    var date = ci.Date;
-                    ci.Date = new DateTime(year, date.Month, date.Day, date.Hour, date.Minute, date.Second, date.Kind);
+                    if (!string.IsNullOrWhiteSpace(callerEmployee.EmployeeId)) callerIdentities.Add(callerEmployee.EmployeeId.Trim());
+                    if (!string.IsNullOrWhiteSpace(callerEmployee.Email)) callerIdentities.Add(callerEmployee.Email.Trim());
                 }
-                return new CalendarResponseDto
+            }
+
+            calendarItems = rawCalendarItems
+                .Where(ci =>
                 {
-                    Id = ci.Id,
-                    Name = ci.Name,
-                    Date = ci.Date,
-                    Description = ci.Description,
-                    Type = (CalendarResponseItem)ci.Type,
-                    ImageUrl = Common.GetCalendarItemCoverImagePath(ci.ImageUrl),
-                    Recurring = ci.Recurring
-                };
-            });
+                    if (!IsRestrictedInterviewCalendarItem(ci))
+                        return true;
+                    if (isHrOrAdmin)
+                        return true;
+                    var allowedUsers = ExtractTargetUsers(ci);
+                    return callerIdentities.Any(id => allowedUsers.Contains(id));
+                })
+                .Select(ci =>
+                {
+                    if (ci.Recurring)
+                    {
+                        var date = ci.Date;
+                        // Treat recurring holiday dates as calendar business dates.
+                        // Do not carry over time components or timezone offsets when
+                        // re-projecting them into the requested year.
+                        ci.Date = new DateTime(year, date.Month, date.Day, 0, 0, 0, DateTimeKind.Unspecified);
+                    }
+                    return new CalendarResponseDto
+                    {
+                        Id = ci.Id,
+                        Name = ci.Name,
+                        Date = ci.Date,
+                        StartTimeUtc = ci.StartTimeUtc,
+                        EndTimeUtc = ci.EndTimeUtc,
+                        Description = ci.Description,
+                        Type = (CalendarResponseItem)ci.Type,
+                        ImageUrl = Common.GetCalendarItemCoverImagePath(ci.ImageUrl),
+                        Recurring = ci.Recurring,
+                        TargetUserIds = ExtractTargetUsers(ci).ToArray(),
+                        RestrictToTargetUsersAndHrAdmin = IsRestrictedInterviewCalendarItem(ci)
+                    };
+                });
         }
 
         // get employee birthdays and work anniversaries
-        var today = DateTime.Today;
+        var today = IndiaTime.Today;
         string dateFormat = "yyyy-MM-dd";
-        var employeesList = await _employeeRepository.GetAll(e => e.DateOfBirth != null || e.DateOfJoining != null);
+        var employeesList = await _employeeRepository.GetAll(e => e.CompanyId == CompanyId && (e.DateOfBirth != null || e.DateOfJoining != null));
         if (employeesList == null || !employeesList.Any())
         {
             result.MethodResults = calendarItems.ToList() ?? [];
@@ -128,37 +233,36 @@ public class CalendarServices : ICalendarServices
     public async Task<Result> AddUpdateCalendarItem(CalendarRequestDto model)
     {
         Result result = new();
-        if (string.IsNullOrEmpty(model.Id))
-        {
-            // var existingItem = await _calendarRepository.FirstOrDefault(ci => ci.Name.Equals(model.Name, StringComparison.OrdinalIgnoreCase) && ci.Type == model.Type);
-            // if (existingItem != null)
-            // {
-            //     result.Success = false;
-            //     return result;
-            // }
-
+            if (string.IsNullOrEmpty(model.Id))
+            {
             var newItem = new CalendarEntity
             {
+                CompanyId = CompanyId,
                 Name = model.Name,
-                Date = model.Date,
+                Date = DateTime.SpecifyKind(model.Date.Date, DateTimeKind.Unspecified),
+                StartTimeUtc = model.StartTimeUtc,
+                EndTimeUtc = model.EndTimeUtc,
                 Description = model.Description,
                 Type = model.Type,
                 Recurring = model.Recurring,
+                TargetUserIds = model.TargetUserIds,
+                RestrictToTargetUsersAndHrAdmin = model.RestrictToTargetUsersAndHrAdmin,
                 ImageUrl = model.Image == null ? null : await AddUpdateCalenderItemImage(model.Image)
             };
             result = await _calendarRepository.AddOne(newItem);
+            result.ResourceId = newItem.Id;
         }
         else
         {
-            Expression<Func<CalendarEntity, bool>> whereCondition = c => c.Id == model.Id;
-            var existingItem = await _calendarRepository.FirstOrDefault(ci => ci.Name.Equals(model.Name, StringComparison.OrdinalIgnoreCase));
+            Expression<Func<CalendarEntity, bool>> whereCondition = c => c.Id == model.Id && c.CompanyId == CompanyId;
+            var existingItem = await _calendarRepository.FirstOrDefault(ci => ci.CompanyId == CompanyId && ci.Name.Equals(model.Name, StringComparison.OrdinalIgnoreCase));
             var existingCalendarItem = await _calendarRepository.FirstOrDefault(whereCondition);
             if (existingCalendarItem == null)
             {
                 result.Success = false;
                 return result;
             }
-            if (existingItem != null && existingItem.Name == model.Name && existingItem.Id != model.Id)
+            if (existingItem != null && existingItem.Name == model.Name && existingItem.Id != model.Id && !model.RestrictToTargetUsersAndHrAdmin)
             {
                 result.Success = false;
                 return result;
@@ -176,19 +280,63 @@ public class CalendarServices : ICalendarServices
                 }
             }
             existingCalendarItem.Name = model.Name;
-            existingCalendarItem.Date = model.Date;
+            existingCalendarItem.Date = DateTime.SpecifyKind(model.Date.Date, DateTimeKind.Unspecified);
+            existingCalendarItem.StartTimeUtc = model.StartTimeUtc;
+            existingCalendarItem.EndTimeUtc = model.EndTimeUtc;
             existingCalendarItem.Type = model.Type;
             existingCalendarItem.Description = model.Description;
             existingCalendarItem.Recurring = model.Recurring;
+            existingCalendarItem.TargetUserIds = model.TargetUserIds;
+            existingCalendarItem.RestrictToTargetUsersAndHrAdmin = model.RestrictToTargetUsersAndHrAdmin;
             result = await _calendarRepository.Update(whereCondition, existingCalendarItem);
+            result.ResourceId = existingCalendarItem.Id;
         }
         return result;
+    }
+
+    public async Task<Result> ImportCalendarItems(CalendarBulkImportRequest model)
+    {
+        if (model.Items.Count is < 1 or > CalendarBulkImportRequest.MaxItems)
+        {
+            _logger?.LogWarning("ImportCalendarItems rejected due to row count {Count}", model.Items.Count);
+            return new Result { Success = false, Message = "CALENDAR_IMPORT_ROW_LIMIT: Import 1 to 500 rows." };
+        }
+        var normalized = model.Items.Select(x => new CalendarBulkImportItem
+        {
+            Name = x.Name?.Trim() ?? string.Empty,
+            Date = DateTime.SpecifyKind(x.Date.Date, DateTimeKind.Unspecified),
+            Type = x.Type
+        }).ToList();
+        if (normalized.Any(x => string.IsNullOrWhiteSpace(x.Name) || x.Date.Year is < 2000 or > 2100 || x.Type is not (CalendarItem.Holiday or CalendarItem.Event)))
+        {
+            _logger?.LogWarning("ImportCalendarItems contained invalid rows. Normalized count={Count}", normalized.Count);
+            return new Result { Success = false, Message = "CALENDAR_IMPORT_INVALID_ROW: Name, date, and Holiday or Event type are required." };
+        }
+        var duplicateRows = normalized.GroupBy(x => $"{x.Type}|{x.Date:yyyy-MM-dd}|{x.Name}", StringComparer.OrdinalIgnoreCase).Any(x => x.Count() > 1);
+        if (duplicateRows)
+        {
+            _logger?.LogWarning("ImportCalendarItems detected duplicate rows in payload");
+            return new Result { Success = false, Message = "CALENDAR_IMPORT_DUPLICATE_ROW: The file contains duplicate type, date, and name rows." };
+        }
+        var existing = (await _calendarRepository.GetAll(x => x.CompanyId == CompanyId && (x.Type == CalendarItem.Holiday || x.Type == CalendarItem.Event))).ToList();
+        _logger?.LogInformation("ImportCalendarItems: existingCount={ExistingCount}, incoming={IncomingCount}", existing.Count, normalized.Count);
+        var additions = normalized.Where(item => !existing.Any(x => x.Type == item.Type && x.Date.Date == item.Date && string.Equals(x.Name, item.Name, StringComparison.OrdinalIgnoreCase)))
+            .Select(item => new CalendarEntity { CompanyId = CompanyId, Name = item.Name, Date = item.Date, Type = item.Type, Description = string.Empty, Recurring = false }).ToList();
+        if (additions.Count == 0) return new Result { Success = true, Message = "CALENDAR_IMPORT_NO_NEW_ITEMS" };
+        var saved = await _calendarRepository.AddMany(additions);
+        if (saved.Success)
+        {
+            _logger?.LogInformation("ImportCalendarItems: added {Added} new items", additions.Count);
+            return new Result { Success = true, Message = $"CALENDAR_IMPORT_SUCCESS: Added {additions.Count} item(s); existing matching items were skipped." };
+        }
+        _logger?.LogError("ImportCalendarItems failed to save additions: {Message}", saved.Message);
+        return saved;
     }
 
     public async Task<Result> DeleteItem(string itemId)
     {
         Result result = new();
-        Expression<Func<CalendarEntity, bool>> whereCondition = ci => ci.Id == itemId;
+        Expression<Func<CalendarEntity, bool>> whereCondition = ci => ci.Id == itemId && ci.CompanyId == CompanyId;
         var existingItem = await _calendarRepository.FirstOrDefault(whereCondition);
         if (existingItem is null) return result;
         if (existingItem.ImageUrl != null)
@@ -233,26 +381,34 @@ public class CalendarServices : ICalendarServices
     {
         Result<HolidayResponseDto> result = new();
 
-        var allHolidays = await _calendarRepository.GetAll(cl => cl.Type == EnumsHelper.CalendarItem.Holiday);
+        var allHolidays = await _calendarRepository.GetAll(cl => cl.CompanyId == CompanyId && cl.Type == EnumsHelper.CalendarItem.Holiday);
 
         List<HolidayResponseDto> holidaysInRange = new();
 
+        // Use the same IST-aware business-date helper that Attendance/WFH use for
+        // matching. This keeps a plain ".Date" truncation from re-introducing a
+        // timezone shift for any legacy row that was stored as an IST-midnight
+        // instant converted to UTC (see CalendarDateHelpers.ToBusinessDate).
+        var rangeStart = DateOnly.FromDateTime(filter.FromDate);
+        var rangeEnd = DateOnly.FromDateTime(filter.ToDate);
+
         foreach (var holiday in allHolidays)
         {
+            var holidayDateOnly = CalendarDateHelpers.ToBusinessDate(holiday.Date);
             if (holiday.Recurring)
             {
-                // Generate the holiday date for each year in the range
-                for (int year = filter.FromDate.Year; year <= filter.ToDate.Year; year++)
+                // Generate the holiday date for each year in the range using the
+                // business day (month/day) from the stored holiday.
+                for (int year = rangeStart.Year; year <= rangeEnd.Year; year++)
                 {
-                    var recurringDate = new DateTime(year, holiday.Date.Month, holiday.Date.Day, holiday.Date.Hour, holiday.Date.Minute, holiday.Date.Second, holiday.Date.Kind);
-
-                    if (recurringDate >= filter.FromDate && recurringDate <= filter.ToDate)
+                    var recurringDateOnly = new DateOnly(year, holidayDateOnly.Month, holidayDateOnly.Day);
+                    if (recurringDateOnly >= rangeStart && recurringDateOnly <= rangeEnd)
                     {
                         holidaysInRange.Add(new HolidayResponseDto
                         {
                             Id = holiday.Id,
                             Name = holiday.Name,
-                            Date = recurringDate,
+                            Date = recurringDateOnly.ToDateTime(TimeOnly.MinValue),
                             Description = holiday.Description
                         });
                     }
@@ -260,13 +416,13 @@ public class CalendarServices : ICalendarServices
             }
             else
             {
-                if (holiday.Date >= filter.FromDate && holiday.Date <= filter.ToDate)
+                if (holidayDateOnly >= rangeStart && holidayDateOnly <= rangeEnd)
                 {
                     holidaysInRange.Add(new HolidayResponseDto
                     {
                         Id = holiday.Id,
                         Name = holiday.Name,
-                        Date = holiday.Date,
+                        Date = holidayDateOnly.ToDateTime(TimeOnly.MinValue),
                         Description = holiday.Description
                     });
                 }
@@ -279,3 +435,5 @@ public class CalendarServices : ICalendarServices
         return result;
     }
 }
+
+

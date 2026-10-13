@@ -108,7 +108,7 @@ public class AssetResponseDto
     public string? AssignedToUserName { get; set; }   // joined from EmpUser
     public DateTime? AssignedDate { get; set; }
     public bool IsActive { get; set; }
-}
+} 
 
 // AssetFilterDto.cs
 public class AssetFilterDto

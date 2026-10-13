@@ -25,6 +25,8 @@ public class SalarySlipTemplateModel
     public decimal HealthInsurance { get; set; } = 0;
     public decimal EPF { get; set; } = 0;
     public decimal ESIC { get; set; } = 0;
+    public string EsicEmployeeLabel { get; set; } = "ESIC Employee (0.75%)";
+    public decimal OtherDeductions { get; set; } = 0;
     public decimal GrossPay { get; set; } = 0;
     public decimal TotalDeduction { get; set; } = 0;
     public decimal NetSalary { get; set; } = 0;

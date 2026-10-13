@@ -21,20 +21,14 @@ public static class DefaultCompanySeeds
         "Administration",
     ];
 
-    private static readonly string[] DefaultJobTitles =
+    private static readonly (string Title, string Department)[] DefaultJobTitles =
     [
-        "Software Engineer",
-        "Senior Software Engineer",
-        "Team Lead",
-        "Project Manager",
-        "Business Analyst",
-        "Quality Analyst",
-        "UI/UX Designer",
-        "HR Executive",
-        "HR Manager",
-        "Accountant",
-        "Sales Executive",
-        "Marketing Executive",
+        ("Software Engineer", "Engineering"), ("Senior Software Engineer", "Engineering"),
+        ("Team Lead", "Engineering"), ("Project Manager", "Operations"),
+        ("Business Analyst", "Operations"), ("Quality Analyst", "Engineering"),
+        ("UI/UX Designer", "Engineering"), ("HR Executive", "Human Resources"),
+        ("HR Manager", "Human Resources"), ("Accountant", "Finance & Accounts"),
+        ("Sales Executive", "Sales"), ("Marketing Executive", "Marketing"),
     ];
 
     // EN label -> { language code -> localized label }
@@ -162,19 +156,20 @@ public static class DefaultCompanySeeds
             .ToList();
     }
 
-    public static List<JobTitles> BuildJobTitles(string companyId, IEnumerable<string>? languages, string? createdBy = null)
+    public static List<JobTitles> BuildJobTitles(string companyId, IEnumerable<string>? languages, IReadOnlyDictionary<string, string> departmentIds, string? createdBy = null)
     {
         var langs = NormalizeLanguages(languages);
         var now = DateTime.UtcNow;
         return DefaultJobTitles
-            .Select(label => new JobTitles
+            .Select(item => new JobTitles
             {
                 CompanyId = companyId,
                 IsActive = true,
                 IsDeleted = false,
                 CreatedBy = createdBy ?? string.Empty,
                 CreatedDate = now,
-                Titles = BuildTitles(label, langs),
+                DepartmentId = departmentIds.TryGetValue(item.Department, out var departmentId) ? departmentId : null,
+                Titles = BuildTitles(item.Title, langs),
             })
             .ToList();
     }
@@ -200,5 +195,30 @@ public static class DefaultCompanySeeds
                 ? englishLabel
                 : (perLang != null && perLang.TryGetValue(lang, out var translated) ? translated : englishLabel),
         }).ToList();
+    }
+
+    /// <summary>
+    /// Supplies catalog translations for legacy default data created before
+    /// multilingual titles were stored. Explicit company translations win.
+    /// </summary>
+    public static Dictionary<string, string> GetTitlesWithKnownTranslations(IEnumerable<MultilingualModel>? titles)
+    {
+        Dictionary<string, string> result = (titles ?? [])
+            .Where(title => !string.IsNullOrWhiteSpace(title.Language))
+            .GroupBy(title => title.Language, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last().Label, StringComparer.OrdinalIgnoreCase);
+
+        if (!result.TryGetValue(Languages.English, out string? englishLabel) ||
+            !Translations.TryGetValue(englishLabel, out Dictionary<string, string>? translations))
+        {
+            return result;
+        }
+
+        foreach ((string language, string label) in translations)
+        {
+            result.TryAdd(language, label);
+        }
+
+        return result;
     }
 }

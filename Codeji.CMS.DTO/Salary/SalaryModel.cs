@@ -10,7 +10,8 @@ namespace Codeji.CMS.DTO.Salary
         public Guid SalaryId { get; set; }
 
         [BsonRepresentation(BsonType.String)]
-        public Guid UserId { get; set; }
+        public Guid? UserId { get; set; }
+        public string CompanyId { get; set; } = string.Empty;
 
         public string EmployeeId {get; set;}
 
@@ -20,6 +21,8 @@ namespace Codeji.CMS.DTO.Salary
         public decimal? Lta { get; set; }
         public decimal? Bonus { get; set; }
         public decimal? HealthInsurance { get; set; }
+        public List<SalaryDeductionComponent> OtherDeductions { get; set; } = [];
+        public List<SalaryEarningComponent> OtherEarnings { get; set; } = [];
 
         public decimal GrossSalary { get; set; }
         public decimal? TotalDeductions { get; set; }
@@ -35,5 +38,19 @@ namespace Codeji.CMS.DTO.Salary
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    }
+
+    public sealed class SalaryDeductionComponent
+    {
+        public string Code { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+    }
+
+    public sealed class SalaryEarningComponent
+    {
+        public string Code { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
     }
 }

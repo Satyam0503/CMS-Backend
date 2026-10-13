@@ -27,7 +27,7 @@ Primary route:
 
 ## 2. Design goals
 
-The dashboard should be:
+The dashboard should be: 
 
 - Scannable within five seconds
 - Useful even when the company has little or no data

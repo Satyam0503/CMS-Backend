@@ -4,6 +4,7 @@ using System.Security.Claims;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Employee;
 using Codeji.CMS.DTO.RequestModels;
+using Codeji.CMS.DTO.RequestModels.EmployeeData;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
@@ -15,6 +16,7 @@ using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.Helpers;
+using Codeji.CMS.Utility.Enums;
 using Moq;
 using MongoDB.Driver;
 
@@ -80,6 +82,41 @@ public class AccountAuthTests
     }
 
     [Fact]
+    public async Task Login_AnonymousRequest_UsesServerOwnedFallbackWhenTenantScopedLookupHasNoMatch()
+    {
+        var fixture = new AccountFixture();
+        var user = CreateUser();
+        var role = CreateRole(hasAppAccess: true);
+
+        // A login request has no JWT/company context. The normal repository read is
+        // therefore denied by the tenant filter; AccountServices may only fall back
+        // to its explicit anonymous-auth lookup and must derive the company from user.
+        fixture.EmployeeRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>(), false))
+            .ReturnsAsync((EmpUser?)null);
+        fixture.EmployeeRepository
+            .Setup(x => x.GetAll(It.IsAny<Expression<Func<EmpUser, bool>>>(), false, false))
+            .ReturnsAsync([user]);
+        fixture.RoleRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Roles, bool>>>(), false))
+            .ReturnsAsync(role);
+        fixture.RefreshTokenRepository
+            .Setup(x => x.AddOne(It.IsAny<RefreshToken>()))
+            .ReturnsAsync(new Result { Success = true });
+
+        var result = await fixture.Service.VerifyAndGenerateToken(new LoginModel
+        {
+            Email = user.Email,
+            Password = "CorrectPassword1!"
+        });
+
+        Assert.True(result.Success);
+        Assert.Equal(200, result.StatusCode);
+        fixture.EmployeeRepository.Verify(
+            x => x.GetAll(It.IsAny<Expression<Func<EmpUser, bool>>>(), false, false), Times.Once);
+    }
+
+    [Fact]
     public async Task Login_InvalidPassword_IsRejectedWithoutCreatingRefreshToken()
     {
         var fixture = new AccountFixture();
@@ -142,6 +179,49 @@ public class AccountAuthTests
         Assert.False(result.Success);
         Assert.Equal(CustomStatusCode.UnVerifiedMail, result.StatusCode);
         fixture.RoleRepository.Verify(x => x.FirstOrDefault(It.IsAny<Expression<Func<Roles, bool>>>(), false), Times.Never);
+    }
+
+    [Fact]
+    public async Task ResendEmailVerification_UnverifiedUser_ReplacesTokenAndSendsVerificationLink()
+    {
+        var fixture = new AccountFixture();
+        var user = CreateUser();
+        user.IsEmailVerified = false;
+        UserSecurityToken? storedToken = null;
+        EmpEmailLogs? sentEmail = null;
+
+        fixture.EmployeeRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>(), false)).ReturnsAsync(user);
+        fixture.CompanyRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Company, bool>>>(), false)).ReturnsAsync(new Company { CompanyId = user.CompanyId, CompanyName = "Test Company", DefaultLanguage = "English" });
+        fixture.SecurityTokenRepository.Setup(x => x.UpdateMany(It.IsAny<FilterDefinition<UserSecurityToken>>(), It.IsAny<UpdateDefinition<UserSecurityToken>>())).ReturnsAsync(new Result { Success = true });
+        fixture.SecurityTokenRepository.Setup(x => x.AddOne(It.IsAny<UserSecurityToken>())).Callback<UserSecurityToken>(token => storedToken = token).ReturnsAsync(new Result { Success = true });
+        fixture.MiddlewareService.Setup(x => x.EmailSendAndSaveWithResult(It.IsAny<EmpEmailLogs>())).Callback<EmpEmailLogs>(email => sentEmail = email).ReturnsAsync((true, string.Empty));
+
+        var result = await fixture.Service.ResendEmailVerification(user.Email);
+
+        Assert.True(result.Success);
+        Assert.NotNull(storedToken);
+        Assert.Equal(EnumsHelper.SecurityTokenType.EmailVerification, storedToken.Type);
+        Assert.NotNull(sentEmail);
+        Assert.Contains("/api/account/verify-email?token=", sentEmail.Body);
+        fixture.SecurityTokenRepository.Verify(x => x.UpdateMany(It.IsAny<FilterDefinition<UserSecurityToken>>(), It.IsAny<UpdateDefinition<UserSecurityToken>>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ResendEmailVerification_DeliveryFailure_ReturnsRetryableError()
+    {
+        var fixture = new AccountFixture();
+        var user = CreateUser();
+        user.IsEmailVerified = false;
+        fixture.EmployeeRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>(), false)).ReturnsAsync(user);
+        fixture.CompanyRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Company, bool>>>(), false)).ReturnsAsync(new Company { CompanyId = user.CompanyId, CompanyName = "Test Company", DefaultLanguage = "English" });
+        fixture.SecurityTokenRepository.Setup(x => x.UpdateMany(It.IsAny<FilterDefinition<UserSecurityToken>>(), It.IsAny<UpdateDefinition<UserSecurityToken>>())).ReturnsAsync(new Result { Success = true });
+        fixture.SecurityTokenRepository.Setup(x => x.AddOne(It.IsAny<UserSecurityToken>())).ReturnsAsync(new Result { Success = true });
+        fixture.MiddlewareService.Setup(x => x.EmailSendAndSaveWithResult(It.IsAny<EmpEmailLogs>())).ReturnsAsync((false, "SMTP unavailable"));
+
+        var result = await fixture.Service.ResendEmailVerification(user.Email);
+
+        Assert.False(result.Success);
+        Assert.Equal(503, result.StatusCode);
     }
 
     [Fact]
@@ -216,6 +296,44 @@ public class AccountAuthTests
         Assert.NotNull(storedToken.RevokedAt);
     }
 
+    [Fact]
+    public async Task CreateNewPassword_ValidResetToken_UpdatesPasswordAndConsumesToken()
+    {
+        var fixture = new AccountFixture();
+        var user = CreateUser();
+        var token = "one-time-reset-token";
+        var securityToken = new UserSecurityToken
+        {
+            Id = "security-1", UserId = user.UserId,
+            TokenHash = TokenHelper.ComputeSha256Hash(token),
+            Expiry = DateTime.UtcNow.AddMinutes(10), IsUsed = false,
+            Type = EnumsHelper.SecurityTokenType.PasswordReset
+        };
+        fixture.SecurityTokenRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<UserSecurityToken, bool>>>(), false)).ReturnsAsync(securityToken);
+        fixture.EmployeeRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>(), false)).ReturnsAsync(user);
+        fixture.EmployeeRepository.Setup(x => x.Update(It.IsAny<FilterDefinition<EmpUser>>(), user)).ReturnsAsync(new Result { Success=true });
+        fixture.SecurityTokenRepository.Setup(x => x.UpdateMany(It.IsAny<FilterDefinition<UserSecurityToken>>(), It.IsAny<UpdateDefinition<UserSecurityToken>>())).ReturnsAsync(new Result { Success=true });
+
+        var result = await fixture.Service.CreateNewPassword(new CreateNewPasswordRequest { Token=token, NewPassword="NewPassword1!" });
+
+        Assert.True(result.Success);
+        Assert.True(AuthenticationHandler.VerifyPassword("NewPassword1!", user.Password));
+        fixture.SecurityTokenRepository.Verify(x => x.UpdateMany(It.IsAny<FilterDefinition<UserSecurityToken>>(), It.IsAny<UpdateDefinition<UserSecurityToken>>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task CreateNewPassword_EmailVerificationToken_CannotResetPassword()
+    {
+        var fixture = new AccountFixture();
+        fixture.SecurityTokenRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<UserSecurityToken, bool>>>(), false)).ReturnsAsync((UserSecurityToken?)null);
+
+        var result = await fixture.Service.CreateNewPassword(new CreateNewPasswordRequest { Token="verification-token", NewPassword="NewPassword1!" });
+
+        Assert.False(result.Success);
+        Assert.Equal(CustomStatusCode.InvalidExpiredToken, result.StatusCode);
+        fixture.EmployeeRepository.Verify(x => x.Update(It.IsAny<FilterDefinition<EmpUser>>(), It.IsAny<EmpUser>()), Times.Never);
+    }
+
     private static EmpUser CreateUser() => new()
     {
         UserId = "user-1",
@@ -244,20 +362,26 @@ public class AccountAuthTests
         public Mock<IMongoDbRepository<EmpUser>> EmployeeRepository { get; } = new();
         public Mock<IMongoDbRepository<RefreshToken>> RefreshTokenRepository { get; } = new();
         public Mock<IMongoDbRepository<Roles>> RoleRepository { get; } = new();
+        public Mock<IMongoDbRepository<UserSecurityToken>> SecurityTokenRepository { get; } = new();
+        public Mock<IMongoDbRepository<Company>> CompanyRepository { get; } = new();
+        public Mock<IMiddlewareService> MiddlewareService { get; } = new();
         public AccountServices Service { get; }
 
         public AccountFixture()
         {
+            MiddlewareService
+                .Setup(x => x.EmailSendAndSaveWithResult(It.IsAny<EmpEmailLogs>()))
+                .ReturnsAsync((true, string.Empty));
             Service = new AccountServices(
                 Mock.Of<IEmployeeService>(),
                 EmployeeRepository.Object,
                 RefreshTokenRepository.Object,
                 RoleRepository.Object,
-                Mock.Of<IMongoDbRepository<Company>>(),
+                CompanyRepository.Object,
                 Mock.Of<IMongoDbRepository<MailTemplate>>(),
                 Mock.Of<IPriorityTaskQueue>(),
-                Mock.Of<IMiddlewareService>(),
-                Mock.Of<IMongoDbRepository<UserSecurityToken>>());
+                MiddlewareService.Object,
+                SecurityTokenRepository.Object);
         }
     }
 }

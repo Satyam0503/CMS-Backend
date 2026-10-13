@@ -1,4 +1,5 @@
-﻿using System.Net;
+using System.IdentityModel.Tokens.Jwt;
+using System.Net;
 using System.Text;
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.API.ChatHub;
@@ -31,20 +32,65 @@ using static Codeji.CMS.Utility.Enums.EnumsHelper;
 using Codeji.CMS.Services.Attendance;
 using MongoDB.Driver;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.Leave;
+using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Repositories;
 using Codeji.CMS.Repository.Interfaces;
 using Codeji.CMS.Services.Interfaces;
 using Codeji.CMS.Services.PayRoll;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.Services.Interface;
+using System.Threading.RateLimiting;
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-BsonSerializer.RegisterSerializer(
-new EnumSerializer<NotificationPreferenceType>(BsonType.String)
-);
+try
+{
+    BsonSerializer.RegisterSerializer(
+        new EnumSerializer<NotificationPreferenceType>(BsonType.String)
+    );
+}
+catch (BsonSerializationException)
+{
+    // Already registered - happens when multiple WebApplicationFactory instances re-run
+    // Program's top-level statements in the same test process; the registry is process-wide.
+}
 
 // Add services to the container
 builder.Services.AddControllers();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("career-sensitive", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 12,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+    options.AddPolicy("account-sensitive", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 8,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+    options.AddPolicy("career-analytics", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 30,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+});
 // .AddJsonOptions(options =>
 // {
 //     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
@@ -95,9 +141,25 @@ builder.Services.AddSwaggerGen(option =>
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    options.ForwardLimit = 0;
-    options.KnownProxies.Add(IPAddress.Parse("::ffff:192.165.10.20"));
-    options.ForwardedForHeaderName = "X-Forwarded-For-You";
+    // Only accept client-address information from the reverse proxies explicitly
+    // configured for this deployment. With an empty list, forwarded headers are
+    // ignored rather than allowing a caller to choose its own limiter partition.
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor |
+                               ForwardedHeaders.XForwardedHost |
+                               ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = builder.Configuration.GetValue<int?>("ReverseProxy:ForwardLimit") ?? 1;
+
+    foreach (var proxy in builder.Configuration.GetSection("ReverseProxy:TrustedProxies").Get<string[]>() ?? [])
+    {
+        if (IPAddress.TryParse(proxy, out var address))
+        {
+            options.KnownProxies.Add(address);
+        }
+        else
+        {
+            throw new InvalidOperationException($"ReverseProxy:TrustedProxies contains an invalid IP address: '{proxy}'.");
+        }
+    }
 });
 
 // SignalR and Notification Services
@@ -109,14 +171,14 @@ builder.Services.AddSingleton<IPriorityTaskQueue, PriorityTaskQueue>();
 builder.Services.AddHostedService<PriorityQueuedHostedService>();
 builder.Services.AddHostedService<BirthDayAndAnniversaryNotificationHostedServices>();
 builder.Services.AddHostedService<LeaveAccrualHostedService>();
+builder.Services.AddHostedService<Codeji.CMS.Services.CareerPortal.CareerNotificationWorker>();
+builder.Services.AddHostedService<Codeji.CMS.Services.Recruitments.RecruitmentEmailOutboxWorker>();
+builder.Services.AddHostedService<Codeji.CMS.Services.Recruitments.RecruitmentRetentionWorker>();
+builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceOutboxWorker>();
+builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceReminderHostedService>();
+builder.Services.AddHostedService<EmployeeExitOutboxWorker>();
+builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.LeaveAttendanceReconciliationHostedService>();
 builder.Services.AddHttpContextAccessor();
-// Register Attendance Repository
-builder.Services.AddScoped<IAttendanceRepository, AttendanceRepository>();
-
-// Register Service Layer
-builder.Services.AddScoped<IAdminAttendanceService, AdminAttendanceService>();
-
-
 // MongoDB Configuration
 ConfigurationManager configuration = builder.Configuration;
 var mongoConnection = configuration.GetConnectionString("mongodb")
@@ -164,7 +226,20 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
         options.Events = new JwtBearerEvents
         {
-            OnMessageReceived = context =>
+            OnTokenValidated = context =>
+            {
+                var principal = context.Principal;
+                var subject = principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+                    ?? principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                var userId = principal?.FindFirst("user_id")?.Value;
+                var companyId = principal?.FindFirst("company_id")?.Value;
+                var roleId = principal?.FindFirst("role_id")?.Value;
+                if (string.IsNullOrWhiteSpace(subject) || string.IsNullOrWhiteSpace(userId) ||
+                    !string.Equals(subject, userId, StringComparison.Ordinal) ||
+                    string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(roleId))
+                    context.Fail("Required tenant identity claims are missing or inconsistent.");
+                return Task.CompletedTask;
+            },            OnMessageReceived = context =>
             {
                 var accessToken = context.Request.Query["access_token"];
                 // If the request is for our hub...
@@ -186,7 +261,9 @@ builder.Services.AddAuthorization(option =>
     {
         policy.Requirements.Add(new RoleRequirement(EnumsHelper.Roles.Administrator));
     });
+    option.AddPolicy("HrExitOverride", policy => policy.Requirements.Add(new AnyRoleRequirement(EnumsHelper.Roles.Administrator, EnumsHelper.Roles.HR, EnumsHelper.Roles.HRExecutive)));
 });
+builder.Services.AddSingleton<IAuthorizationHandler, AnyRoleHandler>();
 
 // Antiforgery
 builder.Services.AddAntiforgery(options =>
@@ -198,8 +275,8 @@ builder.Services.AddAntiforgery(options =>
 // SignalR Configuration
 builder.Services.AddSignalR(options =>
 {
-    options.MaximumReceiveMessageSize = null;
-    options.EnableDetailedErrors = true;
+    options.MaximumReceiveMessageSize = 64 * 1024;
+    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
 });
 
 // to track users presence in application 
@@ -208,7 +285,28 @@ builder.Services.AddSingleton<IEmployeePresenceService, EmployeePresenceService>
 
 // mogodb repositories
 builder.Services.AddScoped<IMongoDbRepository<EmpUser>, MongoRepository<EmpUser>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeLifecyclePolicy>, MongoRepository<EmployeeLifecyclePolicy>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeLifecycleCase>, MongoRepository<EmployeeLifecycleCase>>();
+builder.Services.AddScoped<IEmployeeLifecycleCaseService, EmployeeLifecycleCaseService>();
+builder.Services.AddScoped<IEmployeeLifecyclePolicyService, EmployeeLifecyclePolicyService>();
 builder.Services.AddScoped<IMongoDbRepository<EmpPayRoll>, MongoRepository<EmpPayRoll>>();
+builder.Services.AddScoped<IMongoDbRepository<PayrollRun>, MongoRepository<PayrollRun>>();
+builder.Services.AddScoped<IMongoDbRepository<PayrollRunEmployee>, MongoRepository<PayrollRunEmployee>>();
+builder.Services.AddScoped<IMongoDbRepository<PayrollPaymentBatch>, MongoRepository<PayrollPaymentBatch>>();
+builder.Services.AddScoped<IMongoDbRepository<PayrollAdjustment>, MongoRepository<PayrollAdjustment>>();
+
+builder.Services.AddScoped<IMongoDbRepository<RefreshToken>, MongoRepository<RefreshToken>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeExit>, MongoRepository<EmployeeExit>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeExitPolicy>, MongoRepository<EmployeeExitPolicy>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeExitClearanceTemplate>, MongoRepository<EmployeeExitClearanceTemplate>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeFinalSettlement>, MongoRepository<EmployeeFinalSettlement>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeExitAttendanceCutoff>, MongoRepository<EmployeeExitAttendanceCutoff>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeExitOutbox>, MongoRepository<EmployeeExitOutbox>>();
+builder.Services.AddScoped<IMongoDbRepository<FormerEmployeeAccessToken>, MongoRepository<FormerEmployeeAccessToken>>();
+builder.Services.AddSingleton<IEmployeeExitEvidenceStorage, PrivateEmployeeExitEvidenceStorage>();
+builder.Services.AddScoped<IFormerEmployeePortalService, FormerEmployeePortalService>();
+builder.Services.AddScoped<IMongoDbRepository<LeaveRequest>, MongoRepository<LeaveRequest>>();
+builder.Services.AddScoped<IMongoDbRepository<WorkFromHomeRequest>, MongoRepository<WorkFromHomeRequest>>();
 // salary 
 builder.Services.AddScoped<MongoDbContext>();
 builder.Services.AddScoped<ISalaryRepository, SalaryRepository>();
@@ -263,10 +361,10 @@ if (!Directory.Exists(uploadsPath))
     Directory.CreateDirectory(uploadsPath);
 }
 
-// CORS first — UseStaticFiles is terminal middleware, so the CORS middleware
+// CORS first â€” UseStaticFiles is terminal middleware, so the CORS middleware
 // never gets a chance to attach headers to /fs/* responses. We move UseCors
 // above static files for canonical ordering and ALSO attach CORS headers
-// directly via OnPrepareResponse below — that's the only path that actually
+// directly via OnPrepareResponse below â€” that's the only path that actually
 // works for static-file responses.
 app.UseCors(corsName);
 
@@ -293,16 +391,27 @@ app.UseStaticFiles(new StaticFileOptions
         }
         catch (UriFormatException)
         {
-            // Malformed Origin header — silently skip, response gets no CORS
+            // Malformed Origin header â€” silently skip, response gets no CORS
             // headers and the browser blocks (correct behavior).
         }
     }
 });
-app.UseHttpsRedirection();
+// Local development profiles may intentionally expose HTTP only. Avoid emitting an
+// unusable HTTPS redirect when no development HTTPS endpoint is configured.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+// This must precede rate limiting and authentication so both use the client IP
+// supplied by a configured trusted proxy.
+app.UseForwardedHeaders();
+app.UseRateLimiter();
 app.UseAuthentication();
-app.UseAuthorization();
-
+// Establish the authenticated tenant before any policy handler performs a
+// tenant-scoped repository lookup.  In particular, AdminOnly verifies the
+// role against CompanyId, so it must run after this request validation.
 app.UseMiddleware<AntiforgeryMiddleware>();
+app.UseAuthorization();
 // app.UseMiddleware<CompanyIdMiddleware>();
 
 // Configure SignalR hub
@@ -322,12 +431,8 @@ app.MapHub<ChatHub>("/chathub", options =>
 
 // Configure controller routes
 app.MapControllers();
-app.UseForwardedHeaders(new ForwardedHeadersOptions
-{
-    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedHost
-});
 // Add security headers.
-// Use indexer assignment (not .Add) so duplicate keys don't throw — .NET 10's
+// Use indexer assignment (not .Add) so duplicate keys don't throw â€” .NET 10's
 // IHeaderDictionary.Add throws ArgumentException on existing keys (ASP0019).
 app.Use(async (context, next) =>
 {
@@ -348,3 +453,6 @@ app.Use(async (context, next) =>
 
 // Run the application
 app.Run();
+
+
+

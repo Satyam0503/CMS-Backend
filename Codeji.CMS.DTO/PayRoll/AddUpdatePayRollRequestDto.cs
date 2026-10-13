@@ -19,4 +19,74 @@ public class AddUpdatePayRollRequestDto
     public decimal? EPF { get; set; }
     public decimal? ESIC { get; set; }
     public required DateTime PayMonth { get; set; }
+    public List<PayrollDeductionLineDto> DeductionLines { get; set; } = [];
+    public List<PayrollEarningLineDto> EarningLines { get; set; } = [];
+    public bool ReplaceEarningLines { get; set; }
+    public bool ReplaceDeductionLines { get; set; }
+    public PayrollCalculationSnapshotDto? CalculationSnapshot { get; set; }
+}
+
+public class PayrollDeductionLineDto
+{
+    public required string Code { get; set; }
+    public required string Description { get; set; }
+    public decimal DayFraction { get; set; }
+    public decimal Amount { get; set; }
+    public string? SourceId { get; set; }
+}
+
+public class PayrollEarningLineDto
+{
+    public required string Code { get; set; }
+    public required string Description { get; set; }
+    public decimal Amount { get; set; }
+}
+
+public class PayrollCalculationSnapshotDto
+{
+    public DateTime PayrollMonth { get; set; }
+    public DateTime JoiningDateUsed { get; set; }
+    public DateTime? ExitDateUsed { get; set; }
+    public DateTime EligibleFrom { get; set; }
+    public DateTime EligibleTo { get; set; }
+    public string DivisorPolicy { get; set; } = "CALENDAR_DAYS";
+    public decimal Divisor { get; set; }
+    public int DivisorPolicyVersion { get; set; }
+    public int LhdCount { get; set; }
+    public int EdCount { get; set; }
+    public int CombinedCount { get; set; }
+    public int AllowedCount { get; set; }
+    public int ExceededCount { get; set; }
+    public string? ExceptionDecision { get; set; }
+    public decimal PenaltyDayFraction { get; set; }
+    public decimal PenaltyAmount { get; set; }
+    public string? PolicyId { get; set; }
+    public int PolicyVersion { get; set; }
+    public int AttendanceSummaryVersion { get; set; }
+    public string? PayrollAssignmentId { get; set; }
+    public int PayrollAssignmentVersion { get; set; }
+    public string? PayGroupId { get; set; }
+    public int PayGroupVersion { get; set; }
+    public string? SalaryTemplateId { get; set; }
+    public int SalaryTemplateVersion { get; set; }
+    public string? ResolvedPolicyProfileId { get; set; }
+    public int ResolvedPolicyVersion { get; set; }
+    public string EpfMode { get; set; } = "CAPPED_CEILING";
+    public decimal EpfWageCeiling { get; set; } = 15000m;
+    public decimal EpfEmployeeRatePercent { get; set; } = 12m;
+    public decimal EpfEmployerRatePercent { get; set; } = 12m;
+    public string EsicMode { get; set; } = "STATUTORY";
+    public decimal EsicWageCeiling { get; set; } = 21000m;
+    public decimal EsicEmployeeRatePercent { get; set; } = 0.75m;
+    public decimal EsicEmployerRatePercent { get; set; } = 3.25m;
+    public string TdsMode { get; set; } = "AUTO_NEW_REGIME";
+    public List<PayrollSalaryRevisionReferenceDto> SalaryRevisions { get; set; } = [];
+    public List<PayrollSalaryStructureSnapshotDto> SalaryStructures { get; set; } = [];
+
+}
+
+public sealed class PayrollSalaryRevisionReferenceDto
+{
+    public string SalaryStructureId { get; set; } = string.Empty;
+    public int Version { get; set; }
 }

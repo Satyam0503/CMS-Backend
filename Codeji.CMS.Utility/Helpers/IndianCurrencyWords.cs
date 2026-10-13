@@ -17,16 +17,33 @@ public static class IndianCurrencyWords
         "", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"
     ];
 
-    public static string ToWords(decimal amount)
+    public static string ToWords(decimal amount, string? currency = "INR")
     {
         amount = Math.Round(amount, 2, MidpointRounding.AwayFromZero);
-        long rupees = (long)Math.Floor(amount);
-        int paise = (int)Math.Round((amount - rupees) * 100, MidpointRounding.AwayFromZero);
+        long wholeNumber = (long)Math.Floor(amount);
+        int fractionalNumber = (int)Math.Round((amount - wholeNumber) * 100, MidpointRounding.AwayFromZero);
 
-        string result = $"Rupees {ConvertWholeNumber(rupees)}";
-        if (paise > 0)
+        var curr = string.IsNullOrWhiteSpace(currency) ? "INR" : currency.Trim().ToUpperInvariant();
+        string majorUnit = curr switch
         {
-            result += $" and {ConvertWholeNumber(paise)} Paise";
+            "USD" => "Dollars",
+            "EUR" => "Euros",
+            "GBP" => "Pounds",
+            "AED" => "Dirhams",
+            _ => "Rupees"
+        };
+        string minorUnit = curr switch
+        {
+            "USD" or "EUR" => "Cents",
+            "GBP" => "Pence",
+            "AED" => "Fils",
+            _ => "Paise"
+        };
+
+        string result = $"{majorUnit} {ConvertWholeNumber(wholeNumber)}";
+        if (fractionalNumber > 0)
+        {
+            result += $" and {ConvertWholeNumber(fractionalNumber)} {minorUnit}";
         }
         return $"{result} Only";
     }

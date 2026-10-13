@@ -44,6 +44,15 @@ public class CalendarController : ControllerBase
         return result;
     }
 
+    [Route("ImportCalendarItems")]
+    [HttpPost]
+    [ModulePermission(AppModule.Calendar, Permission.Create)]
+    public async Task<Result> ImportCalendarItems([FromBody] CalendarBulkImportRequest model)
+    {
+        if (!ModelState.IsValid) return new Result { Success = false, Message = "CALENDAR_IMPORT_INVALID_PAYLOAD" };
+        return await _calendarServices.ImportCalendarItems(model);
+    }
+
     [Route("DeleteCalendarItem/{itemId}")]
     [HttpDelete]
     [ModulePermission(AppModule.Calendar, Permission.Delete)]

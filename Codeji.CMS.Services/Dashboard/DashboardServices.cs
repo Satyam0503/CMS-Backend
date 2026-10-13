@@ -13,6 +13,7 @@ using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
+using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using LinqKit;
 using Microsoft.AspNetCore.Http;
@@ -51,7 +52,7 @@ namespace Codeji.CMS.Services.Dashboard
         public async Task<List<DepartmentEmpResponseDto>> GetAllDepartmentsDetails(string companyId)
         {
             var allDepartments = await _departmentRepository.GetAll(x => x.CompanyId == companyId && x.IsDeleted == false);
-            var allEmpUser = await _empUserRepository.GetAll(x => x.CompanyId == companyId);
+            var allEmpUser = await _empUserRepository.GetAll(x => x.CompanyId == companyId && x.Status && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended));
             var result = from ad in allDepartments
                          join aeu in allEmpUser on ad.DepartmentId equals aeu.Department into empGroup
                          select new DepartmentEmpResponseDto
@@ -65,7 +66,7 @@ namespace Codeji.CMS.Services.Dashboard
 
         public async Task<List<GenderDetailsResponseModel>> GetAllGenderDetails(string companyId)
         {
-            var allEmpUser = await _empUserRepository.GetAll(x => x.CompanyId == companyId);
+            var allEmpUser = await _empUserRepository.GetAll(x => x.CompanyId == companyId && x.Status && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended));
             var result = (from aeu in allEmpUser
                           group aeu by aeu.Gender into genderGroup
                           select new GenderDetailsResponseModel
@@ -80,14 +81,15 @@ namespace Codeji.CMS.Services.Dashboard
         public async Task<Result<ApplicationDataResponseDto>> GetApplicationStatusData(string? vacancyId)
         {
             Result<ApplicationDataResponseDto> result = new();
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
             List<Applicant> applicantList = [];
             if (vacancyId != null)
             {
-                applicantList = (await _applicantRepository.GetAll(ap => ap.VacancyId == vacancyId)).ToList();
+                applicantList = (await _applicantRepository.GetAll(ap => ap.CompanyId == companyId && ap.VacancyId == vacancyId)).ToList();
             }
             else
             {
-                applicantList = (await _applicantRepository.GetAll()).ToList();
+                applicantList = (await _applicantRepository.GetAll(ap => ap.CompanyId == companyId)).ToList();
             }
             if (applicantList.Count == 0) return result;
             var groupedApplicantData = applicantList.GroupBy(ap => ap.ActivityType).Select(apg => new ApplicationStatusTypeData()
@@ -106,7 +108,8 @@ namespace Codeji.CMS.Services.Dashboard
         public async Task<Result<UpComingHolidayEventResponseDto>> GetUpComingHolidayAndEvents()
         {
             Result<UpComingHolidayEventResponseDto> result = new();
-            var recurringItems = await _calendarRepository.GetAll(ci => ci.Recurring);
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var recurringItems = await _calendarRepository.GetAll(ci => ci.CompanyId == companyId && ci.Recurring);
             var upcomingEventOrHolidays = recurringItems.Select(ci =>
             {
                 var date = ci.Date;
@@ -127,10 +130,10 @@ namespace Codeji.CMS.Services.Dashboard
                 };
             }).Where(ci => ci.Date > DateTime.UtcNow).OrderBy(ci => ci.Date);
 
-            Expression<Func<CalendarEntity, bool>> holidayExpressiojn = ci => ci.Date.Date >= DateTime.UtcNow.Date && ci.Recurring == false && ci.Type == EnumsHelper.CalendarItem.Holiday;
+            Expression<Func<CalendarEntity, bool>> holidayExpressiojn = ci => ci.CompanyId == companyId && ci.Date.Date >= DateTime.UtcNow.Date && ci.Recurring == false && ci.Type == EnumsHelper.CalendarItem.Holiday;
             var upcomingHoliday = (await _calendarRepository.GetAggregateDataAsync<CalendarEntity>(holidayExpressiojn, isAscending: true, orderedKey: "Date", pageSize: 5)).ToList();
 
-            Expression<Func<CalendarEntity, bool>> eventExpression = ci => ci.Date.Date >= DateTime.UtcNow.Date && ci.Recurring == false && ci.Type == EnumsHelper.CalendarItem.Event;
+            Expression<Func<CalendarEntity, bool>> eventExpression = ci => ci.CompanyId == companyId && ci.Date.Date >= DateTime.UtcNow.Date && ci.Recurring == false && ci.Type == EnumsHelper.CalendarItem.Event;
             var upcomingEvent = (await _calendarRepository.GetAggregateDataAsync<CalendarEntity>(eventExpression, isAscending: true, orderedKey: "Date", pageSize: 5)).ToList();
 
             var combinedItems = upcomingHoliday.Concat(upcomingEvent).Concat(upcomingEventOrHolidays).OrderBy(ci => ci.Date).Select(x =>
@@ -155,11 +158,12 @@ namespace Codeji.CMS.Services.Dashboard
         public async Task<Result<UpcomingCelebrations>> GetUpComingCelebrations()
         {
             Result<UpcomingCelebrations> result = new();
-            IEnumerable<EmpUser> employeeList = await _empUserRepository.GetAll();
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            IEnumerable<EmpUser> employeeList = await _empUserRepository.GetAll(employee => employee.CompanyId == companyId && employee.Status && (employee.Lifecycle == null || employee.Lifecycle.EmploymentStatus == null || employee.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || employee.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || employee.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended));
             List<string> empJobIds = employeeList.Select(e => e.JobRole).ToList();
-            IEnumerable<JobTitles> jobTitles = await _jobTitleRepository.GetAll(jt => empJobIds.Contains(jt.JobTitleId));
+            IEnumerable<JobTitles> jobTitles = await _jobTitleRepository.GetAll(jt => jt.CompanyId == companyId && empJobIds.Contains(jt.JobTitleId));
 
-            var today = DateTime.Today;
+            var today = IndiaTime.Today;
             string dateFormat = "yyyy-MM-dd";
 
             var empJobTitleJoin = (from emp in employeeList

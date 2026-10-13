@@ -19,7 +19,7 @@ public interface ICompanyMasterService
 
     // Company Job Titles 
     Task<Result> AddUpdateJobTitle(List<JobTitleRequestDto> data, string userId);
-    Task<Result<JobTitleResponseDto>> GetJobTitles(bool? isActive);
+    Task<Result<JobTitleResponseDto>> GetJobTitles(bool? isActive, string? departmentId);
     Task<bool> DeleteJobTitle(string jobTitleId);
 
     // custom attributes
@@ -27,5 +27,6 @@ public interface ICompanyMasterService
     Task<List<CustomAttributeResponseDto>> GetAllCustomAttribute(string companyId);
     Task<Result<CustomAttributeByIdResponseDto>> GetCustomAttributeById(string customAttributeId, string companyId, bool? active);
     Task<Result> UpdateCustomAttribute(CustomAttributeRequestDto data, string companyId, string userId);
+    Task<Result> DeleteCustomAttribute(string customAttributeId, string companyId, string userId);
     Task<Result> DeleteCustomAttributeValue(string customAttributeValueId, string companyId);
 }

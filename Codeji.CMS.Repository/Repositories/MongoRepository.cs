@@ -26,10 +26,16 @@ namespace Codeji.CMS.Repository.Repositories
         private readonly IMongoCollection<TEntity> _dbSet = null;
         private readonly IHttpContextAccessor _httpContextAccessor;
         //private IMongoDbContext _mongoDbContext;
-        public MongoRepository(IMongoDbCacheService _cacheService, IHttpContextAccessor httpContextAccessor)
+        public MongoRepository(IMongoDbCacheService cacheService, IHttpContextAccessor httpContextAccessor, IMongoClient mongoClient)
         {
-            MongoDbContext _mongoDbContext = new MongoDbContext(_cacheService, typeof(TEntity).Name);
-            _dbSet = _mongoDbContext.GetCollection<TEntity>();
+            MongoDbContext _mongoDbContext = new MongoDbContext(cacheService, mongoClient, typeof(TEntity).Name);
+            // Attendance was introduced with the physical collection name "Attendance"
+            // while the generic repository normally derives "AttendanceModel" from the
+            // CLR type. Keep every attendance consumer (calendar, validation and payroll)
+            // on the same existing collection so saved records are not reported missing.
+            _dbSet = typeof(TEntity) == typeof(AttendanceModel)
+                ? _mongoDbContext.GetCollection<TEntity>("Attendance")
+                : _mongoDbContext.GetCollection<TEntity>();
             _httpContextAccessor = httpContextAccessor;
         }
 
@@ -95,10 +101,26 @@ namespace Codeji.CMS.Repository.Repositories
         private IFindFluent<TEntity, TEntity> GetQuery(Expression<Func<TEntity, bool>> filter = null, bool WithDeletedObjects = false, bool withDefaultFilter = true)
         {
             filter = filter ?? (x => true);
-            // IQueryable<TEntity> query = _dbSet.AsQueryable()(WithDeletedObjects, GetCompanyId()).Where(filter);
-            var filterDefinition = IQueryableCustomExtensions.ApplyDefaultFilters(filter, WithDeletedObjects, withDefaultFilter ? GetCompanyId() : "");
+            // `withDefaultFilter: false` is an explicit maintenance/background escape hatch.
+            // Normal request reads must never fall back to cross-company data merely because
+            // a model does not implement ISupportAuditing (AttendanceModel is one example).
+            var companyId = withDefaultFilter ? GetCompanyId() : string.Empty;
+            var filterDefinition = IQueryableCustomExtensions.ApplyDefaultFilters(filter, WithDeletedObjects, companyId);
+            if (withDefaultFilter && HasCompanyIdProperty())
+            {
+                filterDefinition &= TenantFilter(companyId);
+            }
             return _dbSet.Find(filterDefinition);
         }
+
+        private static bool HasCompanyIdProperty() =>
+            typeof(TEntity).GetProperty("CompanyId", BindingFlags.Public | BindingFlags.Instance) != null;
+
+        private static FilterDefinition<TEntity> TenantFilter(string companyId) =>
+            string.IsNullOrWhiteSpace(companyId)
+                // A missing tenant context is denied, never interpreted as an all-company read.
+                ? Builders<TEntity>.Filter.Eq("CompanyId", "__TENANT_CONTEXT_REQUIRED__")
+                : Builders<TEntity>.Filter.Eq("CompanyId", companyId);
 
         public IQueryable<TEntity> Get(Expression<Func<TEntity, bool>> filter = null, Func<IQueryable<TEntity>, IOrderedQueryable<TEntity>> orderBy = null, bool WithDeletedObjects = false)
         {
@@ -124,9 +146,9 @@ namespace Codeji.CMS.Repository.Repositories
             bool res = await GetQuery(filter, WithDeletedObjects).AnyAsync();
             return res;
         }
-        public async Task<TEntity?> FirstOrDefault(Expression<Func<TEntity, bool>> filter = null, bool WithDeletedObjects = false)
+        public async Task<TEntity?> FirstOrDefault(Expression<Func<TEntity, bool>> filter = null, bool WithDeletedObjects = false, bool withDefaultFilter = true)
         {
-            TEntity? res = GetQuery(filter, WithDeletedObjects).FirstOrDefault();
+            TEntity? res = GetQuery(filter, WithDeletedObjects, withDefaultFilter).FirstOrDefault();
             return res;
         }
         #region Create
@@ -272,10 +294,12 @@ namespace Codeji.CMS.Repository.Repositories
                 // check filters with company ID.
                 //to DO
                 ReplaceOneResult updateRes = await _dbSet.ReplaceOneAsync(filter, model, new ReplaceOptions { IsUpsert = false });
-                if (updateRes.ModifiedCount < 1)
+                // A matching replacement can legitimately be idempotent.  Treat a
+                // missing match as the failure, not a zero modified count.
+                if (updateRes.MatchedCount < 1)
                 {
                     Exception ex = new Exception();
-                    result.Message = HelperService.NotifyException("UpdateOne", "ERROR: updateRes.ModifiedCount < 1 for entity: " + typeof(TEntity).Name, ex);
+                    result.Message = HelperService.NotifyException("UpdateOne", "ERROR: updateRes.MatchedCount < 1 for entity: " + typeof(TEntity).Name, ex);
                     result.StatusCode = StatusCodes.Status400BadRequest;
                     return result;
                 }
@@ -345,24 +369,24 @@ namespace Codeji.CMS.Repository.Repositories
         {
             try
             {
-                Expression<Func<TEntity, bool>> defaultFilter = x => true;
+                FilterDefinition<TEntity> defaultFilter = Builders<TEntity>.Filter.Empty;
 
                 if (typeof(TEntity).GetProperties().Any(x => x.Name == "IsDeleted") && !WithDeletedObjects)
                 {
-                    defaultFilter = x => !((ISupportSoftDelete)x).IsDeleted;
+                    defaultFilter &= Builders<TEntity>.Filter.Eq("IsDeleted", false);
                 }
-                if (typeof(TEntity).GetProperties().Any(x => x.Name == "CompanyId"))
+                if (HasCompanyIdProperty())
                 {
-                    defaultFilter = defaultFilter.And(x => ((ISupportAuditing)x).CompanyId == GetCompanyId());
+                    defaultFilter &= TenantFilter(GetCompanyId());
                 }
                 if (filter != null)
                 {
-                    defaultFilter = defaultFilter.And(filter);
+                    defaultFilter &= Builders<TEntity>.Filter.Where(filter);
                 }
 
 
                 List<IPipelineStageDefinition> pipeline = new List<IPipelineStageDefinition>        {
-                    PipelineStageDefinitionBuilder.Match(Builders<TEntity>.Filter.Where(defaultFilter))
+                    PipelineStageDefinitionBuilder.Match(defaultFilter)
                 };
 
                 if (projection != null)

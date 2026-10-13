@@ -2,10 +2,12 @@ using Microsoft.AspNetCore.Mvc;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Salary;
 using Codeji.CMS.Services.Interfaces;
+using Codeji.CMS.Services.Exceptions;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
+using MongoDB.Driver;
 
 
 namespace Codeji.CMS.API.Controllers
@@ -30,14 +32,25 @@ namespace Codeji.CMS.API.Controllers
 
         public async Task<IActionResult> CreateSalary([FromBody] CreateSalaryDto dto)
         {
-            var salary = await _salaryService.CreateSalaryAsync(dto);
-            return Ok(new { success = true, data = SalaryResponseDto.MapFromModel(salary) });
+            try
+            {
+                var salary = await _salaryService.CreateSalaryAsync(CurrentContext.CompanyId(_httpContextAccessor), dto);
+                return Ok(new { success = true, data = SalaryResponseDto.MapFromModel(salary) });
+            }
+            catch (SalaryEffectiveDateConflictException ex)
+            {
+                return Conflict(new { success = false, message = ex.Message });
+            }
+            catch (MongoWriteException ex) when (ex.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+            {
+                return Conflict(new { success = false, message = "A salary structure already exists for this employee on the selected effective date." });
+            }
         }
 
         [HttpGet("active/{userId}")]
         public async Task<IActionResult> GetActiveSalary(Guid userId)
         {
-            var salary = await _salaryService.GetActiveSalaryAsync(userId);
+            var salary = await _salaryService.GetActiveSalaryAsync(CurrentContext.CompanyId(_httpContextAccessor), userId);
             if (salary == null) return NotFound(new { success = false, message = "No active salary found" });
             return Ok(new { success = true, data = salary });
         }
@@ -45,7 +58,7 @@ namespace Codeji.CMS.API.Controllers
         [HttpGet("history/{userId}")]
         public async Task<IActionResult> GetSalaryHistory(Guid userId)
         {
-            var salaries = await _salaryService.GetSalaryHistoryAsync(userId);
+            var salaries = await _salaryService.GetSalaryHistoryAsync(CurrentContext.CompanyId(_httpContextAccessor), userId);
             return Ok(new { success = true, data = salaries });
         }
 
@@ -55,8 +68,13 @@ namespace Codeji.CMS.API.Controllers
         public async Task<ActionResult<Result<CompanySalaryResponseDto>>> GetCompanySalaries([FromBody] CompanySalaryFilterDto filter)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-            var salaries = await _salaryService.GetCompanySalariesAsync(companyId, filter.EmployeeName);
-            var result = new Result<CompanySalaryResponseDto> { MethodResults = salaries };
+            var salaries = await _salaryService.GetCompanySalariesAsync(companyId, filter?.EmployeeName);
+            var result = new Result<CompanySalaryResponseDto>
+            {
+                Success = true,
+                MethodResults = salaries,
+                TotalRecords = salaries.Count
+            };
             return Ok(result);
         }
     }

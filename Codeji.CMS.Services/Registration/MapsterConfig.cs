@@ -47,12 +47,19 @@ public class MapsterConfig : IRegister
         config.NewConfig<ApplicantViewModel, Applicant>()
             .Map(dest => dest.CreatedDate, src => src.ApplyDate);
         config.NewConfig<JobTitles, JobTitleRequestDto>().TwoWays();
+        config.NewConfig<JobTitleRequestDto, JobTitles>()
+            .Map(dest => dest.JobTitleId, src => src.JobTitleId)
+            .Map(dest => dest.DepartmentId, src => src.DepartmentId)
+            .Map(dest => dest.IsActive, src => src.IsActive)
+            .Map(dest => dest.Titles, src => src.Titles);
         config.NewConfig<CustomAttributeValue, CustomAttributeValueRequestDto>().TwoWays();
         config.NewConfig<LeaveRequest, MyLeaveRequestResponse>().TwoWays();
         config.NewConfig<CalendarEntity, UpComingHolidayEventResponseDto>().TwoWays();
         config.NewConfig<CalendarEntity, CalendarResponseDto>().TwoWays();
         config.NewConfig<LeavePolicy, LeavePolicyRequest>().TwoWays();
         config.NewConfig<LeavePolicy, UpdateLeavePolicyRequest>().TwoWays();
+        config.NewConfig<WorkFromHomePolicySettings, WorkFromHomePolicySettingsRequest>().TwoWays();
+        config.NewConfig<LifecycleLeavePolicySettings, LifecycleLeavePolicySettingsRequest>().TwoWays();
         config.NewConfig<Policy, CreatePolicyRequestModel>().TwoWays();
         config.NewConfig<Policy, PolicyResponseModel>().TwoWays();
         config.NewConfig<AdminAttendanceCreateDto, AttendanceModel>()

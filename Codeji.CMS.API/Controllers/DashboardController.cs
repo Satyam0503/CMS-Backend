@@ -1,4 +1,5 @@
 using MapsterMapper;
+using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Dashboard;
 using Codeji.CMS.DTO.RolePermissions;
@@ -8,6 +9,7 @@ using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.middlewares;
+using Codeji.CMS.Utility.Constraints;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -40,6 +42,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetAllGenderDetails")]
+        [ModulePermission(AppModule.Dashboard, Permission.ViewAll)]
         public async Task<Result<GenderDetailsResponseModel>> GetAllGenderDetails()
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -54,6 +57,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetApplicationStatusData")]
+        [ModulePermission(AppModule.Dashboard, Permission.ViewAll)]
         public async Task<Result<ApplicationDataResponseDto>> GetApplicationStatusData([FromQuery] string? vacancyId)
         {
             var result = await _dashboardService.GetApplicationStatusData(vacancyId);
@@ -62,6 +66,7 @@ namespace Codeji.CMS.API.Controllers
 
         [HttpGet]
         [Route("GetAllDepartmentDetails")]
+        [ModulePermission(AppModule.Dashboard, Permission.ViewAll)]
         public async Task<Result<DepartmentEmpResponseDto>> GetAllDepartmentDetails()
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);

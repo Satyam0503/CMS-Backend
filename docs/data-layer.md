@@ -28,7 +28,7 @@ Public methods (all `async` unless noted):
 | `DeleteAll(filter)` | `Result` | Bulk hard delete (rare) |
 | `GetAggregateDataAsync<TResult>(filter, projection, withDeleted, ascending, orderKey, page, size, hint)` | `IEnumerable<TResult>` | Projection + paging in one call |
 
-### Implementation
+### Implementation 
 
 [`MongoRepository<TEntity>`](../Codeji.CMS.Repository/Repositories/MongoRepository.cs)
 

@@ -80,8 +80,31 @@ public class AccountServices : IAccountServices
     public async Task<Result<TokenResponseDto>> VerifyAndGenerateToken(LoginModel model)
     {
         Result<TokenResponseDto> result = new();
-        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase) && x.Status);
+        model.Email = model.Email.Trim();
+        EmpUser? user = await FindSingleForAnonymousAuthAsync(_employeeRepository,
+            x => x.Email.Equals(model.Email, StringComparison.OrdinalIgnoreCase) && x.Status && !x.IsDeleted && (x.EmploymentStatus == null || x.EmploymentStatus == "" || x.EmploymentStatus == "Active" || x.EmploymentStatus == "NoticePeriod") && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended));
         if (user == null)
+        {
+            result.Success = false;
+            result.StatusCode = CustomStatusCode.InvalidCredential;
+            return result;
+        }
+        // A newly registered tenant remains inactive until provisioning completes.
+        // Keep the check tenant-scoped and fail closed when the company record exists.
+        var loginCompany = await FindSingleForAnonymousAuthAsync(_companyRepository, x =>
+            x.CompanyId == user.CompanyId && !x.IsDeleted);
+        if (loginCompany is not null && !loginCompany.Status)
+        {
+            result.Success = false;
+            result.StatusCode = CustomStatusCode.InvalidCredential;
+            return result;
+        }
+
+        // Account access is an independent lifecycle dimension. Legacy
+        // EmpUser.Status only represents the employee record and must not
+        // allow a Locked, TemporarilyDisabled, Suspended, or Closed account
+        // to authenticate.
+        if (user.Lifecycle is not null && !user.Lifecycle.CanLogin())
         {
             result.Success = false;
             result.StatusCode = CustomStatusCode.InvalidCredential;
@@ -93,7 +116,23 @@ public class AccountServices : IAccountServices
             result.StatusCode = CustomStatusCode.UnVerifiedMail;
             return result;
         }
-        Roles? role = await _rolesRepository.FirstOrDefault(x => x.RolesId == user.RoleId);
+        Roles? role = await FindSingleForAnonymousAuthAsync(_rolesRepository,
+            x => x.RolesId == user.RoleId && x.CompanyId == user.CompanyId && !x.IsDeleted);
+        if (role is null && string.IsNullOrWhiteSpace(user.RoleId))
+        {
+            var company = await FindSingleForAnonymousAuthAsync(_companyRepository, x =>
+                x.CompanyId == user.CompanyId && x.PrimaryContact == user.UserId && x.Status && !x.IsDeleted);
+            if (company is not null)
+            {
+                role = await FindSingleForAnonymousAuthAsync(_rolesRepository, x =>
+                    x.CompanyId == user.CompanyId && x.RoleType == (int)EnumsHelper.Roles.Administrator && !x.IsDeleted);
+                if (role is not null)
+                {
+                    user.RoleId = role.RolesId;
+                    await _employeeRepository.Update(Builders<EmpUser>.Filter.Eq(x => x.UserId, user.UserId), user);
+                }
+            }
+        }
         if (role == null)
         {
             result.Success = false;
@@ -147,19 +186,19 @@ public class AccountServices : IAccountServices
     {
         Result result = new();
         // get employee by email
-        var emp = await _employeeRepository.FirstOrDefault(x => x.Email.Equals(email));
-        if (emp is null) return result;
+        email = email.Trim();
+        // Employees who have not created an initial password must still be able
+        // to prove mailbox ownership and create one through this flow.
+        var emp = await FindSingleForAnonymousAuthAsync(_employeeRepository,
+            x => x.Email.Equals(email, StringComparison.OrdinalIgnoreCase) && x.Status && !x.IsDeleted);
+        // Do not reveal whether an address exists, but return the same accepted
+        // response used for a real reset request.
+        if (emp is null)
+            return new Result { Success = true, StatusCode = CustomStatusCode.PasswordResetLinkSent };
 
-        //  check if employee already has a pending valid token / link 
-        Expression<Func<UserSecurityToken, bool>> expression = t => t.UserId == emp.UserId && t.Type == EnumsHelper.SecurityTokenType.PasswordReset && t.IsUsed == false && t.Expiry > DateTime.UtcNow;
-        UserSecurityToken userSecurityToken = await _userSecurityTokenRepository.FirstOrDefault(expression);
-        if (userSecurityToken != null)
-        {
-            result.StatusCode = CustomStatusCode.PasswordResetLinkAlreadySent;
-            return result;
-        }
-
-        // generate fresh token and send mail
+        // Generate a fresh token without cancelling other unexpired links. Email
+        // delivery and browser retries can overlap; all remaining links are
+        // invalidated after the first successful password change.
         var token = TokenHelper.GenerateToken();
         var hashedToken = TokenHelper.ComputeSha256Hash(token);
         int tokenExpiryMinutes = 15;
@@ -171,36 +210,47 @@ public class AccountServices : IAccountServices
             Expiry = DateTime.UtcNow.AddMinutes(tokenExpiryMinutes),
             Type = EnumsHelper.SecurityTokenType.PasswordReset,
         };
-        await _userSecurityTokenRepository.AddOne(securityToken);
+        var tokenResult = await _userSecurityTokenRepository.AddOne(securityToken);
+        if (!tokenResult.Success)
+            return new Result { Success=false, StatusCode=StatusCodes.Status500InternalServerError, Message="Unable to create a password reset request." };
 
-        Company? company = await _companyRepository.FirstOrDefault(x => x.CompanyId == emp.CompanyId);
-        MailTemplate? emailContent = await _mailTemplateRepository.FirstOrDefault(x => x.mailType == EnumsHelper.MailType.ResetPassword);
-        string replacedBody = HtmlTemplate.Render(emailContent?.body, new
+        Company? company = await FindSingleForAnonymousAuthAsync(_companyRepository, x => x.CompanyId == emp.CompanyId);
+        RepositoryEmailTemplate.TryGet(EnumsHelper.MailType.ResetPassword, out var templateSubject, out var templateBody);
+        var resetLink = $"{ConfigManager.AppSettings.AppUrl.TrimEnd('/')}/auth/createpassword?token={Uri.EscapeDataString(token)}";
+        var bodyTemplate = string.IsNullOrWhiteSpace(templateBody) ? "<p>Hello [EmployeeName],</p><p>Reset your password using this link: <a href=\"[PasswordResetLink]\">Reset password</a>.</p><p>This link expires in [LinkExpiryTime].</p>" : templateBody;
+        string replacedBody = HtmlTemplate.Render(bodyTemplate, new
         {
             EmployeeName = emp.FirstName + " " + emp.LastName,
-            PasswordResetLink = $"{ConfigManager.AppSettings.AppUrl}auth/createpassword?token={Uri.EscapeDataString(token)}",
+            PasswordResetLink = resetLink,
             CompanyName = company != null ? company.CompanyName : "",
             LinkExpiryTime = $"{tokenExpiryMinutes} Minutes",
-            CompanyLogo = company.CompanyLogo != null ? Common.GetCompanyLogoUrl(company.CompanyLogo) : string.Empty,
+            CompanyLogo = company?.CompanyLogo != null ? Common.GetCompanyLogoUrl(company.CompanyLogo) : string.Empty,
             Year = DateTime.UtcNow.Year,
         });
-        string replacedSubject = HtmlTemplate.Render(emailContent.subject, new
+        string replacedSubject = HtmlTemplate.Render(string.IsNullOrWhiteSpace(templateSubject) ? "Reset your password" : templateSubject, new
         {
             CompanyName = company != null ? company.CompanyName : ""
         });
 
-        _priorityTaskQueue.QueueBackgroundWorkItem(async cancellationToken =>
-                {
-                    await _middlewareService.EmailSendAndSave(new EmpEmailLogs()
-                    {
-                        UserTo = emp.UserId,
-                        Subject = replacedSubject,
-                        Body = replacedBody,
-                        EmailLogType = EnumsHelper.MailType.ResetPassword,
-                        Email = emp.Email,
-                        UserFrom = "",
-                    });
-                }, priority: 1);
+        var delivery = await _middlewareService.EmailSendAndSaveWithResult(new EmpEmailLogs()
+        {
+            UserTo = emp.UserId,
+            Subject = replacedSubject,
+            Body = replacedBody,
+            EmailLogType = EnumsHelper.MailType.ResetPassword,
+            Email = emp.Email,
+            UserFrom = "",
+        });
+
+        if (!delivery.IsSent)
+        {
+            return new Result
+            {
+                Success = false,
+                StatusCode = StatusCodes.Status503ServiceUnavailable,
+                Message = "The reset email could not be sent. Please try again later."
+            };
+        }
 
         result.Success = true;
         result.StatusCode = CustomStatusCode.PasswordResetLinkSent;
@@ -210,9 +260,12 @@ public class AccountServices : IAccountServices
     public async Task<Result> CreateNewPassword(CreateNewPasswordRequest model)
     {
         Result result = new();
-        var tokenHash = TokenHelper.ComputeSha256Hash(model.Token);
+        if (model == null || string.IsNullOrWhiteSpace(model.Token) || string.IsNullOrWhiteSpace(model.NewPassword))
+            return new Result { Success=false, StatusCode=StatusCodes.Status400BadRequest, Message="A valid reset token and password are required." };
+        var tokenHash = TokenHelper.ComputeSha256Hash(model.Token.Trim());
         // UserSecurityToken? userSecurityToken = await _userSecurityTokenRepository.FirstOrDefault(t => t.TokenHash == tokenHash && t.Type == EnumsHelper.SecurityTokenType.Invite && !t.IsUsed);
-        UserSecurityToken? userSecurityToken = await _userSecurityTokenRepository.FirstOrDefault(t => t.TokenHash == tokenHash && !t.IsUsed);
+        UserSecurityToken? userSecurityToken = await _userSecurityTokenRepository.FirstOrDefault(t => t.TokenHash == tokenHash &&
+            (t.Type == EnumsHelper.SecurityTokenType.PasswordReset || t.Type == EnumsHelper.SecurityTokenType.Invite) && !t.IsUsed);
         // PasswordResetTokens? token = await _passwordResetTokens.FirstOrDefault(x => x.TokenHash == tokenHash && !x.IsUsed);
         if (userSecurityToken is null)
         {
@@ -225,20 +278,24 @@ public class AccountServices : IAccountServices
             return result;
         }
 
-        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userSecurityToken.UserId);
+        EmpUser? user = await FindSingleForAnonymousAuthAsync(_employeeRepository,
+            x => x.UserId == userSecurityToken.UserId && x.Status && !x.IsDeleted);
         if (user is null) return result;
         user.Password = AuthenticationHandler.HashedPassword(model.NewPassword);
         user.IsEmailVerified = true;
         Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == user.UserId;
-        await _employeeRepository.Update(whereCondition, user);
+        var passwordResult = await _employeeRepository.Update(whereCondition, user);
+        if (!passwordResult.Success) return passwordResult;
 
         // mark current token used
         Expression<Func<UserSecurityToken, bool>> userTokenExpression = ut => ut.Id == userSecurityToken.Id;
         await _userSecurityTokenRepository.UpdateMany(userTokenExpression, Builders<UserSecurityToken>.Update.Set(t => t.IsUsed, true).Set(t => t.UsedAt, DateTime.UtcNow));
 
-        // delete all the used and expired tokens of current user
-        Expression<Func<UserSecurityToken, bool>> expression = x => x.UserId == user.UserId && (x.IsUsed || x.Expiry < DateTime.UtcNow);
-        await _userSecurityTokenRepository.DeleteAll(expression);
+        // Invalidate any other active reset/invite links after a successful password change.
+        Expression<Func<UserSecurityToken, bool>> expression = x => x.UserId == user.UserId &&
+            (x.Type == EnumsHelper.SecurityTokenType.PasswordReset || x.Type == EnumsHelper.SecurityTokenType.Invite) && !x.IsUsed;
+        await _userSecurityTokenRepository.UpdateMany(expression,
+            Builders<UserSecurityToken>.Update.Set(x => x.IsUsed, true).Set(x => x.UsedAt, DateTime.UtcNow));
         result.Success = true;
         result.StatusCode = CustomStatusCode.PasswordResetSuccess;
         return result;
@@ -271,7 +328,8 @@ public class AccountServices : IAccountServices
             return result;
         }
 
-        EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userSecurityToken.UserId && x.Status);
+        EmpUser? user = await FindSingleForAnonymousAuthAsync(_employeeRepository,
+            x => x.UserId == userSecurityToken.UserId && x.Status && !x.IsDeleted);
         if (user is null)
         {
             result.StatusCode = CustomStatusCode.EmployeeNotExist;
@@ -282,16 +340,69 @@ public class AccountServices : IAccountServices
         {
             user.IsEmailVerified = true;
             Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == user.UserId;
-            await _employeeRepository.Update(whereCondition, user);
+            var verifyResult = await _employeeRepository.Update(whereCondition, user);
+            if (!verifyResult.Success) return verifyResult;
         }
 
         Expression<Func<UserSecurityToken, bool>> userTokenExpression = ut => ut.Id == userSecurityToken.Id;
-        await _userSecurityTokenRepository.UpdateMany(
+        var consumeResult = await _userSecurityTokenRepository.UpdateMany(
             userTokenExpression,
             Builders<UserSecurityToken>.Update.Set(t => t.IsUsed, true).Set(t => t.UsedAt, DateTime.UtcNow));
+        if (!consumeResult.Success) return consumeResult;
 
         result.Success = true;
         return result;
+    }
+
+    public async Task<Result> ResendEmailVerification(string email)
+    {
+        // Keep the response generic so this endpoint cannot be used to enumerate accounts.
+        Result accepted = new() { Success = true, StatusCode = StatusCodes.Status200OK };
+        if (string.IsNullOrWhiteSpace(email))
+            return accepted;
+
+        EmpUser? user = await FindSingleForAnonymousAuthAsync(_employeeRepository, x =>
+            x.Email.Equals(email.Trim(), StringComparison.OrdinalIgnoreCase) && x.Status && !x.IsDeleted);
+        if (user is null || user.IsEmailVerified)
+            return accepted;
+
+        Expression<Func<UserSecurityToken, bool>> activeTokens = token =>
+            token.UserId == user.UserId &&
+            token.Type == EnumsHelper.SecurityTokenType.EmailVerification &&
+            !token.IsUsed;
+        await _userSecurityTokenRepository.UpdateMany(activeTokens,
+            Builders<UserSecurityToken>.Update.Set(token => token.IsUsed, true).Set(token => token.UsedAt, DateTime.UtcNow));
+
+        string token = TokenHelper.GenerateToken();
+        UserSecurityToken verificationToken = new()
+        {
+            UserId = user.UserId,
+            TokenHash = TokenHelper.ComputeSha256Hash(token),
+            IsUsed = false,
+            Expiry = DateTime.UtcNow.AddHours(24),
+            Type = EnumsHelper.SecurityTokenType.EmailVerification
+        };
+        Result tokenResult = await _userSecurityTokenRepository.AddOne(verificationToken);
+        if (!tokenResult.Success)
+            return new Result { Success = false, StatusCode = StatusCodes.Status500InternalServerError, Message = "Unable to create an email verification link." };
+
+        Company? company = await FindSingleForAnonymousAuthAsync(_companyRepository, x => x.CompanyId == user.CompanyId);
+        string verifyLink = EmailVerificationUrlBuilder.Build(ConfigManager.AppSettings.APIUrl, token);
+        var delivery = await _middlewareService.EmailSendAndSaveWithResult(new EmpEmailLogs
+        {
+            UserTo = user.UserId,
+            UserFrom = user.UserId,
+            Email = user.Email,
+            Subject = $"Verify your email for {company?.CompanyName ?? "CodeJi CMS"}",
+            Body = HtmlTemplate.Render(
+                "<h2>Welcome, [EmployeeName]!</h2><p>Please verify your email address to activate your account.</p><p><a href=\"[EmailVerificationLink]\">Verify email</a></p><p>This link will expire in 24 hours.</p>",
+                new { EmployeeName = $"{user.FirstName} {user.LastName}", EmailVerificationLink = verifyLink }),
+            EmailLogType = EnumsHelper.MailType.EmployeeWelcomeMail
+        });
+
+        return delivery.IsSent
+            ? accepted
+            : new Result { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, Message = "The verification email could not be sent. Please try again later." };
     }
 
     public async Task<Result<TokenResponseDto>> RefreshToken(RefreshTokenRequestDto model)
@@ -318,13 +429,29 @@ public class AccountServices : IAccountServices
             result.StatusCode = CustomStatusCode.RefreshTokenExpired;
             return result;
         }
-        EmpUser? empUser = await _employeeRepository.FirstOrDefault(x => x.UserId == storedRefreshToken.UserId);
+        EmpUser? empUser = await FindSingleForAnonymousAuthAsync(_employeeRepository,
+            x => x.UserId == storedRefreshToken.UserId && x.Status && !x.IsDeleted);
         if (empUser == null)
         {
             result.StatusCode = CustomStatusCode.InvalidRefreshToken;
             return result;
         }
-        Roles? role = await _rolesRepository.FirstOrDefault(r => r.CompanyId == empUser.CompanyId && r.RolesId == empUser.RoleId);
+        if (empUser.Lifecycle is not null && !empUser.Lifecycle.CanLogin())
+        {
+            result.StatusCode = CustomStatusCode.InvalidRefreshToken;
+            return result;
+        }
+        Roles? role = await FindSingleForAnonymousAuthAsync(_rolesRepository, r =>
+            r.CompanyId == empUser.CompanyId &&
+            r.RolesId == empUser.RoleId &&
+            !r.IsDeleted &&
+            r.HasAppAccess);
+        if (role is null)
+        {
+            result.StatusCode = CustomStatusCode.InvalidRefreshToken;
+            return result;
+        }
+
         string newRefreshToken = TokenHelper.GenerateToken();
         string newRefreshTokenHashed = TokenHelper.ComputeSha256Hash(newRefreshToken);
         List<string> roles = [role.Titles];
@@ -371,6 +498,32 @@ public class AccountServices : IAccountServices
         storedRefreshToken.RevokedAt = DateTime.UtcNow;
         result = await _refreshTokenRepository.Update(whereCondition, storedRefreshToken);
         return result;
+    }
+
+    /// <summary>
+    /// Resolves an identity from a server-owned credential/token path before a JWT exists.
+    /// This is deliberately limited to AccountServices anonymous flows: callers never provide
+    /// a company ID, and the resolved user determines the company/role checks that follow.
+    /// Normal application reads must continue to use the tenant-scoped repository methods.
+    /// </summary>
+    private static async Task<TEntity?> FindSingleForAnonymousAuthAsync<TEntity>(
+        IMongoDbRepository<TEntity> repository,
+        Expression<Func<TEntity, bool>> filter)
+    {
+        // Keep the ordinary scoped path for callers that do have a tenant context.
+        // Anonymous account endpoints have no JWT yet, so their scoped lookup returns
+        // no records and only then may they use the explicit server-owned fallback.
+        var scopedMatch = await repository.FirstOrDefault(filter);
+        if (scopedMatch is not null)
+        {
+            return scopedMatch;
+        }
+
+        var matches = (await repository.GetAll(filter, WithDeletedObjects: false, withDefaultFilter: false))
+            .Take(2)
+            .ToList();
+
+        return matches.Count == 1 ? matches[0] : default;
     }
 
 }

@@ -11,10 +11,10 @@ public interface
 {
     Task<Result> AddEditRoles(RoleWithModuleAndPermissions roles, string companyId);
     Task<List<RoleModel>> GetRoles(string companyId, bool? excludeAdmin);
-    Task<RoleModel> GetRoleById(string roleId);
+    Task<RoleModel> GetRoleById(string roleId, string companyId);
     //Task<RoleWithModuleAndPermissions> SaveRoleAndPermissions(RoleWithModuleAndPermissions roleWithModuleAndPermissions);
     Task<List<ModuleWithPermissionsModel>> GetRoleWithPermissions(string roleId, string companyId);
-    Task<string[]> GetRolePermissionOfuser(string roleId);
+    Task<string[]> GetRolePermissionOfuser(string roleId, string companyId);
     Task<List<Roles>> AddDefaultRole(string companyId);
     Task<List<ModuleWithPermissionsModel>> GetDefaultRoleWithPermissions(bool isEditableUserRole, string companyId);
     Task<List<RoleModel>> GetRolesWithPagination(int pageNo, int pageSize);

@@ -14,7 +14,8 @@ namespace Codeji.CMS.Services
             var deductions = dto.TotalDeductions ?? 0;
 
             var gross = dto.BasicPay + hra + other + lta + bonus;
-            var net = gross - deductions - insurance;
+            var effectiveDeductions = deductions > 0 ? deductions : insurance;
+            var net = gross - effectiveDeductions;
             var ctc = gross + insurance;
 
             return (gross, net, ctc);

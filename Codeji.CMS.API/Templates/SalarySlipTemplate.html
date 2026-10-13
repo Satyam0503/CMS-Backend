@@ -109,8 +109,11 @@
       }
 
       .amount-in-words {
-        font-size: 14px;
-        margin-top: 5px;
+        margin-top: 10px;
+        font-size: 13px;
+        font-weight: normal;
+        line-height: 1.4;
+        text-align: right;
       }
 
       .details {
@@ -155,9 +158,7 @@
 
       <div class="company-info">
         <div>
-          <img alt="company-logo" src="[CompanyLogo]" /><br />
-          <strong style="font-size: 16px">[CompanyName]</strong><br />
-          <span style="font-size: 12px">[CompanyAddress]</span>
+          <img alt="company-logo" src="[CompanyLogo]" />
         </div>
         <div style="text-align: end">
           <strong>Payslip For Month:</strong><br />
@@ -232,18 +233,19 @@
           <td class="fw-bold">Health Insurance</td>
           <td class="text-end">₹ [HealthInsurance]</td>
         </tr>
+        {{OtherAllowanceRows}}
         <tr>
-          <td class="fw-bold">Other Allowance</td>
-          <td class="text-end">₹ [OtherAllowance]</td>
+          <td colspan="2"></td>
           <td class="fw-bold">EPF</td>
           <td class="text-end">₹ [EPF]</td>
         </tr>
         <tr>
           <td class="fw-bold">Bonus</td>
           <td class="text-end">₹ [Bonus]</td>
-          <td class="fw-bold">ESIC Employee (0.75%)</td>
+          <td class="fw-bold">[EsicEmployeeLabel]</td>
           <td class="text-end">₹ [ESIC]</td>
         </tr>
+        {{OtherDeductionRows}}
         <tr>
           <td colspan="4">-</td>
         </tr>
@@ -260,7 +262,7 @@
           <td class="text-end fw-bold">₹ [NetSalary]</td>
         </tr>
       </table>
-      <p class="text-center" style="margin-block: 20px">[NetSalaryInWords]</p>
+      <div class="amount-in-words">[NetSalaryInWords]</div>
     </div>
   </body>
 </html>

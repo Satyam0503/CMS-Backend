@@ -26,6 +26,12 @@ public class UserModel
     public string? PersonalEmail { get; set; }
     public string? EmergencyContact { get; set; }
     public string? DateOfJoining { get; set; }
+    public string? EmploymentStatus { get; set; }
+    public string? AvailabilityStatus { get; set; }
+    public string? AccountStatus { get; set; }
+    public string? PayrollStatus { get; set; }
+    public string? AlumniStatus { get; set; }
+    public DateTime? LastWorkingDate { get; set; }
     public bool? Status { get; set; }
     public bool? IsEmailVerified { get; set; }
     public string? Address { get; set; }

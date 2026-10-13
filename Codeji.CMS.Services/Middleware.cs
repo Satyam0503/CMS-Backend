@@ -5,6 +5,7 @@ using Codeji.CMS.DTO;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.Helpers;
@@ -19,17 +20,20 @@ namespace Codeji.CMS.Services
         private readonly IMongoDbRepository<EmpEmailLogs> _emailLogRepository;
         private readonly IMapper _mapper;
         readonly IMongoDbRepository<NotificationPreference> _notificationPreferenceRepository;
+        readonly IMongoDbRepository<Company> _companyRepository;
         readonly IEmployeeService _employeeService;
         public MiddlewareService(IMongoDbRepository<EmpUser> userRepository,
             IMongoDbRepository<EmpEmailLogs> emailLogRepository,
             IMapper mapper,
-            IMongoDbRepository<NotificationPreference> notificationPreferenceRepository
+            IMongoDbRepository<NotificationPreference> notificationPreferenceRepository,
+            IMongoDbRepository<Company> companyRepository
         )
         {
             _userRepository = userRepository;
             _emailLogRepository = emailLogRepository;
             _mapper = mapper;
             _notificationPreferenceRepository = notificationPreferenceRepository;
+            _companyRepository = companyRepository;
         }
 
 
@@ -48,11 +52,15 @@ namespace Codeji.CMS.Services
         {
             await Common(emailLog);
         }
+        public async Task<(bool IsSent, string Error)> EmailSendAndSaveWithResult(EmpEmailLogs emailLog)
+        {
+            return await Common(emailLog);
+        }
         public async Task EmailSendAndSave(EmpEmailLogs emailLog, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
         {
             await Common(emailLog, attachments);
         }
-        private async Task Common(EmpEmailLogs emailLog, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
+        private async Task<(bool IsSent, string Error)> Common(EmpEmailLogs emailLog, List<(string FileName, byte[] FileContent, string ContentType)> attachments = null)
         {
             try
             {
@@ -72,14 +80,14 @@ namespace Codeji.CMS.Services
                     if (!string.IsNullOrEmpty(res.log))
                         emailLog.ErrorMessage = res.log;
                     await SaveEmailLog(emailLog);
-
+                    return (res.isSent, res.log);
                 }
             }
             catch (Exception ex)
             {
-                // Handle exception
-                // Log the error or take appropriate action
+                return (false, ex.Message);
             }
+            return (false, "Email details are missing.");
         }
         private async Task SaveEmailLog(EmpEmailLogs empEmailLogs)
         {
@@ -91,24 +99,39 @@ namespace Codeji.CMS.Services
 
         public Dictionary<NotificationPreferenceType, bool> GetDefaultNotificationPreferences()
         {
-            var defaultPreferences = Enum.GetValues(typeof(NotificationPreferenceType)).Cast<NotificationPreferenceType>().ToDictionary(pref => pref, pref => true);
-            return defaultPreferences;
+            return Enum.GetValues(typeof(NotificationPreferenceType))
+                .Cast<NotificationPreferenceType>()
+                .ToDictionary(preference => preference, _ => true);
         }
 
         // method to check user notification preference
         public async Task<bool> IsUserNotificationPreferenceEnabled(string userId, NotificationPreferenceType preferenceType)
         {
-            var preferenceResult = await _notificationPreferenceRepository.FirstOrDefault(n => n.UserId == userId);
-            if (preferenceResult == null)
+            var user = await _userRepository.FirstOrDefault(x => x.UserId == userId);
+           if(user?.CompanyId is null)
             {
-                var defaultPreferences = GetDefaultNotificationPreferences();
-                return defaultPreferences[preferenceType];
+                return true;
             }
-            if (preferenceResult != null && preferenceResult.Preferences != null && preferenceResult.Preferences.TryGetValue(preferenceType, out bool value))
+
+            var company=await _companyRepository.FirstOrDefault(x => x.CompanyId == user.CompanyId && !x.IsDeleted);
+            if(company?.NotificationPreferences is {Count: >0} companyPreferences &&
+                companyPreferences.TryGetValue(preferenceType, out var companyEnabled) &&
+                !companyEnabled)
             {
-                return value;
+                // A company-disabled category cannot be enabled by an employee.
+                return false;
             }
-            return false;
+
+            var preferenceResult = await _notificationPreferenceRepository.FirstOrDefault(
+                n => n.UserId == userId && n.CompanyId == user.CompanyId);
+            if (preferenceResult?.Preferences is not null &&
+                preferenceResult.Preferences.TryGetValue(preferenceType, out var employeeEnabled))
+            {
+                return employeeEnabled;
+            }
+
+            // Company enabled (or unset) and no employee override: enabled by default.
+            return true;
         }
         public string GetCompanyLogoAsDataUrl(string companyLogoPath)
         {

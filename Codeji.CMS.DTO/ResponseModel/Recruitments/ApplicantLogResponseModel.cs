@@ -11,6 +11,9 @@ public class ApplicantLogResponseModel
     public string JobRole { get; set; }
     public int ActivityCategory { get; set; }
     public string ApplicantName { get; set; }
+    public string? EventType { get; set; }
+    public string? PreviousStage { get; set; }
+    public string? CurrentStage { get; set; }
     public string CompanyId { get; set; }
     public string CreatedBy { get; set; }
     public DateTime? CreatedDate { get; set; }

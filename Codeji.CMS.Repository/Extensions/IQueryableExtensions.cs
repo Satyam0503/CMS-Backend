@@ -18,7 +18,9 @@ namespace Codeji.CMS.GenericRepository.Extensions
             var builder = Builders<TEntity>.Filter;
             var combinedFilter = builder.Where(filter ?? (x => true));
 
-            if (typeof(ISupportAuditing).IsAssignableFrom(typeof(TEntity)) && !string.IsNullOrEmpty(_companyId))
+            // CompanyId is the tenant boundary even for legacy entities that do not
+            // implement ISupportAuditing (for example AttendanceModel).
+            if (typeof(TEntity).GetProperty("CompanyId") is not null && !string.IsNullOrEmpty(_companyId))
             {
                 var companyFilter = builder.Eq("CompanyId", _companyId);
                 combinedFilter = builder.And(combinedFilter, companyFilter);

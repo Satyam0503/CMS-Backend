@@ -1,5 +1,4 @@
 ﻿using System;
-using Microsoft.VisualBasic;
 using System.Reflection;
 using Ganss.Xss;
 
@@ -12,11 +11,13 @@ namespace Codeji.CMS.Utility
     {
         public static void SanitizeProperties(object obj)
         {
-            try
-            {
-                IEnumerable<PropertyInfo> properties = obj.GetType().GetProperties()
+            ArgumentNullException.ThrowIfNull(obj);
+
+            IEnumerable<PropertyInfo> properties = obj.GetType().GetProperties()
                 .Where(prop => Attribute.IsDefined(prop, typeof(SanitizeAttribute)) && prop.CanWrite);
-                foreach (PropertyInfo prop in properties)
+            foreach (PropertyInfo prop in properties)
+            {
+                try
                 {
                     if (prop.PropertyType == typeof(string))
                     {
@@ -27,8 +28,16 @@ namespace Codeji.CMS.Utility
                         SanitizeListProperty(obj, prop);
                     }
                 }
+                catch (Exception exception)
+                {
+                    // Do not allow an object with partially sanitized content to continue
+                    // through a request. The caller's exception middleware can log this
+                    // safely without including the source value.
+                    throw new InvalidOperationException(
+                        $"Unable to sanitize property '{prop.Name}' on '{obj.GetType().Name}'.",
+                        exception);
+                }
             }
-            catch (Exception ex) { }
         }
 
         private static void SanitizeStringProperty(object obj, PropertyInfo prop)
@@ -59,8 +68,7 @@ namespace Codeji.CMS.Utility
             sanitizer.AllowedTags.UnionWith(Constraints.ConstraintHelper.AllowedSanitizerTags);
             sanitizer.AllowedAttributes.Clear();
             sanitizer.AllowedAttributes.UnionWith(Constraints.ConstraintHelper.AllowedSanitizerAttributes);
-            string sanitized = sanitizer.Sanitize(text, "httpS://www.codeji.in").Replace("&amp;", "&");
-            return sanitized;
+            return sanitizer.Sanitize(text, "httpS://www.codeji.in");
         }
     }
 }

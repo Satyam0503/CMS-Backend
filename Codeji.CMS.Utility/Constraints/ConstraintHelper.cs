@@ -3,6 +3,7 @@ namespace Codeji.CMS.Utility.Constraints
 {
     public static class AppModule
     {
+        public const string Dashboard = "Dashboard";
         public const string Employees = "Employees";
         public const string Attendance = "Attendance";
         public const string LeaveManagement = "Leave_Management";
@@ -14,6 +15,9 @@ namespace Codeji.CMS.Utility.Constraints
         public const string PayRoll = "PayRoll";
         public const string Policy = "Policy";
         public const string PayrollSettings = "Payroll_Settings";
+        public const string CareerProfile = "Career_Profile";
+        public const string WorkFromHome = "Work_From_Home";
+        public const string Offboarding = "Offboarding";
     }
 
     public static class Permission
@@ -22,6 +26,34 @@ namespace Codeji.CMS.Utility.Constraints
         public const string Create = "Create";
         public const string Edit = "Edit";
         public const string Delete = "Delete";
+        public const string ViewOwn = "ViewOwn";
+        public const string CreateOwn = "CreateOwn";
+        public const string EditOwn = "EditOwn";
+        public const string CancelOwn = "CancelOwn";
+        public const string ViewTeam = "ViewTeam";
+        public const string ApproveTeam = "ApproveTeam";
+        public const string ViewAll = "ViewAll";
+        public const string CreateForEmployee = "CreateForEmployee";
+        public const string Override = "Override";
+        public const string Revoke = "Revoke";
+        public const string PolicyView = "PolicyView";
+        public const string PolicyEdit = "PolicyEdit";
+        public const string Submit = "Submit";
+        public const string Review = "Review";
+        public const string Approve = "Approve";
+        public const string Complete = "Complete";
+        public const string Evidence = "Evidence";
+        public const string Download = "Download";
+        // Offboarding operation permissions are intentionally separate: a company can
+        // delegate IT, finance, policy administration and case completion independently.
+        public const string PolicyManage = "PolicyManage";
+        public const string CaseManage = "CaseManage";
+        public const string AssetManage = "AssetManage";
+        public const string AccessManage = "AccessManage";
+        public const string FinanceManage = "FinanceManage";
+        public const string BenefitsManage = "BenefitsManage";
+        public const string EvidenceManage = "EvidenceManage";
+        public const string PortalManage = "PortalManage";
     }
 
     public static class ConstraintHelper

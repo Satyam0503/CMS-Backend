@@ -22,6 +22,9 @@ public class SeedDefaultRolesAndRolePermissions : IMigration
         (2, "HR Manager",
             "The HR employee can: Add & Edit colleagues, -Edit engagement surveys and view results for all departments, -Assign roles to other employees",
             false),
+        (4, "HR Executive",
+            "HR Executives have the same application permissions as HR Managers.",
+            false),
         (3, "Employee",
             "Regular Employee",
             false),
@@ -135,6 +138,7 @@ public class SeedDefaultRolesAndRolePermissions : IMigration
         {
             (1, allMps.Select(mp => mp.ModulePermissionId)),
             (2, ResolveMpIds(HrManagerPermissions())),
+            (4, ResolveMpIds(HrManagerPermissions())),
             (3, ResolveMpIds(EmployeePermissions())),
         };
 

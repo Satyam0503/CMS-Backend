@@ -1,4 +1,4 @@
-﻿using Codeji.CMS.Domain.Models;
+using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RequestModels;
 
 namespace Codeji.CMS.Services.Recruitments.Interface
@@ -8,7 +8,7 @@ namespace Codeji.CMS.Services.Recruitments.Interface
         Task<Result<JobVacancyModel>> AddJobVacancy(JobVacancyModel jobVacancy);
         Task<Result<JobVacancyModel>> EditJobVacancy(JobVacancyModel jobVacancy, string jobId);
         Task<Result<GetJobVacancyModel>> GetAllVacancy(JobRequestModel model);
-        Task<JobVacancyModel?> GetVacancyById(string vacancyId);
+        Task<JobVacancyModel?> GetVacancyById(string vacancyId, string? companyId = null);
         Task<Result> DeleteJobVacancy(string vacancyId);
     }
 }

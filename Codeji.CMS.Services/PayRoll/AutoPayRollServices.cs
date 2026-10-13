@@ -1,10 +1,14 @@
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.PayRoll;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.DTO.Salary;
+using Codeji.CMS.Services.Employees;
 using MongoDB.Driver.Linq;
+using MongoDB.Driver;
+using MongoDB.Bson;
 
 namespace Codeji.CMS.Services.PayRoll
 {
@@ -14,213 +18,593 @@ namespace Codeji.CMS.Services.PayRoll
         private readonly IMongoDbRepository<EmpUser> _employeeRepository;
         private readonly IMongoDbRepository<EmpPayRoll> _empPayRollRepository;
         private readonly IMongoDbRepository<AttendanceModel> _attendanceRepository;
+        private readonly IMongoDbRepository<AttendanceDaySegment> _attendanceSegmentRepository;
         private readonly IMongoDbRepository<SalaryModel> _salaryRepository;
+        private readonly IMongoDbRepository<AttendanceStatusSetting> _attendanceStatusRepository;
+        private readonly IMongoDbRepository<MonthlyAttendanceSummary> _attendanceSummaryRepository;
+        private readonly IMongoDbRepository<AttendancePayrollException> _attendanceExceptionRepository;
+        private readonly IPayrollDivisorPolicyService _divisorPolicies;
+        private readonly ICompanyWorkingCalendarService _workingCalendar;
+        private readonly IMongoDbRepository<EmployeePayrollAssignment> _assignments;
+        private readonly IMongoDbRepository<PayrollPolicyProfile> _policyProfiles;
+        private readonly IMongoDbRepository<PayrollPayGroup>? _payGroups;
+        private readonly IMongoDbRepository<SalaryTemplate>? _salaryTemplates;
+        private readonly IMongoDbRepository<EmployeeSalaryStructure>? _employeeSalaryStructures;
 
         public AutoPayrollServices(
             IPayRollServices payRollServices,
             IMongoDbRepository<EmpUser> employeeRepository,
             IMongoDbRepository<EmpPayRoll> empPayRollRepository,
             IMongoDbRepository<AttendanceModel> attendanceRepository,
-            IMongoDbRepository<SalaryModel> salaryRepository)
+            IMongoDbRepository<AttendanceDaySegment> attendanceSegmentRepository,
+            IMongoDbRepository<SalaryModel> salaryRepository,
+            IMongoDbRepository<AttendanceStatusSetting> attendanceStatusRepository,
+            IMongoDbRepository<MonthlyAttendanceSummary> attendanceSummaryRepository,
+            IMongoDbRepository<AttendancePayrollException> attendanceExceptionRepository,
+            IPayrollDivisorPolicyService divisorPolicies,
+            ICompanyWorkingCalendarService workingCalendar,
+            IMongoDbRepository<EmployeePayrollAssignment> assignments,
+            IMongoDbRepository<PayrollPolicyProfile> policyProfiles,
+            IMongoDbRepository<PayrollPayGroup>? payGroups = null,
+            IMongoDbRepository<SalaryTemplate>? salaryTemplates = null,
+            IMongoDbRepository<EmployeeSalaryStructure>? employeeSalaryStructures = null)
         {
             _payRollServices = payRollServices;
             _employeeRepository = employeeRepository;
             _empPayRollRepository = empPayRollRepository;
             _attendanceRepository = attendanceRepository;
+            _attendanceSegmentRepository = attendanceSegmentRepository;
             _salaryRepository = salaryRepository;
+            _attendanceStatusRepository = attendanceStatusRepository;
+            _attendanceSummaryRepository = attendanceSummaryRepository;
+            _attendanceExceptionRepository = attendanceExceptionRepository;
+            _divisorPolicies = divisorPolicies;
+            _workingCalendar = workingCalendar;
+            _assignments = assignments;
+            _policyProfiles = policyProfiles;
+            _payGroups = payGroups;
+            _salaryTemplates = salaryTemplates;
+            _employeeSalaryStructures = employeeSalaryStructures;
         }
 
         public async Task<Result> GeneratePayrollForMonthAsync(string companyId, DateTime payMonth)
-{
-    var employees = await _employeeRepository.GetAll(e => e.CompanyId == companyId);
-
-    int processedCount = 0;
-    int skippedNoSalaryCount = 0;
-    int consideredCount = 0;
-
-    foreach (var emp in employees)
-    {
-        if (string.IsNullOrEmpty(emp.DateOfJoining))
-            continue;
-
-        if (!DateTime.TryParse(emp.DateOfJoining, out DateTime joiningDate))
-            continue;
-
-        var monthStart = new DateTime(payMonth.Year, payMonth.Month, 1);
-        var monthEnd = new DateTime(payMonth.Year, payMonth.Month, DateTime.DaysInMonth(payMonth.Year, payMonth.Month));
-
-        if (joiningDate > monthEnd)
-            continue;
-
-        consideredCount++;
-
-        var salaryRecords = _salaryRepository
-            .Get(s => s.EmployeeId == emp.EmployeeId && s.Status)
-            .FirstOrDefault();
-
-        if (salaryRecords == null)
         {
-            skippedNoSalaryCount++;
-            continue;
-        }
+            var monthStart = new DateTime(payMonth.Year, payMonth.Month, 1);
+            // Payroll keys are calendar months. Use the canonical first-of-month value for
+            // every read and write so a time component or client timezone cannot create a
+            // second key for the same displayed month.
+            payMonth = monthStart;
+            var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+            var employees = (await _employeeRepository.GetAll(e => e.CompanyId == companyId && !e.IsDeleted))
+                .Where(e => EmploymentPeriod.IsPayrollIncludedForMonth(e, monthStart))
+                .ToList();
+            if (await _empPayRollRepository.Exist(p => p.CompanyId == companyId &&
+                p.PayMonth == monthStart && (p.IsProcessed || p.WorkflowStatus == "PROCESSED" || p.WorkflowStatus == "PAID" || p.WorkflowStatus == "CLOSED" || p.PaymentStatus == "PAID" || p.PaymentStatus == "CLOSED")))
+                return new Result { Success = false, Message = $"Payroll for {monthStart:MMMM yyyy} is already processed and cannot be regenerated." };
 
-        int daysInMonth = DateTime.DaysInMonth(payMonth.Year, payMonth.Month);
+            var divisorSetting = await _divisorPolicies.GetEffective(companyId, monthStart);
+            var divisorPolicy = divisorSetting.DivisorPolicy;
+            var requireAttendanceLock = divisorSetting.RequireAttendanceLock;
+            var policyProfiles = await _policyProfiles.GetAll(x => x.CompanyId == companyId && x.IsActive);
+            var payGroups = _payGroups is null ? Array.Empty<PayrollPayGroup>() : (await _payGroups.GetAll(x => x.CompanyId == companyId && x.IsActive)).ToArray();
+            var salaryTemplates = _salaryTemplates is null ? Array.Empty<SalaryTemplate>() : (await _salaryTemplates.GetAll(x => x.CompanyId == companyId && x.IsActive)).ToArray();
+            var canonicalSalaryStructures = _employeeSalaryStructures is null ? Array.Empty<EmployeeSalaryStructure>() : (await _employeeSalaryStructures.GetAll(x => x.CompanyId == companyId && x.ApprovalStatus == "APPROVED" && x.Status == "ACTIVE")).ToArray();
+            var assignmentRows = (await _assignments.GetAll(x => x.CompanyId == companyId)).ToArray();
 
-        decimal originalBasic = salaryRecords.BasicPay;
-        decimal originalHRA = salaryRecords.Hra ?? 0m;
-        decimal originalLTA = salaryRecords.Lta ?? 0m;
-        decimal originalOtherAllowance = salaryRecords.OtherAllowances ?? 0m;
-        decimal originalBonus = salaryRecords.Bonus ?? 0m;
-
-        DateTime today = DateTime.UtcNow.Date;
-
-        DateTime calculationEndDate =
-            (payMonth.Month == today.Month && payMonth.Year == today.Year)
-            ? today
-            : monthEnd;
-
-        var attendanceRecords = await _attendanceRepository.GetAll(a =>
-            a.EmployeeId == emp.EmployeeId &&
-            a.Date >= monthStart &&
-            a.Date <= calculationEndDate);
-
-        int fullDayLeaves = attendanceRecords.Count(a => a.Status == AttendanceStatus.A);
-        int halfDayLeaves = attendanceRecords.Count(a => a.Status == AttendanceStatus.H);
-        int lateCount = attendanceRecords.Sum(a => a.LateCount);
-        int earlyExitCount = attendanceRecords.Sum(a => a.EarlyExitCount);
-
-        decimal perDaySalary = originalBasic / daysInMonth;
-
-        int totalLateEarly = lateCount + earlyExitCount;
-        decimal lateHalfDays = (totalLateEarly / 4) * 0.5m;
-
-        decimal lossOfPayDays = fullDayLeaves + (halfDayLeaves * 0.5m) + lateHalfDays;
-        decimal lossOfPay = Math.Round(lossOfPayDays * perDaySalary, 2);
-
-        // Joining month proration
-        decimal joiningProrationFactor = 1m;
-
-        if (joiningDate.Year == payMonth.Year && joiningDate.Month == payMonth.Month)
-        {
-            int eligibleDays = daysInMonth - joiningDate.Day + 1;
-            joiningProrationFactor = (decimal)eligibleDays / daysInMonth;
-        }
-
-        decimal basicAfterJoining = Math.Round(originalBasic * joiningProrationFactor, 2);
-        decimal hra = Math.Round(originalHRA * joiningProrationFactor, 2);
-        decimal lta = Math.Round(originalLTA * joiningProrationFactor, 2);
-        decimal otherAllowance = Math.Round(originalOtherAllowance * joiningProrationFactor, 2);
-        decimal bonus = Math.Round(originalBonus * joiningProrationFactor, 2);
-
-        decimal finalBasic = basicAfterJoining - lossOfPay;
-        if (finalBasic < 0) finalBasic = 0;
-
-        int paidDays = daysInMonth - (int)Math.Floor(lossOfPayDays);
-        if (paidDays < 0) paidDays = 0;
-
-        decimal monthlyGross = finalBasic + hra + lta + otherAllowance + bonus;
-        decimal annualGrossIncome = monthlyGross * 12;
-        decimal monthlyIncomeTax = CalculateMonthlyIncomeTax(annualGrossIncome, true);
-
-        var payrollDto = new AddUpdatePayRollRequestDto
-        {
-            EmployeeId = emp.EmployeeId,
-            PayMonth = payMonth,
-            PaidDate = DateTime.UtcNow,
-            BasicPay = finalBasic,
-            HRA = hra,
-            LTA = lta,
-            OtherAllowance = otherAllowance,
-            Bonus = bonus,
-            PaidDays = paidDays,
-            LossOfPayDays = lossOfPayDays,
-            LossOfPay = lossOfPay,
-            IncomeTax = monthlyIncomeTax,
-            HealthInsurance = salaryRecords.HealthInsurance ?? 0
-        };
-
-        // --- Check for existing payroll ---
-
-var existingPayroll = _empPayRollRepository.Get(p =>
-    p.EmployeeId == emp.EmployeeId &&
-    p.CompanyId == companyId &&
-    p.PayMonth.Year == payMonth.Year &&
-    p.PayMonth.Month == payMonth.Month)
-.FirstOrDefault();
-
-if (existingPayroll != null)
-{
-    payrollDto.PayRollId = existingPayroll.Id; // Update existing payroll
-}
-
-// Add or update payroll
-await _payRollServices.AddUpdatePayRoll(payrollDto, companyId);
-processedCount++;
-}
-
-    return new Result
-    {
-        Success = true,
-        Message = skippedNoSalaryCount > 0
-            ? $"Processed payroll for {processedCount} of {consideredCount} employees. {skippedNoSalaryCount} employee(s) have no salary structure defined."
-            : $"Processed payroll for {processedCount} employee(s)."
-    };
-}
-
-        private decimal CalculateMonthlyIncomeTax(decimal annualGrossIncome, bool isNewRegime = true)
-        {
-            decimal taxableIncome = annualGrossIncome;
-            decimal tax = 0m;
-
-            if (isNewRegime)
+            // Validate every eligible employee before the first payroll write. This prevents a
+            // later employee validation failure from leaving an unnoticed partial company run.
+            var validationErrors = new List<string>();
+            foreach (var employee in employees)
             {
-                if (taxableIncome <= 300000)
-                    tax = 0;
-                else if (taxableIncome <= 600000)
-                    tax = (taxableIncome - 300000) * 0.05m;
-                else if (taxableIncome <= 900000)
-                    tax = (300000 * 0.05m) +
-                          (taxableIncome - 600000) * 0.10m;
-                else if (taxableIncome <= 1200000)
-                    tax = (300000 * 0.05m) +
-                          (300000 * 0.10m) +
-                          (taxableIncome - 900000) * 0.15m;
-                else if (taxableIncome <= 1500000)
-                    tax = (300000 * 0.05m) +
-                          (300000 * 0.10m) +
-                          (300000 * 0.15m) +
-                          (taxableIncome - 1200000) * 0.20m;
-                else
-                    tax = (300000 * 0.05m) +
-                          (300000 * 0.10m) +
-                          (300000 * 0.15m) +
-                          (300000 * 0.20m) +
-                          (taxableIncome - 1500000) * 0.30m;
-
-                if (taxableIncome <= 700000)
-                    tax = 0;
+                // Payroll cannot be calculated without an effective joining date. Skip this
+                // employee instead of blocking a completed historical month for everyone else.
+                if (!DateTime.TryParse(employee.DateOfJoining, out var joining)) continue;
+                if (joining.Date > monthEnd) continue;
+                var exitDate = EmploymentPeriod.GetLastWorkingDate(employee);
+                if (exitDate.HasValue && exitDate.Value < monthStart) continue;
+                if (exitDate.HasValue && exitDate.Value < joining.Date) { validationErrors.Add($"{employee.EmployeeId}: exit date cannot be before joining date."); continue; }
+                var policyPeriodStart = joining.Date > monthStart ? joining.Date : monthStart;
+                var policyPeriodEnd = exitDate.HasValue && exitDate.Value < monthEnd ? exitDate.Value : monthEnd;
+                var validationPolicy = PayrollPolicyResolver.ResolveConsistentPeriod(
+                    companyId, employee.EmployeeId, policyPeriodStart, policyPeriodEnd,
+                    assignmentRows, canonicalSalaryStructures, policyProfiles, payGroups);
+                if (!validationPolicy.IsConsistent)
+                    validationErrors.Add($"{employee.EmployeeId}: approved payroll policy changes within this pay period (from {validationPolicy.FirstConflictDate:yyyy-MM-dd}). One monthly payroll row cannot safely mix policy versions; align the approved policy to a period boundary before processing.");
+                var validationProfile = validationPolicy.Profile;
+                var validationTdsMode = validationProfile?.TdsMode ?? divisorSetting.TdsMode;
+                if (!PayrollCalculationRules.IsSupportedTdsMode(validationTdsMode))
+                    validationErrors.Add($"{employee.EmployeeId}: configured TDS mode '{validationTdsMode}' is unsupported; choose AUTO_NEW_REGIME, AUTO_OLD_REGIME, or MANUAL_ONLY before processing payroll.");
+                var invalidSalaryIdentity = canonicalSalaryStructures.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeId == employee.EmployeeId &&
+                    x.EffectiveFrom.Date <= monthEnd.Date && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value.Date >= monthStart.Date) &&
+                    !Guid.TryParse(x.Id, out _));
+                if (invalidSalaryIdentity is not null)
+                    validationErrors.Add($"{employee.EmployeeId}: approved salary structure '{invalidSalaryIdentity.Id}' has an invalid identifier; correct the salary record before processing payroll.");
+                var validationRequiresAttendanceLock = validationProfile?.RequireAttendanceLock ?? requireAttendanceLock;
+                var summary = await _attendanceSummaryRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeId == employee.EmployeeId && x.PayrollMonth == monthStart && x.IsApproved && x.IsLocked);
+                if (summary == null && validationRequiresAttendanceLock) validationErrors.Add($"{employee.EmployeeId}: monthly attendance must be approved and locked.");
+                // Missing salary structure is not a company-wide blocker: the generation loop below
+                // already skips that employee individually (tracked via skippedNoSalaryCount) and
+                // reports the count in the result message, so other employees can still be paid.
+                if (await _attendanceExceptionRepository.Exist(x => x.CompanyId == companyId && x.EmployeeId == employee.EmployeeId && x.PayrollMonth == monthStart && x.Status == "PENDING_REVIEW")) validationErrors.Add($"{employee.EmployeeId}: unresolved attendance exception requires review.");
             }
-            else
+            if (validationErrors.Count > 0) return new Result
             {
-                if (taxableIncome <= 250000)
-                    tax = 0;
-                else if (taxableIncome <= 500000)
-                    tax = (taxableIncome - 250000) * 0.05m;
-                else if (taxableIncome <= 1000000)
-                    tax = (250000 * 0.05m) +
-                          (taxableIncome - 500000) * 0.20m;
-                else
-                    tax = (250000 * 0.05m) +
-                          (500000 * 0.20m) +
-                          (taxableIncome - 1000000) * 0.30m;
+                Success = false,
+                StatusCode = 422,
+                ErrorCode = "PAYROLL_VALIDATION_BLOCKED",
+                Message = $"Payroll validation failed for {validationErrors.Count} issue(s). No payroll records were changed.",
+                Errors = validationErrors.Select(message =>
+                {
+                    var separator = message.IndexOf(": ", StringComparison.Ordinal);
+                    return new ValidationError
+                    {
+                        Field = separator >= 0 ? message[..separator] : "Payroll",
+                        Message = separator >= 0 ? message[(separator + 2)..] : message
+                    };
+                }).ToList()
+            };
 
-                if (taxableIncome <= 500000)
-                    tax = 0;
+            int processedCount = 0;
+            int skippedNoSalaryCount = 0;
+            var skippedNoSalaryEmployeeIds = new List<string>();
+            int consideredCount = 0;
+            var payrollMutations = new List<PayrollMutation>();
+
+            try
+            {
+                foreach (var emp in employees)
+                {
+                    if (string.IsNullOrEmpty(emp.DateOfJoining))
+                        continue;
+
+                    if (!DateTime.TryParse(emp.DateOfJoining, out DateTime joiningDate))
+                        continue;
+
+                    if (joiningDate.Date > monthEnd)
+                        continue;
+
+                    DateTime? exitDate = EmploymentPeriod.GetLastWorkingDate(emp);
+                    if (exitDate.HasValue && exitDate.Value < monthStart)
+                        continue;
+
+                    var eligibleFrom = joiningDate.Date > monthStart ? joiningDate.Date : monthStart;
+                    var eligibleTo = exitDate.HasValue && exitDate.Value < monthEnd ? exitDate.Value : monthEnd;
+
+                    var assignment = PayrollPolicyResolver.ResolveAssignment(companyId, emp.EmployeeId, monthStart, assignmentRows);
+                    var policyPeriodStart = joiningDate.Date > monthStart ? joiningDate.Date : monthStart;
+                    var policyPeriodEnd = exitDate.HasValue && exitDate.Value < monthEnd ? exitDate.Value : monthEnd;
+                    var resolvedPolicyPeriod = PayrollPolicyResolver.ResolveConsistentPeriod(
+                        companyId, emp.EmployeeId, policyPeriodStart, policyPeriodEnd,
+                        assignmentRows, canonicalSalaryStructures, policyProfiles, payGroups);
+                    var resolvedProfile = resolvedPolicyPeriod.Profile;
+                    var salaryResolution = PayrollSalarySourceResolver.Resolve(
+                        companyId, emp.EmployeeId, monthStart, monthEnd, canonicalSalaryStructures,
+                        () => _salaryRepository.Get(s => s.CompanyId == companyId && s.EmployeeId == emp.EmployeeId && s.EffectiveFrom <= monthEnd && (!s.EffectiveTo.HasValue || s.EffectiveTo.Value >= monthStart)).ToList());
+                    var overlappingSalaryRecords = salaryResolution.Records;
+                    var canonicalRecords = salaryResolution.UsesCanonicalSource
+                        ? canonicalSalaryStructures.Where(x => x.EmployeeId == emp.EmployeeId && x.EffectiveFrom.Date <= monthEnd.Date && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value.Date >= monthStart.Date)).ToList()
+                        : [];
+
+                    var activeSalaryStructure = canonicalRecords.FirstOrDefault();
+                    var employeeTaxRegime = activeSalaryStructure?.TaxRegime;
+                    var employeeEpfMode = activeSalaryStructure?.EpfModeOverride;
+                    var employeeEsicMode = activeSalaryStructure?.EsicModeOverride;
+                    var employeeAttendanceMode = activeSalaryStructure?.AttendanceTrackingMode;
+
+                    var effectiveDivisorPolicy = resolvedProfile?.DivisorPolicy ?? divisorPolicy;
+                    var effectiveRequireAttendanceLock = resolvedProfile?.RequireAttendanceLock ?? requireAttendanceLock;
+                    var effectiveEpfMode = !string.IsNullOrWhiteSpace(employeeEpfMode) ? employeeEpfMode : (resolvedProfile?.EpfMode ?? divisorSetting.EpfMode);
+                    var effectiveEpfWageCeiling = resolvedProfile?.EpfWageCeiling ?? divisorSetting.EpfWageCeiling;
+                    var effectiveEpfEmployeeRate = resolvedProfile?.EpfEmployeeRatePercent ?? divisorSetting.EpfEmployeeRatePercent;
+                    var effectiveEpfEmployerRate = resolvedProfile?.EpfEmployerRatePercent ?? divisorSetting.EpfEmployerRatePercent;
+                    var effectiveEsicMode = !string.IsNullOrWhiteSpace(employeeEsicMode) ? employeeEsicMode : (resolvedProfile?.EsicMode ?? divisorSetting.EsicMode);
+                    var effectiveEsicWageCeiling = resolvedProfile?.EsicWageCeiling ?? divisorSetting.EsicWageCeiling;
+                    var effectiveEsicEmployeeRate = resolvedProfile?.EsicEmployeeRatePercent ?? divisorSetting.EsicEmployeeRatePercent;
+                    var effectiveEsicEmployerRate = resolvedProfile?.EsicEmployerRatePercent ?? divisorSetting.EsicEmployerRatePercent;
+                    var effectiveTdsMode = !string.IsNullOrWhiteSpace(employeeTaxRegime) ? employeeTaxRegime : (resolvedProfile?.TdsMode ?? divisorSetting.TdsMode);
+                    var isAttendanceExempt = string.Equals(employeeAttendanceMode, "EXEMPT", StringComparison.OrdinalIgnoreCase);
+
+                    var attendanceSummary = await _attendanceSummaryRepository.FirstOrDefault(x =>
+                        x.CompanyId == companyId && x.EmployeeId == emp.EmployeeId &&
+                        x.PayrollMonth == monthStart && x.IsApproved && x.IsLocked);
+                    if (attendanceSummary == null && effectiveRequireAttendanceLock && !isAttendanceExempt)
+                    {
+                        await RollbackPayrollRunAsync(companyId, monthStart, payrollMutations);
+                        return new Result { Success = false, Message = $"Attendance must be validated and locked before payroll. Missing lock for employee {emp.EmployeeId}." };
+                    }
+
+                    var attendanceException = await _attendanceExceptionRepository.FirstOrDefault(x =>
+                        x.CompanyId == companyId && x.EmployeeId == emp.EmployeeId &&
+                        x.PayrollMonth == monthStart && x.ExceptionType == "LHD_ED_LIMIT_EXCEEDED" && x.Status != "CANCELLED");
+                    if (attendanceException?.Status == "PENDING_REVIEW")
+                    {
+                        await RollbackPayrollRunAsync(companyId, monthStart, payrollMutations);
+                        return new Result { Success = false, Message = $"Payroll is blocked: the LHD/ED exception for employee {emp.EmployeeId} requires HR/Admin review." };
+                    }
+
+                    consideredCount++;
+
+                    if (canonicalRecords.Count > 0)
+                    {
+                        var taxTreatmentIssue = PayrollCalculationRules.FindUnsupportedAutomaticTdsTreatment(
+                            canonicalRecords.SelectMany(record => record.Components).Select((component, index) => new PayrollComponentSnapshot
+                            {
+                                Code = component.ComponentCode, Name = component.ComponentName, Kind = component.Kind,
+                                CalculationType = component.CalculationType, BaseComponentCode = component.BaseComponentCode,
+                                Value = component.Percentage ?? component.Value, IsTaxable = component.IsTaxable,
+                                IsRecurring = component.IsRecurring, IsStatutory = component.IsStatutory,
+                                IsEmployerContribution = component.IsEmployerContribution, SortOrder = index
+                            }), effectiveTdsMode);
+                        if (taxTreatmentIssue is not null)
+                        {
+                            await RollbackPayrollRunAsync(companyId, monthStart, payrollMutations);
+                            return new Result { Success = false, Message = $"Payroll is blocked for employee {emp.EmployeeId}: {taxTreatmentIssue} No payroll records were changed." };
+                        }
+                    }
+
+                    var latestSalaryRecord = overlappingSalaryRecords.FirstOrDefault();
+                    var assignedTemplate = assignment?.SalaryTemplateId is null ? null : salaryTemplates.FirstOrDefault(x => x.Id == assignment.SalaryTemplateId && (x.PayGroupId is null || x.PayGroupId == assignment.PayGroupId) && x.EffectiveFrom.Date <= monthStart.Date && (x.EffectiveTo is null || x.EffectiveTo.Value.Date >= monthStart.Date));
+                    if (latestSalaryRecord == null)
+                    {
+                        skippedNoSalaryCount++;
+                        skippedNoSalaryEmployeeIds.Add(emp.EmployeeId);
+                        continue;
+                    }
+
+                    int daysInMonth = DateTime.DaysInMonth(payMonth.Year, payMonth.Month);
+                    int eligibleDays = (eligibleTo - eligibleFrom).Days + 1;
+
+                    // BambooHR-style day-weighted split-month salary proration:
+                    // If an employee receives a mid-month increment/revision, weight each day in [eligibleFrom, eligibleTo]
+                    // by the SalaryModel active on that date.
+                    decimal weightedBasicSum = 0m;
+                    decimal weightedHraSum = 0m;
+                    decimal weightedLtaSum = 0m;
+                    decimal weightedOtherSum = 0m;
+                    decimal weightedBonusSum = 0m;
+                    decimal weightedHealthInsuranceSum = 0m;
+                    var weightedSalaryDeductions = new Dictionary<string, (string Name, decimal Amount)>(StringComparer.OrdinalIgnoreCase);
+                    var weightedSalaryEarnings = new Dictionary<string, (string Name, decimal Amount)>(StringComparer.OrdinalIgnoreCase);
+
+                    for (var cursor = eligibleFrom.Date; cursor <= eligibleTo.Date; cursor = cursor.AddDays(1))
+                    {                        var activeSalaryForDay = overlappingSalaryRecords
+                            .FirstOrDefault(s => s.EffectiveFrom.Date <= cursor && (!s.EffectiveTo.HasValue || s.EffectiveTo.Value.Date >= cursor));
+                        if (activeSalaryForDay is null)
+                        {
+                            await RollbackPayrollRunAsync(companyId, monthStart, payrollMutations);
+                            return new Result { Success = false, Message = $"Payroll is blocked: no effective salary record covers {cursor:yyyy-MM-dd} for employee {emp.EmployeeId}." };
+                        }
+
+                        weightedBasicSum += activeSalaryForDay.BasicPay;
+                        weightedHraSum += activeSalaryForDay.Hra ?? 0m;
+                        weightedLtaSum += activeSalaryForDay.Lta ?? 0m;
+                        weightedOtherSum += activeSalaryForDay.OtherAllowances ?? 0m;
+                        weightedBonusSum += activeSalaryForDay.Bonus ?? 0m;
+                        weightedHealthInsuranceSum += activeSalaryForDay.HealthInsurance ?? 0m;
+                        if (activeSalaryForDay.OtherEarnings.Count > 0)
+                        {
+                            foreach (var item in activeSalaryForDay.OtherEarnings)
+                            {
+                                var prior = weightedSalaryEarnings.GetValueOrDefault(item.Code);
+                                weightedSalaryEarnings[item.Code] = (item.Name, prior.Amount + item.Amount);
+                            }
+                        }
+                        else if ((activeSalaryForDay.OtherAllowances ?? 0m) > 0m)
+                        {
+                            var prior = weightedSalaryEarnings.GetValueOrDefault("OTHER_ALLOWANCE");
+                            weightedSalaryEarnings["OTHER_ALLOWANCE"] = ("Other Allowance", prior.Amount + (activeSalaryForDay.OtherAllowances ?? 0m));
+                        }
+                        foreach (var item in activeSalaryForDay.OtherDeductions)
+                        {
+                            var prior = weightedSalaryDeductions.GetValueOrDefault(item.Code);
+                            weightedSalaryDeductions[item.Code] = (item.Name, prior.Amount + item.Amount);
+                        }
+                    }
+
+                    // An approved employee salary is the payable offer/revision. A
+                    // template is only a fallback when no canonical salary structure exists.
+                    var hasApprovedEmployeeStructure = canonicalRecords.Count > 0;
+                    decimal originalBasic = PayrollSalaryValueResolver.Resolve(hasApprovedEmployeeStructure, assignedTemplate?.BasicPay, eligibleDays > 0 ? weightedBasicSum / eligibleDays : latestSalaryRecord?.BasicPay ?? 0m, latestSalaryRecord?.BasicPay ?? 0m);
+                    decimal originalHRA = PayrollSalaryValueResolver.Resolve(hasApprovedEmployeeStructure, assignedTemplate?.Hra, eligibleDays > 0 ? weightedHraSum / eligibleDays : latestSalaryRecord?.Hra ?? 0m, latestSalaryRecord?.Hra ?? 0m);
+                    decimal originalLTA = PayrollSalaryValueResolver.Resolve(hasApprovedEmployeeStructure, assignedTemplate?.Lta, eligibleDays > 0 ? weightedLtaSum / eligibleDays : latestSalaryRecord?.Lta ?? 0m, latestSalaryRecord?.Lta ?? 0m);
+                    decimal originalOtherAllowance = PayrollSalaryValueResolver.Resolve(hasApprovedEmployeeStructure, assignedTemplate?.OtherAllowance, eligibleDays > 0 ? weightedOtherSum / eligibleDays : latestSalaryRecord?.OtherAllowances ?? 0m, latestSalaryRecord?.OtherAllowances ?? 0m);
+                    decimal originalBonus = PayrollSalaryValueResolver.Resolve(hasApprovedEmployeeStructure, assignedTemplate?.Bonus, eligibleDays > 0 ? weightedBonusSum / eligibleDays : latestSalaryRecord?.Bonus ?? 0m, latestSalaryRecord?.Bonus ?? 0m);
+                    decimal contractualFixedMonthlyGross = originalBasic + originalHRA + originalLTA + originalOtherAllowance;
+
+                    var eligibleToExclusive = eligibleTo.Date.AddDays(1);
+                    var attendanceRecords = await _attendanceRepository.GetAll(a =>
+                        a.CompanyId == companyId && a.UserId == emp.UserId && a.EmployeeId == emp.EmployeeId &&
+                        a.Date >= eligibleFrom &&
+                        a.Date < eligibleToExclusive);
+                    var attendanceSegments = await _attendanceSegmentRepository.GetAll(a =>
+                        a.CompanyId == companyId && a.UserId == emp.UserId && a.EmployeeId == emp.EmployeeId &&
+                        a.Date >= eligibleFrom && a.Date < eligibleToExclusive);
+
+                    var statusRules = (await _attendanceStatusRepository.GetAll(s => s.CompanyId == companyId)).ToDictionary(s => s.Code, StringComparer.OrdinalIgnoreCase);
+                    var workingDays = await _workingCalendar.CountWorkingDaysAsync(companyId, DateOnly.FromDateTime(monthStart), DateOnly.FromDateTime(monthEnd));
+                    decimal resolvedDivisor = PayrollCalculationRules.ResolveDivisor(effectiveDivisorPolicy, daysInMonth, workingDays);
+                    if (resolvedDivisor <= 0)
+                    {
+                        await RollbackPayrollRunAsync(companyId, monthStart, payrollMutations);
+                        return new Result { Success = false, Message = $"Invalid payroll divisor for employee {emp.EmployeeId}. No payroll was changed." };
+                    }
+
+                    // Joining / exit / split-month earned components
+                    decimal basicAfterJoining = PayrollCalculationRules.RoundMoney(weightedBasicSum / daysInMonth);
+                    decimal hra = PayrollCalculationRules.RoundMoney(weightedHraSum / daysInMonth);
+                    decimal lta = PayrollCalculationRules.RoundMoney(weightedLtaSum / daysInMonth);
+                    decimal otherAllowance = PayrollCalculationRules.RoundMoney(weightedOtherSum / daysInMonth);
+                    decimal bonus = PayrollCalculationRules.RoundMoney(weightedBonusSum / daysInMonth);
+
+                    // Transparent payslip model: keep earned/prorated basic before attendance LOP;
+                    // LOP is stored once in the deductions section and subtracted once from net pay.
+                    decimal finalBasic = basicAfterJoining;
+                    decimal earnedFixedGross = finalBasic + hra + lta + otherAllowance;
+
+                    decimal perDaySalary = PayrollCalculationRules.ResolvePerDayLopRate(
+                        divisorSetting.LopCalculationBase,
+                        originalBasic,
+                        contractualFixedMonthlyGross,
+                        resolvedDivisor);
+
+                    var segmentDates = attendanceSegments.Select(x => x.Date.Date).ToHashSet();
+                    decimal configuredUnpaidDays = attendanceRecords.Where(a => !segmentDates.Contains(a.Date.Date)).Sum(a => statusRules.TryGetValue(a.Status, out var rule)
+                        ? rule.UnpaidDayFraction
+                        : PayrollCalculationRules.ResolveFallbackUnpaidDayFraction(a.Status))
+                        + attendanceSegments.Sum(a => statusRules.TryGetValue(a.Status, out var rule) ? rule.UnpaidDayFraction : 0m);
+                    decimal approvedPenaltyDays = attendanceException?.Status is "DEDUCTION_APPROVED" or "APPLIED_TO_PAYROLL"
+                        ? attendanceException.DeductionDayFraction
+                        : 0m;
+                    decimal lossOfPayDays = isAttendanceExempt ? 0m : PayrollCalculationRules.TotalLossOfPayDays(configuredUnpaidDays, approvedPenaltyDays);
+                    decimal lossOfPay = isAttendanceExempt ? 0m : PayrollCalculationRules.CalculateCappedLossOfPay(lossOfPayDays, perDaySalary, earnedFixedGross);
+
+                    decimal paidDaysValue = isAttendanceExempt ? eligibleDays : Math.Max(0m, eligibleDays - lossOfPayDays);
+
+                    decimal monthlyGross = earnedFixedGross + bonus;
+                    decimal earnedGrossAfterLop = Math.Max(0m, monthlyGross - lossOfPay);
+
+                    // Statutory EPF & ESIC auto-calculation according to company policy
+                    decimal earnedBasicAfterLop = Math.Max(0m, finalBasic - Math.Min(finalBasic, lossOfPay));
+                    decimal epf = PayrollCalculationRules.CalculateMonthlyEpf(
+                        effectiveEpfMode,
+                        earnedBasicAfterLop,
+                        effectiveEpfWageCeiling,
+                        effectiveEpfEmployeeRate);
+                    decimal esic = PayrollCalculationRules.CalculateMonthlyEsic(
+                        effectiveEsicMode,
+                        contractualFixedMonthlyGross,
+                        earnedGrossAfterLop,
+                        effectiveEsicWageCeiling,
+                        effectiveEsicEmployeeRate);
+
+                    // Year-To-Date (YTD) + Remaining FY Months projection for Section 192 Income Tax (TDS):
+                    // Non-taxable earnings are excluded from taxable gross base, and one-time bonus is added once.
+                    var fyStartYear = monthStart.Month >= 4 ? monthStart.Year : monthStart.Year - 1;
+                    var fyStart = new DateTime(fyStartYear, 4, 1);
+                    var fyEnd = new DateTime(fyStartYear + 1, 3, 1);
+                    int remainingMonthsInFy = ((fyEnd.Year - monthStart.Year) * 12) + (fyEnd.Month - monthStart.Month) + 1;
+
+                    var priorFyPayrolls = _empPayRollRepository
+                        .Get(p => p.CompanyId == companyId && p.EmployeeId == emp.EmployeeId && (p.IsProcessed || p.WorkflowStatus == "PROCESSED" || p.WorkflowStatus == "PAID" || p.WorkflowStatus == "CLOSED" || p.PaymentStatus == "PAID" || p.PaymentStatus == "CLOSED") && p.PayMonth >= fyStart && p.PayMonth < monthStart)
+                        .ToList();
+
+                    decimal ytdTaxAlreadyDeducted = priorFyPayrolls.Sum(p => p.Deduction?.IncomeTax ?? 0m);
+                    decimal nonTaxableMonthlyEarnings = canonicalRecords
+                        .SelectMany(r => r.Components)
+                        .Where(c => string.Equals(c.Kind, "EARNING", StringComparison.OrdinalIgnoreCase) && !c.IsTaxable)
+                        .Sum(c => c.Value);
+                    decimal taxableContractualFixedMonthlyGross = Math.Max(0m, contractualFixedMonthlyGross - nonTaxableMonthlyEarnings);
+                    decimal taxableEarnedGrossAfterLop = Math.Max(0m, earnedGrossAfterLop - nonTaxableMonthlyEarnings);
+
+                    decimal annualGrossIncome;
+                    if (priorFyPayrolls.Count > 0)
+                    {
+                        decimal ytdActualGross = priorFyPayrolls.Sum(p =>
+                            Math.Max(0m, p.BasicPay + (p.Allowance?.HRA ?? 0m) + (p.Allowance?.LTA ?? 0m) + (p.Allowance?.OtherAllowance ?? 0m) + p.Bonus - (p.Deduction?.LossOfPay ?? 0m)));
+                        int futureMonthsAfterCurrent = Math.Max(0, remainingMonthsInFy - 1);
+                        annualGrossIncome = ytdActualGross + taxableEarnedGrossAfterLop + (taxableContractualFixedMonthlyGross * futureMonthsAfterCurrent);
+                    }
+                    else
+                    {
+                        // Standalone / first-month projection: recurring fixed taxable gross * 12, minus current month LOP, plus one-time bonus once
+                        annualGrossIncome = Math.Max(0m, (taxableContractualFixedMonthlyGross * 12m) - lossOfPay + bonus);
+                    }
+
+                    decimal monthlyIncomeTax = PayrollCalculationRules.CalculateMonthlyTds(
+                        annualGrossIncome,
+                        effectiveTdsMode,
+                        ytdTaxAlreadyDeducted,
+                        priorFyPayrolls.Count > 0 ? remainingMonthsInFy : 12);
+
+                    var salaryDeductionLines = weightedSalaryDeductions
+                        .Select(x => new PayrollDeductionLineDto
+                        {
+                            Code = $"SALARY_{x.Key.Trim().ToUpperInvariant()}",
+                            Description = x.Value.Name,
+                            Amount = daysInMonth > 0 ? PayrollCalculationRules.RoundMoney(x.Value.Amount / daysInMonth) : 0m
+                        })
+                        .Where(x => x.Amount > 0m)
+                        .ToList();
+                    var payrollDeductionLines = salaryDeductionLines;
+                    if (approvedPenaltyDays > 0)
+                    {
+                        payrollDeductionLines.Add(new PayrollDeductionLineDto
+                        {
+                            Code = "LHD_ED_POLICY", Description = "Approved LHD/ED monthly policy deduction",
+                            DayFraction = approvedPenaltyDays, Amount = PayrollCalculationRules.RoundMoney(approvedPenaltyDays * perDaySalary),
+                            SourceId = attendanceException?.Id
+                        });
+                    }
+
+                    var otherAllowanceLines = weightedSalaryEarnings
+                        .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                        .Select(x => new PayrollEarningLineDto
+                        {
+                            Code = x.Key.Trim().ToUpperInvariant(),
+                            Description = x.Value.Name,
+                            Amount = daysInMonth > 0 ? PayrollCalculationRules.RoundMoney(x.Value.Amount / daysInMonth) : 0m
+                        })
+                        .Where(x => x.Amount > 0m)
+                        .ToList();
+                    if (otherAllowanceLines.Count > 0)
+                    {
+                        // Keep the breakdown's displayed sum aligned exactly with the
+                        // canonical OtherAllowance total after per-line currency rounding.
+                        var roundingDifference = otherAllowance - otherAllowanceLines.Sum(x => x.Amount);
+                        otherAllowanceLines[^1].Amount = PayrollCalculationRules.RoundMoney(otherAllowanceLines[^1].Amount + roundingDifference);
+                    }
+
+                    var payrollDto = new AddUpdatePayRollRequestDto
+                    {
+                        EmployeeId = emp.EmployeeId,
+                        PayMonth = monthStart,
+                        PaidDate = DateTime.UtcNow,
+                        BasicPay = finalBasic,
+                        HRA = hra,
+                        LTA = lta,
+                        OtherAllowance = otherAllowance,
+                        EarningLines = otherAllowanceLines,
+                        ReplaceEarningLines = true,
+                        Bonus = bonus,
+                        PaidDays = (float)paidDaysValue,
+                        LossOfPayDays = lossOfPayDays,
+                        LossOfPay = lossOfPay,
+                        EPF = epf,
+                        ESIC = esic,
+                        IncomeTax = monthlyIncomeTax,
+                        HealthInsurance = daysInMonth > 0 ? PayrollCalculationRules.RoundMoney(weightedHealthInsuranceSum / daysInMonth) : 0m,
+                        DeductionLines = payrollDeductionLines,
+                        ReplaceDeductionLines = true,
+                        CalculationSnapshot = new PayrollCalculationSnapshotDto
+                        {
+                            PayrollMonth = monthStart, JoiningDateUsed = joiningDate.Date, ExitDateUsed = exitDate,
+                            EligibleFrom = eligibleFrom, EligibleTo = eligibleTo, DivisorPolicy = effectiveDivisorPolicy, Divisor = resolvedDivisor, DivisorPolicyVersion = resolvedProfile?.Version ?? divisorSetting.Version,
+                            LhdCount = attendanceException?.LhdCount ?? (attendanceSummary?.LhdCount ?? 0),
+                            EdCount = attendanceException?.EdCount ?? (attendanceSummary?.EdCount ?? 0),
+                            CombinedCount = attendanceException?.CombinedOccurrenceCount ?? ((attendanceSummary?.LhdCount ?? 0) + (attendanceSummary?.EdCount ?? 0)),
+                            AllowedCount = attendanceException?.AllowedOccurrenceCount ?? 0,
+                            ExceededCount = attendanceException?.ExceededOccurrenceCount ?? 0,
+                            ExceptionDecision = attendanceException?.Decision, PenaltyDayFraction = approvedPenaltyDays,
+                            PenaltyAmount = PayrollCalculationRules.RoundMoney(approvedPenaltyDays * perDaySalary), PolicyId = attendanceException?.PolicyId,
+                            PolicyVersion = attendanceException?.PolicyVersion ?? 0, AttendanceSummaryVersion = attendanceSummary?.Version ?? 0, PayrollAssignmentId = assignment?.Id, PayrollAssignmentVersion = assignment?.Version ?? 0, PayGroupId = resolvedPolicyPeriod.PayGroupId ?? assignment?.PayGroupId, PayGroupVersion = payGroups.FirstOrDefault(x => x.Id == (resolvedPolicyPeriod.PayGroupId ?? assignment?.PayGroupId))?.Version ?? 0, SalaryTemplateId = assignedTemplate?.Id, SalaryTemplateVersion = assignedTemplate?.Version ?? 0, ResolvedPolicyProfileId = resolvedProfile?.Id, ResolvedPolicyVersion = resolvedProfile?.Version ?? 0, EpfMode = effectiveEpfMode, EpfWageCeiling = effectiveEpfWageCeiling, EpfEmployeeRatePercent = effectiveEpfEmployeeRate, EpfEmployerRatePercent = effectiveEpfEmployerRate, EsicMode = effectiveEsicMode, EsicWageCeiling = effectiveEsicWageCeiling, EsicEmployeeRatePercent = effectiveEsicEmployeeRate, EsicEmployerRatePercent = effectiveEsicEmployerRate, TdsMode = effectiveTdsMode,
+                            SalaryRevisions = canonicalRecords.OrderBy(x => x.EffectiveFrom).ThenBy(x => x.Version).Select(x => new PayrollSalaryRevisionReferenceDto { SalaryStructureId = x.Id, Version = x.Version }).ToList(),
+                            SalaryStructures = canonicalRecords.Count > 0
+                                ? canonicalRecords.OrderBy(x => x.EffectiveFrom).ThenBy(x => x.Version).Select(x => new PayrollSalaryStructureSnapshotDto
+                            {
+                                SalaryStructureId = x.Id, Version = x.Version, PayGroupId = x.PayGroupId,
+                                EffectiveFrom = x.EffectiveFrom, EffectiveTo = x.EffectiveTo,
+                                Components = x.Components.Select((component, index) => new PayrollComponentSnapshotDto
+                                {
+                                    Code = component.ComponentCode, Name = component.ComponentName, Kind = component.Kind,
+                                    CalculationType = component.CalculationType, BaseComponentCode = component.BaseComponentCode,
+                                    Value = component.Percentage ?? component.Value, IsTaxable = component.IsTaxable,
+                                    IsRecurring = component.IsRecurring, IsStatutory = component.IsStatutory,
+                                    IsEmployerContribution = component.IsEmployerContribution, SortOrder = index
+                                }).ToList()
+                            }).ToList()
+                                : salaryResolution.UsesCanonicalSource ? []
+                                : salaryResolution.Records.OrderBy(x => x.EffectiveFrom).Select(PayrollSalarySourceResolver.SnapshotLegacyRecordDto).ToList()
+                        }
+                    };
+
+                    // --- Check for existing payroll ---
+
+                    var existingPayroll = _empPayRollRepository.Get(p =>
+                        p.EmployeeId == emp.EmployeeId &&
+                        p.CompanyId == companyId &&
+                        p.PayMonth == payMonth)
+                        // Preserve a published payroll snapshot if legacy duplicate data exists. The
+                        // service will reject any attempted change to it; ordering also prevents an
+                        // arbitrary draft from being selected by the repository.
+                        .OrderByDescending(p => p.IsProcessed || p.WorkflowStatus == "PROCESSED" || p.WorkflowStatus == "PAID" || p.WorkflowStatus == "CLOSED" || p.PaymentStatus == "PAID" || p.PaymentStatus == "CLOSED")
+                        .ThenByDescending(p => p.ProcessedAt ?? DateTime.MinValue)
+                        .ThenByDescending(p => p.CreatedAt)
+                        .FirstOrDefault();
+                    var originalPayroll = existingPayroll is null ? null : ClonePayroll(existingPayroll);
+
+                    if (existingPayroll != null)
+                    {
+                        if (string.Equals(effectiveTdsMode, "MANUAL_ONLY", StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(existingPayroll.CalculationSnapshot?.TdsMode, "MANUAL_ONLY", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // A manually entered draft withholding must survive regeneration; do not recalculate it as zero.
+                            payrollDto.IncomeTax = existingPayroll.Deduction.IncomeTax;
+                        }
+                        payrollDto.PayRollId = existingPayroll.Id; // Update existing payroll
+                    }
+
+                    // Add or update payroll
+                    var saveResult = await _payRollServices.AddUpdatePayRoll(payrollDto, companyId);
+                    if (!saveResult.Success)
+                    {
+                        await RollbackPayrollRunAsync(companyId, monthStart, payrollMutations);
+                        return saveResult;
+                    }
+                    payrollMutations.Add(new PayrollMutation(emp.EmployeeId, originalPayroll, attendanceException?.Id, attendanceException?.Status));
+                    if (attendanceException?.Status == "DEDUCTION_APPROVED")
+                    {
+                        attendanceException.Status = "APPLIED_TO_PAYROLL";
+                        attendanceException.UpdatedDate = DateTime.UtcNow;
+                        await _attendanceExceptionRepository.Update(
+                            Builders<AttendancePayrollException>.Filter.Eq(x => x.Id, attendanceException.Id) & Builders<AttendancePayrollException>.Filter.Eq(x => x.CompanyId, companyId), attendanceException);
+                    }
+                    processedCount++;
+                }
+            }
+            catch
+            {
+                await RollbackPayrollRunAsync(companyId, monthStart, payrollMutations);
+                throw;
             }
 
-            tax += tax * 0.04m;
-
-            return Math.Round(tax / 12, 2);
+            var skippedIdsPreview = string.Join(", ", skippedNoSalaryEmployeeIds.Take(10));
+            var remainingSkippedCount = skippedNoSalaryCount - Math.Min(skippedNoSalaryCount, 10);
+            var skippedIdentityText = remainingSkippedCount > 0 ? $" Employee IDs: {skippedIdsPreview}, and {remainingSkippedCount} more." : $" Employee IDs: {skippedIdsPreview}.";
+            return new Result
+            {
+                Success = true,
+                Message = skippedNoSalaryCount > 0
+                    ? $"Generated payroll draft for {processedCount} of {consideredCount} employees. {skippedNoSalaryCount} employee(s) have no salary structure defined.{skippedIdentityText}"
+                    : $"Generated payroll draft for {processedCount} employee(s). Review it and process the month to publish payslips."
+            };
         }
+
+        // This service currently writes through legacy repositories that do not expose a
+        // shared MongoDB session. Keep the operation all-or-nothing with compensation:
+        // newly created drafts are deleted and pre-existing drafts/exception states are
+        // restored whenever any later calculation or persistence step fails.
+        private async Task RollbackPayrollRunAsync(string companyId, DateTime monthStart, IEnumerable<PayrollMutation> mutations)
+        {
+            foreach (var mutation in mutations.Reverse())
+            {
+                var payrollFilter = Builders<EmpPayRoll>.Filter.Where(x =>
+                    x.CompanyId == companyId && x.EmployeeId == mutation.EmployeeId &&
+                    x.PayMonth == monthStart);
+                if (mutation.OriginalPayroll is null)
+                    await _empPayRollRepository.GetCollection().DeleteOneAsync(payrollFilter);
+                else
+                    await _empPayRollRepository.GetCollection().ReplaceOneAsync(
+                        Builders<EmpPayRoll>.Filter.Eq(x => x.Id, mutation.OriginalPayroll.Id) & Builders<EmpPayRoll>.Filter.Eq(x => x.CompanyId, companyId), mutation.OriginalPayroll);
+
+                if (mutation.AttendanceExceptionId is not null && mutation.OriginalAttendanceExceptionStatus is not null)
+                {
+                    await _attendanceExceptionRepository.GetCollection().UpdateOneAsync(
+                        Builders<AttendancePayrollException>.Filter.Eq(x => x.Id, mutation.AttendanceExceptionId) & Builders<AttendancePayrollException>.Filter.Eq(x => x.CompanyId, companyId),
+                        Builders<AttendancePayrollException>.Update
+                            .Set(x => x.Status, mutation.OriginalAttendanceExceptionStatus)
+                            .Set(x => x.UpdatedDate, DateTime.UtcNow));
+                }
+            }
+        }
+
+        private static EmpPayRoll ClonePayroll(EmpPayRoll payroll) =>
+            MongoDB.Bson.Serialization.BsonSerializer.Deserialize<EmpPayRoll>(payroll.ToBsonDocument());
+
+        private sealed record PayrollMutation(string EmployeeId, EmpPayRoll? OriginalPayroll,
+            string? AttendanceExceptionId, string? OriginalAttendanceExceptionStatus);
+
+        private decimal CalculateMonthlyIncomeTax(decimal annualGrossIncome, bool isNewRegime = true) =>
+            PayrollCalculationRules.CalculateMonthlyTds(annualGrossIncome, isNewRegime ? "AUTO_NEW_REGIME" : "AUTO_OLD_REGIME");
     }
 }
+

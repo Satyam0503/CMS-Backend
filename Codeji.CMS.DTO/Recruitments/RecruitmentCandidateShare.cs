@@ -1,0 +1,3 @@
+namespace Codeji.CMS.DTO.Recruitments;
+public sealed class RecruitmentCandidateShareCommand { public string ApplicantId { get; set; } = string.Empty; public string SharedWithUserId { get; set; } = string.Empty; public string Scope { get; set; } = "View"; public DateTime? ExpiresAtUtc { get; set; } public string IdempotencyKey { get; set; } = string.Empty; }
+public sealed class RecruitmentCandidateShareItem { public string ShareId { get; set; } = string.Empty; public string ApplicantId { get; set; } = string.Empty; public string SharedWithUserId { get; set; } = string.Empty; public string Scope { get; set; } = string.Empty; public DateTime? ExpiresAtUtc { get; set; } public DateTime? RevokedAtUtc { get; set; } }

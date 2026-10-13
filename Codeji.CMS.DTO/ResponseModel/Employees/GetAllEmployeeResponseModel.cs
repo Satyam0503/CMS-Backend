@@ -13,7 +13,17 @@ public class GetAllEmployeeResponseModel
     public Dictionary<string, string>? Department { get; set; }
     public string? PhoneNumber { get; set; }
     public string? DateOfBirth { get; set; }
+    public string? DateOfJoining { get; set; }
     public string? FullProfileUrl { get; set; }
     public string Gender { get; set; }
     public bool IsVerified { get; set; }
+    public string EmploymentStatus { get; set; } = "Active";
+    public DateTime? LastWorkingDate { get; set; }
+    public string AvailabilityStatus { get; set; } = "Working";
+    public string AccountStatus { get; set; } = "Active";
+    public string PayrollStatus { get; set; } = "Active";
+    public string OffboardingStatus { get; set; } = "None";
+    public string FormerPortalStatus { get; set; } = "NotEligible";
+    public string AlumniStatus { get; set; } = "NotMember";
+    public int LifecycleVersion { get; set; }
 }

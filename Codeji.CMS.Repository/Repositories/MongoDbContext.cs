@@ -8,13 +8,13 @@ namespace Codeji.CMS.Repository.Repositories
         private readonly IMongoClient _appClient;
         private readonly IMongoDatabase _appDatabase;
         //IMongoDbCacheService cacheService;
-        public MongoDbContext(IMongoDbCacheService _cacheService, string entityName = "")
+        public MongoDbContext(IMongoDbCacheService cacheService, IMongoClient appClient, string entityName = "")
         {
             //one know issue is there when first time table created in db it will not identify the right db connetion string.
             //thing alternative solutions.
-            var dbSettings = _cacheService.GetDatabaseSettings(entityName);
+            var dbSettings = cacheService.GetDatabaseSettings(entityName);
             // Initialize MongoClient and Database
-            _appClient = new MongoClient(dbSettings.Connection);
+            _appClient = appClient;
             _appDatabase = _appClient.GetDatabase(dbSettings.DatabaseName);
         }
 

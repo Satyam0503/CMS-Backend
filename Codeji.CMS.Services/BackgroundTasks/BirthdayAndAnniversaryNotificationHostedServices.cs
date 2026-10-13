@@ -3,6 +3,7 @@ using DnsClient.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Codeji.CMS.Utility.Helpers;
 
 namespace Codeji.CMS.Services.BackgroundTasks;
 
@@ -21,8 +22,8 @@ public class BirthDayAndAnniversaryNotificationHostedServices : BackgroundServic
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var now = DateTime.Now;  // get current time
-            var nextRun = DateTime.Today.AddHours(1); // set date to today 1 am
+            var now = IndiaTime.Now;
+            var nextRun = IndiaTime.Today.AddHours(1); // 1 AM IST
             if (now > nextRun)
             {
                 nextRun = nextRun.AddDays(1); // set next run to tommarrow 1 am 
@@ -45,7 +46,7 @@ public class BirthDayAndAnniversaryNotificationHostedServices : BackgroundServic
                 using var scope = _serviceProvider.CreateScope();
                 var empServices = scope.ServiceProvider.GetRequiredService<IEmployeeService>();
                 await empServices.SendBirthDayAndAnniversaryNotificationToEmployees();
-                _logger.LogInformation("Birthday/Anniversary notifications sent at {Time}", DateTime.Now);
+                _logger.LogInformation("Birthday/Anniversary notifications sent at {Time}", IndiaTime.Now);
             }
             catch (Exception ex)
             {

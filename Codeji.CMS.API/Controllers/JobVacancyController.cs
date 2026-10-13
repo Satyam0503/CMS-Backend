@@ -1,4 +1,4 @@
-﻿using Codeji.CMS.API.App_Start;
+using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.DTO.RequestModels.ApplyNow;
@@ -46,7 +46,7 @@ public class JobVacancyController : BaseApiController
 
     [Route("GetAllVacancy")]
     [HttpPost]
-    [AllowAnonymous]
+    [ModulePermission(AppModule.Jobs, Permission.View)]
     public async Task<Result<GetJobVacancyModel>> GetAllVacancy(JobRequestModel model)
     {
         var data = await _jobVacancyService.GetAllVacancy(model);
@@ -55,7 +55,7 @@ public class JobVacancyController : BaseApiController
 
     [Route("GetVacancyById")]
     [HttpPost]
-
+    [ModulePermission(AppModule.Jobs, Permission.View)]
     public async Task<string> GetVacancyById(string vacancyId)
     {
         var data = await _jobVacancyService.GetVacancyById(vacancyId);

@@ -13,8 +13,12 @@ namespace Codeji.CMS.Services.Interface
         Task<List<Company>> GetAllCompanyList();
         Task<bool> IsActiveCompanyExist(string companyId);
         Task<Result<Company>> GetCompanyDetails(string companyId);
+        Task<Result<PublicCareerCompanyDto>> GetPublicCareerCompany();
+        Task<Result<PublicCareerCompanyDto>> GetPublicCareerCompany(string publicCompanyCode);
 
         Task<Result<Company>> UpdateCompanyDetails(UpdateCompanyInfoRequestModel model, string companyId);
+        Task<Result<CompanyNotificationPreferencesDto>> GetCompanyNotificationPreferences(string companyId);
+        Task<Result<CompanyNotificationPreferencesDto>> UpdateCompanyNotificationPreferences(string companyId, string userId, CompanyNotificationPreferencesDto model);
 
         Task<string> UpdateCompanyLogo(IFormFile companyLogo, string companyId);
 
@@ -29,8 +33,9 @@ namespace Codeji.CMS.Services.Interface
         Task<Result> DeletePolicy(string policyId, string companyId);
 
 
-        Task<Result<PolicyVersionResponseModel>> AddPolicyVersion(PolicyVersionRequestModel model);
-        Task<Result<PolicyVersionResponseModel>> EditPolicyVersion(PolicyVersionUpdateModel model);
+        Task<Result<PolicyVersionResponseModel>> AddPolicyVersion(PolicyVersionRequestModel model, string companyId);
+        Task<Result<PolicyVersionResponseModel>> EditPolicyVersion(PolicyVersionUpdateModel model, string companyId);
+        Task<Result<PolicyVersionResponseModel>> SetCurrentPolicyVersion(SetCurrentPolicyVersionRequestModel model, string companyId);
         Task<Result<PolicyVersionResponseModel>> GetAllPolicyVersion(string policyId, string userId, string companyId);
         Task<Result> DeletePolicyVersion(string policyVersionId, string companyId);
         Task<Result<PolicyDocumentResult>> GetPolicyDocument(string policyVersionId, string userId, string companyId);

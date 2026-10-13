@@ -7,7 +7,7 @@ public class AttendanceUpdateDto
     public string?CheckInTime {get;set;}
     public string? CheckOutTime { get; set; }
     [Required]
-    public AttendanceStatus Status { get; set; } 
+    public string Status { get; set; } = "P";
     public string? Remarks { get; set; }
     public DateTime Date { get; set; }
 }

@@ -3,10 +3,12 @@ using Codeji.CMS.DTO.Company;
 using Codeji.CMS.DTO.Company.CustomAttribute;
 using Codeji.CMS.DTO.Company.Department;
 using Codeji.CMS.DTO.Company.JobTitle;
+using Codeji.CMS.DTO.Attendance;
 using Codeji.CMS.DTO.RequestModels.Company;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Services.Interface;
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -20,11 +22,51 @@ public class CompanyMasterController : BaseApiController
 {
     readonly ICompanyMasterService _companyMasterService;
     readonly IHttpContextAccessor _httpContextAccessor;
-    public CompanyMasterController(ICompanyMasterService companyService, IHttpContextAccessor httpContextAccessor)
+    readonly IOfficeScheduleSettingsService _officeScheduleSettings;
+    readonly IOfficeScheduleAssignmentService _officeScheduleAssignments;
+    public CompanyMasterController(ICompanyMasterService companyService, IHttpContextAccessor httpContextAccessor, IOfficeScheduleSettingsService officeScheduleSettings, IOfficeScheduleAssignmentService officeScheduleAssignments)
     {
         _companyMasterService = companyService;
         _httpContextAccessor = httpContextAccessor;
+        _officeScheduleSettings = officeScheduleSettings;
+        _officeScheduleAssignments = officeScheduleAssignments;
     }
+
+    [HttpGet]
+    [Route("OfficeSchedule")]
+    [Authorize(Policy = "AdminOnly")]
+    public Task<Result<OfficeScheduleSettingsDto>> GetOfficeSchedule(CancellationToken cancellationToken) =>
+        _officeScheduleSettings.GetAsync(CurrentContext.CompanyId(_httpContextAccessor), cancellationToken);
+
+    [HttpGet]
+    [Route("OfficeSchedules")]
+    [Authorize(Policy = "AdminOnly")]
+    public Task<Result<OfficeScheduleSettingsDto>> GetOfficeSchedules(CancellationToken cancellationToken) =>
+        _officeScheduleSettings.GetAllAsync(CurrentContext.CompanyId(_httpContextAccessor), cancellationToken);
+
+    [HttpPut]
+    [Route("OfficeSchedule")]
+    [Authorize(Policy = "AdminOnly")]
+    public Task<Result<OfficeScheduleSettingsDto>> SaveOfficeSchedule(OfficeScheduleSettingsDto request, CancellationToken cancellationToken) =>
+        _officeScheduleSettings.SaveAsync(CurrentContext.CompanyId(_httpContextAccessor), CurrentContext.UserId(_httpContextAccessor), request, cancellationToken);
+
+    [HttpDelete]
+    [Route("OfficeSchedule/{scheduleId}")]
+    [Authorize(Policy = "AdminOnly")]
+    public Task<Result> DeleteOfficeSchedule(string scheduleId, CancellationToken cancellationToken) =>
+        _officeScheduleSettings.DeleteAsync(CurrentContext.CompanyId(_httpContextAccessor), CurrentContext.UserId(_httpContextAccessor), scheduleId, cancellationToken);
+
+    [HttpGet]
+    [Route("DepartmentOfficeScheduleAssignments")]
+    [Authorize(Policy = "AdminOnly")]
+    public Task<Result<DepartmentOfficeScheduleAssignmentDto>> GetDepartmentOfficeScheduleAssignments(CancellationToken cancellationToken) =>
+        _officeScheduleAssignments.GetDepartmentsAsync(CurrentContext.CompanyId(_httpContextAccessor), cancellationToken);
+
+    [HttpPut]
+    [Route("DepartmentOfficeScheduleAssignment/{departmentId}")]
+    [Authorize(Policy = "AdminOnly")]
+    public Task<Result<DepartmentOfficeScheduleAssignmentDto>> SetDepartmentOfficeScheduleAssignment(string departmentId, SetOfficeScheduleAssignmentRequest request, CancellationToken cancellationToken) =>
+        _officeScheduleAssignments.SetDepartmentAsync(CurrentContext.CompanyId(_httpContextAccessor), CurrentContext.UserId(_httpContextAccessor), departmentId, request, cancellationToken);
 
     // company department actions
 
@@ -95,18 +137,18 @@ public class CompanyMasterController : BaseApiController
     [HttpPost]
     [Route("AddUpdateJobTitle")]
     [Authorize(Policy = "AdminOnly")]
-    public async Task<Result> AddUpdateJobTitle(List<JobTitleRequestDto> data)
+    public async Task<IActionResult> AddUpdateJobTitle(List<JobTitleRequestDto> data)
     {
         string userId = CurrentContext.UserId(_httpContextAccessor);
         var result = await _companyMasterService.AddUpdateJobTitle(data, userId);
-        return result;
+        return StatusCode(result.StatusCode, result);
     }
 
     [HttpGet]
     [Route("GetJobTitles")]
-    public async Task<Result<JobTitleResponseDto>> GetAllJobTitles([FromQuery] bool? isActive)
+    public async Task<Result<JobTitleResponseDto>> GetAllJobTitles([FromQuery] bool? isActive, [FromQuery] string? departmentId)
     {
-        var result = await _companyMasterService.GetJobTitles(isActive);
+        var result = await _companyMasterService.GetJobTitles(isActive, departmentId);
         return result;
     }
 
@@ -167,8 +209,18 @@ public class CompanyMasterController : BaseApiController
     public async Task<Result> UpdateCustomAttribute([FromBody] CustomAttributeRequestDto data)
     {
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-        string userId = CurrentContext.CompanyId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
         return await _companyMasterService.UpdateCustomAttribute(data, companyId, userId);
+    }
+
+    [HttpDelete]
+    [Route("DeleteCustomAttribute/{customAttributeId}")]
+    [Authorize(Policy = "AdminOnly")]
+    public async Task<Result> DeleteCustomAttribute(string customAttributeId)
+    {
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _companyMasterService.DeleteCustomAttribute(customAttributeId, companyId, userId);
     }
 
     [HttpDelete]

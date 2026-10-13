@@ -1,5 +1,12 @@
-*/bin
-*/obj
+# .NET build outputs at every project depth (including tools/)
+**/bin/
+**/obj/
+**/artifacts/
+**/PrivateLeaveEvidence/
+**/PrivateLifecycleEvidence/
+**/test-results/
+**/TestResults/
+NUL
 .vs
 .vscode/*
 */Uploads/*
@@ -13,6 +20,27 @@ Codeji.CMS.API/Uploads/*
 # Local build checks
 .build-check/
 **/.build-check/
+.tmp/
+**/.tmp/
+.verification/
+**/.verification/
 
 # Runtime logs
 *.log
+build-lifecycle-validation.txt
+
+# Documentation is maintained under /docs and committed with the source.
+# ASP.NET configuration containing secrets
+Codeji.CMS.API/appsettings.json
+
+# Local planning and progress spreadsheets
+*.xlsx
+# Local validation output (not source)
+*-build*.txt
+*-api*.txt
+api-*.txt
+*-services*.txt
+services-*.txt
+*-tests*.txt
+*-token-tests*.txt
+tenant-*.txt

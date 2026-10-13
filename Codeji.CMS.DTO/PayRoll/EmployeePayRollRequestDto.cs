@@ -17,9 +17,19 @@ public class EmployeePayRollModel
     public decimal? HealthInsurance { get; set; }
     public decimal? EPF { get; set; }
     public decimal? ESIC { get; set; }
+    public List<PayrollDeductionLineDto> DeductionLines { get; set; } = [];
+    public List<PayrollEarningLineDto> EarningLines { get; set; } = [];
+    public bool IsProcessed { get; set; }
+    public string? WorkflowStatus { get; set; }
+    public string? ApprovalStatus { get; set; }
+    public string? PaymentStatus { get; set; }
+    public string? PaymentReference { get; set; }
+    public DateTime? ClosedAt { get; set; }
+    public string? ClosedBy { get; set; }
 }
 public class EmplyeePayRollRequestDto
 {
     public DateTime PayMonth { get; set; }
     public List<EmployeePayRollModel> PayData { get; set; } = [];
 }
+

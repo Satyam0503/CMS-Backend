@@ -1,0 +1,2 @@
+namespace Codeji.CMS.DTO.Recruitments;
+public sealed class RecruitmentOfferPendingQueueItem { public string OfferId { get; set; } = string.Empty; public string ApplicantId { get; set; } = string.Empty; public string VacancyId { get; set; } = string.Empty; public string ApplicantName { get; set; } = string.Empty; public string Status { get; set; } = string.Empty; public decimal Salary { get; set; } public string Currency { get; set; } = string.Empty; public bool ApprovalRequired { get; set; } }

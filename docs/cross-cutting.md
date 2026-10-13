@@ -30,7 +30,7 @@ Configured in [Program.cs](../Codeji.CMS.API/Program.cs) — search for `app.Use
 
 > **Caveat.** Re-throwing in debug mode should never be enabled in a real environment. Treat `IsForDebug` as a development-only flag.
 
-### AntyForgeryMiddleware
+### AntyForgeryMiddleware 
 
 [`AntyForgeryMiddleware.cs`](../Codeji.CMS.API/App_Start/AntyForgeryMiddleware.cs)
 
@@ -214,6 +214,14 @@ var safe = Sanitizer.EncodingHtmlText(rawHtml);
 Stored in the `MailTemplate` collection — one row per `MailType` enum value. Seeded by [`SeedMailTemplates.cs`](../Codeji.CMS.Migrations/Migrations/SeedMailTemplates.cs) at first run.
 
 To customize a template per company, the long-term plan is per-company override rows; for now the template is global.
+
+### Current recruitment and career-email behavior
+
+- Public job applications send an applicant acknowledgement and a separate internal notification.
+- Internal application notifications use `ApplyNowMailToHR` and go to `RecruiterContactEmail` plus active verified company users in `Administrator` and `HR` roles.
+- Applicant stage changes send one candidate email only when `ActivityType` changes, with template-based messages for `Selected` and `Rejected` and fallback bodies for the other supported stages.
+- Career subscription verification, career preference confirmations, and career alert deliveries also flow through the same shared sender and are recorded in `EmpEmailLogs`.
+- Blank or invalid CC/BCC config values are now filtered before send so optional `SupportEmail` and `BccEmail` settings do not interfere with delivery.
 
 ### Placeholder syntax
 

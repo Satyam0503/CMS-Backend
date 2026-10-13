@@ -17,6 +17,98 @@ public class EmpPayRoll
     public Allowance Allowance { get; set; } = new Allowance();
     public Deduction Deduction { get; set; } = new Deduction();
     public DateTime CreatedAt { get; set; }
+    public bool IsProcessed { get; set; }
+    // Additive lifecycle read/write field; legacy rows derive their status from IsProcessed/PaymentStatus.
+    public string WorkflowStatus { get; set; } = "DRAFT";
+    public string? ApprovalStatus { get; set; }
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAtUtc { get; set; }
+    public DateTime? ProcessedAt { get; set; }
+    public string? ProcessedBy { get; set; }
+    public string PaymentStatus { get; set; } = "PENDING";
+    public string PaymentMethod { get; set; } = "MANUAL";
+    public string? PaymentReference { get; set; }
+    public DateTime? PaymentDate { get; set; }
+    public string? PaymentRecordedBy { get; set; }
+    public string? PaymentNotes { get; set; }
+    public DateTime? ClosedAt { get; set; }
+    public string? ClosedBy { get; set; }
+    public List<PayrollDeductionLine> DeductionLines { get; set; } = [];
+    public List<PayrollEarningLine> EarningLines { get; set; } = [];
+    public PayrollCalculationSnapshot? CalculationSnapshot { get; set; }
+    public List<PayrollAuditEvent> AuditHistory { get; set; } = [];
+}
+
+public class PayrollAuditEvent
+{
+    public required string Action { get; set; }
+    public required string ActorId { get; set; }
+    public DateTime OccurredAtUtc { get; set; }
+    public string? Notes { get; set; }
+}
+public class PayrollDeductionLine
+{
+    public required string Code { get; set; }
+    public required string Description { get; set; }
+    public decimal DayFraction { get; set; }
+    public decimal Amount { get; set; }
+    public string? SourceId { get; set; }
+}
+
+public class PayrollEarningLine
+{
+    public required string Code { get; set; }
+    public required string Description { get; set; }
+    public decimal Amount { get; set; }
+}
+
+public class PayrollCalculationSnapshot
+{
+    public DateTime PayrollMonth { get; set; }
+    public DateTime JoiningDateUsed { get; set; }
+    public DateTime? ExitDateUsed { get; set; }
+    public DateTime EligibleFrom { get; set; }
+    public DateTime EligibleTo { get; set; }
+    public string DivisorPolicy { get; set; } = "CALENDAR_DAYS";
+    public decimal Divisor { get; set; }
+    public int DivisorPolicyVersion { get; set; }
+    public int LhdCount { get; set; }
+    public int EdCount { get; set; }
+    public int CombinedCount { get; set; }
+    public int AllowedCount { get; set; }
+    public int ExceededCount { get; set; }
+    public string? ExceptionDecision { get; set; }
+    public decimal PenaltyDayFraction { get; set; }
+    public decimal PenaltyAmount { get; set; }
+    public string? PolicyId { get; set; }
+    public int PolicyVersion { get; set; }
+    public int AttendanceSummaryVersion { get; set; }
+    public string? PayrollAssignmentId { get; set; }
+    public int PayrollAssignmentVersion { get; set; }
+    public string? PayGroupId { get; set; }
+    public int PayGroupVersion { get; set; }
+    public string? SalaryTemplateId { get; set; }
+    public int SalaryTemplateVersion { get; set; }
+    public string? ResolvedPolicyProfileId { get; set; }
+    public int ResolvedPolicyVersion { get; set; }
+    public string EpfMode { get; set; } = "CAPPED_CEILING";
+    public decimal EpfWageCeiling { get; set; } = 15000m;
+    public decimal EpfEmployeeRatePercent { get; set; } = 12m;
+    public decimal EpfEmployerRatePercent { get; set; } = 12m;
+    public string EsicMode { get; set; } = "STATUTORY";
+    public decimal EsicWageCeiling { get; set; } = 21000m;
+    public decimal EsicEmployeeRatePercent { get; set; } = 0.75m;
+    public decimal EsicEmployerRatePercent { get; set; } = 3.25m;
+    public string TdsMode { get; set; } = "AUTO_NEW_REGIME";
+    public List<PayrollSalaryRevisionReference> SalaryRevisions { get; set; } = [];
+    public List<PayrollSalaryStructureSnapshot> SalaryStructures { get; set; } = [];
+    public string CalculationEngineVersion { get; set; } = "2.0";
+}
+
+public sealed class PayrollSalaryRevisionReference
+{
+    public string SalaryStructureId { get; set; } = string.Empty;
+    public int Version { get; set; }
 }
 
 public class Allowance
@@ -35,3 +127,4 @@ public class Deduction
     public decimal EPF { get; set; }
     public decimal ESIC { get; set; }
 }
+

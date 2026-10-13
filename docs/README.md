@@ -1,38 +1,33 @@
-# CMS Backend Docs
+# Project Documentation
 
-Architectural reference for the **CMS-Backend-Core** .NET 8 ASP.NET Core API. Written for AI agents and humans who need to ramp up on the codebase without re-exploring it from scratch.
+Last verified against code: 2026-09-07.
 
-> **Snapshot date:** 2026-05. File paths and conventions reflect the codebase at that time. If a path no longer resolves, prefer reading the actual source over trusting the doc.
+This is the current, module-oriented entry point for the Codeji CMS API and its sibling React client. It intentionally points to source and focused references instead of copying implementation. The API is ASP.NET Core (`Codeji.CMS.API`), services and DTOs live in sibling projects, and persistence is MongoDB through `Codeji.CMS.Repository`. The React application is `../CMS-React`.
 
-## How to use these docs
+```mermaid
+flowchart LR
+  UI[CMS-React routes/components] --> Client[frontend service]
+  Client --> API[API controllers]
+  API --> Auth[authentication and ModulePermission]
+  Auth --> Service[CMS services]
+  Service --> Repo[Mongo repositories/entities]
+  Service --> Effects[notifications, jobs, integrations]
+```
 
-If you only have time to read **one** file, read [`modules.md`](./modules.md) — the catalog of every business domain (controllers + services + entities). Everything else exists to support adding to or modifying that catalog.
+| Module | Overview | UI | API | Flow / data |
+|---|---|---|---|---|
+| Authentication and authorization | [authentication](authentication/README.md) | [UI](authentication/UI.md) | [API](authentication/API.md) | [current flow](authentication/CURRENT_FLOW.md) |
+| Employee and offboarding | [employee](employee/README.md) | [offboarding UI](offboarding/UI.md) | [offboarding API](offboarding/API.md) | [offboarding flow](offboarding/FLOW.md) |
+| Attendance and WFH | [attendance](attendance/README.md) | [UI](attendance/UI.md) | [API](attendance/API.md) | [current flow](attendance/CURRENT_FLOW.md) |
+| Leave management | [leave-management](leave-management/README.md) | [UI](leave-management/UI.md) | [API](leave-management/API.md) | [current flow](leave-management/CURRENT_FLOW.md) |
+| Company, calendar and schedules | [company](company/README.md) | [UI](company/UI.md) | [API](company/API.md) | [current flow](company/CURRENT_FLOW.md) |
+| Payroll and salary | [payroll](payroll/README.md) | [UI](payroll/UI.md) | [API](payroll/API.md) | [current flow](payroll/CURRENT_FLOW.md) |
+| Recruitment and careers | [recruitment](recruitment/README.md) | [UI](recruitment/UI.md) | [API](recruitment/API.md) | [current flow](recruitment/CURRENT_FLOW.md) |
+| Dashboard and notices | [dashboard-notices](dashboard-notices/README.md) | [UI](dashboard-notices/UI.md) | [API](dashboard-notices/API.md) | [current flow](dashboard-notices/CURRENT_FLOW.md) |
+| Platform/cross-cutting | [platform](platform/README.md) | [UI integration](platform/UI.md) | [API boundary](platform/API.md) | [current flow](platform/CURRENT_FLOW.md) |
 
-Recommended reading order for a new contributor (human or AI):
+The older focused references remain available because they contain checked, useful detail. They are not changelogs: `offboarding-module-current-flow.md`, `attendance-module-current-flow-and-audit.md`, `leave-management-current-flow.md`, `payroll-module-current-flow.md`, and `recruitment-current-flow-and-working-context.md`.
 
-1. [`architecture.md`](./architecture.md) — solution layout, project map, tech stack, request lifecycle
-2. [`modules.md`](./modules.md) — business modules: controllers, services, entities, endpoints
-3. [`data-layer.md`](./data-layer.md) — generic Mongo repository, multi-tenancy, soft delete
-4. [`auth-and-permissions.md`](./auth-and-permissions.md) — JWT, password hashing, `ModulePermission`, refresh-token flow
-5. [`migrations.md`](./migrations.md) — runner mechanics, writing a new migration, existing seeds
-6. [`cross-cutting.md`](./cross-cutting.md) — middleware, sanitizer, mail, background jobs, SignalR
-7. [`conventions.md`](./conventions.md) — naming, `Result<T>` pattern, error handling, async style
-8. [`add-new-feature.md`](./add-new-feature.md) — playbook for adding a new endpoint / module
+## Employee lifecycle reference
 
-## What this is not
-
-- Not a tutorial. Assumes you know C#, ASP.NET Core, MongoDB, JWT, dependency injection.
-- Not generated. Update by hand when you add a controller, service, entity, or change a cross-cutting pattern.
-- Not exhaustive of every endpoint. The module catalog in [`modules.md`](./modules.md) lists controllers and notable endpoints; the rest are discoverable via grep.
-
-## When to update these docs
-
-- **New module** (controller + service + entity) → add a section to [`modules.md`](./modules.md).
-- **New cross-cutting middleware, hosted service, or SignalR hub** → update [`cross-cutting.md`](./cross-cutting.md).
-- **Change to JWT / auth / permission attribute** → update [`auth-and-permissions.md`](./auth-and-permissions.md).
-- **New migration** → add to the existing-migrations table in [`migrations.md`](./migrations.md).
-- **Renamed, moved, or deleted a file referenced here** → grep this folder for the old path and replace.
-
-## Companion: frontend docs
-
-This repo only documents the **backend**. The React frontend lives in a sibling repo (`CMS-React`). When implementing a feature that needs UI, also add the corresponding service file, route, and translations there. The frontend docs at `CMS-React/docs/` mirror this structure.
+The current additive lifecycle implementation is documented in [the status model](employee-lifecycle-status-model.md), [the transition matrix](employee-lifecycle-transition-matrix.md), [the production TODO](employee-lifecycle-production-todo.md), and [the deployment runbook](employee-lifecycle-deployment-runbook.md). Module-specific updates are mirrored in the ignored-but-distributed module folders: `employee`, `offboarding`, `attendance`, `leave-management`, and `payroll`.

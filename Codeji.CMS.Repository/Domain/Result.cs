@@ -2,6 +2,13 @@ using Microsoft.AspNetCore.Http;
 
 namespace Codeji.CMS.Domain.Models
 {
+    public sealed class ValidationError
+    {
+        public string? JobTitleId { get; set; }
+        public string? JobTitleName { get; set; }
+        public string Field { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+    }
     public class Result<T>
     {
         public string UserId;
@@ -9,7 +16,13 @@ namespace Codeji.CMS.Domain.Models
         public bool Success { get; set; }
         public string Message { get; set; }
         public int StatusCode { get; set; }
+        public string? ErrorCode { get; set; }
+        // Optional resource identity for additive command integrations.
+        public string? ResourceId { get; set; }
+        // One-time external action credential for additive public workflows.
+        public string? ActionToken { get; set; }
         public int TotalRecords { get; set; }
+        public T Data { get; set; }
         public Result()
         {
             Success = true;
@@ -26,6 +39,14 @@ namespace Codeji.CMS.Domain.Models
         public bool Success { get; set; }
         public string Message { get; set; }
         public int StatusCode { get; set; }
+        public string? ErrorCode { get; set; }
+        // Optional resource identity for additive command integrations.
+        public string? ResourceId { get; set; }
+        // One-time external action credential for additive public workflows.
+        public string? ActionToken { get; set; }
+        // Optional, structured validation information for clients that can show
+        // a problem next to the field which caused it.
+        public List<ValidationError> Errors { get; set; } = [];
         public Result()
         {
             Success = false;
@@ -35,3 +56,5 @@ namespace Codeji.CMS.Domain.Models
     }
 
 }
+
+

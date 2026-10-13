@@ -53,7 +53,7 @@ public class EmployeeController : BaseApiController
     {
         _employeeService = employeeService;
         _httpContextAccessor = httpContextAccessor;
-    }
+    }  
 
     [HttpPost("InviteNewEmployee")]
     [ModulePermission(AppModule.Employees, Permission.Create)]

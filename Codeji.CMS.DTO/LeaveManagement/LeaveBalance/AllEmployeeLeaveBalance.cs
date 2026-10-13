@@ -15,6 +15,9 @@ public class LeaveBalanceDetail
     public string LeavePolicyId { get; set; }
     public string LeavePolicyName { get; set; }
     public string LeavePolicyCode { get; set; }
+    public decimal TotalAllocated { get; set; }
+    public decimal Taken { get; set; }
     public decimal Remaining { get; set; }
-    public decimal UsedLeave { get; set; }
+    public long Version { get; set; }
+    [Obsolete("Use Taken.")] public decimal UsedLeave { get; set; }
 }

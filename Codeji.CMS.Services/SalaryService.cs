@@ -3,7 +3,9 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Interfaces;
+using Codeji.CMS.Services.Exceptions;
 using Codeji.CMS.Services.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace Codeji.CMS.Services
 {
@@ -12,28 +14,33 @@ namespace Codeji.CMS.Services
         private readonly ISalaryRepository _repository;
         private readonly IMongoDbRepository<EmpUser> _employeeRepository;
         private readonly IMongoDbRepository<JobTitles> _jobTitlesRepository;
+        private readonly ILogger<SalaryService> _logger;
 
         public SalaryService(
             ISalaryRepository repository,
             IMongoDbRepository<EmpUser> employeeRepository,
-            IMongoDbRepository<JobTitles> jobTitlesRepository)
+            IMongoDbRepository<JobTitles> jobTitlesRepository,
+            ILogger<SalaryService> logger)
         {
             _repository = repository;
             _employeeRepository = employeeRepository;
             _jobTitlesRepository = jobTitlesRepository;
+            _logger = logger;
         }
 
-        public async Task<SalaryModel> CreateSalaryAsync(CreateSalaryDto dto)
+        public async Task<SalaryModel> CreateSalaryAsync(string companyId, CreateSalaryDto dto)
         {
-            // mark previous active salary inactive
-            var activeSalary = await _repository.GetActiveSalaryAsync(dto.UserId);
-            if (activeSalary != null)
+            var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.Status && !x.IsDeleted && x.UserId == dto.UserId.ToString());
+            if (employee == null) throw new InvalidOperationException("Employee does not belong to the authenticated company.");
+            dto.EmployeeId = employee.EmployeeId;
+            var effectiveFrom = dto.EffectiveFrom.Date;
+            var salaryHistory = await _repository.GetSalaryHistoryAsync(companyId, dto.UserId);
+            if (salaryHistory.Any(salary => salary.EffectiveFrom.Date == effectiveFrom))
             {
-                activeSalary.Status = false;
-                activeSalary.EffectiveTo = dto.EffectiveFrom.AddDays(-1);
-                activeSalary.UpdatedAt = DateTime.UtcNow;
-                await _repository.UpdateAsync(activeSalary);
+                throw new SalaryEffectiveDateConflictException();
             }
+
+            var activeSalary = await _repository.GetActiveSalaryAsync(companyId, dto.UserId);
 
             var (gross, net, ctc) = SalaryCalculator.Calculate(dto);
 
@@ -41,6 +48,7 @@ namespace Codeji.CMS.Services
             {
                 SalaryId = Guid.NewGuid(),
                 UserId = dto.UserId,
+                CompanyId = companyId,
                 EmployeeId = dto.EmployeeId,
                 BasicPay = dto.BasicPay,
                 Hra = dto.Hra,
@@ -52,7 +60,7 @@ namespace Codeji.CMS.Services
                 GrossSalary = gross,
                 NetSalary = net,
                 Ctc = ctc,
-                EffectiveFrom = dto.EffectiveFrom,
+                EffectiveFrom = effectiveFrom,
                 Status = true,
                 PaymentFrequency = dto.PaymentFrequency,
                 Currency = dto.Currency,
@@ -62,18 +70,27 @@ namespace Codeji.CMS.Services
 
             await _repository.AddAsync(newSalary);
 
+            // Insert first so a duplicate-key race cannot deactivate the current salary.
+            if (activeSalary != null)
+            {
+                activeSalary.Status = false;
+                activeSalary.EffectiveTo = effectiveFrom.AddDays(-1);
+                activeSalary.UpdatedAt = DateTime.UtcNow;
+                await _repository.UpdateAsync(activeSalary);
+            }
+
             return newSalary;
         }
 
-        public async Task<SalaryResponseDto?> GetActiveSalaryAsync(Guid userId)
+        public async Task<SalaryResponseDto?> GetActiveSalaryAsync(string companyId, Guid userId)
         {
-            var salary = await _repository.GetActiveSalaryAsync(userId);
+            var salary = await _repository.GetActiveSalaryAsync(companyId, userId);
             return salary == null ? null : SalaryResponseDto.MapFromModel(salary);
         }
 
-        public async Task<List<SalaryResponseDto>> GetSalaryHistoryAsync(Guid userId)
+        public async Task<List<SalaryResponseDto>> GetSalaryHistoryAsync(string companyId, Guid userId)
         {
-            var salaries = await _repository.GetSalaryHistoryAsync(userId);
+            var salaries = await _repository.GetSalaryHistoryAsync(companyId, userId);
             return salaries.Select(SalaryResponseDto.MapFromModel).ToList();
         }
 
@@ -90,12 +107,48 @@ namespace Codeji.CMS.Services
                 .Select(e => (Employee: e, Parsed: Guid.TryParse(e.UserId, out var guid), Guid: guid))
                 .ToList();
 
-            var activeSalaries = await _repository.GetActiveSalariesAsync(
-                employeeGuidIds.Where(e => e.Parsed).Select(e => e.Guid).ToList());
-            var activeSalaryByUserId = activeSalaries.ToDictionary(s => s.UserId);
+            List<SalaryModel> activeSalaries = [];
+            try
+            {
+                var validUserIds = employeeGuidIds
+                    .Where(e => e.Parsed)
+                    .Select(e => e.Guid)
+                    .ToList();
+                if (validUserIds.Count > 0)
+                {
+                    activeSalaries = await _repository.GetActiveSalariesAsync(companyId, validUserIds);
+                }
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(
+                    exception,
+                    "Unable to load active salary structures for company {CompanyId}; returning employees without salary data.",
+                    companyId);
+            }
+            var activeSalaryByUserId = activeSalaries
+                .Where(s => s.UserId.HasValue)
+                .GroupBy(s => s.UserId!.Value)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderByDescending(s => s.EffectiveFrom).First());
 
             List<string> jobIds = employees.Select(e => e.JobRole).Distinct().Where(jt => jt != null).ToList();
-            IEnumerable<JobTitles> jobTitles = await _jobTitlesRepository.GetAll(jt => jobIds.Contains(jt.JobTitleId));
+            IEnumerable<JobTitles> jobTitles = [];
+            try
+            {
+                if (jobIds.Count > 0)
+                {
+                    jobTitles = await _jobTitlesRepository.GetAll(jt => jobIds.Contains(jt.JobTitleId));
+                }
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(
+                    exception,
+                    "Unable to load job titles for company {CompanyId}; returning employees without job titles.",
+                    companyId);
+            }
 
             return (from emp in employeeGuidIds
                     join jobTitle in jobTitles on emp.Employee.JobRole equals jobTitle.JobTitleId into jobTitleGroup
@@ -109,7 +162,9 @@ namespace Codeji.CMS.Services
                         ActiveSalary = emp.Parsed && activeSalaryByUserId.TryGetValue(emp.Guid, out var salary)
                             ? SalaryResponseDto.MapFromModel(salary)
                             : null
-                    }).ToList();
+                    })
+                    .OrderBy(employee => employee.EmployeeName)
+                    .ToList();
         }
     }
 }

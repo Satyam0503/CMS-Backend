@@ -15,4 +15,5 @@ public interface IAccountServices
     Task<Result> GenerateTokenAndSendEmail(string email);
     Task<Result> CreateNewPassword(CreateNewPasswordRequest model);
     Task<Result> VerifyEmail(string token);
+    Task<Result> ResendEmailVerification(string email);
 }

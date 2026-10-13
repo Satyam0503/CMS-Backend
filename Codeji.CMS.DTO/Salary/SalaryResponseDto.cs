@@ -5,7 +5,7 @@ namespace Codeji.CMS.DTO.Salary
     public class SalaryResponseDto
     {
         public Guid SalaryId { get; set; }
-        public Guid UserId { get; set; }
+        public Guid? UserId { get; set; }
 
         public String  EmployeeId {get ; set;}
         public decimal BasicPay { get; set; }

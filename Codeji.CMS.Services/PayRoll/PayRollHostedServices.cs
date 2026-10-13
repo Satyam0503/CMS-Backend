@@ -77,7 +77,7 @@ private async Task RunPayroll(CancellationToken stoppingToken)
 
         var companies = await companyService.GetAllCompanyList();
 
-        DateTime currentMonth = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+        DateTime currentMonth = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1).AddMonths(-1);
 
         foreach (var company in companies.Where(c => c.Status && !c.IsDeleted))
         {
