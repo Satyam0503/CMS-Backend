@@ -21,14 +21,19 @@ public sealed class DeduplicateCompanyRoles : IMigration
         var users = db.GetCollection<BsonDocument>("EmpUser");
         var permissions = db.GetCollection<BsonDocument>("RolePermission");
         var rows = await roles.Find(Builders<BsonDocument>.Filter.And(
-            Builders<BsonDocument>.Filter.Exists("CompanyId", true),
-            Builders<BsonDocument>.Filter.Ne("CompanyId", ""),
+            Builders<BsonDocument>.Filter.Gt("CompanyId", ""),
             Builders<BsonDocument>.Filter.Ne("IsDeleted", true))).ToListAsync();
+
+        var tenantRoles = rows
+            .Where(role => role.TryGetValue("CompanyId", out var comp) && comp.IsString && !string.IsNullOrWhiteSpace(comp.AsString))
+            .ToList();
 
         var removedRoles = 0;
         var movedUsers = 0;
         var movedPermissions = 0;
-        foreach (var group in rows.GroupBy(role => (role.GetValue("CompanyId", "").AsString, role.GetValue("RoleType", 0).ToInt32())))
+        foreach (var group in tenantRoles.GroupBy(role => (
+            role["CompanyId"].AsString,
+            role.TryGetValue("RoleType", out var rt) && !rt.IsBsonNull && (rt.IsInt32 || rt.IsInt64) ? rt.ToInt32() : 0)))
         {
             var duplicates = group.OrderByDescending(role => role.GetValue("IsNotEditable", false).ToBoolean())
                 .ThenByDescending(role => role.GetValue("UpdatedDate", BsonNull.Value))
@@ -37,10 +42,10 @@ public sealed class DeduplicateCompanyRoles : IMigration
             if (duplicates.Count < 2) continue;
 
             var keeper = duplicates[0];
-            var keeperId = keeper["_id"].AsString;
+            var keeperId = keeper["_id"].IsString ? keeper["_id"].AsString : keeper["_id"].ToString()!;
             foreach (var duplicate in duplicates.Skip(1))
             {
-                var duplicateId = duplicate["_id"].AsString;
+                var duplicateId = duplicate["_id"].IsString ? duplicate["_id"].AsString : duplicate["_id"].ToString()!;
                 movedUsers += (int)(await users.UpdateManyAsync(
                     Builders<BsonDocument>.Filter.Eq("RoleId", duplicateId),
                     Builders<BsonDocument>.Update.Set("RoleId", keeperId))).ModifiedCount;
@@ -48,7 +53,9 @@ public sealed class DeduplicateCompanyRoles : IMigration
                 var duplicatePermissions = await permissions.Find(Builders<BsonDocument>.Filter.Eq("RoleId", duplicateId)).ToListAsync();
                 foreach (var permission in duplicatePermissions)
                 {
-                    var modulePermissionId = permission.GetValue("ModulePermissionId", 0).ToInt32();
+                    var modulePermissionId = permission.TryGetValue("ModulePermissionId", out var mpId) && !mpId.IsBsonNull && (mpId.IsInt32 || mpId.IsInt64)
+                        ? mpId.ToInt32()
+                        : 0;
                     var existing = await permissions.Find(Builders<BsonDocument>.Filter.And(
                         Builders<BsonDocument>.Filter.Eq("RoleId", keeperId),
                         Builders<BsonDocument>.Filter.Eq("ModulePermissionId", modulePermissionId))).FirstOrDefaultAsync();
@@ -77,7 +84,20 @@ public sealed class DeduplicateCompanyRoles : IMigration
                 // $gt keeps empty/global template roles outside this tenant-only index.
                 PartialFilterExpression = Builders<BsonDocument>.Filter.Gt("CompanyId", "")
             });
-        await roles.Indexes.CreateOneAsync(tenantRoleIndex);
+
+        using var cursor = await roles.Indexes.ListAsync();
+        var existingIndexes = await cursor.ToListAsync();
+        if (!existingIndexes.Any(i => i.GetValue("name", "").AsString == "ux_roles_company_role_type"))
+        {
+            try
+            {
+                await roles.Indexes.CreateOneAsync(tenantRoleIndex);
+            }
+            catch (MongoCommandException ex) when (ex.Code == 11000 || ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine($"Skipped ux_roles_company_role_type on Roles: {ex.Message}");
+            }
+        }
 
         Console.WriteLine($"{{\"migration\":\"{Id}\",\"removedRoles\":{removedRoles},\"movedUsers\":{movedUsers},\"movedPermissions\":{movedPermissions}}}");
         await migrations.InsertOneAsync(new BsonDocument { { "_id", Id }, { "ExecutedAt", DateTime.UtcNow } });

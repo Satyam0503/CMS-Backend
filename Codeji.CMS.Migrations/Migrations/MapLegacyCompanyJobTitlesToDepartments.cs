@@ -35,18 +35,28 @@ public sealed class MapLegacyCompanyJobTitlesToDepartments : IMigration
 
         foreach (var title in allTitles)
         {
-            var companyId = title.GetValue("CompanyId", "").AsString;
+            var companyId = SafeString(title, "CompanyId");
             var titleName = EnglishLabel(title.GetValue("Titles", new BsonArray()).AsBsonArray);
             if (string.IsNullOrWhiteSpace(companyId) || titleName is null || !Mapping.TryGetValue(titleName, out var departmentName)) continue;
-            var matches = allDepartments.Where(d => d.GetValue("CompanyId", "").AsString == companyId &&
+            var matches = allDepartments.Where(d => SafeString(d, "CompanyId") == companyId &&
                 d.GetValue("IsActive", true).ToBoolean() && EnglishLabel(d.GetValue("Titles", new BsonArray()).AsBsonArray)?.Equals(departmentName, StringComparison.OrdinalIgnoreCase) == true).ToList();
             if (matches.Count == 1)
-                await jobTitles.UpdateOneAsync(Builders<BsonDocument>.Filter.Eq("_id", title["_id"]), Builders<BsonDocument>.Update.Set("DepartmentId", matches[0].GetValue("_id").AsString));
+                await jobTitles.UpdateOneAsync(Builders<BsonDocument>.Filter.Eq("_id", title["_id"]), Builders<BsonDocument>.Update.Set("DepartmentId", SafeString(matches[0], "_id")));
         }
         await migrations.InsertOneAsync(new Migration { Id = Id, ExecutedAt = DateTime.UtcNow });
     }
 
-    private static string? EnglishLabel(BsonArray titles) => titles.OfType<BsonDocument>()
-        .FirstOrDefault(x => x.GetValue("Language", "").AsString.Equals("en", StringComparison.OrdinalIgnoreCase))?
-        .GetValue("Label", "").AsString;
+    private static string? EnglishLabel(BsonArray titles)
+    {
+        var doc = titles.OfType<BsonDocument>()
+            .FirstOrDefault(x => SafeString(x, "Language").Equals("en", StringComparison.OrdinalIgnoreCase));
+        if (doc is null) return null;
+        var label = SafeString(doc, "Label");
+        return string.IsNullOrWhiteSpace(label) ? null : label;
+    }
+
+    private static string SafeString(BsonDocument doc, string field) =>
+        doc.TryGetValue(field, out var val) && !val.IsBsonNull
+            ? (val.IsString ? val.AsString : val.ToString()!)
+            : string.Empty;
 }
