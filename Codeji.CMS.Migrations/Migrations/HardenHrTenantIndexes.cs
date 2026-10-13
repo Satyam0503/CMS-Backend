@@ -40,14 +40,20 @@ public sealed class HardenHrTenantIndexes : IMigration
         var employees = db.GetCollection<BsonDocument>("EmpUser");
         var missing = await attendance.Find(Builders<BsonDocument>.Filter.Or(
             Builders<BsonDocument>.Filter.Exists("CompanyId", false),
-            Builders<BsonDocument>.Filter.Eq("CompanyId", ""))).ToListAsync();
+            Builders<BsonDocument>.Filter.Eq("CompanyId", BsonNull.Value),
+            Builders<BsonDocument>.Filter.Eq("CompanyId", ""),
+            Builders<BsonDocument>.Filter.Type("CompanyId", BsonType.Null))).ToListAsync();
         foreach (var row in missing)
         {
             if (!row.TryGetValue("UserId", out var userId) || userId.IsBsonNull) continue;
-            var employee = await employees.Find(Builders<BsonDocument>.Filter.Eq("UserId", userId)).FirstOrDefaultAsync();
-            if (employee == null || !employee.TryGetValue("CompanyId", out var companyId)) continue;
+            var userStr = userId.IsString ? userId.AsString : userId.ToString();
+            if (string.IsNullOrWhiteSpace(userStr)) continue;
+            var employee = await employees.Find(Builders<BsonDocument>.Filter.Or(
+                Builders<BsonDocument>.Filter.Eq("UserId", userStr),
+                Builders<BsonDocument>.Filter.Eq("_id", userStr))).FirstOrDefaultAsync();
+            if (employee == null || !employee.TryGetValue("CompanyId", out var companyId) || companyId.IsBsonNull || string.IsNullOrWhiteSpace(companyId.ToString())) continue;
             await attendance.UpdateOneAsync(Builders<BsonDocument>.Filter.Eq("_id", row["_id"]),
-                Builders<BsonDocument>.Update.Set("CompanyId", companyId));
+                Builders<BsonDocument>.Update.Set("CompanyId", companyId.ToString()));
         }
     }
 
@@ -55,17 +61,108 @@ public sealed class HardenHrTenantIndexes : IMigration
     {
         var salaries = db.GetCollection<BsonDocument>("SalaryModel");
         var employees = db.GetCollection<BsonDocument>("EmpUser");
-        var missing = await salaries.Find(Builders<BsonDocument>.Filter.Or(
+        var missingFilter = Builders<BsonDocument>.Filter.Or(
             Builders<BsonDocument>.Filter.Exists("CompanyId", false),
-            Builders<BsonDocument>.Filter.Eq("CompanyId", ""))).ToListAsync();
+            Builders<BsonDocument>.Filter.Eq("CompanyId", BsonNull.Value),
+            Builders<BsonDocument>.Filter.Eq("CompanyId", ""),
+            Builders<BsonDocument>.Filter.Type("CompanyId", BsonType.Null));
+
+        var missing = await salaries.Find(missingFilter).ToListAsync();
         foreach (var row in missing)
         {
             BsonDocument? employee = null;
-            if (row.TryGetValue("EmployeeId", out var employeeId) && !employeeId.IsBsonNull)
-                employee = await employees.Find(Builders<BsonDocument>.Filter.Eq("EmployeeId", employeeId)).FirstOrDefaultAsync();
-            if (employee == null || !employee.TryGetValue("CompanyId", out var companyId)) continue;
-            await salaries.UpdateOneAsync(Builders<BsonDocument>.Filter.Eq("_id", row["_id"]),
-                Builders<BsonDocument>.Update.Set("CompanyId", companyId));
+            if (row.TryGetValue("UserId", out var userId) && !userId.IsBsonNull)
+            {
+                var userStr = userId.IsString ? userId.AsString : userId.ToString();
+                if (!string.IsNullOrWhiteSpace(userStr))
+                {
+                    employee = await employees.Find(Builders<BsonDocument>.Filter.Or(
+                        Builders<BsonDocument>.Filter.Eq("UserId", userStr),
+                        Builders<BsonDocument>.Filter.Eq("_id", userStr))).FirstOrDefaultAsync();
+                }
+            }
+
+            if (employee == null && row.TryGetValue("EmployeeId", out var employeeId) && !employeeId.IsBsonNull)
+            {
+                var empIdStr = employeeId.IsString ? employeeId.AsString : employeeId.ToString();
+                if (!string.IsNullOrWhiteSpace(empIdStr))
+                {
+                    employee = await employees.Find(Builders<BsonDocument>.Filter.Eq("EmployeeId", empIdStr)).FirstOrDefaultAsync();
+                }
+            }
+
+            if (employee != null && employee.TryGetValue("CompanyId", out var companyId) && !companyId.IsBsonNull && !string.IsNullOrWhiteSpace(companyId.ToString()))
+            {
+                var updates = new List<UpdateDefinition<BsonDocument>>
+                {
+                    Builders<BsonDocument>.Update.Set("CompanyId", companyId.ToString())
+                };
+
+                if ((!row.TryGetValue("UserId", out var curUser) || curUser.IsBsonNull || string.IsNullOrWhiteSpace(curUser.ToString())) &&
+                    employee.TryGetValue("UserId", out var empUserId) && !empUserId.IsBsonNull)
+                {
+                    updates.Add(Builders<BsonDocument>.Update.Set("UserId", empUserId.ToString()));
+                }
+
+                if ((!row.TryGetValue("EmployeeId", out var curEmp) || curEmp.IsBsonNull || string.IsNullOrWhiteSpace(curEmp.ToString())) &&
+                    employee.TryGetValue("EmployeeId", out var empEmpId) && !empEmpId.IsBsonNull)
+                {
+                    updates.Add(Builders<BsonDocument>.Update.Set("EmployeeId", empEmpId.ToString()));
+                }
+
+                await salaries.UpdateOneAsync(
+                    Builders<BsonDocument>.Filter.Eq("_id", row["_id"]),
+                    Builders<BsonDocument>.Update.Combine(updates));
+            }
+        }
+
+        // Clean up orphaned records that have no valid CompanyId or UserId
+        var orphanFilter = Builders<BsonDocument>.Filter.Or(
+            Builders<BsonDocument>.Filter.Exists("CompanyId", false),
+            Builders<BsonDocument>.Filter.Eq("CompanyId", BsonNull.Value),
+            Builders<BsonDocument>.Filter.Eq("CompanyId", ""),
+            Builders<BsonDocument>.Filter.Type("CompanyId", BsonType.Null),
+            Builders<BsonDocument>.Filter.Exists("UserId", false),
+            Builders<BsonDocument>.Filter.Eq("UserId", BsonNull.Value),
+            Builders<BsonDocument>.Filter.Eq("UserId", ""));
+
+        await salaries.DeleteManyAsync(orphanFilter);
+
+        // Deduplicate records sharing the same (CompanyId, UserId, EffectiveFrom)
+        await DeduplicateSalaries(db);
+    }
+
+    private static async Task DeduplicateSalaries(IMongoDatabase db)
+    {
+        var salaries = db.GetCollection<BsonDocument>("SalaryModel");
+        var allSalaries = await salaries.Find(FilterDefinition<BsonDocument>.Empty).ToListAsync();
+
+        var duplicateGroups = allSalaries
+            .GroupBy(row => new
+            {
+                CompanyId = row.TryGetValue("CompanyId", out var c) && !c.IsBsonNull ? c.ToString() : string.Empty,
+                UserId = row.TryGetValue("UserId", out var u) && !u.IsBsonNull ? u.ToString() : string.Empty,
+                EffectiveFrom = row.TryGetValue("EffectiveFrom", out var ef) && ef.IsBsonDateTime ? ef.AsBsonDateTime.MillisecondsSinceEpoch : 0L
+            })
+            .Where(g => g.Count() > 1 && !string.IsNullOrWhiteSpace(g.Key.CompanyId) && !string.IsNullOrWhiteSpace(g.Key.UserId))
+            .ToList();
+
+        foreach (var group in duplicateGroups)
+        {
+            var docs = group.ToList();
+            var keeper = docs
+                .OrderByDescending(d => d.TryGetValue("Status", out var s) && !s.IsBsonNull && s.ToBoolean())
+                .ThenByDescending(d => d.TryGetValue("GrossSalary", out var gs) && !gs.IsBsonNull && gs.ToDecimal() > 0)
+                .ThenByDescending(d => d.TryGetValue("UpdatedAt", out var u) && u.IsValidDateTime ? u.ToUniversalTime() : DateTime.MinValue)
+                .ThenByDescending(d => d.TryGetValue("CreatedAt", out var cr) && cr.IsValidDateTime ? cr.ToUniversalTime() : DateTime.MinValue)
+                .ThenByDescending(d => d["_id"].ToString(), StringComparer.Ordinal)
+                .First();
+
+            var removeIds = docs.Where(d => d["_id"] != keeper["_id"]).Select(d => d["_id"]).ToList();
+            if (removeIds.Count > 0)
+            {
+                await salaries.DeleteManyAsync(Builders<BsonDocument>.Filter.In("_id", removeIds));
+            }
         }
     }
 
@@ -120,8 +217,26 @@ public sealed class HardenHrTenantIndexes : IMigration
         catch (MongoCommandException ex) when (ex.CodeName == "IndexNotFound") { }
     }
 
-    private static Task CreateUnique(IMongoDatabase db, string collection, string name, params string[] fields) =>
-        db.GetCollection<BsonDocument>(collection).Indexes.CreateOneAsync(new CreateIndexModel<BsonDocument>(
-            new BsonDocument(fields.Select(x => new BsonElement(x, 1))),
-            new CreateIndexOptions { Name = name, Unique = true }));
+    private static async Task CreateUnique(IMongoDatabase db, string collection, string name, params string[] fields)
+    {
+        var col = db.GetCollection<BsonDocument>(collection);
+        using var cursor = await col.Indexes.ListAsync();
+        var existing = await cursor.ToListAsync();
+        if (existing.Any(i => i.GetValue("name", string.Empty).AsString == name))
+        {
+            return;
+        }
+
+        var keys = new BsonDocument(fields.Select(x => new BsonElement(x, 1)));
+        try
+        {
+            await col.Indexes.CreateOneAsync(new CreateIndexModel<BsonDocument>(
+                keys,
+                new CreateIndexOptions { Name = name, Unique = true }));
+        }
+        catch (MongoCommandException ex) when (ex.Code == 11000)
+        {
+            Console.WriteLine($"Skipped {name} on {collection}: duplicate keys found ({ex.Message}).");
+        }
+    }
 }
