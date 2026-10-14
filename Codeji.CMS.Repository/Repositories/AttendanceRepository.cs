@@ -115,6 +115,30 @@ public class AttendanceRepository : IAttendanceRepository
         return result.ModifiedCount > 0 || result.MatchedCount > 0;
     }
 
+    public async Task<long> DeleteDefaultPresentOutsideEmploymentPeriodAsync(
+        string companyId,
+        string userId,
+        DateTime joiningDate,
+        DateTime? lastWorkingDate = null)
+    {
+        var joiningUtc = UtcMidnight(joiningDate);
+        var replaceableSources = new[] { "SYSTEM_DEFAULT_PRESENT", "SYSTEM_OFFICE_START_PRESENT" };
+        var baseFilter = Builders<AttendanceModel>.Filter.Eq(a => a.CompanyId, companyId)
+            & Builders<AttendanceModel>.Filter.Eq(a => a.UserId, userId)
+            & Builders<AttendanceModel>.Filter.In(a => a.SourceType, replaceableSources);
+
+        FilterDefinition<AttendanceModel> dateFilter = Builders<AttendanceModel>.Filter.Lt(a => a.Date, joiningUtc);
+        if (lastWorkingDate.HasValue)
+        {
+            var exitUtc = UtcMidnight(lastWorkingDate.Value).AddDays(1);
+            dateFilter = Builders<AttendanceModel>.Filter.Or(dateFilter, Builders<AttendanceModel>.Filter.Gte(a => a.Date, exitUtc));
+        }
+
+        var filter = baseFilter & dateFilter;
+        var result = await _collection.DeleteManyAsync(filter);
+        return result.DeletedCount;
+    }
+
     public Task GetAll(Func<object, bool> value)
     {
         throw new NotImplementedException();

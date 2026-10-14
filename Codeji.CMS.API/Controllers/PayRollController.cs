@@ -118,7 +118,8 @@ public class PayRollController : BaseApiController
         var currentDate = DateTime.UtcNow;
         if (!PayrollPeriodRules.IsClosedPeriod(model.PayMonth, currentDate)) return BadRequest();
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-        var result = await _payRollServices.UploadPayrollData(model, companyId);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        var result = await _payRollServices.UploadPayrollData(model, companyId, userId);
         return Ok(result);
     }
 

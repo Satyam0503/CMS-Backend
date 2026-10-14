@@ -132,7 +132,7 @@ public sealed class PayrollRunService(
         var approvedSalaryRows = employeeSalaryStructures is null
             ? []
             : (await employeeSalaryStructures.GetAll(x => x.CompanyId == companyId &&
-                x.ApprovalStatus == "APPROVED" && x.Status == "ACTIVE" && x.EffectiveFrom <= end)).ToList();
+                x.ApprovalStatus == "APPROVED" && x.Status == "ACTIVE")).ToList();
 
         var legacySalaryRowsByEmployee = new Dictionary<string, List<SalaryModel>>(StringComparer.Ordinal);
         if (legacySalaries is not null)
@@ -141,8 +141,9 @@ public sealed class PayrollRunService(
             {
                 if (!Guid.TryParse(employee.UserId, out var userId)) continue;
                 var history = await legacySalaries.GetSalaryHistoryAsync(companyId, userId);
+                DateTime? joiningDate = EmploymentPeriod.GetJoiningDate(employee);
                 var resolution = PayrollSalarySourceResolver.Resolve(companyId, employee.EmployeeId, start, end,
-                    approvedSalaryRows, () => history.Where(x => x.UserId == userId));
+                    approvedSalaryRows, () => history.Where(x => x.UserId == userId), joiningDate);
                 if (!resolution.UsesCanonicalSource)
                     legacySalaryRowsByEmployee[employee.EmployeeId] = resolution.Records;
             }
@@ -152,9 +153,9 @@ public sealed class PayrollRunService(
         foreach (var employee in populationEmployees)
         {
             var eligibleStart = start;
-            if (DateTime.TryParse(employee.DateOfJoining, System.Globalization.CultureInfo.InvariantCulture,
-                    System.Globalization.DateTimeStyles.AllowWhiteSpaces, out var joiningDate) && joiningDate.Date > eligibleStart)
-                eligibleStart = joiningDate.Date;
+            DateTime? empJoining = EmploymentPeriod.GetJoiningDate(employee);
+            if (empJoining.HasValue && empJoining.Value.Date > eligibleStart)
+                eligibleStart = empJoining.Value.Date;
             var eligibleEnd = end;
             var lastWorkingDate = EmploymentPeriod.GetLastWorkingDate(employee);
             if (lastWorkingDate.HasValue && lastWorkingDate.Value.Date < eligibleEnd) eligibleEnd = lastWorkingDate.Value.Date;
@@ -162,7 +163,7 @@ public sealed class PayrollRunService(
 
             var employeeSalaryRows = approvedSalaryRows.Where(x => x.EmployeeId == employee.EmployeeId).ToList();
             var periodPolicy = PayrollPolicyResolver.ResolveConsistentPeriod(companyId, employee.EmployeeId,
-                eligibleStart, eligibleEnd, assignmentRows, employeeSalaryRows, configuredPolicy, payGroupRows, request.PayGroupId);
+                eligibleStart, eligibleEnd, assignmentRows, employeeSalaryRows, configuredPolicy, payGroupRows, request.PayGroupId, empJoining);
             if (!periodPolicy.IsConsistent)
                 return Fail(409, $"Employee {employee.EmployeeId} changes statutory policy on {periodPolicy.FirstConflictDate:yyyy-MM-dd}; split the payroll period or align the policy effective date before creating this run.");
             policyResolutionByEmployee[employee.EmployeeId] = periodPolicy;
@@ -190,7 +191,8 @@ public sealed class PayrollRunService(
         {
             var assignment = PayrollPolicyResolver.ResolveAssignment(companyId, employee.EmployeeId, start, assignmentRows);
             var employeeSalaryRows = approvedSalaryRows.Where(x => x.EmployeeId == employee.EmployeeId).ToList();
-            var salaryAtStart = EmployeeSalaryStructureResolver.Resolve(companyId, employee.EmployeeId, start, employeeSalaryRows);
+            DateTime? empJoining = EmploymentPeriod.GetJoiningDate(employee);
+            var salaryAtStart = EmployeeSalaryStructureResolver.Resolve(companyId, employee.EmployeeId, start, employeeSalaryRows, approvedOnly: true, joiningDate: empJoining);
             var overlappingSalaryRows = employeeSalaryRows
                 .Where(x => x.EffectiveFrom.Date <= end.Date && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value.Date >= start.Date))
                 .OrderBy(x => x.EffectiveFrom).ThenBy(x => x.Version).ToList();
@@ -348,15 +350,15 @@ public sealed class PayrollRunService(
             SalaryTemplateId = template?.Id, SalaryTemplateVersion = template?.Version ?? 0,
             PayGroupId = assignment?.PayGroupId ?? payGroup?.Id, PayGroupVersion = payGroup?.Version ?? 0,
             PolicyProfileId = policy?.Id, PolicyProfileVersion = policy?.Version ?? 0,
-            EpfMode = policy?.EpfMode ?? companyPolicy?.EpfMode ?? "CAPPED_CEILING",
+            EpfMode = !string.IsNullOrWhiteSpace(employeeSalary?.EpfModeOverride) ? employeeSalary.EpfModeOverride : (policy?.EpfMode ?? companyPolicy?.EpfMode ?? "CAPPED_CEILING"),
             EpfWageCeiling = policy?.EpfWageCeiling ?? companyPolicy?.EpfWageCeiling ?? 15000m,
             EpfEmployeeRatePercent = policy?.EpfEmployeeRatePercent ?? companyPolicy?.EpfEmployeeRatePercent ?? 12m,
             EpfEmployerRatePercent = policy?.EpfEmployerRatePercent ?? companyPolicy?.EpfEmployerRatePercent ?? 12m,
-            EsicMode = policy?.EsicMode ?? companyPolicy?.EsicMode ?? "STATUTORY",
+            EsicMode = !string.IsNullOrWhiteSpace(employeeSalary?.EsicModeOverride) ? employeeSalary.EsicModeOverride : (policy?.EsicMode ?? companyPolicy?.EsicMode ?? "STATUTORY"),
             EsicWageCeiling = policy?.EsicWageCeiling ?? companyPolicy?.EsicWageCeiling ?? 21000m,
             EsicEmployeeRatePercent = policy?.EsicEmployeeRatePercent ?? companyPolicy?.EsicEmployeeRatePercent ?? 0.75m,
             EsicEmployerRatePercent = policy?.EsicEmployerRatePercent ?? companyPolicy?.EsicEmployerRatePercent ?? 3.25m,
-            TdsMode = policy?.TdsMode ?? companyPolicy?.TdsMode ?? "AUTO_NEW_REGIME",
+            TdsMode = !string.IsNullOrWhiteSpace(employeeSalary?.TaxRegime) ? employeeSalary.TaxRegime : (policy?.TdsMode ?? companyPolicy?.TdsMode ?? "AUTO_NEW_REGIME"),
             RequireAttendanceLock = policy?.RequireAttendanceLock ?? companyPolicy?.RequireAttendanceLock,
             Components = components
         };
@@ -436,8 +438,7 @@ public sealed class PayrollRunService(
     private static bool IsEligibleForPayrollPeriod(EmpUser employee, DateTime start, DateTime end)
     {
         if (!EmploymentPeriod.IsPayrollIncludedForMonth(employee, start) ||
-            !DateTime.TryParse(employee.DateOfJoining, System.Globalization.CultureInfo.InvariantCulture,
-                System.Globalization.DateTimeStyles.AllowWhiteSpaces, out var joiningDate) || joiningDate.Date > end.Date)
+            !EmploymentPeriod.TryGetJoiningDate(employee, out var joiningDate) || joiningDate.Date > end.Date)
             return false;
 
         var lastWorkingDate = EmploymentPeriod.GetLastWorkingDate(employee);

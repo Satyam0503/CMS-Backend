@@ -53,7 +53,8 @@ public static class PayrollSalarySourceResolver
         DateTime periodStart,
         DateTime periodEnd,
         IReadOnlyCollection<EmployeeSalaryStructure> approvedActiveStructures,
-        Func<IEnumerable<SalaryModel>> loadLegacyStructures)
+        Func<IEnumerable<SalaryModel>> loadLegacyStructures,
+        DateTime? joiningDate = null)
     {
         var canonical = approvedActiveStructures
             .Where(x => x.CompanyId == companyId && x.EmployeeId == employeeId &&
@@ -63,7 +64,24 @@ public static class PayrollSalarySourceResolver
             .ThenByDescending(x => x.Version)
             .Select(EmployeeSalaryPayrollMapper.Map)
             .ToList();
-        if (canonical.Count > 0) return new PayrollSalarySourceResolution(canonical, true);
+
+        if (canonical.Count > 0)
+        {
+            // If the earliest approved canonical record for this employee has no prior structure,
+            // and the employee joined before its nominal EffectiveFrom, stretch its effective start
+            // back to the joining date so initial onboarding compensation covers the starting period.
+            var earliestCanonicalInPeriod = canonical.Last();
+            var hasEarlierStructure = approvedActiveStructures.Any(x =>
+                x.CompanyId == companyId && x.EmployeeId == employeeId &&
+                x.EffectiveFrom.Date < earliestCanonicalInPeriod.EffectiveFrom.Date);
+
+            if (!hasEarlierStructure && joiningDate.HasValue && joiningDate.Value.Date < earliestCanonicalInPeriod.EffectiveFrom.Date)
+            {
+                earliestCanonicalInPeriod.EffectiveFrom = joiningDate.Value.Date;
+            }
+
+            return new PayrollSalarySourceResolution(canonical, true);
+        }
 
         // Before the first approved canonical effective date, legacy rows remain
         // a compatibility source. Once that timeline has started, a gap or an
@@ -78,6 +96,29 @@ public static class PayrollSalarySourceResolver
                 (!x.EffectiveTo.HasValue || x.EffectiveTo.Value.Date >= periodStart.Date))
             .OrderByDescending(x => x.EffectiveFrom.Date)
             .ToList();
-        return new PayrollSalarySourceResolution(legacy, false);
+        if (legacy.Count > 0) return new PayrollSalarySourceResolution(legacy, false);
+
+        // Foundational initial structure fallback:
+        // When an employee joined on or before periodEnd, but HR set/finalized their initial
+        // salary structure later (nominal EffectiveFrom > periodEnd), and no prior structures exist:
+        // allow this initial approved structure to resolve for the eligible joining period.
+        if (joiningDate.HasValue && joiningDate.Value.Date <= periodEnd.Date)
+        {
+            var earliestCanonical = approvedActiveStructures
+                .Where(x => x.CompanyId == companyId && x.EmployeeId == employeeId)
+                .OrderBy(x => x.EffectiveFrom.Date)
+                .ThenBy(x => x.Version)
+                .FirstOrDefault();
+
+            if (earliestCanonical != null &&
+                !approvedActiveStructures.Any(x => x.CompanyId == companyId && x.EmployeeId == employeeId && x.EffectiveFrom.Date < earliestCanonical.EffectiveFrom.Date))
+            {
+                var mappedInitial = EmployeeSalaryPayrollMapper.Map(earliestCanonical);
+                mappedInitial.EffectiveFrom = joiningDate.Value.Date;
+                return new PayrollSalarySourceResolution([mappedInitial], true);
+            }
+        }
+
+        return new PayrollSalarySourceResolution([], false);
     }
 }

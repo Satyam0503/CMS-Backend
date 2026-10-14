@@ -67,7 +67,7 @@ namespace Codeji.CMS.Services.PayRoll
             _employeeSalaryStructures = employeeSalaryStructures;
         }
 
-        public async Task<Result> GeneratePayrollForMonthAsync(string companyId, DateTime payMonth)
+        public async Task<Result> GeneratePayrollForMonthAsync(string companyId, DateTime payMonth, IReadOnlyCollection<string>? targetEmployeeIds = null)
         {
             var monthStart = new DateTime(payMonth.Year, payMonth.Month, 1);
             // Payroll keys are calendar months. Use the canonical first-of-month value for
@@ -78,8 +78,44 @@ namespace Codeji.CMS.Services.PayRoll
             var employees = (await _employeeRepository.GetAll(e => e.CompanyId == companyId && !e.IsDeleted))
                 .Where(e => EmploymentPeriod.IsPayrollIncludedForMonth(e, monthStart))
                 .ToList();
-            if (await _empPayRollRepository.Exist(p => p.CompanyId == companyId &&
-                p.PayMonth == monthStart && (p.IsProcessed || p.WorkflowStatus == "PROCESSED" || p.WorkflowStatus == "PAID" || p.WorkflowStatus == "CLOSED" || p.PaymentStatus == "PAID" || p.PaymentStatus == "CLOSED")))
+
+            var targetIdsSet = targetEmployeeIds?
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (targetIdsSet != null && targetIdsSet.Count > 0)
+            {
+                employees = employees.Where(e => targetIdsSet.Contains(e.EmployeeId)).ToList();
+            }
+
+            // Check for existing processed payroll rows in this company and month.
+            // A finalized/processed employee row must NEVER be overwritten or mutated.
+            // However, if some employees were previously skipped (e.g. salary was not decided/set),
+            // or new eligible employees were added, payroll must still calculate for the remaining
+            // unprocessed/draft employees without re-generating or touching the locked ones.
+            var existingMonthPayrolls = _empPayRollRepository
+                .Get(p => p.CompanyId == companyId && p.PayMonth == monthStart)
+                .ToList();
+
+            static bool IsProcessedRow(EmpPayRoll p) =>
+                p.IsProcessed || p.WorkflowStatus == "PROCESSED" || p.WorkflowStatus == "PAID" ||
+                p.WorkflowStatus == "CLOSED" || p.PaymentStatus == "PAID" || p.PaymentStatus == "CLOSED";
+
+            var processedEmployeeIds = existingMonthPayrolls
+                .Where(IsProcessedRow)
+                .Select(p => p.EmployeeId)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var excelUploadedEmployeeIds = existingMonthPayrolls
+                .Where(p => string.Equals(p.CalculationSource, "EXCEL_UPLOAD", StringComparison.OrdinalIgnoreCase))
+                .Select(p => p.EmployeeId)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var hasAnyProcessedPayroll = processedEmployeeIds.Count > 0 ||
+                await _empPayRollRepository.Exist(p => p.CompanyId == companyId &&
+                    p.PayMonth == monthStart && (p.IsProcessed || p.WorkflowStatus == "PROCESSED" || p.WorkflowStatus == "PAID" || p.WorkflowStatus == "CLOSED" || p.PaymentStatus == "PAID" || p.PaymentStatus == "CLOSED"));
+
+            if (hasAnyProcessedPayroll && (employees.Count == 0 || employees.All(e => processedEmployeeIds.Contains(e.EmployeeId))))
                 return new Result { Success = false, Message = $"Payroll for {monthStart:MMMM yyyy} is already processed and cannot be regenerated." };
 
             var divisorSetting = await _divisorPolicies.GetEffective(companyId, monthStart);
@@ -96,9 +132,11 @@ namespace Codeji.CMS.Services.PayRoll
             var validationErrors = new List<string>();
             foreach (var employee in employees)
             {
+                if (processedEmployeeIds.Contains(employee.EmployeeId)) continue;
+                if ((targetIdsSet == null || targetIdsSet.Count == 0) && excelUploadedEmployeeIds.Contains(employee.EmployeeId)) continue;
                 // Payroll cannot be calculated without an effective joining date. Skip this
                 // employee instead of blocking a completed historical month for everyone else.
-                if (!DateTime.TryParse(employee.DateOfJoining, out var joining)) continue;
+                if (!EmploymentPeriod.TryGetJoiningDate(employee, out var joining)) continue;
                 if (joining.Date > monthEnd) continue;
                 var exitDate = EmploymentPeriod.GetLastWorkingDate(employee);
                 if (exitDate.HasValue && exitDate.Value < monthStart) continue;
@@ -107,7 +145,8 @@ namespace Codeji.CMS.Services.PayRoll
                 var policyPeriodEnd = exitDate.HasValue && exitDate.Value < monthEnd ? exitDate.Value : monthEnd;
                 var validationPolicy = PayrollPolicyResolver.ResolveConsistentPeriod(
                     companyId, employee.EmployeeId, policyPeriodStart, policyPeriodEnd,
-                    assignmentRows, canonicalSalaryStructures, policyProfiles, payGroups);
+                    assignmentRows, canonicalSalaryStructures, policyProfiles, payGroups,
+                    joiningDate: joining.Date);
                 if (!validationPolicy.IsConsistent)
                     validationErrors.Add($"{employee.EmployeeId}: approved payroll policy changes within this pay period (from {validationPolicy.FirstConflictDate:yyyy-MM-dd}). One monthly payroll row cannot safely mix policy versions; align the approved policy to a period boundary before processing.");
                 var validationProfile = validationPolicy.Profile;
@@ -154,10 +193,12 @@ namespace Codeji.CMS.Services.PayRoll
             {
                 foreach (var emp in employees)
                 {
-                    if (string.IsNullOrEmpty(emp.DateOfJoining))
+                    if (processedEmployeeIds.Contains(emp.EmployeeId))
+                        continue;
+                    if ((targetIdsSet == null || targetIdsSet.Count == 0) && excelUploadedEmployeeIds.Contains(emp.EmployeeId))
                         continue;
 
-                    if (!DateTime.TryParse(emp.DateOfJoining, out DateTime joiningDate))
+                    if (!EmploymentPeriod.TryGetJoiningDate(emp, out DateTime joiningDate))
                         continue;
 
                     if (joiningDate.Date > monthEnd)
@@ -175,14 +216,18 @@ namespace Codeji.CMS.Services.PayRoll
                     var policyPeriodEnd = exitDate.HasValue && exitDate.Value < monthEnd ? exitDate.Value : monthEnd;
                     var resolvedPolicyPeriod = PayrollPolicyResolver.ResolveConsistentPeriod(
                         companyId, emp.EmployeeId, policyPeriodStart, policyPeriodEnd,
-                        assignmentRows, canonicalSalaryStructures, policyProfiles, payGroups);
+                        assignmentRows, canonicalSalaryStructures, policyProfiles, payGroups,
+                        joiningDate: joiningDate.Date);
                     var resolvedProfile = resolvedPolicyPeriod.Profile;
                     var salaryResolution = PayrollSalarySourceResolver.Resolve(
                         companyId, emp.EmployeeId, monthStart, monthEnd, canonicalSalaryStructures,
-                        () => _salaryRepository.Get(s => s.CompanyId == companyId && s.EmployeeId == emp.EmployeeId && s.EffectiveFrom <= monthEnd && (!s.EffectiveTo.HasValue || s.EffectiveTo.Value >= monthStart)).ToList());
+                        () => _salaryRepository.Get(s => s.CompanyId == companyId && s.EmployeeId == emp.EmployeeId && s.EffectiveFrom <= monthEnd && (!s.EffectiveTo.HasValue || s.EffectiveTo.Value >= monthStart)).ToList(),
+                        joiningDate.Date);
                     var overlappingSalaryRecords = salaryResolution.Records;
                     var canonicalRecords = salaryResolution.UsesCanonicalSource
-                        ? canonicalSalaryStructures.Where(x => x.EmployeeId == emp.EmployeeId && x.EffectiveFrom.Date <= monthEnd.Date && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value.Date >= monthStart.Date)).ToList()
+                        ? canonicalSalaryStructures.Where(x => x.EmployeeId == emp.EmployeeId &&
+                            ((x.EffectiveFrom.Date <= monthEnd.Date && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value.Date >= monthStart.Date)) ||
+                             (salaryResolution.Records.Count > 0 && Guid.TryParse(x.Id, out var parsedId) && parsedId == salaryResolution.Records[0].SalaryId))).ToList()
                         : [];
 
                     var activeSalaryStructure = canonicalRecords.FirstOrDefault();

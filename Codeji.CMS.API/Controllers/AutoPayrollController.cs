@@ -60,7 +60,7 @@ public class AutoPayrollController : BaseApiController
             if (!attendanceLock.Success)
                 return StatusCode(attendanceLock.StatusCode >= 400 ? attendanceLock.StatusCode : 409, attendanceLock);
 
-            result = await _autoPayRollServices.GeneratePayrollForMonthAsync(companyId, requestPeriod);
+            result = await _autoPayRollServices.GeneratePayrollForMonthAsync(companyId, requestPeriod, model.EmployeeIds);
         }
         catch (Exception ex)
         {

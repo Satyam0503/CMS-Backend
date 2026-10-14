@@ -17,5 +17,11 @@ public interface IAttendanceRepository
 
     Task<bool> UpdateAsync(string companyId, string userId, DateTime date, AttendanceModel updatedModel);
 
+    Task<long> DeleteDefaultPresentOutsideEmploymentPeriodAsync(
+        string companyId,
+        string userId,
+        DateTime joiningDate,
+        DateTime? lastWorkingDate = null);
+
     Task GetAll(Func<object, bool> value);
 }

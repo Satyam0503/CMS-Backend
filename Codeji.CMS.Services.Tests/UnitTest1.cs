@@ -32,8 +32,8 @@ public class EmployeeServiceBulkImportTests
         {
             Employees =
             [
-                new BulkImportEmployeeItemDto { EmpId = "EMP001", FirstName = " John ", LastName = " Doe ", Email = "john.doe@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer" },
-                new BulkImportEmployeeItemDto { EmpId = "EMP002", FirstName = "Jane", LastName = "Smith", Email = "jane.smith@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer" }
+                new BulkImportEmployeeItemDto { EmpId = "EMP001", FirstName = " John ", LastName = " Doe ", Email = "john.doe@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer", DateOfJoining = "2026-10-01" },
+                new BulkImportEmployeeItemDto { EmpId = "EMP002", FirstName = "Jane", LastName = "Smith", Email = "jane.smith@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer", DateOfJoining = "2026-10-01" }
             ]
         };
 
@@ -55,9 +55,9 @@ public class EmployeeServiceBulkImportTests
         {
             Employees =
             [
-                new BulkImportEmployeeItemDto { EmpId = "EMP010", FirstName = "Alice", LastName = "Jones", Email = "alice.jones@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer" },
-                new BulkImportEmployeeItemDto { EmpId = "EMP011", FirstName = "Bob", LastName = "Brown", Email = "invalid-email", Role = "Employee", Department = "Engineering", JobRole = "Developer" },
-                new BulkImportEmployeeItemDto { EmpId = "EMP012", FirstName = " ", LastName = "Taylor", Email = "taylor@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer" }
+                new BulkImportEmployeeItemDto { EmpId = "EMP010", FirstName = "Alice", LastName = "Jones", Email = "alice.jones@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer", DateOfJoining = "2026-10-01" },
+                new BulkImportEmployeeItemDto { EmpId = "EMP011", FirstName = "Bob", LastName = "Brown", Email = "invalid-email", Role = "Employee", Department = "Engineering", JobRole = "Developer", DateOfJoining = "2026-10-01" },
+                new BulkImportEmployeeItemDto { EmpId = "EMP012", FirstName = " ", LastName = "Taylor", Email = "taylor@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer", DateOfJoining = "2026-10-01" }
             ]
         };
 
@@ -80,9 +80,9 @@ public class EmployeeServiceBulkImportTests
         {
             Employees =
             [
-                new BulkImportEmployeeItemDto { EmpId = "EMP020", FirstName = "A", LastName = "One", Email = "a.one@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer" },
-                new BulkImportEmployeeItemDto { EmpId = "EMP020", FirstName = "B", LastName = "Two", Email = "b.two@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer" },
-                new BulkImportEmployeeItemDto { EmpId = "EMP021", FirstName = "C", LastName = "Three", Email = "a.one@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer" }
+                new BulkImportEmployeeItemDto { EmpId = "EMP020", FirstName = "A", LastName = "One", Email = "a.one@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer", DateOfJoining = "2026-10-01" },
+                new BulkImportEmployeeItemDto { EmpId = "EMP020", FirstName = "B", LastName = "Two", Email = "b.two@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer", DateOfJoining = "2026-10-01" },
+                new BulkImportEmployeeItemDto { EmpId = "EMP021", FirstName = "C", LastName = "Three", Email = "a.one@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer", DateOfJoining = "2026-10-01" }
             ]
         };
 
@@ -322,7 +322,7 @@ public class EmployeeServiceBulkImportTests
         {
             Employees =
             [
-                new BulkImportEmployeeItemDto { EmpId = "EMP030", FirstName = "David", LastName = "Miller", Email = "david.miller@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer" }
+                new BulkImportEmployeeItemDto { EmpId = "EMP030", FirstName = "David", LastName = "Miller", Email = "david.miller@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer", DateOfJoining = "2026-10-01" }
             ]
         };
 
@@ -356,7 +356,7 @@ public class EmployeeServiceBulkImportTests
         {
             Employees =
             [
-                new BulkImportEmployeeItemDto { EmpId = "EMP040", FirstName = "Invalid", LastName = "Email", Email = "invalid", Role = "Employee", Department = "Engineering", JobRole = "Developer" }
+                new BulkImportEmployeeItemDto { EmpId = "EMP040", FirstName = "Invalid", LastName = "Email", Email = "invalid", Role = "Employee", Department = "Engineering", JobRole = "Developer", DateOfJoining = "2026-10-01" }
             ]
         };
 
@@ -376,8 +376,8 @@ public class EmployeeServiceBulkImportTests
         {
             Employees =
             [
-                new BulkImportEmployeeItemDto { EmpId = "EMP050", FirstName = "N", LastName = "Role", Email = "n.role@example.com", Role = "UnknownRole", Department = "Engineering", JobRole = "Developer" },
-                new BulkImportEmployeeItemDto { EmpId = "EMP051", FirstName = "N", LastName = "Department", Email = "n.department@example.com", Role = "Employee", Department = "UnknownDepartment", JobRole = "Developer" }
+                new BulkImportEmployeeItemDto { EmpId = "EMP050", FirstName = "N", LastName = "Role", Email = "n.role@example.com", Role = "UnknownRole", Department = "Engineering", JobRole = "Developer", DateOfJoining = "2026-10-01" },
+                new BulkImportEmployeeItemDto { EmpId = "EMP051", FirstName = "N", LastName = "Department", Email = "n.department@example.com", Role = "Employee", Department = "UnknownDepartment", JobRole = "Developer", DateOfJoining = "2026-10-01" }
             ]
         };
 
@@ -398,7 +398,7 @@ public class EmployeeServiceBulkImportTests
         {
             Employees =
             [
-                new BulkImportEmployeeItemDto { EmpId = "EMP060", FirstName = "New", LastName = "JobRole", Email = "new.jobrole@example.com", Role = "Employee", Department = "Engineering", JobRole = "AI Engineer" }
+                new BulkImportEmployeeItemDto { EmpId = "EMP060", FirstName = "New", LastName = "JobRole", Email = "new.jobrole@example.com", Role = "Employee", Department = "Engineering", JobRole = "AI Engineer", DateOfJoining = "2026-10-01" }
             ]
         };
 
@@ -407,6 +407,46 @@ public class EmployeeServiceBulkImportTests
         Assert.True(result.Success);
         Assert.Equal(1, result.MethodResult.CreatedCount);
         fixture.JobTitlesRepository.Verify(r => r.AddOne(It.Is<JobTitles>(j => j.Titles.Any(t => t.Label == "AI Engineer"))), Times.Once);
+    }
+
+    [Fact]
+    public async Task BulkImportEmployees_MissingDateOfJoining_FailsRow()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false);
+        var request = new BulkImportEmployeesRequestDto
+        {
+            Employees =
+            [
+                new BulkImportEmployeeItemDto { EmpId = "EMP070", FirstName = "Missing", LastName = "DOJ", Email = "missing.doj@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer", DateOfJoining = "" }
+            ]
+        };
+
+        var result = await fixture.Service.BulkImportEmployees(request, "admin-user-id");
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.MethodResult.CreatedCount);
+        Assert.Equal(1, result.MethodResult.FailedCount);
+        Assert.Contains("Required fields", result.MethodResult.Results[0].Message);
+    }
+
+    [Fact]
+    public async Task BulkImportEmployees_InvalidDateOfJoining_FailsRow()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false);
+        var request = new BulkImportEmployeesRequestDto
+        {
+            Employees =
+            [
+                new BulkImportEmployeeItemDto { EmpId = "EMP071", FirstName = "Invalid", LastName = "DOJ", Email = "invalid.doj@example.com", Role = "Employee", Department = "Engineering", JobRole = "Developer", DateOfJoining = "not-a-valid-date" }
+            ]
+        };
+
+        var result = await fixture.Service.BulkImportEmployees(request, "admin-user-id");
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.MethodResult.CreatedCount);
+        Assert.Equal(1, result.MethodResult.FailedCount);
+        Assert.Contains("Invalid Date of Joining format", result.MethodResult.Results[0].Message);
     }
 
     [Theory]

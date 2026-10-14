@@ -333,12 +333,121 @@ public sealed class EmployeeSalaryStructureServiceTests
         var employees = Repository(new[] { new EmpUser { EmployeeId = "e1", CompanyId = "company-1", FirstName = "Employee", LastName = "One", Email = "e@example.com" } });
         var service = new EmployeeSalaryStructureService(salaries.Object, employees.Object);
 
-        var result = await service.Approve("company-1", "maker", "salary-1", 1);
+        var result = await service.Approve("company-1", "maker", "salary-1", 1, isCompanyAdministrator: false);
 
         Assert.False(result.Success);
         Assert.Equal(403, result.StatusCode);
         Assert.Equal("SUBMITTED", row.ApprovalStatus);
         salaries.Verify(x => x.Update(It.IsAny<FilterDefinition<EmployeeSalaryStructure>>(), It.IsAny<EmployeeSalaryStructure>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Approve_AllowsCompanyAdministratorToApproveStructureTheyCreated()
+    {
+        var row = new EmployeeSalaryStructure { Id = "salary-admin", CompanyId = "company-1", EmployeeId = "e1", CreatedBy = "admin-1", EffectiveFrom = new DateTime(2026, 10, 1), ApprovalStatus = "SUBMITTED", Status = "PENDING_REVIEW", Version = 1 };
+        var salaries = Repository(new[] { row });
+        var employees = Repository(new[] { new EmpUser { EmployeeId = "e1", CompanyId = "company-1", FirstName = "Employee", LastName = "One", Email = "e@example.com" } });
+        var service = new EmployeeSalaryStructureService(salaries.Object, employees.Object);
+
+        var result = await service.Approve("company-1", "admin-1", "salary-admin", 1, isCompanyAdministrator: true);
+
+        Assert.True(result.Success);
+        Assert.Equal(200, result.StatusCode);
+        Assert.Equal("APPROVED", row.ApprovalStatus);
+        Assert.Equal("ACTIVE", row.Status);
+        Assert.Equal("admin-1", row.ApprovedBy);
+    }
+
+    [Fact]
+    public async Task Approve_AllowsCompanyAdministratorToApproveDraftDirectly()
+    {
+        var row = new EmployeeSalaryStructure { Id = "salary-draft", CompanyId = "company-1", EmployeeId = "e1", CreatedBy = "maker-1", EffectiveFrom = new DateTime(2026, 10, 1), ApprovalStatus = "DRAFT", Status = "DRAFT", Version = 1 };
+        var salaries = Repository(new[] { row });
+        var employees = Repository(new[] { new EmpUser { EmployeeId = "e1", CompanyId = "company-1", FirstName = "Employee", LastName = "One", Email = "e@example.com" } });
+        var service = new EmployeeSalaryStructureService(salaries.Object, employees.Object);
+
+        var result = await service.Approve("company-1", "admin-1", "salary-draft", 1, isCompanyAdministrator: true);
+
+        Assert.True(result.Success);
+        Assert.Equal(200, result.StatusCode);
+        Assert.Equal("APPROVED", row.ApprovalStatus);
+        Assert.Equal("ACTIVE", row.Status);
+        Assert.Equal("admin-1", row.ApprovedBy);
+        salaries.Verify(x => x.Update(It.IsAny<FilterDefinition<EmployeeSalaryStructure>>(), It.Is<EmployeeSalaryStructure>(s => s.ApprovalStatus == "APPROVED" && s.Status == "ACTIVE")), Times.Once);
+    }
+
+    [Fact]
+    public async Task Approve_FallsBackToOptimisticConcurrencyOnStandaloneMongoDBServer()
+    {
+        var prior = new EmployeeSalaryStructure { Id = "old", CompanyId = "company-1", EmployeeId = "e1", EffectiveFrom = new DateTime(2026, 1, 1), ApprovalStatus = "APPROVED", Status = "ACTIVE", Version = 1 };
+        var next = new EmployeeSalaryStructure { Id = "new", CompanyId = "company-1", EmployeeId = "e1", CreatedBy = "maker", SubmittedBy = "submitter", EffectiveFrom = new DateTime(2026, 10, 1), ApprovalStatus = "SUBMITTED", Status = "PENDING_REVIEW", Version = 1 };
+        var salaries = Repository(new[] { prior, next });
+        var employees = Repository(new[] { new EmpUser { EmployeeId = "e1", CompanyId = "company-1", FirstName = "Employee", LastName = "One", Email = "e@example.com" } });
+        var client = SalaryStandalone(salaries, 1, 1);
+        var service = new EmployeeSalaryStructureService(salaries.Object, employees.Object, mongoClient: client.Object);
+
+        var result = await service.Approve("company-1", "approver", "new", 1);
+
+        Assert.True(result.Success);
+        Assert.Equal(200, result.StatusCode);
+        Assert.Equal(new DateTime(2026, 9, 30), prior.EffectiveTo);
+        Assert.Equal(2, prior.Version);
+        Assert.Equal("APPROVED", next.ApprovalStatus);
+        Assert.Equal("ACTIVE", next.Status);
+        Assert.Equal(2, next.Version);
+        Assert.Equal("approver", next.ApprovedBy);
+    }
+
+    [Fact]
+    public async Task Approve_RollsBackPriorOpenWhenApprovalFailsOnStandaloneMongoDBServer()
+    {
+        var prior = new EmployeeSalaryStructure { Id = "old", CompanyId = "company-1", EmployeeId = "e1", EffectiveFrom = new DateTime(2026, 1, 1), ApprovalStatus = "APPROVED", Status = "ACTIVE", Version = 1 };
+        var next = new EmployeeSalaryStructure { Id = "new", CompanyId = "company-1", EmployeeId = "e1", CreatedBy = "maker", SubmittedBy = "submitter", EffectiveFrom = new DateTime(2026, 10, 1), ApprovalStatus = "SUBMITTED", Status = "PENDING_REVIEW", Version = 1 };
+        var salaries = Repository(new[] { prior, next });
+        var employees = Repository(new[] { new EmpUser { EmployeeId = "e1", CompanyId = "company-1", FirstName = "Employee", LastName = "One", Email = "e@example.com" } });
+        var client = SalaryStandalone(salaries, 1, 0, 1);
+        var service = new EmployeeSalaryStructureService(salaries.Object, employees.Object, mongoClient: client.Object);
+
+        var result = await service.Approve("company-1", "approver", "new", 1);
+
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Null(prior.EffectiveTo);
+        Assert.Equal(1, prior.Version);
+        Assert.Equal("SUBMITTED", next.ApprovalStatus);
+        Assert.Equal(1, next.Version);
+    }
+
+    [Fact]
+    public async Task Reject_TransitionsDraftOrSubmittedSalaryToRejected()
+    {
+        var row = new EmployeeSalaryStructure { Id = "salary-discard", CompanyId = "company-1", EmployeeId = "e1", CreatedBy = "admin-1", EffectiveFrom = new DateTime(2026, 10, 1), ApprovalStatus = "DRAFT", Status = "DRAFT", Version = 1 };
+        var salaries = Repository(new[] { row });
+        var employees = Repository(new[] { new EmpUser { EmployeeId = "e1", CompanyId = "company-1", FirstName = "Employee", LastName = "One", Email = "e@example.com" } });
+        var service = new EmployeeSalaryStructureService(salaries.Object, employees.Object);
+
+        var result = await service.Reject("company-1", "admin-1", "salary-discard", 1);
+
+        Assert.True(result.Success);
+        Assert.Equal("REJECTED", row.ApprovalStatus);
+        Assert.Equal("REJECTED", row.Status);
+    }
+
+    [Fact]
+    public async Task SaveDraft_ReusesExistingDraftForSameEmployeeAndStartDate()
+    {
+        var existingDraft = new EmployeeSalaryStructure { Id = "existing-draft", CompanyId = "company-1", EmployeeId = "e1", EffectiveFrom = new DateTime(2026, 10, 1), ApprovalStatus = "DRAFT", Status = "DRAFT", Version = 1 };
+        var salaries = Repository(new[] { existingDraft });
+        var employees = Repository(new[] { new EmpUser { EmployeeId = "e1", CompanyId = "company-1", FirstName = "Employee", LastName = "One", Email = "e@example.com" } });
+        var dto = Draft("e1", new DateTime(2026, 10, 1)); // dto.Id is empty/null
+        var service = new EmployeeSalaryStructureService(salaries.Object, employees.Object);
+
+        var result = await service.SaveDraft("company-1", "admin-1", dto);
+
+        Assert.True(result.Success);
+        Assert.Equal("existing-draft", result.ResourceId);
+        salaries.Verify(x => x.Update(It.IsAny<FilterDefinition<EmployeeSalaryStructure>>(), It.IsAny<EmployeeSalaryStructure>()), Times.Once);
+        salaries.Verify(x => x.AddOne(It.IsAny<EmployeeSalaryStructure>()), Times.Never);
     }
 
     [Fact]
@@ -500,6 +609,21 @@ public sealed class EmployeeSalaryStructureServiceTests
         var collection = new Mock<IMongoCollection<EmployeeSalaryStructure>>();
         repository.Setup(x => x.GetCollection()).Returns(collection.Object);
         var sequence = collection.SetupSequence(x => x.ReplaceOneAsync(session.Object, It.IsAny<FilterDefinition<EmployeeSalaryStructure>>(), It.IsAny<EmployeeSalaryStructure>(), It.IsAny<ReplaceOptions>(), It.IsAny<CancellationToken>()));
+        foreach (var count in matches)
+            sequence.ReturnsAsync(new ReplaceOneResult.Acknowledged(count, count, null));
+        return client;
+    }
+
+    private static Mock<IMongoClient> SalaryStandalone(Mock<IMongoDbRepository<EmployeeSalaryStructure>> repository, params long[] matches)
+    {
+        var client = new Mock<IMongoClient>();
+        var session = new Mock<IClientSessionHandle>();
+        session.Setup(x => x.WithTransactionAsync(It.IsAny<Func<IClientSessionHandle, CancellationToken, Task<bool>>>(), It.IsAny<TransactionOptions>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new NotSupportedException("Standalone servers do not support transactions."));
+        client.Setup(x => x.StartSessionAsync(It.IsAny<ClientSessionOptions>(), It.IsAny<CancellationToken>())).ReturnsAsync(session.Object);
+        var collection = new Mock<IMongoCollection<EmployeeSalaryStructure>>();
+        repository.Setup(x => x.GetCollection()).Returns(collection.Object);
+        var sequence = collection.SetupSequence(x => x.ReplaceOneAsync(It.IsAny<FilterDefinition<EmployeeSalaryStructure>>(), It.IsAny<EmployeeSalaryStructure>(), It.IsAny<ReplaceOptions>(), It.IsAny<CancellationToken>()));
         foreach (var count in matches)
             sequence.ReturnsAsync(new ReplaceOneResult.Acknowledged(count, count, null));
         return client;

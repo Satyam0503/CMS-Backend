@@ -44,8 +44,9 @@ public sealed record AttendanceMonthlyExportResult(byte[] Content, string FileNa
         private readonly IMongoDbRepository<WeeklyOffSetting> _weeklyOffs;
         private readonly IMongoDbRepository<CalendarEntity> _calendar;
         private readonly IMongoDbRepository<AttendanceStatusSetting> _attendanceStatuses;
+        private readonly IAttendanceInitializationService? _initializationService;
 
-        public AdminAttendanceService(IAttendanceRepository attendanceRepository, IMapper mapper, IAttendanceMutationValidator mutationValidator, IAttendanceAuditWriter auditWriter, IMongoDbRepository<AttendanceDaySegment> attendanceSegments, IMongoDbRepository<EmpUser> employees, ICompanyWorkingCalendarService workingCalendar, IMongoDbRepository<WeeklyOffSetting> weeklyOffs, IMongoDbRepository<CalendarEntity> calendar, IMongoDbRepository<AttendanceStatusSetting> attendanceStatuses)
+        public AdminAttendanceService(IAttendanceRepository attendanceRepository, IMapper mapper, IAttendanceMutationValidator mutationValidator, IAttendanceAuditWriter auditWriter, IMongoDbRepository<AttendanceDaySegment> attendanceSegments, IMongoDbRepository<EmpUser> employees, ICompanyWorkingCalendarService workingCalendar, IMongoDbRepository<WeeklyOffSetting> weeklyOffs, IMongoDbRepository<CalendarEntity> calendar, IMongoDbRepository<AttendanceStatusSetting> attendanceStatuses, IAttendanceInitializationService? initializationService = null)
         {
             _attendanceRepository = attendanceRepository;
             _mapper = mapper;
@@ -57,6 +58,7 @@ public sealed record AttendanceMonthlyExportResult(byte[] Content, string FileNa
             _weeklyOffs = weeklyOffs;
             _calendar = calendar;
             _attendanceStatuses = attendanceStatuses;
+            _initializationService = initializationService;
         }
   public async Task<AttendanceResponseDto> AddManualAttendance(string companyId, string actorUserId, AdminAttendanceCreateDto dto)
 {
@@ -149,12 +151,49 @@ public async Task<IEnumerable<AttendanceResponseDto>> GetAttendanceByDateRange(
     if (from.Date > to.Date) throw new ArgumentException("From date cannot be after to date.");
     var fromDate = from.Date;
     var toDateInclusive = to.Date.AddDays(1).AddTicks(-1); 
-    
+
+    if (_initializationService != null && userIds != null && userIds.Length > 0 && userIds.Length <= 20)
+    {
+        foreach (var uid in userIds)
+        {
+            if (!string.IsNullOrWhiteSpace(uid))
+            {
+                try
+                {
+                    await _initializationService.InitializeEmployeeAttendanceAsync(
+                        companyId, "system", uid, from, CancellationToken.None);
+                }
+                catch
+                {
+                    // Non-blocking: calendar query still succeeds if initialization encounters an exception
+                }
+            }
+        }
+    }
 
     var data = await _attendanceRepository
         .GetAllByDateRangeAsync(companyId, fromDate, toDateInclusive, userIds);
 
     var dailyRows = _mapper.Map<IEnumerable<AttendanceResponseDto>>(data);
+    if (userIds != null && userIds.Length > 0 && userIds.Length <= 20)
+    {
+        var emps = (await _employees.GetAll(x => x.CompanyId == companyId && userIds.Contains(x.UserId)))
+            .ToDictionary(x => x.UserId, x => x);
+
+        dailyRows = dailyRows.Where(r =>
+        {
+            if (r.UserId != null && emps.TryGetValue(r.UserId, out var emp))
+            {
+                if (EmploymentPeriod.TryGetJoiningDate(emp, out var j) && r.Date.Date < j.Date)
+                    return false;
+                var l = EmploymentPeriod.GetLastWorkingDate(emp);
+                if (l.HasValue && r.Date.Date > l.Value.Date)
+                    return false;
+            }
+            return true;
+        }).ToList();
+    }
+
     var segments = await _attendanceSegments.GetAll(x =>
         x.CompanyId == companyId &&
         x.Date >= fromDate &&
@@ -292,7 +331,7 @@ private static string FormatAttendanceCell(AttendanceModel? daily, IReadOnlyColl
     if (lines.Count > 0) return string.Join(Environment.NewLine, lines);
 
     if (DateOnly.FromDateTime(date) > DateOnly.FromDateTime(IndiaTime.Today)) return "Future date";
-    if (DateTime.TryParse(employee.DateOfJoining, out var joiningDate) && date.Date < joiningDate.Date) return "Not eligible";
+    if (EmploymentPeriod.TryGetJoiningDate(employee, out var joiningDate) && date.Date < joiningDate.Date) return "Not eligible";
     var lastWorkingDate = EmploymentPeriod.GetLastWorkingDate(employee);
     if (lastWorkingDate.HasValue && date.Date > lastWorkingDate.Value) return "Not employed";
     if (!workingDates.Contains(DateOnly.FromDateTime(date)))

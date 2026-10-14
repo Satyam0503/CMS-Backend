@@ -82,8 +82,14 @@ public sealed class WorkFromHomeService(
     private string CompanyId => CurrentContext.CompanyId(context);
     private string UserId => CurrentContext.UserId(context);
 
+    private async Task<bool> IsWfhAccessibleAsync() =>
+        await roles.IsModuleAccessibleForCompany(AppModule.WorkFromHome, CompanyId);
+
     public async Task<Result<WorkFromHomePolicyDto>> GetPolicy()
     {
+        if (!await IsWfhAccessibleAsync())
+            return Ok(new WorkFromHomePolicyDto { IsEnabled = false, MaxDaysPerWeek = 0 });
+
         var policy = await policies.FirstOrDefault(x => x.CompanyId == CompanyId);
         // Keep the initial UX stable: an HR/Admin can refresh, see the intended
         // one-day policy, and persist it. Creation still requires the SavePolicy action.
@@ -92,6 +98,9 @@ public sealed class WorkFromHomeService(
 
     public async Task<Result<EmployeeWfhContextDto>> GetEmployeeContext()
     {
+        if (!await IsWfhAccessibleAsync())
+            return Ok(new EmployeeWfhContextDto { DisabledReasonCode = "WFH_MODULE_DISABLED", IsEligible = false });
+
         var employee = await ActiveEmployee(UserId);
         var policy = await policies.FirstOrDefault(x => x.CompanyId == CompanyId);
         if (employee is null || policy is null || !policy.IsEnabled)
@@ -123,6 +132,9 @@ public sealed class WorkFromHomeService(
 
     public async Task<Result> SavePolicy(WorkFromHomePolicyDto dto)
     {
+        if (!await IsWfhAccessibleAsync())
+            return Fail("WFH_MODULE_DISABLED", "Work from home module is not enabled for this company.");
+
         var configuredCodes = new[] { dto.FullDayAttendanceStatusCode, dto.HalfDayAttendanceStatusCode, dto.MixedAttendanceStatusCode, dto.WfhWfoAttendanceStatusCode, dto.WfhHdAttendanceStatusCode };
         var configuredStatuses = await Task.WhenAll(configuredCodes.Select(async code => string.IsNullOrWhiteSpace(code)
             ? null
@@ -140,6 +152,9 @@ public sealed class WorkFromHomeService(
 
     public async Task<Result<IEnumerable<WorkFromHomeEmployeeAllocationDto>>> GetEmployeeAllocations()
     {
+        if (!await IsWfhAccessibleAsync())
+            return Ok<IEnumerable<WorkFromHomeEmployeeAllocationDto>>([]);
+
         var policy = await policies.FirstOrDefault(x => x.CompanyId == CompanyId);
         if (policy is null)
             return Ok<IEnumerable<WorkFromHomeEmployeeAllocationDto>>([]);
@@ -162,6 +177,9 @@ public sealed class WorkFromHomeService(
 
     public async Task<Result> SaveEmployeeAllocation(WorkFromHomeEmployeeAllocationDto dto)
     {
+        if (!await IsWfhAccessibleAsync())
+            return Fail("WFH_MODULE_DISABLED", "Work from home module is not enabled for this company.");
+
         var employeeId = dto.EmployeeId?.Trim();
         if (string.IsNullOrWhiteSpace(employeeId) || dto.WeeklyLimit is < 0 or > 31) return Fail("WFH_INVALID_EMPLOYEE_ALLOCATION", "Provide an active employee ID and a weekly WFH limit from 0 to 31.");
         if (!await employees.Exist(x => x.CompanyId == CompanyId && x.EmployeeId == employeeId && x.Status && !x.IsDeleted && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended))) return Fail("WFH_EMPLOYEE_NOT_FOUND", "The employee is not active in this company.");
@@ -226,6 +244,9 @@ public sealed class WorkFromHomeService(
 
     public async Task<Result<WorkFromHomeResponseDto>> GetMy()
     {
+        if (!await IsWfhAccessibleAsync())
+            return new Result<WorkFromHomeResponseDto> { Success = true, MethodResults = [], TotalRecords = 0 };
+
         var items = await requests.GetAll(x => x.CompanyId == CompanyId && x.UserId == UserId);
         return new Result<WorkFromHomeResponseDto> { Success = true, MethodResults = items.OrderByDescending(x => x.CreatedDate).Select(x => Map(x)).ToList(), TotalRecords = items.Count() };
     }
@@ -897,7 +918,8 @@ public sealed class WorkFromHomeService(
         return fullDayMinutes > 0 ? officeStartTime.Value.Add(TimeSpan.FromMinutes(fullDayMinutes / 2d)) : null;
     }
 
-    private async Task<WorkFromHomePolicy?> ActivePolicy() => await policies.FirstOrDefault(x => x.CompanyId == CompanyId && x.IsEnabled);
+    private async Task<WorkFromHomePolicy?> ActivePolicy() =>
+        !await IsWfhAccessibleAsync() ? null : await policies.FirstOrDefault(x => x.CompanyId == CompanyId && x.IsEnabled);
     private async Task<bool> ValidCode(string code) => !string.IsNullOrWhiteSpace(code) && await statuses.Exist(x => x.CompanyId == CompanyId && x.Code == code.Trim().ToUpperInvariant() && x.IsActive);
     private async Task InvalidateSummary(EmpUser employee, DateTime day) => await summaries.DeleteAll(Builders<MonthlyAttendanceSummary>.Filter.Where(x => x.CompanyId == CompanyId && x.EmployeeId == employee.EmployeeId && x.PayrollMonth == new DateTime(day.Year, day.Month, 1) && !x.IsLocked));
     private void QueueHrNotification(WorkFromHomeRequest request, EmpUser employee, string subject)

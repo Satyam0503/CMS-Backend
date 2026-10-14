@@ -104,7 +104,38 @@ public static class EmploymentPeriod
         return lastWorkingDate.HasValue && lastWorkingDate.Value >= new DateTime(month.Year, month.Month, 1);
     }
 
-    private static bool TryGetJoiningDate(EmpUser employee, out DateTime joiningDate) =>
-        DateTime.TryParse(employee.DateOfJoining, CultureInfo.InvariantCulture,
-            DateTimeStyles.AllowWhiteSpaces, out joiningDate);
+    public static bool TryGetJoiningDate(EmpUser employee, out DateTime joiningDate)
+    {
+        if (employee != null)
+        {
+            if (!string.IsNullOrWhiteSpace(employee.DateOfJoining))
+            {
+                string[] formats = ["yyyy-MM-dd", "dd-MM-yyyy", "dd/MM/yyyy", "MM/dd/yyyy", "yyyy/MM/dd", "d MMMM yyyy", "d MMM yyyy", "dd MMM yyyy", "dd MMMM yyyy"];
+                if (DateTime.TryParseExact(employee.DateOfJoining.Trim(), formats, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out joiningDate))
+                {
+                    joiningDate = joiningDate.Date;
+                    return true;
+                }
+
+                if (DateTime.TryParse(employee.DateOfJoining, CultureInfo.InvariantCulture,
+                        DateTimeStyles.AllowWhiteSpaces, out joiningDate))
+                {
+                    joiningDate = joiningDate.Date;
+                    return true;
+                }
+            }
+
+            if (employee.CreatedDate.HasValue)
+            {
+                joiningDate = employee.CreatedDate.Value.Date;
+                return true;
+            }
+        }
+
+        joiningDate = default;
+        return false;
+    }
+
+    public static DateTime? GetJoiningDate(EmpUser employee) =>
+        TryGetJoiningDate(employee, out var date) ? date : null;
 }

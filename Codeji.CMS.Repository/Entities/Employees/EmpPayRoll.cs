@@ -20,6 +20,7 @@ public class EmpPayRoll
     public bool IsProcessed { get; set; }
     // Additive lifecycle read/write field; legacy rows derive their status from IsProcessed/PaymentStatus.
     public string WorkflowStatus { get; set; } = "DRAFT";
+    public string CalculationSource { get; set; } = "AUTO_CALCULATED";
     public string? ApprovalStatus { get; set; }
     public string? ApprovedBy { get; set; }
     public DateTime? ApprovedAtUtc { get; set; }

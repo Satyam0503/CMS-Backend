@@ -300,7 +300,16 @@ public sealed class PayrollRunCalculationService(
                 Builders<PayrollRun>.Filter.Eq(x => x.Version, calculationStartVersion),
                 run);
             if (!blockedSave.Success) return Fail(409, "Payroll run changed during calculation; reload before retrying.");
-            return Fail(409, $"{missing} employees are blocked by missing or duplicate payroll data, frozen salary/policy snapshot mismatches, invalid component formulas, or deductions exceeding gross pay.");
+            var blockedMembers = members.Where(m => m.Status == "BLOCKED").ToList();
+            var primaryReason = blockedMembers
+                .Where(m => !string.IsNullOrWhiteSpace(m.ErrorMessage))
+                .GroupBy(m => m.ErrorMessage!)
+                .OrderByDescending(g => g.Count())
+                .FirstOrDefault();
+            var reasonText = primaryReason is not null
+                ? (primaryReason.Count() == missing ? primaryReason.Key : $"{primaryReason.Count()} of {missing} employees: {primaryReason.Key}")
+                : "Resolve missing or duplicate payroll data, frozen salary/policy snapshot mismatches, invalid component formulas, or deductions exceeding gross pay.";
+            return Fail(409, $"{missing} employee(s) are blocked from calculation: {reasonText}");
         }
 
         run.Status = "CALCULATED";

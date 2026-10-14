@@ -14,18 +14,21 @@ namespace Codeji.CMS.Services
         private readonly ISalaryRepository _repository;
         private readonly IMongoDbRepository<EmpUser> _employeeRepository;
         private readonly IMongoDbRepository<JobTitles> _jobTitlesRepository;
+        private readonly IMongoDbRepository<EmployeeSalaryStructure>? _salaryStructures;
         private readonly ILogger<SalaryService> _logger;
 
         public SalaryService(
             ISalaryRepository repository,
             IMongoDbRepository<EmpUser> employeeRepository,
             IMongoDbRepository<JobTitles> jobTitlesRepository,
-            ILogger<SalaryService> logger)
+            ILogger<SalaryService> logger,
+            IMongoDbRepository<EmployeeSalaryStructure>? salaryStructures = null)
         {
             _repository = repository;
             _employeeRepository = employeeRepository;
             _jobTitlesRepository = jobTitlesRepository;
             _logger = logger;
+            _salaryStructures = salaryStructures;
         }
 
         public async Task<SalaryModel> CreateSalaryAsync(string companyId, CreateSalaryDto dto)
@@ -133,6 +136,37 @@ namespace Codeji.CMS.Services
                     group => group.Key,
                     group => group.OrderByDescending(s => s.EffectiveFrom).First());
 
+            if (_salaryStructures != null)
+            {
+                try
+                {
+                    var approvedStructures = await _salaryStructures.GetAll(x =>
+                        x.CompanyId == companyId &&
+                        x.ApprovalStatus == "APPROVED" &&
+                        x.Status == "ACTIVE");
+
+                    foreach (var structure in approvedStructures.OrderBy(s => s.EffectiveFrom))
+                    {
+                        try
+                        {
+                            var mapped = PayRoll.EmployeeSalaryPayrollMapper.Map(structure);
+                            if (mapped.UserId.HasValue)
+                            {
+                                activeSalaryByUserId[mapped.UserId.Value] = mapped;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to map EmployeeSalaryStructure {Id} for employee {EmployeeId}", structure.Id, structure.EmployeeId);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to load EmployeeSalaryStructures for company {CompanyId}", companyId);
+                }
+            }
+
             List<string> jobIds = employees.Select(e => e.JobRole).Distinct().Where(jt => jt != null).ToList();
             IEnumerable<JobTitles> jobTitles = [];
             try
@@ -161,7 +195,8 @@ namespace Codeji.CMS.Services
                         JobTitle = empJobTitle?.Titles.ToDictionary(keySelector: jt => jt.Language, elementSelector: jt => jt.Label) ?? null,
                         ActiveSalary = emp.Parsed && activeSalaryByUserId.TryGetValue(emp.Guid, out var salary)
                             ? SalaryResponseDto.MapFromModel(salary)
-                            : null
+                            : null,
+                        DateOfJoining = emp.Employee.DateOfJoining
                     })
                     .OrderBy(employee => employee.EmployeeName)
                     .ToList();

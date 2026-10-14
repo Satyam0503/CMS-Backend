@@ -11,7 +11,7 @@ public interface IPayrollRunWorkflowService
  Task<Result> Process(string companyId,string runId,string actorId);
  Task<Result> Close(string companyId,string runId,string actorId);
 }
-public sealed class PayrollRunWorkflowService(IMongoDbRepository<PayrollRun> runs,IMongoDbRepository<PayrollRunEmployee> employees):IPayrollRunWorkflowService
+public sealed class PayrollRunWorkflowService(IMongoDbRepository<PayrollRun> runs,IMongoDbRepository<PayrollRunEmployee> employees,IMongoDbRepository<EmpPayRoll>? payrolls=null):IPayrollRunWorkflowService
 {
  public async Task<Result> Validate(string c,string id,string actor)
  {
@@ -65,7 +65,26 @@ public sealed class PayrollRunWorkflowService(IMongoDbRepository<PayrollRun> run
   if(rowError is not null)return Fail(409,rowError);
   return await Transition(c,id,actor,"CALCULATED","APPROVED","Payroll run approved and inputs frozen.");
  }
- public Task<Result> Process(string c,string id,string actor)=>Transition(c,id,actor,"APPROVED","PROCESSED","Payroll run processed.");
+ public async Task<Result> Process(string c,string id,string actor)
+ {
+  var transition=await Transition(c,id,actor,"APPROVED","PROCESSED","Payroll run processed.");
+  if(!transition.Success) return transition;
+  if(payrolls is not null)
+  {
+   try
+   {
+    var run=await runs.FirstOrDefault(x=>x.CompanyId==c&&x.Id==id);
+    if(run is not null)
+    {
+     var filter=Builders<EmpPayRoll>.Filter.Eq(p=>p.CompanyId,c)&Builders<EmpPayRoll>.Filter.Eq(p=>p.PayMonth,run.PeriodStart)&Builders<EmpPayRoll>.Filter.Ne(p=>p.IsProcessed,true);
+     var update=Builders<EmpPayRoll>.Update.Set(p=>p.IsProcessed,true).Set(p=>p.WorkflowStatus,"PROCESSED").Set(p=>p.ProcessedAt,DateTime.UtcNow).Set(p=>p.ProcessedBy,actor).Push(p=>p.AuditHistory,new PayrollAuditEvent{Action="PayrollProcessedViaRun",ActorId=actor,OccurredAtUtc=DateTime.UtcNow,Notes=$"Synchronized from Payroll Run {id}"});
+     await payrolls.UpdateMany(filter,update);
+    }
+   }
+   catch{}
+  }
+  return transition;
+ }
  public Task<Result> Close(string c,string id,string actor)=>Transition(c,id,actor,"PAID","CLOSED","Payroll run closed.");
  private async Task<Result> Transition(string c,string id,string actor,string from,string to,string message)
  {

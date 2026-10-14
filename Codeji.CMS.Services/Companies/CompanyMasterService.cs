@@ -206,26 +206,13 @@ public class CompanyMasterService : ICompanyMasterService
         var existing = (await _jobTitleRepository.GetAll(x => x.CompanyId == companyId && existingIds.Contains(x.JobTitleId) && !x.IsDeleted)).ToDictionary(x => x.JobTitleId);
         foreach (JobTitleRequestDto request in jobTitleList)
         {
-            // A legacy row that remains unchanged and unmapped must not prevent
-            // administrators from mapping another row in the same bulk request.
-            // New rows, cleared mappings, and changed mappings still require an
-            // active same-company department.
-            bool unchangedLegacyMapping = !string.IsNullOrWhiteSpace(request.JobTitleId)
-                && existing.TryGetValue(request.JobTitleId, out var existingTitle)
-                && string.IsNullOrWhiteSpace(existingTitle.DepartmentId)
-                && string.IsNullOrWhiteSpace(request.DepartmentId);
-            if (!unchangedLegacyMapping && (string.IsNullOrWhiteSpace(request.DepartmentId) || !await _departmentRepository.Exist(x =>
-                x.DepartmentId == request.DepartmentId && x.CompanyId == companyId && x.IsActive && !x.IsDeleted)))
-            {
-                validationErrors.Add(new ValidationError { JobTitleId = request.JobTitleId, JobTitleName = EnglishTitle(request.Titles), Field = "departmentId", Message = "Select an active department." });
-            }
             if (!string.IsNullOrWhiteSpace(request.JobTitleId) && !existing.ContainsKey(request.JobTitleId))
             {
                 validationErrors.Add(new ValidationError { JobTitleId = request.JobTitleId, JobTitleName = EnglishTitle(request.Titles), Field = "jobTitleId", Message = "Job title is not available in the current company." });
             }
         }
         if (validationErrors.Count != 0)
-            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Some job titles have invalid department mappings.", Errors = validationErrors };
+            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Invalid job title request.", Errors = validationErrors };
 
         var jobTitles = new List<JobTitles>();
         foreach (JobTitleRequestDto request in jobTitleList)

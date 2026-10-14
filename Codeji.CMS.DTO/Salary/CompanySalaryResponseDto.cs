@@ -7,4 +7,5 @@ public class CompanySalaryResponseDto
     public required string EmployeeName { get; set; }
     public Dictionary<string, string>? JobTitle { get; set; }
     public SalaryResponseDto? ActiveSalary { get; set; }
+    public string? DateOfJoining { get; set; }
 }

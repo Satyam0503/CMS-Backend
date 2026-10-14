@@ -80,7 +80,7 @@ public sealed class AttendanceMutationValidator(
         // attendance (including the final payroll month) impossible to repair.
         var employee = (await employees.GetAll(x => x.CompanyId == request.CompanyId && x.UserId == request.TargetUserId && !x.IsDeleted, withDefaultFilter: false)).FirstOrDefault();
         if (employee is null) return Fail(result, "ATTENDANCE_TARGET_UNAVAILABLE");
-        if (DateTime.TryParse(employee.DateOfJoining, out var joined) && date.Date < joined.Date)
+        if (EmploymentPeriod.TryGetJoiningDate(employee, out var joined) && date.Date < joined.Date)
             return Fail(result, $"Attendance cannot be marked before the employee's joining date of {joined:dd-MMM-yyyy}.");
         var lastWorkingDate = employee.LastWorkingDate ?? (DateTime.TryParse(employee.ExitDate, out var exited) ? exited.Date : (DateTime?)null);
         if (lastWorkingDate.HasValue && date.Date > lastWorkingDate.Value.Date) return Fail(result, "ATTENDANCE_AFTER_EXIT");

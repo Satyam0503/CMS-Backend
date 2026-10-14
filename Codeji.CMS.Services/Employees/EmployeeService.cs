@@ -21,6 +21,7 @@ using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Leave;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Repository.Entities.RolePermissions;
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
@@ -83,6 +84,7 @@ namespace Codeji.CMS.Services.Employees
         readonly IMongoClient? _mongoClient;
         readonly IEmployeeExitEvidenceStorage? _employeeExitEvidenceStorage;
         readonly IEmployeeLifecyclePolicyService? _employeeLifecyclePolicyService;
+        readonly IAttendanceInitializationService? _attendanceInitializationService;
 
         public EmployeeService(IMongoDbRepository<EmpEducationDetails> educationDetailsRepo,
             IMapper mapper, IMongoDbRepository<EmpCertificationDetails> certificationDetailsRepo,
@@ -127,6 +129,7 @@ namespace Codeji.CMS.Services.Employees
             , IMongoClient? mongoClient = null
             , IEmployeeExitEvidenceStorage? employeeExitEvidenceStorage = null
             , IEmployeeLifecyclePolicyService? employeeLifecyclePolicyService = null
+            , IAttendanceInitializationService? attendanceInitializationService = null
             )
         {
             _employeeRepository = employeeRepository;
@@ -172,6 +175,7 @@ namespace Codeji.CMS.Services.Employees
             _mongoClient = mongoClient;
             _employeeExitEvidenceStorage = employeeExitEvidenceStorage;
             _employeeLifecyclePolicyService = employeeLifecyclePolicyService;
+            _attendanceInitializationService = attendanceInitializationService;
             _logger = logger;
         }
 
@@ -239,12 +243,6 @@ namespace Codeji.CMS.Services.Employees
                     result.Message = "Selected job role is not available in the current company.";
                     return result;
                 }
-
-                if (string.IsNullOrWhiteSpace(model.DepartmentId) || jobRole.DepartmentId != model.DepartmentId)
-                {
-                    result.Message = "Selected job role does not belong to the selected department.";
-                    return result;
-                }
             }
 
             Company? company = await _companyRepository.FirstOrDefault(c => c.CompanyId == companyId);
@@ -282,6 +280,10 @@ namespace Codeji.CMS.Services.Employees
                     return result;
                 }
             }
+            string effectiveDoj = !string.IsNullOrWhiteSpace(model.DateOfJoining)
+                ? model.DateOfJoining
+                : DateTime.UtcNow.ToString("yyyy-MM-dd");
+
             EmpUser employee = new EmpUser()
             {
                 UserId = userId,
@@ -296,6 +298,7 @@ namespace Codeji.CMS.Services.Employees
                 JobRole = model.JobRoleId ?? string.Empty,
                 Gender = model.Gender ?? string.Empty,
                 ReportingManager = model.ReportingManager ?? string.Empty,
+                DateOfJoining = effectiveDoj,
                 IsEmailVerified = false,
                 Status = true
             };
@@ -338,6 +341,19 @@ namespace Codeji.CMS.Services.Employees
                 model.UserId = employee.UserId;
                 result.Success = true;
                 result.MethodResult = model;
+
+                if (_attendanceInitializationService != null)
+                {
+                    try
+                    {
+                        await _attendanceInitializationService.InitializeEmployeeAttendanceAsync(
+                            companyId, currentUserId, employee.UserId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to initialize attendance for new employee {UserId}", employee.UserId);
+                    }
+                }
             }
             // Employee creation must remain successful if a non-critical
             // notification or invitation delivery dependency is unavailable.
@@ -410,6 +426,7 @@ namespace Codeji.CMS.Services.Employees
                 string departmentName = item.Department?.Trim() ?? string.Empty;
                 string jobRoleName = item.JobRole?.Trim() ?? string.Empty;
                 string gender = item.Gender?.Trim() ?? string.Empty;
+                string dateOfJoining = item.DateOfJoining?.Trim() ?? string.Empty;
                 int rowNumber = i + 1;
 
                 BulkImportEmployeeRowResultDto rowResult = new()
@@ -420,13 +437,26 @@ namespace Codeji.CMS.Services.Employees
                 };
 
                 if (string.IsNullOrWhiteSpace(empId) || string.IsNullOrWhiteSpace(firstName) || string.IsNullOrWhiteSpace(lastName) || string.IsNullOrWhiteSpace(email)
-                    || string.IsNullOrWhiteSpace(roleName) || string.IsNullOrWhiteSpace(departmentName) || string.IsNullOrWhiteSpace(jobRoleName))
+                    || string.IsNullOrWhiteSpace(roleName) || string.IsNullOrWhiteSpace(departmentName) || string.IsNullOrWhiteSpace(jobRoleName)
+                    || string.IsNullOrWhiteSpace(dateOfJoining))
                 {
                     rowResult.Status = "Failed";
                     rowResult.Message = "Required fields are missing.";
                     response.Results.Add(rowResult);
                     continue;
                 }
+
+                string[] dojFormats = ["yyyy-MM-dd", "dd-MM-yyyy", "dd/MM/yyyy", "MM/dd/yyyy", "yyyy/MM/dd", "d MMMM yyyy", "d MMM yyyy", "dd MMM yyyy", "dd MMMM yyyy"];
+                if (!DateTime.TryParseExact(dateOfJoining, dojFormats, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsedDoj)
+                    && !DateTime.TryParse(dateOfJoining, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out parsedDoj)
+                    && !DateTime.TryParse(dateOfJoining, out parsedDoj))
+                {
+                    rowResult.Status = "Failed";
+                    rowResult.Message = "Invalid Date of Joining format.";
+                    response.Results.Add(rowResult);
+                    continue;
+                }
+                string normalizedDoj = parsedDoj.ToString("yyyy-MM-dd");
 
                 if (!EmployeeNamePattern.IsMatch(firstName) || !EmployeeNamePattern.IsMatch(lastName))
                 {
@@ -524,7 +554,7 @@ namespace Codeji.CMS.Services.Employees
                         jobTitle = new JobTitles()
                         {
                             CompanyId = companyId,
-                            DepartmentId = department.DepartmentId,
+                            DepartmentId = null,
                             IsActive = true,
                             CreatedBy = currentUserId,
                             CreatedDate = DateTime.UtcNow,
@@ -548,13 +578,6 @@ namespace Codeji.CMS.Services.Employees
                         }
                         availableJobTitles.Add(jobTitle);
                     }
-                    else if (jobTitle.DepartmentId != department.DepartmentId)
-                    {
-                        rowResult.Status = "Failed";
-                        rowResult.Message = "Job role does not belong to the selected department.";
-                        response.Results.Add(rowResult);
-                        continue;
-                    }
 
                     InviteEmployeeDto inviteModel = new()
                     {
@@ -565,7 +588,8 @@ namespace Codeji.CMS.Services.Employees
                         RoleId = role.RolesId,
                         DepartmentId = department.DepartmentId,
                         JobRoleId = jobTitle.JobTitleId,
-                        Gender = gender
+                        Gender = gender,
+                        DateOfJoining = normalizedDoj
                     };
 
                     Result<InviteEmployeeDto> inviteResult = await InviteNewEmployee(inviteModel, currentUserId);
@@ -740,19 +764,6 @@ namespace Codeji.CMS.Services.Employees
                         Message = "Selected job role is not available in the current company."
                     };
                 }
-
-                bool isUnchangedLegacyRole = string.IsNullOrWhiteSpace(jobRole.DepartmentId)
-                    && employeeToUpdate.JobRole == user.JobRole
-                    && employeeToUpdate.Department == user.Department;
-                if (!isUnchangedLegacyRole &&
-                    (string.IsNullOrWhiteSpace(user.Department) || jobRole.DepartmentId != user.Department))
-                {
-                    return new Result<UserModel>
-                    {
-                        Success = false,
-                        Message = "Selected job role does not belong to the selected department."
-                    };
-                }
             }
 
             if (!string.IsNullOrWhiteSpace(user.ReportingManager))
@@ -767,6 +778,16 @@ namespace Codeji.CMS.Services.Employees
             }
             UpdateDefinitionBuilder<EmpUser> update = Builders<EmpUser>.Update;
             List<UpdateDefinition<EmpUser>> updateDefinition = new();
+            if (!string.IsNullOrWhiteSpace(user.DateOfJoining))
+            {
+                string[] formats = ["yyyy-MM-dd", "dd-MM-yyyy", "dd/MM/yyyy", "MM/dd/yyyy", "yyyy/MM/dd", "d MMMM yyyy", "d MMM yyyy", "dd MMM yyyy", "dd MMMM yyyy"];
+                if (DateTime.TryParseExact(user.DateOfJoining.Trim(), formats, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsedDoj) ||
+                    DateTime.TryParse(user.DateOfJoining, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out parsedDoj))
+                {
+                    user.DateOfJoining = parsedDoj.ToString("yyyy-MM-dd");
+                }
+            }
+
             foreach (PropertyInfo property in user.GetType().GetProperties().Where(x => x.GetValue(user) != null))
             {
                 object value = property.GetValue(user, null);
@@ -780,6 +801,21 @@ namespace Codeji.CMS.Services.Employees
             UpdateDefinition<EmpUser> data = update.Combine(updateDefinition);
             Expression<Func<EmpUser, bool>> whereCondition = x => x.UserId == userId && x.CompanyId == companyId && !x.IsDeleted;
             Result result = await _employeeRepository.UpdateMany(whereCondition, data, true);
+
+            if (!string.IsNullOrWhiteSpace(user.DateOfJoining) && _attendanceInitializationService != null)
+            {
+                try
+                {
+                    var actorUserId = CurrentContext.UserId(_httpContextAccessor) ?? userId;
+                    await _attendanceInitializationService.InitializeEmployeeAttendanceAsync(
+                        companyId, actorUserId, userId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to initialize attendance after updating DateOfJoining for user {UserId}", userId);
+                }
+            }
+
             UserModel updatedUser = await GetEmployeeById(userId);
             return new Result<UserModel>()
             {

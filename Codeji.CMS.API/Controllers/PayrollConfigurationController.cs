@@ -143,6 +143,10 @@ public sealed class PayrollConfigurationController(
 
     [HttpPost("employee-salaries/approve"), Authorize(Policy = "AdminOnly"), ModulePermission(AppModule.PayrollSettings, Permission.Approve)]
     public Task<Codeji.CMS.Domain.Models.Result> ApproveEmployeeSalary([FromQuery] string id, [FromQuery] int version) =>
-        salaries.Approve(CurrentContext.CompanyId(context), CurrentContext.UserId(context), id, version);
+        salaries.Approve(CurrentContext.CompanyId(context), CurrentContext.UserId(context), id, version, isCompanyAdministrator: true);
+
+    [HttpPost("employee-salaries/reject"), Authorize(Policy = "AdminOnly"), ModulePermission(AppModule.PayrollSettings, Permission.Approve)]
+    public Task<Codeji.CMS.Domain.Models.Result> RejectEmployeeSalary([FromQuery] string id, [FromQuery] int version, [FromQuery] string? reason = null) =>
+        salaries.Reject(CurrentContext.CompanyId(context), CurrentContext.UserId(context), id, version, reason);
 }
 

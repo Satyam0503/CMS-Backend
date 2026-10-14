@@ -146,6 +146,62 @@ public sealed class EmployeeSalaryPdfImportParserTests
         Assert.Contains(result.Errors, error => error.Contains("readable PDF", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Parse_SucceedsWhenOptionalComponentsLikeBonusAndLtaAreOmitted()
+    {
+        var pdfBytes = CreateTextPdf(
+            "Employee Id: EMP-999",
+            "Effective From: 15/11/2026",
+            "Basic Salary: 50000",
+            "House Rent Allowance: 20000",
+            "Special Allowance: 10000",
+            "Annual CTC: 960000");
+
+        var result = EmployeeSalaryPdfImportParser.Parse(new MemoryStream(pdfBytes));
+
+        Assert.Empty(result.Errors);
+        Assert.NotNull(result.Row);
+        Assert.Equal("EMP-999", result.Row.EmployeeId);
+        Assert.Equal(new DateTime(2026, 11, 15), result.Row.EffectiveFrom);
+        Assert.Equal(80000m, result.Row.MonthlyGross);
+        Assert.Equal(960000m, result.Row.AnnualCtc);
+
+        var basic = result.Row.Components.First(c => c.ComponentCode == "BASIC");
+        var hra = result.Row.Components.First(c => c.ComponentCode == "HRA");
+        var other = result.Row.Components.First(c => c.ComponentCode == "OTHER_ALLOWANCE");
+        var bonus = result.Row.Components.First(c => c.ComponentCode == "BONUS");
+        var lta = result.Row.Components.First(c => c.ComponentCode == "LTA");
+        var insurance = result.Row.Components.First(c => c.ComponentCode == "HEALTH_INSURANCE");
+
+        Assert.Equal(50000m, basic.Value);
+        Assert.Equal(20000m, hra.Value);
+        Assert.Equal(10000m, other.Value);
+        Assert.Equal(0m, bonus.Value);
+        Assert.Equal(0m, lta.Value);
+        Assert.Equal(0m, insurance.Value);
+    }
+
+    [Fact]
+    public void Parse_SupportsIndianCurrencyAndFormattedAmounts()
+    {
+        var pdfBytes = CreateTextPdf(
+            "Employee Code: EMP-888",
+            "Joining Date: 01-Dec-2026",
+            "Basic Pay: Rs. 65,000/-",
+            "HRA: ₹ 25,000",
+            "Other Allowance: INR 10,000",
+            "CTC: 1200000");
+
+        var result = EmployeeSalaryPdfImportParser.Parse(new MemoryStream(pdfBytes));
+
+        Assert.Empty(result.Errors);
+        Assert.NotNull(result.Row);
+        Assert.Equal("EMP-888", result.Row.EmployeeId);
+        Assert.Equal(new DateTime(2026, 12, 1), result.Row.EffectiveFrom);
+        Assert.Equal(100000m, result.Row.MonthlyGross);
+        Assert.Equal(1200000m, result.Row.AnnualCtc);
+    }
+
     private static byte[] CreateTextPdf(params string[] lines)
     {
         var content = new StringBuilder();

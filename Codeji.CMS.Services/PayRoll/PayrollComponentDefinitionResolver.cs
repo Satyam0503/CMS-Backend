@@ -16,17 +16,24 @@ public static class PayrollComponentDefinitionResolver
         DateTime effectiveDate)
     {
         var date = effectiveDate.Date;
-        var latest = definitions
+        var code = componentCode.Trim();
+        var isSpecialOrOther = string.Equals(code, "SPECIAL_ALLOWANCE", StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(code, "OTHER_ALLOWANCE", StringComparison.OrdinalIgnoreCase);
+
+        var list = definitions
             .Where(definition => definition.CompanyId == companyId &&
-                string.Equals(definition.Code.Trim(), componentCode.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                (string.Equals(definition.Code.Trim(), code, StringComparison.OrdinalIgnoreCase) ||
+                 (isSpecialOrOther && (string.Equals(definition.Code.Trim(), "SPECIAL_ALLOWANCE", StringComparison.OrdinalIgnoreCase) ||
+                                       string.Equals(definition.Code.Trim(), "OTHER_ALLOWANCE", StringComparison.OrdinalIgnoreCase)))) &&
                 definition.EffectiveFrom.Date <= date)
-            .OrderByDescending(definition => definition.EffectiveFrom.Date)
+            .OrderByDescending(definition => string.Equals(definition.Code.Trim(), code, StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+            .ThenByDescending(definition => definition.EffectiveFrom.Date)
             .ThenByDescending(definition => definition.Version)
             .FirstOrDefault();
 
-        return latest is not null && latest.IsActive &&
-            (!latest.EffectiveTo.HasValue || latest.EffectiveTo.Value.Date >= date)
-            ? latest
+        return list is not null && list.IsActive &&
+            (!list.EffectiveTo.HasValue || list.EffectiveTo.Value.Date >= date)
+            ? list
             : null;
     }
 }

@@ -10,7 +10,7 @@ public static class AttendancePayrollRules
     {
         eligibleFrom = monthStart.Date;
         eligibleTo = monthEnd.Date;
-        if (!DateTime.TryParse(employee.DateOfJoining, out var joining) || joining.Date > monthEnd.Date) return false;
+        if (!EmploymentPeriod.TryGetJoiningDate(employee, out var joining) || joining.Date > monthEnd.Date) return false;
         eligibleFrom = joining.Date > monthStart.Date ? joining.Date : monthStart.Date;
         var exitDate = EmploymentPeriod.GetLastWorkingDate(employee);
         if (exitDate.HasValue)

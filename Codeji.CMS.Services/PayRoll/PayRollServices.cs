@@ -11,6 +11,7 @@ using MongoDB.Driver;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
+using Codeji.CMS.Services.Employees;
 
 namespace Codeji.CMS.Services.PayRoll;
 
@@ -23,6 +24,7 @@ public class PayRollServices : IPayRollServices
     readonly IMongoDbRepository<JobTitles> _jobTitlesRepository;
     readonly PdfService _pdfService;
     readonly IAttendancePayrollReadinessService _attendanceReadiness;
+    readonly IMongoDbRepository<PayrollRun>? _payrollRunsRepository;
     public PayRollServices(
         IMongoDbRepository<EmpPayRoll> empPayRollRepository,
         IMongoDbRepository<EmpUser> employeeRepository,
@@ -30,7 +32,8 @@ public class PayRollServices : IPayRollServices
         IMongoDbRepository<JobTitles> jobTitlesRepository,
         PdfService pdfService,
         IMiddlewareService middlewareService,
-        IAttendancePayrollReadinessService attendanceReadiness
+        IAttendancePayrollReadinessService attendanceReadiness,
+        IMongoDbRepository<PayrollRun>? payrollRunsRepository = null
     )
     {
         _empPayRollRepository = empPayRollRepository;
@@ -40,6 +43,7 @@ public class PayRollServices : IPayRollServices
         _pdfService = pdfService;
         _middlewareService = middlewareService;
         _attendanceReadiness = attendanceReadiness;
+        _payrollRunsRepository = payrollRunsRepository;
     }
 
 
@@ -252,7 +256,7 @@ public class PayRollServices : IPayRollServices
             MethodResults = errors
         };
     }
-    public async Task<Result<string>> UploadPayrollData(EmplyeePayRollRequestDto payLoad, string companyId)
+    public async Task<Result<string>> UploadPayrollData(EmplyeePayRollRequestDto payLoad, string companyId, string? userId = null)
     {
         Result<string> result = new();
         var monthStart = new DateTime(payLoad.PayMonth.Year, payLoad.PayMonth.Month, 1);
@@ -285,7 +289,9 @@ public class PayRollServices : IPayRollServices
             return result;
         }
 
-        var dataList = from emp in empUsers
+        var now = DateTime.UtcNow;
+        var actor = string.IsNullOrWhiteSpace(userId) ? "System" : userId;
+        var dataList = (from emp in empUsers
                        join payItem in payData on emp.EmployeeId equals payItem.EmployeeId
                        select new EmpPayRoll()
                        {
@@ -297,7 +303,9 @@ public class PayRollServices : IPayRollServices
                            BasicPay = RoundAmount(payItem.BasicPay),
                            Bonus = RoundAmount(payItem.Bonus),
                            PaidDays = payItem.PaidDays ?? 0,
-                           CreatedAt = DateTime.UtcNow,
+                           CreatedAt = now,
+                           CalculationSource = "EXCEL_UPLOAD",
+                           WorkflowStatus = "DRAFT",
                            Allowance = new Allowance()
                            {
                                HRA = RoundAmount(payItem.HRA),
@@ -314,8 +322,17 @@ public class PayRollServices : IPayRollServices
                                ESIC = RoundAmount(payItem.ESIC)
                            },
                            DeductionLines = MapDeductionLines(payItem.DeductionLines),
-                           EarningLines = MapEarningLines(payItem.EarningLines)
-                       };
+                           EarningLines = MapEarningLines(payItem.EarningLines),
+                           AuditHistory = [
+                               new PayrollAuditEvent
+                               {
+                                   Action = "PayrollUploaded",
+                                   ActorId = actor,
+                                   OccurredAtUtc = now,
+                                   Notes = $"Uploaded from spreadsheet. Basic: {RoundAmount(payItem.BasicPay)}, Paid Days: {payItem.PaidDays ?? 0}, LOP Days: {payItem.LossOfPayDays ?? 0}"
+                               }
+                           ]
+                       }).ToList();
 
         var tasks = new List<Task>();
         foreach (var item in dataList)
@@ -329,6 +346,14 @@ public class PayRollServices : IPayRollServices
             {
                 Expression<Func<EmpPayRoll, bool>> expression = p => p.Id == payRoll.Id && p.CompanyId == companyId && p.EmployeeId == item.EmployeeId && p.PayMonth == item.PayMonth;
                 item.Id = payRoll.Id;
+                item.AuditHistory = payRoll.AuditHistory ?? [];
+                item.AuditHistory.Add(new PayrollAuditEvent
+                {
+                    Action = "PayrollUploaded",
+                    ActorId = actor,
+                    OccurredAtUtc = now,
+                    Notes = $"Updated from spreadsheet. Basic: {item.BasicPay}, Paid Days: {item.PaidDays}, LOP Days: {item.Deduction.LossOfPayDays}"
+                });
                 tasks.Add(_empPayRollRepository.Update(expression, item));
             }
         }
@@ -346,14 +371,14 @@ public class PayRollServices : IPayRollServices
         var monthStart = new DateTime(payload.PayMonth.Year, payload.PayMonth.Month, 1);
         if (!string.IsNullOrEmpty(payload.EmployeeName))
         {
-            matchingEmployeeIds = (await _employeeRepository.GetAll(e => (e.FirstName + " " + e.LastName).Contains(payload.EmployeeName, StringComparison.CurrentCultureIgnoreCase) && e.CompanyId == companyId)).Select(e => e.UserId).ToList();
+            matchingEmployeeIds = (await _employeeRepository.GetAll(e => (e.FirstName + " " + e.LastName).Contains(payload.EmployeeName, StringComparison.CurrentCultureIgnoreCase) && e.CompanyId == companyId && !e.IsDeleted)).Select(e => e.UserId).ToList();
             Expression<Func<EmpPayRoll, bool>> expression = p => p.CompanyId == companyId
                                         && p.PayMonth == monthStart
                                         && (!processedOnly || p.IsProcessed || p.WorkflowStatus == "PROCESSED" || p.WorkflowStatus == "PAID" || p.WorkflowStatus == "CLOSED" || p.PaymentStatus == "PAID" || p.PaymentStatus == "CLOSED")
                                         && (viewerUserId == null || p.UserId == viewerUserId)
                                         && matchingEmployeeIds.Contains(p.UserId);
             empPayRolls = _empPayRollRepository.Get(expression).ToList();
-            Expression<Func<EmpUser, bool>> empExpression = e => e.CompanyId == companyId &&
+            Expression<Func<EmpUser, bool>> empExpression = e => e.CompanyId == companyId && !e.IsDeleted &&
                 (viewerUserId == null || e.UserId == viewerUserId) && matchingEmployeeIds.Contains(e.UserId);
             empUsers = await _employeeRepository.GetAll(empExpression);
         }
@@ -364,7 +389,7 @@ public class PayRollServices : IPayRollServices
                                         && (!processedOnly || p.IsProcessed || p.WorkflowStatus == "PROCESSED" || p.WorkflowStatus == "PAID" || p.WorkflowStatus == "CLOSED" || p.PaymentStatus == "PAID" || p.PaymentStatus == "CLOSED")
                                         && (viewerUserId == null || p.UserId == viewerUserId);
             empPayRolls = _empPayRollRepository.Get(expression).ToList();
-            Expression<Func<EmpUser, bool>> empExpression = e => e.CompanyId == companyId &&
+            Expression<Func<EmpUser, bool>> empExpression = e => e.CompanyId == companyId && !e.IsDeleted &&
                 (viewerUserId == null || e.UserId == viewerUserId);
             empUsers = await _employeeRepository.GetAll(empExpression);
         }
@@ -387,6 +412,12 @@ public class PayRollServices : IPayRollServices
         {
             return result;
         }
+
+        var existingPayrollEmployeeIds = empPayRolls.Select(p => p.EmployeeId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        empUsers = empUsers.Where(emp =>
+            existingPayrollEmployeeIds.Contains(emp.EmployeeId) ||
+            (!processedOnly && EmploymentPeriod.IsPayrollIncludedForMonth(emp, monthStart))
+        ).ToList();
 
         List<string> jobIds = empUsers.Select(emp => emp.JobRole).Distinct().Where(jt => jt != null).ToList();
         IEnumerable<JobTitles> jobTitles = await _jobTitlesRepository.GetAll(jt => jt.CompanyId == companyId && jobIds.Contains(jt.JobTitleId));
@@ -528,6 +559,7 @@ public class PayRollServices : IPayRollServices
                 Bonus = model.Bonus ?? 0,
                 PaidDays = model.PaidDays,
                 CreatedAt = DateTime.UtcNow,
+                CalculationSource = model.CalculationSnapshot != null ? "AUTO_CALCULATED" : "MANUAL_ENTRY",
                 Allowance = new Allowance()
                 {
                     HRA = model.HRA ?? 0,
@@ -590,6 +622,10 @@ public class PayRollServices : IPayRollServices
             payRoll.PaidDays = model.PaidDays;
             payRoll.PayMonth = model.PayMonth;
             payRoll.PaidDate = model.PaidDate;
+            if (model.CalculationSnapshot != null)
+                payRoll.CalculationSource = "AUTO_CALCULATED";
+            else if (payRoll.CalculationSource != "EXCEL_UPLOAD")
+                payRoll.CalculationSource = "MANUAL_ENTRY";
             payRoll.Allowance.HRA = model.HRA ?? 0;
             payRoll.Allowance.LTA = model.LTA ?? 0;
             payRoll.Allowance.OtherAllowance = model.OtherAllowance ?? 0;
@@ -759,6 +795,45 @@ public class PayRollServices : IPayRollServices
 
         if (!result.Success)
             return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = $"Payroll for {monthStart:MMMM yyyy} is already processed." };
+
+        if (_payrollRunsRepository is not null)
+        {
+            try
+            {
+                var matchingRun = await _payrollRunsRepository.FirstOrDefault(r =>
+                    r.CompanyId == companyId &&
+                    r.PeriodStart == monthStart &&
+                    r.RunType == "REGULAR" &&
+                    r.IsActive &&
+                    r.Status != "CANCELLED" &&
+                    r.Status != "PROCESSED" &&
+                    r.Status != "PAID" &&
+                    r.Status != "CLOSED");
+                if (matchingRun is not null)
+                {
+                    var previousStatus = matchingRun.Status;
+                    matchingRun.Status = "PROCESSED";
+                    matchingRun.ProcessedAtUtc = DateTime.UtcNow;
+                    matchingRun.Version++;
+                    matchingRun.AuditHistory.Add(new PayrollRunAuditEvent
+                    {
+                        Action = "RunProcessedViaRegister",
+                        ActorId = processedBy,
+                        OccurredAtUtc = DateTime.UtcNow,
+                        Notes = "Synchronized from Monthly Register processing."
+                    });
+                    await _payrollRunsRepository.Update(
+                        Builders<PayrollRun>.Filter.Eq(r => r.Id, matchingRun.Id) &
+                        Builders<PayrollRun>.Filter.Eq(r => r.CompanyId, companyId) &
+                        Builders<PayrollRun>.Filter.Eq(r => r.Status, previousStatus),
+                        matchingRun);
+                }
+            }
+            catch
+            {
+                // Non-fatal synchronization
+            }
+        }
 
         result.Message = $"Payroll for {pendingCount} employee{(pendingCount == 1 ? "" : "s")} in {monthStart:MMMM yyyy} has been processed.";
         return result;
