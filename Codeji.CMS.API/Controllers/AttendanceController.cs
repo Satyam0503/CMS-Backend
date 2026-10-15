@@ -191,4 +191,85 @@ public class AdminAttendanceController : ControllerBase
 
         return Ok(new { items = attendance });
     }
+
+    [HttpGet("import/template")]
+    [ModulePermission(AppModule.Attendance, Permission.CreateForEmployee)]
+    public async Task<IActionResult> DownloadImportTemplate(
+        [FromQuery] int year,
+        [FromQuery] int month,
+        [FromServices] IAttendanceImportService importService)
+    {
+        try
+        {
+            var companyId = CurrentContext.CompanyId(_context);
+            var (fileBytes, fileName) = await importService.GenerateTemplateAsync(companyId, year, month);
+            return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPost("import/validate")]
+    [ModulePermission(AppModule.Attendance, Permission.CreateForEmployee)]
+    public async Task<IActionResult> ValidateImport(
+        [FromForm] Microsoft.AspNetCore.Http.IFormFile file,
+        [FromForm] int year,
+        [FromForm] int month,
+        [FromForm] bool preserveApprovedLeaves,
+        [FromServices] IAttendanceImportService importService)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { success = false, message = "An Excel file (.xlsx) is required." });
+
+        if (!file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { success = false, message = "Only .xlsx files are supported." });
+
+        try
+        {
+            var companyId = CurrentContext.CompanyId(_context);
+            using var stream = file.OpenReadStream();
+            var result = await importService.ValidateAsync(companyId, year, month, stream, preserveApprovedLeaves);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPost("import/commit")]
+    [ModulePermission(AppModule.Attendance, Permission.CreateForEmployee)]
+    public async Task<IActionResult> CommitImport(
+        [FromForm] Microsoft.AspNetCore.Http.IFormFile file,
+        [FromForm] int year,
+        [FromForm] int month,
+        [FromForm] bool preserveApprovedLeaves,
+        [FromServices] IAttendanceImportService importService)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { success = false, message = "An Excel file (.xlsx) is required." });
+
+        if (!file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { success = false, message = "Only .xlsx files are supported." });
+
+        try
+        {
+            var companyId = CurrentContext.CompanyId(_context);
+            var actorUserId = CurrentContext.UserId(_context);
+            using var stream = file.OpenReadStream();
+            var result = await importService.CommitAsync(companyId, actorUserId, year, month, stream, preserveApprovedLeaves);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
 }
+

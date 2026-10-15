@@ -139,6 +139,26 @@ public class AttendanceRepository : IAttendanceRepository
         return result.DeletedCount;
     }
 
+    public async Task<int> BulkUpsertAsync(IEnumerable<AttendanceModel> items, CancellationToken cancellationToken = default)
+    {
+        var list = items.ToList();
+        if (list.Count == 0) return 0;
+
+        var writes = new List<WriteModel<AttendanceModel>>();
+        foreach (var item in list)
+        {
+            item.Date = UtcMidnight(item.Date);
+            if (string.IsNullOrWhiteSpace(item.AttendanceId))
+                item.AttendanceId = MongoDB.Bson.ObjectId.GenerateNewId().ToString();
+
+            var dayFilter = BuildUserDateFilter(item.CompanyId, item.UserId ?? string.Empty, item.Date);
+            writes.Add(new ReplaceOneModel<AttendanceModel>(dayFilter, item) { IsUpsert = true });
+        }
+
+        var result = await _collection.BulkWriteAsync(writes, new BulkWriteOptions { IsOrdered = false }, cancellationToken);
+        return (int)(result.Upserts.Count + result.ModifiedCount);
+    }
+
     public Task GetAll(Func<object, bool> value)
     {
         throw new NotImplementedException();
