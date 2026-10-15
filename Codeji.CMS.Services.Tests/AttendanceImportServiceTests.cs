@@ -10,6 +10,7 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Calendar;
+using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Leave;
 using Codeji.CMS.Services.Attendance;
@@ -29,6 +30,7 @@ public sealed class AttendanceImportServiceTests
     private readonly Mock<IMongoDbRepository<MonthlyAttendanceSummary>> _summaries = new();
     private readonly Mock<IMongoDbRepository<WeeklyOffSetting>> _weeklyOffs = new();
     private readonly Mock<IMongoDbRepository<CalendarEntity>> _calendar = new();
+    private readonly Mock<IMongoDbRepository<Department>> _departments = new();
     private readonly Mock<IAttendanceRepository> _attendanceRepository = new();
     private readonly Mock<IAttendanceStatusService> _statusService = new();
     private readonly Mock<IAttendancePenaltyService> _penaltyService = new();
@@ -45,9 +47,17 @@ public sealed class AttendanceImportServiceTests
             _summaries.Object,
             _weeklyOffs.Object,
             _calendar.Object,
+            _departments.Object,
             _attendanceRepository.Object,
             _statusService.Object,
             _penaltyService.Object);
+
+        _departments.Setup(d => d.GetAll(It.IsAny<Expression<Func<Department, bool>>>(), false, true))
+            .ReturnsAsync(new List<Department>
+            {
+                new() { DepartmentId = "dept-it", Titles = new() { new() { Label = "Engineering" } } },
+                new() { DepartmentId = "dept-hr", Titles = new() { new() { Label = "Human Resources" } } }
+            });
 
         // Standard default setups
         _statusService.Setup(s => s.Get("company-1", true))
@@ -86,7 +96,7 @@ public sealed class AttendanceImportServiceTests
             EmployeeId = "EMP-001",
             FirstName = "John",
             LastName = "Doe",
-            Department = "IT",
+            Department = "dept-it",
             Status = true,
             Email = "john.doe@company.com",
             DateOfJoining = "2026-10-01"
@@ -98,7 +108,7 @@ public sealed class AttendanceImportServiceTests
             EmployeeId = "EMP-002",
             FirstName = "Jane",
             LastName = "Smith",
-            Department = "HR",
+            Department = "dept-hr",
             Status = true,
             Email = "jane.smith@company.com",
             DateOfJoining = "2026-10-05"
@@ -118,6 +128,10 @@ public sealed class AttendanceImportServiceTests
         using var workbook = new XLWorkbook(ms);
 
         Assert.Equal(2, workbook.Worksheets.Count);
+        // Muster is Tab 1 and active
+        Assert.Equal("Attendance Muster", workbook.Worksheet(1).Name);
+        Assert.Equal("Allowed Status Codes", workbook.Worksheet(2).Name);
+
         var musterSheet = workbook.Worksheet("Attendance Muster");
         var codesSheet = workbook.Worksheet("Allowed Status Codes");
 
@@ -127,26 +141,31 @@ public sealed class AttendanceImportServiceTests
         // Headers
         Assert.Equal("Employee ID", musterSheet.Cell(1, 1).GetString());
         Assert.Equal("Employee Name", musterSheet.Cell(1, 2).GetString());
-        Assert.Equal("Date of Joining", musterSheet.Cell(1, 3).GetString());
+        Assert.Equal("Email", musterSheet.Cell(1, 3).GetString());
+        Assert.Equal("Date of Joining", musterSheet.Cell(1, 4).GetString());
+        Assert.Equal("Department", musterSheet.Cell(1, 5).GetString());
 
-        // Employee 1: Joined Oct 1
-        Assert.Equal("EMP-001", musterSheet.Cell(2, 1).GetString());
-        Assert.Equal("John Doe", musterSheet.Cell(2, 2).GetString());
+        // Employee 1 (Sample Guide Row 1)
+        Assert.Equal("SAMPLE-001", musterSheet.Cell(2, 1).GetString());
+        Assert.Contains("Sample Employee 1", musterSheet.Cell(2, 2).GetString());
+        Assert.Equal("sample.emp1@example.com", musterSheet.Cell(2, 3).GetString());
+        Assert.Equal("Engineering", musterSheet.Cell(2, 5).GetString());
         // Day 1 (Oct 1, Thursday) -> "P"
-        Assert.Equal("P", musterSheet.Cell(2, 5).GetString());
+        Assert.Equal("P", musterSheet.Cell(2, 6).GetString());
         // Day 2 (Oct 2, Friday) Gandhi Jayanti -> "H"
-        Assert.Equal("H", musterSheet.Cell(2, 6).GetString());
+        Assert.Equal("H", musterSheet.Cell(2, 7).GetString());
         // Day 3 (Oct 3, Saturday) -> "WO"
-        Assert.Equal("WO", musterSheet.Cell(2, 7).GetString());
+        Assert.Equal("WO", musterSheet.Cell(2, 8).GetString());
 
-        // Employee 2: Joined Oct 5
-        Assert.Equal("EMP-002", musterSheet.Cell(3, 1).GetString());
-        // Day 1 (Oct 1) is before joining date (Oct 5) -> must be "N/A"
-        Assert.Equal("N/A", musterSheet.Cell(3, 5).GetString());
-        // Day 2 (Oct 2) is before joining date (Oct 5) -> must be "N/A"
+        // Employee 2 (Sample Guide Row 2: Mid-Month Joiner)
+        Assert.Equal("SAMPLE-002", musterSheet.Cell(3, 1).GetString());
+        Assert.Contains("Sample Employee 2", musterSheet.Cell(3, 2).GetString());
+        // Day 1 (Oct 1) is before sample joining date -> must be "N/A"
         Assert.Equal("N/A", musterSheet.Cell(3, 6).GetString());
-        // Day 5 (Oct 5, Monday, joining date) -> "P"
-        Assert.Equal("P", musterSheet.Cell(3, 9).GetString());
+        // Day 2 (Oct 2) is before sample joining date -> must be "N/A"
+        Assert.Equal("N/A", musterSheet.Cell(3, 7).GetString());
+        // Day 6 (Oct 6, Monday, sample joining date) -> "P"
+        Assert.Equal("P", musterSheet.Cell(3, 11).GetString());
     }
 
     [Fact]
@@ -785,15 +804,15 @@ public sealed class AttendanceImportServiceTests
         using var ms2024 = new MemoryStream(fileBytes2024);
         using var wb2024 = new XLWorkbook(ms2024);
         var muster2024 = wb2024.Worksheet("Attendance Muster");
-        // Column 4 + 29 = 33
-        Assert.Equal("29 Feb (Thu)", muster2024.Cell(1, 33).GetString());
+        // Column 5 + 29 = 34
+        Assert.Equal("29 Feb (Thu)", muster2024.Cell(1, 34).GetString());
 
         using var ms2026 = new MemoryStream(fileBytes2026);
         using var wb2026 = new XLWorkbook(ms2026);
         var muster2026 = wb2026.Worksheet("Attendance Muster");
-        // Column 4 + 28 = 32
-        Assert.Equal("28 Feb (Sat)", muster2026.Cell(1, 32).GetString());
-        Assert.True(string.IsNullOrEmpty(muster2026.Cell(1, 33).GetString()));
+        // Column 5 + 28 = 33
+        Assert.Equal("28 Feb (Sat)", muster2026.Cell(1, 33).GetString());
+        Assert.True(string.IsNullOrEmpty(muster2026.Cell(1, 34).GetString()));
     }
 
     [Theory]
@@ -805,5 +824,391 @@ public sealed class AttendanceImportServiceTests
     {
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
             _service.GenerateTemplateAsync("company-1", year, month));
+    }
+
+    [Fact]
+    public async Task ValidateAsync_ResolvesEmployeeByEmail_WhenEmailHeaderPresent()
+    {
+        // Arrange
+        var emp = new EmpUser
+        {
+            CompanyId = "company-1",
+            UserId = "user-abc",
+            EmployeeId = "EMP-999",
+            Email = "priya.nair@company.com",
+            FirstName = "Priya",
+            LastName = "Nair",
+            Status = true,
+            DateOfJoining = "2026-01-01"
+        };
+        _employees.Setup(e => e.GetAll(It.IsAny<Expression<Func<EmpUser, bool>>>(), false, true))
+            .ReturnsAsync(new List<EmpUser> { emp });
+
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("Attendance Muster");
+        ws.Cell(1, 1).Value = "Employee ID";
+        ws.Cell(1, 2).Value = "Employee Name";
+        ws.Cell(1, 3).Value = "Email";
+        ws.Cell(1, 4).Value = "Date of Joining";
+        ws.Cell(1, 5).Value = "Department";
+        ws.Cell(1, 6).Value = "01 Oct (Thu)";
+
+        // Row has unknown Employee ID but valid Email
+        ws.Cell(2, 1).Value = ""; // blank ID
+        ws.Cell(2, 2).Value = "Priya Nair";
+        ws.Cell(2, 3).Value = "priya.nair@company.com";
+        ws.Cell(2, 4).Value = "2026-01-01";
+        ws.Cell(2, 5).Value = "Engineering";
+        ws.Cell(2, 6).Value = "P";
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        ms.Position = 0;
+
+        // Act
+        var result = await _service.ValidateAsync("company-1", 2026, 10, ms);
+
+        // Assert
+        Assert.True(result.IsValid);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(1, result.TotalEmployees);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_AutomaticallyIgnoresSampleGuideRows_WhenImported()
+    {
+        // Arrange
+        var emp = new EmpUser
+        {
+            CompanyId = "company-1",
+            UserId = "user-1",
+            EmployeeId = "EMP-001",
+            Email = "real@company.com",
+            FirstName = "Real",
+            LastName = "Employee",
+            Status = true,
+            DateOfJoining = "2026-01-01"
+        };
+        _employees.Setup(e => e.GetAll(It.IsAny<Expression<Func<EmpUser, bool>>>(), false, true))
+            .ReturnsAsync(new List<EmpUser> { emp });
+
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("Attendance Muster");
+        ws.Cell(1, 1).Value = "Employee ID";
+        ws.Cell(1, 2).Value = "Employee Name";
+        ws.Cell(1, 3).Value = "Email";
+        ws.Cell(1, 4).Value = "Date of Joining";
+        ws.Cell(1, 5).Value = "Department";
+        ws.Cell(1, 6).Value = "01 Oct (Thu)";
+
+        // Sample Row 1 (should be skipped)
+        ws.Cell(2, 1).Value = "SAMPLE-001";
+        ws.Cell(2, 2).Value = "Sample Employee 1";
+        ws.Cell(2, 3).Value = "sample.emp1@example.com";
+        ws.Cell(2, 6).Value = "P";
+
+        // Sample Row 2 (should be skipped)
+        ws.Cell(3, 1).Value = "SAMPLE-002";
+        ws.Cell(3, 2).Value = "Sample Employee 2";
+        ws.Cell(3, 3).Value = "sample.emp2@example.com";
+        ws.Cell(3, 6).Value = "P";
+
+        // Real Employee Row
+        ws.Cell(4, 1).Value = "EMP-001";
+        ws.Cell(4, 2).Value = "Real Employee";
+        ws.Cell(4, 3).Value = "real@company.com";
+        ws.Cell(4, 4).Value = "2026-01-01";
+        ws.Cell(4, 5).Value = "IT";
+        ws.Cell(4, 6).Value = "P";
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        ms.Position = 0;
+
+        // Act
+        var result = await _service.ValidateAsync("company-1", 2026, 10, ms);
+
+        // Assert
+        Assert.True(result.IsValid);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(1, result.TotalEmployees); // Only the 1 real employee is processed!
+    }
+
+    [Fact]
+    public async Task GenerateTemplateAsync_And_ValidateAsync_And_CommitAsync_FullEndToEndLifecycle_Succeeds()
+    {
+        // 1. Arrange company employee & mocks
+        var realEmp = new EmpUser
+        {
+            CompanyId = "company-1",
+            UserId = "user-alice",
+            EmployeeId = "EMP-ALICE",
+            Email = "alice@company.com",
+            FirstName = "Alice",
+            LastName = "Wonderland",
+            Status = true,
+            DateOfJoining = "2026-09-01",
+            Department = "dept-it"
+        };
+
+        _employees.Setup(e => e.GetAll(It.IsAny<Expression<Func<EmpUser, bool>>>(), false, true))
+            .ReturnsAsync(new List<EmpUser> { realEmp });
+
+        _leaves.Setup(l => l.GetAll(It.IsAny<Expression<Func<LeaveRequest, bool>>>(), false, true))
+            .ReturnsAsync(new List<LeaveRequest>());
+
+        _attendance.Setup(a => a.GetAll(It.IsAny<Expression<Func<AttendanceModel, bool>>>(), false, true))
+            .ReturnsAsync(new List<AttendanceModel>());
+
+        _attendanceRepository.Setup(r => r.BulkUpsertAsync(It.IsAny<IEnumerable<AttendanceModel>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(30);
+
+        // 2. Act: Generate Template for September 2026 (completed past month)
+        var (templateBytes, fileName) = await _service.GenerateTemplateAsync("company-1", 2026, 9);
+
+        Assert.NotNull(templateBytes);
+        Assert.Contains("2026_09", fileName);
+
+        using var templateMs = new MemoryStream(templateBytes);
+        using var wb = new XLWorkbook(templateMs);
+
+        // Verify workbook structure
+        Assert.Equal(2, wb.Worksheets.Count);
+        var musterSheet = wb.Worksheet(1);
+        Assert.Equal("Attendance Muster", musterSheet.Name);
+        Assert.Equal("Employee ID", musterSheet.Cell(1, 1).GetString());
+        Assert.Equal("Employee Name", musterSheet.Cell(1, 2).GetString());
+        Assert.Equal("Email", musterSheet.Cell(1, 3).GetString());
+        Assert.Equal("Date of Joining", musterSheet.Cell(1, 4).GetString());
+        Assert.Equal("Department", musterSheet.Cell(1, 5).GetString());
+
+        // Verify sample guide rows exist
+        Assert.Equal("SAMPLE-001", musterSheet.Cell(2, 1).GetString());
+        Assert.Equal("SAMPLE-002", musterSheet.Cell(3, 1).GetString());
+
+        // 3. User adds a real employee on row 4
+        musterSheet.Cell(4, 1).Value = "EMP-ALICE";
+        musterSheet.Cell(4, 2).Value = "Alice Wonderland";
+        musterSheet.Cell(4, 3).Value = "alice@company.com";
+        musterSheet.Cell(4, 4).Value = "2026-09-01";
+        musterSheet.Cell(4, 5).Value = "Engineering";
+        for (var day = 1; day <= 30; day++)
+        {
+            var date = new DateTime(2026, 9, day);
+            var col = 5 + day; // Column 6 is day 1
+            if (date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+                musterSheet.Cell(4, col).Value = "WO";
+            else
+                musterSheet.Cell(4, col).Value = "P";
+        }
+
+        using var uploadMs = new MemoryStream();
+        wb.SaveAs(uploadMs);
+
+        // 4. Act: Validate the edited workbook
+        uploadMs.Position = 0;
+        var valResult = await _service.ValidateAsync("company-1", 2026, 9, uploadMs);
+
+        Assert.True(valResult.IsValid);
+        Assert.Equal(0, valResult.ErrorCount);
+        Assert.Equal(1, valResult.TotalEmployees); // Sample rows ignored, only Alice processed
+
+        // 5. Act: Commit the attendance
+        uploadMs.Position = 0;
+        var commitResult = await _service.CommitAsync("company-1", "admin-1", 2026, 9, uploadMs);
+
+        Assert.True(commitResult.Success);
+        Assert.Equal(1, commitResult.EmployeesAffected);
+        // Virtual "WO" (8 days) are skipped from persistence to avoid blocking UNKNOWN_OR_INACTIVE_STATUS exceptions
+        Assert.Equal(22, commitResult.RecordsUpserted);
+
+        _attendanceRepository.Verify(r => r.BulkUpsertAsync(
+            It.Is<IEnumerable<AttendanceModel>>(list => list.Count() == 22 && list.All(a => a.UserId == "user-alice")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WhenTemplateUploadedWithOnlySampleRows_ReturnsValidWithZeroProcessedEmployees()
+    {
+        // Arrange
+        var (templateBytes, _) = await _service.GenerateTemplateAsync("company-1", 2026, 10);
+        using var ms = new MemoryStream(templateBytes);
+
+        // Act
+        var result = await _service.ValidateAsync("company-1", 2026, 10, ms);
+
+        // Assert
+        Assert.True(result.IsValid);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(0, result.TotalEmployees); // Both sample rows are ignored cleanly
+    }
+
+    [Fact]
+    public async Task CommitAsync_AutomaticallyIgnoresSampleGuideRows()
+    {
+        // Arrange
+        var emp = new EmpUser
+        {
+            CompanyId = "company-1",
+            UserId = "user-bob",
+            EmployeeId = "EMP-BOB",
+            Email = "bob@company.com",
+            FirstName = "Bob",
+            LastName = "Builder",
+            Status = true,
+            DateOfJoining = "2026-10-01"
+        };
+        _employees.Setup(e => e.GetAll(It.IsAny<Expression<Func<EmpUser, bool>>>(), false, true))
+            .ReturnsAsync(new List<EmpUser> { emp });
+
+        _leaves.Setup(l => l.GetAll(It.IsAny<Expression<Func<LeaveRequest, bool>>>(), false, true))
+            .ReturnsAsync(new List<LeaveRequest>());
+
+        _attendance.Setup(a => a.GetAll(It.IsAny<Expression<Func<AttendanceModel, bool>>>(), false, true))
+            .ReturnsAsync(new List<AttendanceModel>());
+
+        _attendanceRepository.Setup(r => r.BulkUpsertAsync(It.IsAny<IEnumerable<AttendanceModel>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("Attendance Muster");
+        ws.Cell(1, 1).Value = "Employee ID";
+        ws.Cell(1, 2).Value = "Employee Name";
+        ws.Cell(1, 3).Value = "Email";
+        ws.Cell(1, 4).Value = "Date of Joining";
+        ws.Cell(1, 5).Value = "Department";
+        ws.Cell(1, 6).Value = "01 Oct (Thu)";
+
+        // Sample Rows
+        ws.Cell(2, 1).Value = "SAMPLE-001";
+        ws.Cell(2, 6).Value = "P";
+        ws.Cell(3, 1).Value = "SAMPLE-002";
+        ws.Cell(3, 6).Value = "P";
+
+        // Real Row
+        ws.Cell(4, 1).Value = "EMP-BOB";
+        ws.Cell(4, 3).Value = "bob@company.com";
+        ws.Cell(4, 6).Value = "P";
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        ms.Position = 0;
+
+        // Act
+        var result = await _service.CommitAsync("company-1", "admin-1", 2026, 10, ms);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(1, result.EmployeesAffected);
+        Assert.Equal(1, result.RecordsUpserted);
+        _attendanceRepository.Verify(r => r.BulkUpsertAsync(
+            It.Is<IEnumerable<AttendanceModel>>(records => records.Count() == 1 && records.First().UserId == "user-bob"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_MatchesByUserId_WhenEmployeeIdDoesNotMatch()
+    {
+        // Arrange
+        var emp = new EmpUser
+        {
+            CompanyId = "company-1",
+            UserId = "user-charlie-guid",
+            EmployeeId = "EMP-CHARLIE",
+            Email = "charlie@company.com",
+            FirstName = "Charlie",
+            LastName = "Brown",
+            Status = true,
+            DateOfJoining = "2026-10-01"
+        };
+        _employees.Setup(e => e.GetAll(It.IsAny<Expression<Func<EmpUser, bool>>>(), false, true))
+            .ReturnsAsync(new List<EmpUser> { emp });
+
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("Attendance Muster");
+        ws.Cell(1, 1).Value = "Employee ID";
+        ws.Cell(1, 2).Value = "Employee Name";
+        ws.Cell(1, 3).Value = "Email";
+        ws.Cell(1, 4).Value = "Date of Joining";
+        ws.Cell(1, 5).Value = "Department";
+        ws.Cell(1, 6).Value = "01 Oct (Thu)";
+
+        // User put the database UserId into the Employee ID column
+        ws.Cell(2, 1).Value = "user-charlie-guid";
+        ws.Cell(2, 2).Value = "Charlie Brown";
+        ws.Cell(2, 6).Value = "P";
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        ms.Position = 0;
+
+        // Act
+        var result = await _service.ValidateAsync("company-1", 2026, 10, ms);
+
+        // Assert
+        Assert.True(result.IsValid);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(1, result.TotalEmployees);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_FlagsError_WhenPayrollRegisterUploadedInsteadOfAttendanceMuster()
+    {
+        // Arrange: Upload workbook with Monthly Payroll Register columns
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("Payroll Register");
+        ws.Cell(1, 1).Value = "Employee ID";
+        ws.Cell(1, 2).Value = "Employee Name";
+        ws.Cell(1, 3).Value = "Basic Pay";
+        ws.Cell(1, 4).Value = "HRA";
+        ws.Cell(1, 5).Value = "Gross Earnings";
+        ws.Cell(1, 6).Value = "Net Pay";
+
+        ws.Cell(2, 1).Value = "EMP-001";
+        ws.Cell(2, 2).Value = "John Doe";
+        ws.Cell(2, 3).Value = 50000;
+        ws.Cell(2, 4).Value = 25000;
+        ws.Cell(2, 5).Value = 75000;
+        ws.Cell(2, 6).Value = 70000;
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        ms.Position = 0;
+
+        // Act
+        var result = await _service.ValidateAsync("company-1", 2026, 10, ms);
+
+        // Assert
+        Assert.False(result.IsValid);
+        Assert.True(result.ErrorCount >= 1);
+        Assert.Contains(result.Issues, i => i.Message.Contains("Monthly Payroll Register"));
+    }
+
+    [Fact]
+    public async Task ValidateAsync_FlagsError_WhenNoDayDateColumnsFoundInHeader()
+    {
+        // Arrange: Workbook without any recognized daily attendance dates in row 1
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("Attendance Muster");
+        ws.Cell(1, 1).Value = "Employee ID";
+        ws.Cell(1, 2).Value = "Employee Name";
+        ws.Cell(1, 3).Value = "Email";
+        ws.Cell(1, 4).Value = "Date of Joining";
+        ws.Cell(1, 5).Value = "Department";
+
+        ws.Cell(2, 1).Value = "EMP-001";
+        ws.Cell(2, 2).Value = "John Doe";
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        ms.Position = 0;
+
+        // Act
+        var result = await _service.ValidateAsync("company-1", 2026, 10, ms);
+
+        // Assert
+        Assert.False(result.IsValid);
+        Assert.True(result.ErrorCount >= 1);
+        Assert.Contains(result.Issues, i => i.Message.Contains("No valid daily attendance date columns"));
     }
 }

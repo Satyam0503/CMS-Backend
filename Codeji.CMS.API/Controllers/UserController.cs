@@ -36,7 +36,17 @@ public class UserController : BaseApiController
     private readonly IOfficeScheduleSettingsService _officeScheduleSettings;
     private readonly IEmployeeExitEvidenceStorage _employeeExitEvidenceStorage;
     private readonly IFormerEmployeePortalService _formerEmployeePortalService;
-    public UserController(IHttpContextAccessor httpContextAccessor, IEmployeeService employeeService, IAccountServices accountServices, IOfficeScheduleAssignmentService officeScheduleAssignments, IOfficeScheduleSettingsService officeScheduleSettings, IEmployeeExitEvidenceStorage employeeExitEvidenceStorage, IFormerEmployeePortalService formerEmployeePortalService)
+    private readonly IRoleService _roleService;
+
+    public UserController(
+        IHttpContextAccessor httpContextAccessor,
+        IEmployeeService employeeService,
+        IAccountServices accountServices,
+        IOfficeScheduleAssignmentService officeScheduleAssignments,
+        IOfficeScheduleSettingsService officeScheduleSettings,
+        IEmployeeExitEvidenceStorage employeeExitEvidenceStorage,
+        IFormerEmployeePortalService formerEmployeePortalService,
+        IRoleService roleService)
     {
         _httpContextAccessor = httpContextAccessor;
         _employeeService = employeeService;
@@ -45,6 +55,39 @@ public class UserController : BaseApiController
         _officeScheduleSettings = officeScheduleSettings;
         _employeeExitEvidenceStorage = employeeExitEvidenceStorage;
         _formerEmployeePortalService = formerEmployeePortalService;
+        _roleService = roleService;
+    }
+
+    private async Task<bool> IsUserInSameCompany(string targetUserId)
+    {
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        var user = await _employeeService.GetEmployeeById(targetUserId);
+        return user != null && string.Equals(user.CompanyId, companyId, StringComparison.Ordinal);
+    }
+
+    private async Task<string?> ResolveAuthorizedTargetUserId(string? requestedUserId)
+    {
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+
+        if (string.IsNullOrWhiteSpace(requestedUserId) || string.Equals(requestedUserId, currentUserId, StringComparison.Ordinal))
+        {
+            return currentUserId;
+        }
+
+        bool hasHrEdit = await _roleService.VerifyUserAccess(
+            AppModule.Employees, [Permission.Edit], currentUserId, companyId);
+        if (!hasHrEdit)
+        {
+            return null;
+        }
+
+        if (!await IsUserInSameCompany(requestedUserId))
+        {
+            return null;
+        }
+
+        return requestedUserId;
     }
 
     [Route("InviteNewEmployee")]
@@ -98,7 +141,7 @@ public class UserController : BaseApiController
             return await _employeeService.EditEmployee(ToSelfEditRequest(user), userId);
 
         UserModel isUserExist = await _employeeService.GetEmployeeById(userId);
-        if (userId != isUserExist.UserId)
+        if (isUserExist == null || userId != isUserExist.UserId)
         {
             return new Result<UserModel>
             {
@@ -671,8 +714,37 @@ public class UserController : BaseApiController
     [HttpGet]
     public async Task<Result<UserModel>> GetEmployeeById([FromQuery] string userId = null)
     {
-        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        if (string.IsNullOrEmpty(userId)) userId = currentUserId;
+
         UserModel result = await _employeeService.GetEmployeeById(userId);
+        if (result == null)
+        {
+            return new Result<UserModel>()
+            {
+                Success = false,
+                StatusCode = CustomStatusCode.EmployeeNotExist,
+                Message = "Employee not found."
+            };
+        }
+
+        bool isSelf = string.Equals(userId, currentUserId, StringComparison.Ordinal);
+        if (!isSelf)
+        {
+            bool hasHrAccess = await _roleService.VerifyUserAccess(
+                AppModule.Employees, [Permission.View, Permission.Edit], currentUserId, companyId);
+            if (!hasHrAccess)
+            {
+                result.PanNumber = null;
+                result.BankAccountNumber = null;
+                result.PersonalEmail = null;
+                result.Address = null;
+                result.EmergencyContact = null;
+                result.PhoneNumber = null;
+            }
+        }
+
         return new Result<UserModel>()
         {
             Success = true,
@@ -702,47 +774,77 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result> AddEditEmployeeSummary(EmployeeSummaryRequestModel userSummary)
     {
-        string userId = string.IsNullOrEmpty(userSummary.UserId) ? CurrentContext.UserId(_httpContextAccessor) : userSummary.UserId;
-        return await _employeeService.AddEditEmployeeSummary(userSummary, userId);
+        string? targetUserId = await ResolveAuthorizedTargetUserId(userSummary.UserId);
+        if (targetUserId == null)
+        {
+            return new Result { Success = false, StatusCode = StatusCodes.Status403Forbidden, Message = "Forbidden: Cannot edit summary for another employee." };
+        }
+        userSummary.UserId = targetUserId;
+        return await _employeeService.AddEditEmployeeSummary(userSummary, targetUserId);
     }
 
     [Route("AddEmployeeEducation")]
     [HttpPost]
     public async Task<Result> AddEmployeeEducation(EmployeeEducationRequestModel educationDetails)
     {
-        string userId = string.IsNullOrEmpty(educationDetails.UserId) ? CurrentContext.UserId(_httpContextAccessor) : educationDetails.UserId;
-        return await _employeeService.AddEmployeeEducation(educationDetails, userId);
+        string? targetUserId = await ResolveAuthorizedTargetUserId(educationDetails.UserId);
+        if (targetUserId == null)
+        {
+            return new Result { Success = false, StatusCode = StatusCodes.Status403Forbidden, Message = "Forbidden: Cannot add education for another employee." };
+        }
+        educationDetails.UserId = targetUserId;
+        return await _employeeService.AddEmployeeEducation(educationDetails, targetUserId);
     }
 
     [Route("EditEmployeeEducation")]
     [HttpPost]
     public async Task<Result> EditEmployeeEducation(EmployeeEducationRequestModel educationDetails)
     {
-        string userId = string.IsNullOrEmpty(educationDetails.UserId) ? CurrentContext.UserId(_httpContextAccessor) : educationDetails.UserId;
-        return await _employeeService.EditEmployeeEducation(educationDetails, userId);
+        string? targetUserId = await ResolveAuthorizedTargetUserId(educationDetails.UserId);
+        if (targetUserId == null)
+        {
+            return new Result { Success = false, StatusCode = StatusCodes.Status403Forbidden, Message = "Forbidden: Cannot edit education for another employee." };
+        }
+        educationDetails.UserId = targetUserId;
+        return await _employeeService.EditEmployeeEducation(educationDetails, targetUserId);
     }
 
     [Route("AddEmployeeCertification")]
     [HttpPost]
     public async Task<Result> AddEmployeeCertification(EmployeeCertificationRequestModel certificationDetails)
     {
-        string userId = string.IsNullOrEmpty(certificationDetails.UserId) ? CurrentContext.UserId(_httpContextAccessor) : certificationDetails.UserId;
-        return await _employeeService.AddEmployeeCertification(certificationDetails, userId);
+        string? targetUserId = await ResolveAuthorizedTargetUserId(certificationDetails.UserId);
+        if (targetUserId == null)
+        {
+            return new Result { Success = false, StatusCode = StatusCodes.Status403Forbidden, Message = "Forbidden: Cannot add certification for another employee." };
+        }
+        certificationDetails.UserId = targetUserId;
+        return await _employeeService.AddEmployeeCertification(certificationDetails, targetUserId);
     }
 
     [Route("EditEmployeeCertification")]
     [HttpPost]
     public async Task<Result> EditEmployeeCertification(EmployeeCertificationRequestModel certificationDetails)
     {
-        string userId = string.IsNullOrEmpty(certificationDetails.UserId) ? CurrentContext.UserId(_httpContextAccessor) : certificationDetails.UserId;
-        return await _employeeService.EditEmployeeCertification(certificationDetails, userId);
+        string? targetUserId = await ResolveAuthorizedTargetUserId(certificationDetails.UserId);
+        if (targetUserId == null)
+        {
+            return new Result { Success = false, StatusCode = StatusCodes.Status403Forbidden, Message = "Forbidden: Cannot edit certification for another employee." };
+        }
+        certificationDetails.UserId = targetUserId;
+        return await _employeeService.EditEmployeeCertification(certificationDetails, targetUserId);
     }
 
     [Route("GetEmployeeSummary")]
     [HttpGet]
     public async Task<Result<EmployeeSummaryRequestModel>> GetEmployeeSummary([FromQuery] string userId = null)
     {
-        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        if (string.IsNullOrEmpty(userId)) userId = currentUserId;
+        if (!string.Equals(userId, currentUserId, StringComparison.Ordinal) && !await IsUserInSameCompany(userId))
+        {
+            return new Result<EmployeeSummaryRequestModel> { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "Employee not found." };
+        }
         EmployeeSummaryRequestModel summary = await _employeeService.GetEmployeeSummary(userId);
         return new Result<EmployeeSummaryRequestModel>()
         {
@@ -755,7 +857,12 @@ public class UserController : BaseApiController
     [HttpGet]
     public async Task<Result<EmpEducationDetails>> GetEmployeeEducationDetails([FromQuery] string userId = null)
     {
-        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        if (string.IsNullOrEmpty(userId)) userId = currentUserId;
+        if (!string.Equals(userId, currentUserId, StringComparison.Ordinal) && !await IsUserInSameCompany(userId))
+        {
+            return new Result<EmpEducationDetails> { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "Employee not found." };
+        }
         List<EmpEducationDetails> data = await _employeeService.GetEmployeeEducationDetails(userId);
         Result<EmpEducationDetails> result = new Result<EmpEducationDetails>();
         result.Success = true;
@@ -768,7 +875,12 @@ public class UserController : BaseApiController
     [HttpGet]
     public async Task<Result<EmpCertificationDetails>> GetEmployeeCertificationDetails([FromQuery] string userId = null)
     {
-        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        if (string.IsNullOrEmpty(userId)) userId = currentUserId;
+        if (!string.Equals(userId, currentUserId, StringComparison.Ordinal) && !await IsUserInSameCompany(userId))
+        {
+            return new Result<EmpCertificationDetails> { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "Employee not found." };
+        }
         List<EmpCertificationDetails> data = await _employeeService.GetEmployeeCertificationDetails(userId);
         Result<EmpCertificationDetails> result = new Result<EmpCertificationDetails>();
         result.Success = true;
@@ -779,24 +891,54 @@ public class UserController : BaseApiController
 
     [Route("UploadUserImage")]
     [HttpPost]
-    //[FilesExtensions([".jpg", ".jpeg", ".png"])]
     public async Task<Result<string>> UploadUserImage(IFormFile profilePicture)
     {
+        if (profilePicture == null || profilePicture.Length == 0)
+        {
+            return new Result<string>
+            {
+                Success = false,
+                StatusCode = StatusCodes.Status400BadRequest,
+                Message = "No image file provided."
+            };
+        }
+
+        const long maxFileSize = 5 * 1024 * 1024; // 5 MB
+        if (profilePicture.Length > maxFileSize)
+        {
+            return new Result<string>
+            {
+                Success = false,
+                StatusCode = StatusCodes.Status400BadRequest,
+                Message = "File size exceeds the 5 MB limit."
+            };
+        }
+
+        string fileExtension = Path.GetExtension(profilePicture.FileName).ToLowerInvariant();
+        string[] allowedExtensions = [".jpg", ".jpeg", ".png", ".webp"];
+        if (!allowedExtensions.Contains(fileExtension))
+        {
+            return new Result<string>
+            {
+                Success = false,
+                StatusCode = StatusCodes.Status400BadRequest,
+                Message = "Invalid file type. Only JPG, JPEG, PNG, and WEBP images are allowed."
+            };
+        }
 
         string userId = CurrentContext.UserId(_httpContextAccessor);
         string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "ProfileImage");
-        string fileExtension = Path.GetExtension(profilePicture.FileName);
         if (!Directory.Exists(uploadFolder))
         {
             Directory.CreateDirectory(uploadFolder);
         }
-        string fileName = $"{Guid.NewGuid().ToString()}{fileExtension}";
+        string fileName = $"{Guid.NewGuid():N}{fileExtension}";
         string filePath = Path.Combine(uploadFolder, fileName);
         using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
         {
             await profilePicture.CopyToAsync(fileStream);
         }
-        ;
+
         string profile = await _employeeService.GetUserExistingProfile(userId);
         if (string.IsNullOrEmpty(profile))
         {
@@ -812,9 +954,12 @@ public class UserController : BaseApiController
         }
         else
         {
-            string oldPath = Path.Combine(uploadFolder, profile);
-            FileInfo fileInfo = new(oldPath);
-            fileInfo.Delete();
+            string safeProfile = Path.GetFileName(profile);
+            string oldPath = Path.Combine(uploadFolder, safeProfile);
+            if (System.IO.File.Exists(oldPath))
+            {
+                System.IO.File.Delete(oldPath);
+            }
             string data = await _employeeService.AddUserProfileImage(fileName, userId, filePath);
 
             Result<string> result = new()
@@ -831,15 +976,25 @@ public class UserController : BaseApiController
     [HttpPost]
     public async Task<Result> AddEditSkills(SkillsRequestModel skillsModel)
     {
-        string userId = string.IsNullOrEmpty(skillsModel.UserId) ? CurrentContext.UserId(_httpContextAccessor) : skillsModel.UserId;
-        return await _employeeService.AddEditEmployeeSkills(skillsModel, userId);
+        string? targetUserId = await ResolveAuthorizedTargetUserId(skillsModel.UserId);
+        if (targetUserId == null)
+        {
+            return new Result { Success = false, StatusCode = StatusCodes.Status403Forbidden, Message = "Forbidden: Cannot edit skills for another employee." };
+        }
+        skillsModel.UserId = targetUserId;
+        return await _employeeService.AddEditEmployeeSkills(skillsModel, targetUserId);
     }
 
     [Route("GetEmployeeSkills")]
     [HttpGet]
     public async Task<Result<EmployeeSkillsDTO>> GetEmployeeSkills([FromQuery] string userId = null)
     {
-        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        if (string.IsNullOrEmpty(userId)) userId = currentUserId;
+        if (!string.Equals(userId, currentUserId, StringComparison.Ordinal) && !await IsUserInSameCompany(userId))
+        {
+            return new Result<EmployeeSkillsDTO> { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "Employee not found." };
+        }
         var result = await _employeeService.GetEmployeeSkills(userId);
         return new Result<EmployeeSkillsDTO>()
         {
@@ -853,16 +1008,24 @@ public class UserController : BaseApiController
     [HttpDelete]
     public async Task<Result> DeleteEducationDetails(string educationId, [FromBody] string userId)
     {
-        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
-        return await _employeeService.DeleteEducationDetails(educationId, userId);
+        string? targetUserId = await ResolveAuthorizedTargetUserId(userId);
+        if (targetUserId == null)
+        {
+            return new Result { Success = false, StatusCode = StatusCodes.Status403Forbidden, Message = "Forbidden: Cannot delete education details for another employee." };
+        }
+        return await _employeeService.DeleteEducationDetails(educationId, targetUserId);
     }
 
     [Route("DeleteCertificationDetails/{certificationId}")]
     [HttpDelete]
     public async Task<Result> DeleteCertificationDetails(string certificationId, [FromBody] string userId)
     {
-        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
-        return await _employeeService.DeleteCertificationDetails(certificationId, userId);
+        string? targetUserId = await ResolveAuthorizedTargetUserId(userId);
+        if (targetUserId == null)
+        {
+            return new Result { Success = false, StatusCode = StatusCodes.Status403Forbidden, Message = "Forbidden: Cannot delete certification details for another employee." };
+        }
+        return await _employeeService.DeleteCertificationDetails(certificationId, targetUserId);
     }
 
     [Route("DeleteEmployee")]
@@ -871,12 +1034,13 @@ public class UserController : BaseApiController
     public async Task<Result> DeleteEmployee([FromQuery] string employeeId)
     {
         Result data = await _employeeService.DeleteEmployee(employeeId);
-        if (data == null)
+        if (data == null || !data.Success)
         {
             return new Result()
             {
                 Success = false,
-                StatusCode = 400
+                StatusCode = 400,
+                Message = data?.Message ?? "Failed to delete employee"
             };
         }
         return new Result()
@@ -972,7 +1136,12 @@ public class UserController : BaseApiController
         {
             return new Result();
         }
-        if (string.IsNullOrEmpty(model.UserId)) model.UserId = CurrentContext.UserId(_httpContextAccessor);
+        string? targetUserId = await ResolveAuthorizedTargetUserId(model.UserId);
+        if (targetUserId == null)
+        {
+            return new Result { Success = false, StatusCode = StatusCodes.Status403Forbidden, Message = "Forbidden: Cannot modify work history for another employee." };
+        }
+        model.UserId = targetUserId;
         Result result = await _employeeService.AddUpdateWorkHistory(model);
         return result;
     }
@@ -981,7 +1150,12 @@ public class UserController : BaseApiController
     [Route("GetEmpWorkHistory")]
     public async Task<Result<EmployeeWorkHistoryModel>> GetEmpWorkHistory([FromQuery] string? userId)
     {
-        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
+        string currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        if (string.IsNullOrEmpty(userId)) userId = currentUserId;
+        if (!string.Equals(userId, currentUserId, StringComparison.Ordinal) && !await IsUserInSameCompany(userId))
+        {
+            return new Result<EmployeeWorkHistoryModel> { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "Employee not found." };
+        }
         var data = await _employeeService.GetEmpWorkHistory(userId);
         return new Result<EmployeeWorkHistoryModel>()
         {
@@ -994,8 +1168,12 @@ public class UserController : BaseApiController
     [Route("DeleteWorkHistory/{workId}")]
     public async Task<Result> DeleteWorkHistory(string workId, [FromBody] string? userId)
     {
-        if (string.IsNullOrEmpty(userId)) userId = CurrentContext.UserId(_httpContextAccessor);
-        return await _employeeService.DeleteWorkHistory(workId, userId);
+        string? targetUserId = await ResolveAuthorizedTargetUserId(userId);
+        if (targetUserId == null)
+        {
+            return new Result { Success = false, StatusCode = StatusCodes.Status403Forbidden, Message = "Forbidden: Cannot delete work history for another employee." };
+        }
+        return await _employeeService.DeleteWorkHistory(workId, targetUserId);
     }
 
     [HttpPost]

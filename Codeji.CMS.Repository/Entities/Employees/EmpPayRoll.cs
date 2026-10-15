@@ -2,6 +2,7 @@ using MongoDB.Bson.Serialization.Attributes;
 
 namespace Codeji.CMS.Repository.Entities.Employees;
 
+[BsonIgnoreExtraElements]
 public class EmpPayRoll
 {
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
@@ -40,6 +41,7 @@ public class EmpPayRoll
     public List<PayrollAuditEvent> AuditHistory { get; set; } = [];
 }
 
+[BsonIgnoreExtraElements]
 public class PayrollAuditEvent
 {
     public required string Action { get; set; }
@@ -47,6 +49,7 @@ public class PayrollAuditEvent
     public DateTime OccurredAtUtc { get; set; }
     public string? Notes { get; set; }
 }
+[BsonIgnoreExtraElements]
 public class PayrollDeductionLine
 {
     public required string Code { get; set; }
@@ -56,6 +59,7 @@ public class PayrollDeductionLine
     public string? SourceId { get; set; }
 }
 
+[BsonIgnoreExtraElements]
 public class PayrollEarningLine
 {
     public required string Code { get; set; }
@@ -63,6 +67,7 @@ public class PayrollEarningLine
     public decimal Amount { get; set; }
 }
 
+[BsonIgnoreExtraElements]
 public class PayrollCalculationSnapshot
 {
     public DateTime PayrollMonth { get; set; }
@@ -106,12 +111,14 @@ public class PayrollCalculationSnapshot
     public string CalculationEngineVersion { get; set; } = "2.0";
 }
 
+[BsonIgnoreExtraElements]
 public sealed class PayrollSalaryRevisionReference
 {
     public string SalaryStructureId { get; set; } = string.Empty;
     public int Version { get; set; }
 }
 
+[BsonIgnoreExtraElements]
 public class Allowance
 {
     public decimal HRA { get; set; }
@@ -119,6 +126,7 @@ public class Allowance
     public decimal OtherAllowance { get; set; }
 }
 
+[BsonIgnoreExtraElements]
 public class Deduction
 {
     public float LossOfPayDays { get; set; }

@@ -87,7 +87,11 @@ public sealed class AttendanceMutationValidator(
         if (!EmploymentPeriod.WasEmployedOn(employee, date)) return Fail(result, "ATTENDANCE_TARGET_UNAVAILABLE");
         if (!EmploymentPeriod.IsAttendanceExpectedOn(employee, date)) return Fail(result, "ATTENDANCE_NOT_EXPECTED_FOR_LIFECYCLE");
 
-        try { await editGuard.EnsureEditableWorkingDayAsync(request.CompanyId, request.TargetUserId, date); }
+        try
+        {
+            var isExceptionResolution = string.Equals(request.RemarkCode, "MONTHLY_EXCEPTION_RESOLUTION", StringComparison.OrdinalIgnoreCase);
+            await editGuard.EnsureEditableWorkingDayAsync(request.CompanyId, request.TargetUserId, date, isExceptionResolution);
+        }
         catch (InvalidOperationException ex) { return Fail(result, ex.Message); }
 
         var code = request.StatusCode.Trim().ToUpperInvariant();

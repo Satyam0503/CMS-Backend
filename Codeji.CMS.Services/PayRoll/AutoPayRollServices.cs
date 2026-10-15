@@ -160,7 +160,7 @@ namespace Codeji.CMS.Services.PayRoll
                     validationErrors.Add($"{employee.EmployeeId}: approved salary structure '{invalidSalaryIdentity.Id}' has an invalid identifier; correct the salary record before processing payroll.");
                 var validationRequiresAttendanceLock = validationProfile?.RequireAttendanceLock ?? requireAttendanceLock;
                 var summary = await _attendanceSummaryRepository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeId == employee.EmployeeId && x.PayrollMonth == monthStart && x.IsApproved && x.IsLocked);
-                if (summary == null && validationRequiresAttendanceLock) validationErrors.Add($"{employee.EmployeeId}: monthly attendance must be approved and locked.");
+                if (summary == null && validationRequiresAttendanceLock) validationErrors.Add($"{employee.EmployeeId}: monthly attendance for {monthStart:MMMM yyyy} must be approved and locked. Please go to Attendance -> Month Summary -> Click 'Validate & Lock Month' (or disable 'Require Attendance Lock' in Company Payroll Settings if daily attendance tracking is not required).");
                 // Missing salary structure is not a company-wide blocker: the generation loop below
                 // already skips that employee individually (tracked via skippedNoSalaryCount) and
                 // reports the count in the result message, so other employees can still be paid.

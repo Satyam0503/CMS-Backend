@@ -32,7 +32,7 @@ public class AttendanceStatusService : IAttendanceStatusService
     public async Task<List<AttendanceStatusSettingDto>> Get(string companyId, bool activeOnly)
     {
         await EnsureCompanyDefaults(companyId);
-        var items = (await _repository.GetAll(x => x.CompanyId == companyId)).ToList();
+        var items = (await _repository.GetAll(x => x.CompanyId == companyId, withDefaultFilter: false)).ToList();
         return items.Where(x => !activeOnly || x.IsActive).OrderBy(x => x.SortOrder).Select(x => new AttendanceStatusSettingDto { Id=x.Id, Code=x.Code, Name=x.Name, IsActive=x.IsActive, IsSystem=x.IsSystem, SortOrder=x.SortOrder, RequiresTime=x.RequiresTime, IsAvailableForLeaveManagement=x.IsAvailableForLeaveManagement, ColorHex=string.IsNullOrWhiteSpace(x.ColorHex) ? "#607D8B" : x.ColorHex, PaidDayFraction=x.PaidDayFraction, UnpaidDayFraction=x.UnpaidDayFraction }).ToList();
     }
 

@@ -75,14 +75,28 @@ public class PublicCareerService : IPublicCareerService
 
     public async Task<Result<PublicJobSummaryDto>> GetCompanyJobs(string companyCode, PublicJobSearchRequest request)
     {
-        string code = Regex.Replace(companyCode ?? string.Empty, @"\D", string.Empty);
+        if (string.IsNullOrWhiteSpace(companyCode))
+        {
+            return new Result<PublicJobSummaryDto> { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "Career portal not found." };
+        }
+
+        string trimmedCode = companyCode.Trim();
+        string numericCode = Regex.Replace(trimmedCode, @"\D", string.Empty);
         var cf = Builders<Company>.Filter;
-        var companyFilter = cf.And(cf.Eq(c => c.Status, true), cf.Eq(c => c.IsDeleted, false),
-            cf.Or(
-                cf.Eq(c => c.PublicCompanyCode, code),
-                cf.Eq(c => c.PublicCompanyCode, companyCode),
-                cf.Regex(c => c.PublicCompanyCode, new MongoDB.Bson.BsonRegularExpression(code))
-            ));
+        FilterDefinition<Company> companyFilter;
+        if (!string.IsNullOrEmpty(numericCode))
+        {
+            companyFilter = cf.And(cf.Eq(c => c.Status, true), cf.Eq(c => c.IsDeleted, false),
+                cf.Or(
+                    cf.Eq(c => c.PublicCompanyCode, numericCode),
+                    cf.Eq(c => c.PublicCompanyCode, trimmedCode)
+                ));
+        }
+        else
+        {
+            companyFilter = cf.And(cf.Eq(c => c.Status, true), cf.Eq(c => c.IsDeleted, false),
+                cf.Eq(c => c.PublicCompanyCode, trimmedCode));
+        }
         var company = await _companies.Find(companyFilter).FirstOrDefaultAsync();
         if (company is null)
         {
@@ -106,7 +120,6 @@ public class PublicCareerService : IPublicCareerService
 
     public async Task<Result<string>> GetLocations(string? companyCode, string? search)
     {
-        var normalizedCompanyCode = Regex.Replace(companyCode ?? string.Empty, @"\D", string.Empty);
         var cf = Builders<Company>.Filter;
         FilterDefinition<Company> companyFilter;
         if (string.IsNullOrWhiteSpace(companyCode))
@@ -115,12 +128,21 @@ public class PublicCareerService : IPublicCareerService
         }
         else
         {
-            companyFilter = cf.And(cf.Eq(c => c.Status, true), cf.Eq(c => c.IsDeleted, false),
-                cf.Or(
-                    cf.Eq(c => c.PublicCompanyCode, normalizedCompanyCode),
-                    cf.Eq(c => c.PublicCompanyCode, companyCode),
-                    cf.Regex(c => c.PublicCompanyCode, new BsonRegularExpression(normalizedCompanyCode))
-                ));
+            string trimmed = companyCode.Trim();
+            var normalizedCompanyCode = Regex.Replace(trimmed, @"\D", string.Empty);
+            if (!string.IsNullOrEmpty(normalizedCompanyCode))
+            {
+                companyFilter = cf.And(cf.Eq(c => c.Status, true), cf.Eq(c => c.IsDeleted, false),
+                    cf.Or(
+                        cf.Eq(c => c.PublicCompanyCode, normalizedCompanyCode),
+                        cf.Eq(c => c.PublicCompanyCode, trimmed)
+                    ));
+            }
+            else
+            {
+                companyFilter = cf.And(cf.Eq(c => c.Status, true), cf.Eq(c => c.IsDeleted, false),
+                    cf.Eq(c => c.PublicCompanyCode, trimmed));
+            }
         }
         var companies = await _companies.Find(companyFilter).Project(c => c.CompanyId).ToListAsync();
         if (companies.Count == 0)

@@ -8,7 +8,7 @@ using Codeji.CMS.Utility.Enums;
 
 public interface IAttendanceEditGuard
 {
-    Task EnsureEditableWorkingDayAsync(string companyId, string userId, DateTime date);
+    Task EnsureEditableWorkingDayAsync(string companyId, string userId, DateTime date, bool isExceptionResolution = false);
 }
 
 public sealed class AttendanceEditGuard(
@@ -19,7 +19,7 @@ public sealed class AttendanceEditGuard(
     IMongoDbRepository<CalendarEntity> calendar,
     IMongoDbRepository<EmployeeExitAttendanceCutoff> exitCutoffs) : IAttendanceEditGuard
 {
-    public async Task EnsureEditableWorkingDayAsync(string companyId, string userId, DateTime date)
+    public async Task EnsureEditableWorkingDayAsync(string companyId, string userId, DateTime date, bool isExceptionResolution = false)
     {
         var employee = (await employees.GetAll(x =>
             x.CompanyId == companyId && x.UserId == userId && !x.IsDeleted, withDefaultFilter: false)).FirstOrDefault()
@@ -39,7 +39,7 @@ public sealed class AttendanceEditGuard(
         if ((await payrolls.GetAll(x => x.CompanyId == employee.CompanyId && x.EmployeeId == employee.EmployeeId && x.PayMonth == month &&
             (x.PaymentStatus == "PAID" || x.PaymentStatus == "CLOSED" || x.WorkflowStatus == "PAID" || x.WorkflowStatus == "CLOSED"), withDefaultFilter: false)).Any())
             throw new InvalidOperationException($"Attendance for employee {employee.EmployeeId} cannot be changed because payroll for {month:MMMM yyyy} has already been paid or closed.");
-        if ((await summaries.GetAll(x => x.CompanyId == employee.CompanyId && x.UserId == userId && x.PayrollMonth == month && x.IsLocked, withDefaultFilter: false)).Any())
+        if (!isExceptionResolution && (await summaries.GetAll(x => x.CompanyId == employee.CompanyId && x.UserId == userId && x.PayrollMonth == month && x.IsLocked, withDefaultFilter: false)).Any())
             throw new InvalidOperationException($"Attendance for employee {employee.EmployeeId} cannot be changed because attendance for {month:MMMM yyyy} is locked.");
 
         var weekly = (await weeklyOffs.GetAll(x => x.CompanyId == employee.CompanyId, withDefaultFilter: false)).FirstOrDefault();

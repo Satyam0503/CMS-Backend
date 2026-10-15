@@ -826,6 +826,7 @@ namespace Codeji.CMS.Services.Employees
         public async Task<UserModel> GetEmployeeById(string userId)
         {
             EmpUser? user = await _employeeRepository.FirstOrDefault(x => x.UserId == userId);
+            if (user == null) return null!;
             UserModel userModel = _mapper.Map<UserModel>(user);
             userModel.EmploymentStatus = user.Lifecycle?.EmploymentStatus ?? userModel.EmploymentStatus;
             userModel.AvailabilityStatus = user.Lifecycle?.AvailabilityStatus ?? EmployeeLifecycleStatuses.Working;
@@ -4091,7 +4092,13 @@ if (specialLeaveError is not null)
         public async Task<Result> DeleteEmployee(string employeeId)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
-            //Update for Education Details
+            var employee = await _employeeRepository.FirstOrDefault(x => x.UserId == employeeId && x.CompanyId == companyId && !x.IsDeleted);
+            if (employee == null)
+            {
+                return new Result { Success = false, Message = "Employee not found." };
+            }
+
+            //Update for Certification Details
             Expression<Func<EmpCertificationDetails, bool>> certificateWhereCondition = x => x.UserId == employeeId;
             UpdateDefinitionBuilder<EmpCertificationDetails> empCerUpdateDefinition = Builders<EmpCertificationDetails>.Update;
             UpdateDefinition<EmpCertificationDetails> empCerUpdate = empCerUpdateDefinition.Set(x => x.IsDeleted, true).Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.UpdatedBy, employeeId);
@@ -4107,13 +4114,14 @@ if (specialLeaveError is not null)
             UpdateDefinition<EmpSkills> empSkillUpdate = empSkillUpdateDefinition.Set(x => x.IsDeleted, true).Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.UpdatedBy, employeeId);
             await _employeeSkillsRepository.UpdateMany(skillsWhereCondition, empSkillUpdate);
 
-
             Expression<Func<EmpSummary, bool>> summaryWhereCondition = x => x.UserId == employeeId;
             UpdateDefinitionBuilder<EmpSummary> empSumUpdateDefinition = Builders<EmpSummary>.Update;
             UpdateDefinition<EmpSummary> empSumUpdate = empSumUpdateDefinition.Set(x => x.IsDeleted, true).Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.UpdatedBy, employeeId);
             await _employeeSummaryRepo.UpdateMany(summaryWhereCondition, empSumUpdate);
 
-
+            //Update for Work History
+            Expression<Func<EmpWorkHistory, bool>> workWhereCondition = x => x.UserId == employeeId;
+            await _empWorkHistoryRepository.UpdateMany(workWhereCondition, Builders<EmpWorkHistory>.Update.Set(x => x.IsDeleted, true).Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.UpdatedBy, employeeId));
 
             Expression<Func<EmpUser, bool>> employeeWhereCondition = x => x.UserId == employeeId && x.CompanyId == companyId;
             UpdateDefinitionBuilder<EmpUser> empUpdateDefinition = Builders<EmpUser>.Update;
@@ -4238,9 +4246,9 @@ if (specialLeaveError is not null)
 
         public async Task<Result> DeleteWorkHistory(string workId, string userId)
         {
-            bool exits = await _empWorkHistoryRepository.Exist(x => x.WorkHistoryId.Equals(workId));
-            if (!exits) return new Result();
-            Expression<Func<EmpWorkHistory, bool>> whereCondition = x => x.WorkHistoryId == workId;
+            bool exits = await _empWorkHistoryRepository.Exist(x => x.WorkHistoryId == workId && x.UserId == userId && !x.IsDeleted);
+            if (!exits) return new Result { Success = false, Message = "Work history not found." };
+            Expression<Func<EmpWorkHistory, bool>> whereCondition = x => x.WorkHistoryId == workId && x.UserId == userId;
             return await _empWorkHistoryRepository.UpdateMany(whereCondition, Builders<EmpWorkHistory>.Update.Set(x => x.IsDeleted, true));
         }
         public async Task<NotificationResponseModel> GetAllNotifications(NotificationRequestDTO model, string userId)
@@ -4346,10 +4354,18 @@ if (specialLeaveError is not null)
 
             Expression<Func<EmpUser, bool>> expression = emp =>
                 !string.IsNullOrEmpty(emp.DateOfBirth)
-                && emp.DateOfBirth.Substring(5, 5) == currentMonthDay;
+                && emp.DateOfBirth.Length >= 10
+                && emp.DateOfBirth.Substring(5, 5) == currentMonthDay
+                && emp.Status
+                && !emp.IsDeleted;
 
             IEnumerable<EmpUser> birthDayEmployeeList = await _employeeRepository.GetAll(expression, withDefaultFilter: false);
-            IEnumerable<EmpUser> EmployeeAnniversaryList = await _employeeRepository.GetAll(emp => !string.IsNullOrEmpty(emp.DateOfJoining) && emp.DateOfJoining.Substring(5, 5) == currentMonthDay, withDefaultFilter: false);
+            IEnumerable<EmpUser> EmployeeAnniversaryList = await _employeeRepository.GetAll(emp =>
+                !string.IsNullOrEmpty(emp.DateOfJoining)
+                && emp.DateOfJoining.Length >= 10
+                && emp.DateOfJoining.Substring(5, 5) == currentMonthDay
+                && emp.Status
+                && !emp.IsDeleted, withDefaultFilter: false);
 
             var notificationTasks = new List<Task>();
             List<UserNotifications> userNotifications = [];
@@ -4358,8 +4374,8 @@ if (specialLeaveError is not null)
             {
                 foreach (EmpUser employee in birthDayEmployeeList)
                 {
-                    Expression<Func<EmpUser, bool>> exp = emp => emp.CompanyId == employee.CompanyId && emp.UserId != employee.UserId && emp.Status;
-                    List<EmpUser> allEmployees = _employeeRepository.Get(exp).ToList();
+                    Expression<Func<EmpUser, bool>> exp = emp => emp.CompanyId == employee.CompanyId && emp.UserId != employee.UserId && emp.Status && !emp.IsDeleted;
+                    List<EmpUser> allEmployees = (await _employeeRepository.GetAll(exp, withDefaultFilter: false)).ToList();
                     List<EmpUser> targetEmployeeList = new();
                     foreach (var emp in allEmployees)
                     {
@@ -4405,8 +4421,8 @@ if (specialLeaveError is not null)
             {
                 foreach (EmpUser employee in EmployeeAnniversaryList)
                 {
-                    Expression<Func<EmpUser, bool>> exp = emp => emp.CompanyId == employee.CompanyId && emp.UserId != employee.UserId && emp.Status;
-                    List<EmpUser> allEmployees = _employeeRepository.Get(exp).ToList();
+                    Expression<Func<EmpUser, bool>> exp = emp => emp.CompanyId == employee.CompanyId && emp.UserId != employee.UserId && emp.Status && !emp.IsDeleted;
+                    List<EmpUser> allEmployees = (await _employeeRepository.GetAll(exp, withDefaultFilter: false)).ToList();
                     List<EmpUser> targetEmployeeList = new();
                     foreach (var emp in allEmployees)
                     {
