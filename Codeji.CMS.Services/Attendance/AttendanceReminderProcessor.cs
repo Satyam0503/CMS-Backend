@@ -61,7 +61,7 @@ public sealed class AttendanceReminderProcessor(
 
                 var created = 0;
                 var existing = 0;
-                foreach (var employee in await employees.GetAll(x => x.CompanyId == companyId && x.Status && !x.IsDeleted && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Suspended), WithDeletedObjects: false, withDefaultFilter: false))
+                foreach (var employee in await employees.GetAll(x => x.CompanyId == companyId && x.Status && !x.IsDeleted && (x.Lifecycle == null || x.Lifecycle.EmploymentStatus == null || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.Active || x.Lifecycle.EmploymentStatus == EmployeeLifecycleStatuses.NoticePeriod), WithDeletedObjects: false, withDefaultFilter: false))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var schedule = await schedules.ResolveAsync(companyId, employee, today, cancellationToken);

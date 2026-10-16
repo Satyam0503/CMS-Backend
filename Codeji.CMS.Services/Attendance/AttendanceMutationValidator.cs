@@ -6,6 +6,7 @@ using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Employees;
 using MongoDB.Bson;
+using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Attendance;
 
@@ -109,23 +110,44 @@ public sealed class AttendanceMutationValidator(
             if (request.TimingMode == AttendanceTimingMode.Auto)
             {
                 // System-generated Present rows carry the effective schedule's planned
-                // punch window.  This is tenant/employee schedule-derived (for example
+                // punch window. This is tenant/employee schedule-derived (for example
                 // 09:00–18:00), never a frontend or global hard-coded value.
                 if (schedule is not null)
                 {
                     checkIn = ToScheduleUtc(date, schedule.StartTime, schedule.TimeZoneId);
                     checkOut = ToScheduleUtc(date, schedule.EndTime, schedule.TimeZoneId);
+                    if (schedule.EndTime <= schedule.StartTime)
+                    {
+                        checkOut = checkOut.Value.AddDays(1);
+                    }
+                }
+                else
+                {
+                    // Fallback to standard 09:00 - 18:00 IST when schedule is not explicitly assigned
+                    checkIn = ToScheduleUtc(date, new TimeSpan(9, 0, 0), "Asia/Kolkata");
+                    checkOut = ToScheduleUtc(date, new TimeSpan(18, 0, 0), "Asia/Kolkata");
                 }
             }
             else if (request.TimingMode == AttendanceTimingMode.Custom)
             {
-                if (!request.CheckInTime.HasValue || !request.CheckOutTime.HasValue) return Fail(result, "ATTENDANCE_TIMING_REQUIRED");
+                var effCheckIn = request.CheckInTime ?? (schedule is not null ? TimeOnly.FromTimeSpan(schedule.StartTime) : new TimeOnly(9, 0));
+                var effCheckOut = request.CheckOutTime ?? (schedule is not null ? TimeOnly.FromTimeSpan(schedule.EndTime) : new TimeOnly(18, 0));
+
                 checkIn = schedule is null
-                    ? date.Add(request.CheckInTime.Value.ToTimeSpan())
-                    : ToScheduleUtc(date, request.CheckInTime.Value.ToTimeSpan(), schedule.TimeZoneId);
+                    ? date.Add(effCheckIn.ToTimeSpan())
+                    : ToScheduleUtc(date, effCheckIn.ToTimeSpan(), schedule.TimeZoneId);
                 checkOut = schedule is null
-                    ? date.Add(request.CheckOutTime.Value.ToTimeSpan())
-                    : ToScheduleUtc(date, request.CheckOutTime.Value.ToTimeSpan(), schedule.TimeZoneId);
+                    ? date.Add(effCheckOut.ToTimeSpan())
+                    : ToScheduleUtc(date, effCheckOut.ToTimeSpan(), schedule.TimeZoneId);
+                if (checkOut <= checkIn)
+                {
+                    // Check if this is an overnight shift
+                    if ((schedule is not null && schedule.EndTime < schedule.StartTime) ||
+                        effCheckOut < effCheckIn)
+                    {
+                        checkOut = checkOut.Value.AddDays(1);
+                    }
+                }
                 if (checkOut <= checkIn)
                     return Fail(result, "Check-out time cannot be earlier than or equal to check-in time.");
             }
@@ -133,7 +155,7 @@ public sealed class AttendanceMutationValidator(
         }
         else
         {
-            // The selected status owns its timing rules.  A stale editor/API payload must
+            // The selected status owns its timing rules. A stale editor/API payload must
             // never prevent Present -> Absent (or another non-timed transition), and it
             // must never leave former Present clock events on the persisted row.
             checkIn = null;
@@ -142,18 +164,46 @@ public sealed class AttendanceMutationValidator(
 
         var existing = await attendance.GetByUserAndDateAsync(request.CompanyId, request.TargetUserId, date);
         // A split day is owned by its leave/WFH workflow even when there is no
-        // compatibility AttendanceModel row.  Generic manual editing cannot
-        // replace one half of that source-owned day with a full-day status.
-        var sourceOwnedSegment = (await attendanceSegments.GetAll(x =>
+        // compatibility AttendanceModel row.
+        var existingSegments = (await attendanceSegments.GetAll(x =>
                 x.CompanyId == request.CompanyId &&
                 x.UserId == request.TargetUserId &&
                 x.Date >= date &&
-                x.Date < date.AddDays(1)))
-            .FirstOrDefault(x => x.SourceType is "LEAVE" or "WFH_REQUEST");
-        if (sourceOwnedSegment is not null)
-            return Fail(result, string.Equals(sourceOwnedSegment.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase)
+                x.Date < date.AddDays(1))).ToList();
+        var sourceOwnedSegments = existingSegments.Where(x => x.SourceType is "LEAVE" or "WFH_REQUEST").ToList();
+        if (sourceOwnedSegments.Count >= 2)
+        {
+            var firstSource = sourceOwnedSegments[0];
+            return Fail(result, string.Equals(firstSource.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase)
                 ? "ATTENDANCE_SOURCE_OWNED_LEAVE"
                 : "ATTENDANCE_SOURCE_OWNED_WFH");
+        }
+        else if (sourceOwnedSegments.Count == 1)
+        {
+            var owned = sourceOwnedSegments[0];
+            var complement = owned.Segment == "FIRST_HALF" ? "SECOND_HALF" : "FIRST_HALF";
+            var existingComp = existingSegments.FirstOrDefault(x => x.Segment == complement);
+            var compEntity = existingComp ?? new AttendanceDaySegment
+            {
+                CompanyId = request.CompanyId,
+                UserId = employee.UserId,
+                EmployeeId = employee.EmployeeId,
+                Date = DateTime.SpecifyKind(date.Date, DateTimeKind.Utc),
+                Segment = complement
+            };
+            compEntity.Status = code;
+            compEntity.SourceType = string.IsNullOrWhiteSpace(request.SourceType) ? "ADMIN_MANUAL" : request.SourceType.Trim();
+            compEntity.CheckInTime = checkIn;
+            compEntity.CheckOutTime = checkOut;
+            compEntity.TotalHours = checkIn.HasValue && checkOut.HasValue ? Math.Max((decimal)(checkOut.Value - checkIn.Value).TotalHours, 0) : null;
+            compEntity.Remarks = request.OperatorRemark ?? $"Worked segment complement to {owned.Segment} {owned.SourceType}";
+            compEntity.UpdatedAtUtc = DateTime.UtcNow;
+
+            if (string.IsNullOrEmpty(compEntity.AttendanceDaySegmentId))
+                await attendanceSegments.AddOne(compEntity);
+            else
+                await attendanceSegments.Update(Builders<AttendanceDaySegment>.Filter.Eq(x => x.AttendanceDaySegmentId, compEntity.AttendanceDaySegmentId), compEntity);
+        }
         if (existing is not null)
         {
             if (string.Equals(existing.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase)) return Fail(result, "ATTENDANCE_SOURCE_OWNED_LEAVE");
@@ -171,6 +221,8 @@ public sealed class AttendanceMutationValidator(
         row.Status = code; row.SourceType = string.IsNullOrWhiteSpace(request.SourceType) ? "ADMIN_MANUAL" : request.SourceType.Trim(); row.SourceId = null; row.SourceVersion = 0;
         row.CheckInTime = checkIn; row.CheckOutTime = checkOut; row.BreakMinutes = schedule?.BreakMinutes ?? 0;
         row.TotalHours = checkIn.HasValue && checkOut.HasValue ? Math.Max((decimal)(checkOut.Value - checkIn.Value).TotalHours - (row.BreakMinutes / 60m), 0) : 0;
+        row.LateCount = (code is "LHD" or "LC" or "LHD+ED") ? 1 : 0;
+        row.EarlyExitCount = (code is "ED" or "LHD+ED") ? 1 : 0;
         row.SystemRemark = null;
         // Explicit status selection must use the same effective (company/department/employee)
         // schedule as automatic classification. ED is about leaving early; LHD is about arriving late.
@@ -181,7 +233,7 @@ public sealed class AttendanceMutationValidator(
         TimeSpan? halfDayCheckOutBoundary = schedule is null ? null : earlyDepartureBoundary.Subtract(grace);
         if (schedule is not null && code == "ED" && (!request.CheckOutTime.HasValue || request.CheckOutTime.Value.ToTimeSpan() >= earlyDepartureBoundary))
             return Fail(result, "Check-out time must be earlier than the configured Early Departure boundary to mark Early Departure.");
-        if (schedule is not null && code == "ED" && halfDayCheckOutBoundary.HasValue && request.CheckOutTime!.Value.ToTimeSpan() < halfDayCheckOutBoundary.Value)
+        if (!request.PreserveRequestedStatus && schedule is not null && code == "ED" && halfDayCheckOutBoundary.HasValue && request.CheckOutTime!.Value.ToTimeSpan() < halfDayCheckOutBoundary.Value)
         {
             var halfDay = await statuses.FirstOrDefault(x => x.CompanyId == request.CompanyId && x.Code == "HD" && x.IsActive);
             if (halfDay is null) return Fail(result, "Check-out is before the configured Half Day boundary and no active Half Day attendance status is configured.");
@@ -191,7 +243,7 @@ public sealed class AttendanceMutationValidator(
         }
         if (schedule is not null && code == "LHD" && (!request.CheckInTime.HasValue || request.CheckInTime.Value.ToTimeSpan() <= lateArrivalBoundary))
             return Fail(result, "Check-in time must be later than the configured Late Arrival boundary to mark Late Arrival.");
-        if (schedule is not null && code == "LHD" && halfDayCheckInBoundary.HasValue && request.CheckInTime!.Value.ToTimeSpan() > halfDayCheckInBoundary.Value)
+        if (!request.PreserveRequestedStatus && schedule is not null && code == "LHD" && halfDayCheckInBoundary.HasValue && request.CheckInTime!.Value.ToTimeSpan() > halfDayCheckInBoundary.Value)
         {
             var halfDay = await statuses.FirstOrDefault(x => x.CompanyId == request.CompanyId && x.Code == "HD" && x.IsActive);
             if (halfDay is null) return Fail(result, "Check-in is after the configured Half Day boundary and no active Half Day attendance status is configured.");

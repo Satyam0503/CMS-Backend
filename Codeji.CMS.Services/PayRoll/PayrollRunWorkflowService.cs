@@ -76,7 +76,13 @@ public sealed class PayrollRunWorkflowService(IMongoDbRepository<PayrollRun> run
     var run=await runs.FirstOrDefault(x=>x.CompanyId==c&&x.Id==id);
     if(run is not null)
     {
+     var runRows=(await employees.GetAll(x=>x.CompanyId==c&&x.PayrollRunId==id&&x.Status=="CALCULATED")).ToList();
+     var targetEmployeeIds=runRows.Select(x=>x.EmployeeId).Where(x=>!string.IsNullOrWhiteSpace(x)).Distinct().ToList();
      var filter=Builders<EmpPayRoll>.Filter.Eq(p=>p.CompanyId,c)&Builders<EmpPayRoll>.Filter.Eq(p=>p.PayMonth,run.PeriodStart)&Builders<EmpPayRoll>.Filter.Ne(p=>p.IsProcessed,true);
+     if(targetEmployeeIds.Count>0)
+     {
+      filter&=Builders<EmpPayRoll>.Filter.In(p=>p.EmployeeId,targetEmployeeIds);
+     }
      var update=Builders<EmpPayRoll>.Update.Set(p=>p.IsProcessed,true).Set(p=>p.WorkflowStatus,"PROCESSED").Set(p=>p.ProcessedAt,DateTime.UtcNow).Set(p=>p.ProcessedBy,actor).Push(p=>p.AuditHistory,new PayrollAuditEvent{Action="PayrollProcessedViaRun",ActorId=actor,OccurredAtUtc=DateTime.UtcNow,Notes=$"Synchronized from Payroll Run {id}"});
      await payrolls.UpdateMany(filter,update);
     }

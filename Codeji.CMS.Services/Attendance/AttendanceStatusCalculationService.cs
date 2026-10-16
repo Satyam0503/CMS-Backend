@@ -16,6 +16,10 @@ public sealed class AttendanceStatusCalculationService : IAttendanceStatusCalcul
 {
     public string CalculateOfficeStatus(CompanyOfficeSchedule schedule, TimeOnly checkIn, TimeOnly checkOut, decimal totalHours)
     {
+        var minHalfDayHours = schedule.RequiredWorkingMinutes > 0 ? (schedule.RequiredWorkingMinutes / 120m) : 4.0m;
+        if (totalHours <= 0 || totalHours < minHalfDayHours)
+            return "A";
+
         var grace = TimeSpan.FromMinutes(Math.Max(schedule.GraceMinutes, 0));
         var lateArrivalStart = schedule.CheckInAllowedUntil ?? schedule.StartTime;
         var earlyDepartureStart = schedule.CheckOutAllowedFrom ?? schedule.EndTime;

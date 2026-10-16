@@ -6,6 +6,9 @@ public static class AttendancePayrollRules
     public static int ExceededOccurrences(int lhdCount, int edCount, int allowedCount) =>
         Math.Max(0, lhdCount + edCount - Math.Max(0, allowedCount));
 
+    public static int ExceededOccurrences(int combinedCount, int allowedCount) =>
+        Math.Max(0, combinedCount - Math.Max(0, allowedCount));
+
     public static bool TryGetEligiblePeriod(EmpUser employee, DateTime monthStart, DateTime monthEnd, out DateTime eligibleFrom, out DateTime eligibleTo)
     {
         eligibleFrom = monthStart.Date;

@@ -374,12 +374,32 @@ namespace Codeji.CMS.Services.PayRoll
                         return new Result { Success = false, Message = $"Invalid payroll divisor for employee {emp.EmployeeId}. No payroll was changed." };
                     }
 
-                    // Joining / exit / split-month earned components
-                    decimal basicAfterJoining = PayrollCalculationRules.RoundMoney(weightedBasicSum / daysInMonth);
-                    decimal hra = PayrollCalculationRules.RoundMoney(weightedHraSum / daysInMonth);
-                    decimal lta = PayrollCalculationRules.RoundMoney(weightedLtaSum / daysInMonth);
-                    decimal otherAllowance = PayrollCalculationRules.RoundMoney(weightedOtherSum / daysInMonth);
-                    decimal bonus = PayrollCalculationRules.RoundMoney(weightedBonusSum / daysInMonth);
+                    // Joining / exit / split-month earned components aligned with divisor policy
+                    decimal basicAfterJoining;
+                    decimal hra;
+                    decimal lta;
+                    decimal otherAllowance;
+                    decimal bonus;
+
+                    if (eligibleDays < daysInMonth && effectiveDivisorPolicy == "WORKING_DAYS")
+                    {
+                        var eligibleWorkingDaysInPeriod = await _workingCalendar.CountWorkingDaysAsync(
+                            companyId, DateOnly.FromDateTime(eligibleFrom), DateOnly.FromDateTime(eligibleTo));
+                        decimal prorationFactor = workingDays > 0 ? (decimal)eligibleWorkingDaysInPeriod / workingDays : (decimal)eligibleDays / daysInMonth;
+                        basicAfterJoining = PayrollCalculationRules.RoundMoney(originalBasic * prorationFactor);
+                        hra = PayrollCalculationRules.RoundMoney(originalHRA * prorationFactor);
+                        lta = PayrollCalculationRules.RoundMoney(originalLTA * prorationFactor);
+                        otherAllowance = PayrollCalculationRules.RoundMoney(originalOtherAllowance * prorationFactor);
+                        bonus = PayrollCalculationRules.RoundMoney(originalBonus * prorationFactor);
+                    }
+                    else
+                    {
+                        basicAfterJoining = PayrollCalculationRules.RoundMoney(weightedBasicSum / daysInMonth);
+                        hra = PayrollCalculationRules.RoundMoney(weightedHraSum / daysInMonth);
+                        lta = PayrollCalculationRules.RoundMoney(weightedLtaSum / daysInMonth);
+                        otherAllowance = PayrollCalculationRules.RoundMoney(weightedOtherSum / daysInMonth);
+                        bonus = PayrollCalculationRules.RoundMoney(weightedBonusSum / daysInMonth);
+                    }
 
                     // Transparent payslip model: keep earned/prorated basic before attendance LOP;
                     // LOP is stored once in the deductions section and subtracted once from net pay.
@@ -442,24 +462,38 @@ namespace Codeji.CMS.Services.PayRoll
                     decimal taxableEarnedGrossAfterLop = Math.Max(0m, earnedGrossAfterLop - nonTaxableMonthlyEarnings);
 
                     decimal annualGrossIncome;
+                    int futureMonthsAfterCurrent = Math.Max(0, remainingMonthsInFy - 1);
+                    int divisorMonths = remainingMonthsInFy;
+
                     if (priorFyPayrolls.Count > 0)
                     {
                         decimal ytdActualGross = priorFyPayrolls.Sum(p =>
                             Math.Max(0m, p.BasicPay + (p.Allowance?.HRA ?? 0m) + (p.Allowance?.LTA ?? 0m) + (p.Allowance?.OtherAllowance ?? 0m) + p.Bonus - (p.Deduction?.LossOfPay ?? 0m)));
-                        int futureMonthsAfterCurrent = Math.Max(0, remainingMonthsInFy - 1);
                         annualGrossIncome = ytdActualGross + taxableEarnedGrossAfterLop + (taxableContractualFixedMonthlyGross * futureMonthsAfterCurrent);
+                    }
+                    else if (joiningDate.Date >= fyStart)
+                    {
+                        // Mid-year joiner with no prior FY payrolls: project only for remaining months employed in this FY
+                        annualGrossIncome = Math.Max(0m, taxableEarnedGrossAfterLop + (taxableContractualFixedMonthlyGross * futureMonthsAfterCurrent) + bonus);
                     }
                     else
                     {
-                        // Standalone / first-month projection: recurring fixed taxable gross * 12, minus current month LOP, plus one-time bonus once
-                        annualGrossIncome = Math.Max(0m, (taxableContractualFixedMonthlyGross * 12m) - lossOfPay + bonus);
+                        if (monthStart == fyStart)
+                        {
+                            annualGrossIncome = Math.Max(0m, taxableEarnedGrossAfterLop + (taxableContractualFixedMonthlyGross * futureMonthsAfterCurrent) + bonus);
+                        }
+                        else
+                        {
+                            annualGrossIncome = Math.Max(0m, (taxableContractualFixedMonthlyGross * 12m) - lossOfPay + bonus);
+                            divisorMonths = remainingMonthsInFy;
+                        }
                     }
 
                     decimal monthlyIncomeTax = PayrollCalculationRules.CalculateMonthlyTds(
                         annualGrossIncome,
                         effectiveTdsMode,
                         ytdTaxAlreadyDeducted,
-                        priorFyPayrolls.Count > 0 ? remainingMonthsInFy : 12);
+                        divisorMonths);
 
                     var salaryDeductionLines = weightedSalaryDeductions
                         .Select(x => new PayrollDeductionLineDto

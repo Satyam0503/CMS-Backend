@@ -37,7 +37,7 @@ public static class PayrollCalculationRules
     public static decimal ResolveFallbackUnpaidDayFraction(string? status) => status?.Trim().ToUpperInvariant() switch
     {
         "A" => 1m,
-        "HD" or "LHD" or "WFH-HD" => 0.5m,
+        "HD" or "LHD" or "LHD+ED" or "WFH-HD" => 0.5m,
         _ => 0m
     };
 

@@ -1028,6 +1028,78 @@ public sealed class AttendanceImportServiceTests
     }
 
     [Fact]
+    public async Task CommitAsync_WhenImportSpecifiesOffDay_PurgesPreExistingNonLeaveRecord()
+    {
+        // BUG-06: When importing an off-day (WO or H), any prior non-leave record
+        // (such as SYSTEM_DEFAULT_PRESENT or ADMIN_MANUAL) must be deleted from _attendance.
+        var realEmp = new EmpUser
+        {
+            UserId = "user-alice",
+            EmployeeId = "EMP-ALICE",
+            Email = "alice@company.com",
+            FirstName = "Alice",
+            LastName = "Wonderland",
+            Status = true,
+            DateOfJoining = "2026-09-01",
+            Department = "dept-it"
+        };
+
+        _employees.Setup(e => e.GetAll(It.IsAny<Expression<Func<EmpUser, bool>>>(), false, true))
+            .ReturnsAsync(new List<EmpUser> { realEmp });
+
+        _leaves.Setup(l => l.GetAll(It.IsAny<Expression<Func<LeaveRequest, bool>>>(), false, true))
+            .ReturnsAsync(new List<LeaveRequest>());
+
+        _attendanceRepository.Setup(r => r.BulkUpsertAsync(It.IsAny<IEnumerable<AttendanceModel>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(22);
+
+        var (templateBytes, _) = await _service.GenerateTemplateAsync("company-1", 2026, 9);
+        using var wb = new XLWorkbook(new MemoryStream(templateBytes));
+        var musterSheet = wb.Worksheet(1);
+
+        musterSheet.Cell(4, 1).Value = "EMP-ALICE";
+        musterSheet.Cell(4, 2).Value = "Alice Wonderland";
+        musterSheet.Cell(4, 3).Value = "alice@company.com";
+        musterSheet.Cell(4, 4).Value = "2026-09-01";
+        musterSheet.Cell(4, 5).Value = "Engineering";
+        for (var day = 1; day <= 30; day++)
+        {
+            var date = new DateTime(2026, 9, day);
+            var col = 5 + day;
+            musterSheet.Cell(4, col).Value = (date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) ? "WO" : "P";
+        }
+
+        // Alice already has an existing SYSTEM_DEFAULT_PRESENT record on Sunday, 2026-09-06
+        var sundayDate = new DateTime(2026, 9, 6, 0, 0, 0, DateTimeKind.Utc);
+        var existingSundayRow = new AttendanceModel
+        {
+            AttendanceId = "att-sunday-auto",
+            CompanyId = "company-1",
+            UserId = "user-alice",
+            EmployeeId = "EMP-ALICE",
+            Date = sundayDate,
+            Status = "P",
+            SourceType = "SYSTEM_DEFAULT_PRESENT"
+        };
+
+        _attendance.Setup(a => a.GetAll(It.IsAny<Expression<Func<AttendanceModel, bool>>>(), false, true))
+            .ReturnsAsync(new List<AttendanceModel> { existingSundayRow });
+
+        using var uploadMs = new MemoryStream();
+        wb.SaveAs(uploadMs);
+        uploadMs.Position = 0;
+
+        // Act
+        var commitResult = await _service.CommitAsync("company-1", "admin-1", 2026, 9, uploadMs);
+
+        // Assert
+        Assert.True(commitResult.Success);
+        // DeleteAll must be called to purge the obsolete SYSTEM_DEFAULT_PRESENT row on Sunday
+        _attendance.Verify(a => a.DeleteAll(It.IsAny<FilterDefinition<AttendanceModel>>()), Times.Once);
+    }
+
+
+    [Fact]
     public async Task ValidateAsync_WhenTemplateUploadedWithOnlySampleRows_ReturnsValidWithZeroProcessedEmployees()
     {
         // Arrange
@@ -1210,5 +1282,191 @@ public sealed class AttendanceImportServiceTests
         Assert.False(result.IsValid);
         Assert.True(result.ErrorCount >= 1);
         Assert.Contains(result.Issues, i => i.Message.Contains("No valid daily attendance date columns"));
+    }
+
+    [Theory]
+    [InlineData("P", "P", null, null)]
+    [InlineData("ED (09:00-14:00)", "ED", "09:00", "14:00")]
+    [InlineData("ED 14:00", "ED", null, "14:00")]
+    [InlineData("LHD (13:30-18:00)", "LHD", "13:30", "18:00")]
+    [InlineData("LHD 13:30", "LHD", "13:30", null)]
+    [InlineData("HD (09:00-13:30)", "HD", "09:00", "13:30")]
+    [InlineData("P (09:15-18:15)", "P", "09:15", "18:15")]
+    [InlineData("09:00 - 18:00", "P", "09:00", "18:00")]
+    [InlineData("09:00 - 14:00", "ED", "09:00", "14:00")]
+    [InlineData("13:30 - 18:00", "LHD", "13:30", "18:00")]
+    [InlineData("WO", "WO", null, null)]
+    [InlineData("H", "H", null, null)]
+    [InlineData("N/A", "N/A", null, null)]
+    public void ParseMusterCell_ExtractsCorrectStatusAndPunchTimes(
+        string raw, string expectedCode, string? expectedIn, string? expectedOut)
+    {
+        var parsed = AttendanceImportService.ParseMusterCell(raw);
+        Assert.Equal(expectedCode, parsed.StatusCode);
+        if (expectedIn != null)
+            Assert.Equal(TimeOnly.Parse(expectedIn), parsed.CheckInTime);
+        else
+            Assert.Null(parsed.CheckInTime);
+
+        if (expectedOut != null)
+            Assert.Equal(TimeOnly.Parse(expectedOut), parsed.CheckOutTime);
+        else
+            Assert.Null(parsed.CheckOutTime);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_AllowsStatusWithPunchTimes()
+    {
+        var emp = new EmpUser
+        {
+            CompanyId = "company-1",
+            UserId = "user-1",
+            EmployeeId = "EMP-001",
+            FirstName = "John",
+            LastName = "Doe",
+            Status = true,
+            Email = "john.doe@company.com",
+            DateOfJoining = "2026-10-01"
+        };
+
+        _employees.Setup(e => e.GetAll(It.IsAny<Expression<Func<EmpUser, bool>>>(), false, true))
+            .ReturnsAsync(new List<EmpUser> { emp });
+
+        _statusService.Setup(s => s.Get("company-1", true))
+            .ReturnsAsync(new List<AttendanceStatusSettingDto>
+            {
+                new() { Code = "P", Name = "Present", RequiresTime = true, IsActive = true },
+                new() { Code = "ED", Name = "Early Departure", RequiresTime = true, IsActive = true },
+                new() { Code = "LHD", Name = "Late Arrival-Half Day", RequiresTime = true, IsActive = true },
+                new() { Code = "HD", Name = "Half Day", RequiresTime = false, IsActive = true },
+                new() { Code = "A", Name = "Absent", RequiresTime = false, IsActive = true }
+            });
+
+        _leaves.Setup(l => l.GetAll(It.IsAny<Expression<Func<LeaveRequest, bool>>>(), false, true))
+            .ReturnsAsync(new List<LeaveRequest>());
+
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("Attendance Muster");
+        ws.Cell(1, 1).Value = "Employee ID";
+        ws.Cell(1, 2).Value = "Employee Name";
+        ws.Cell(1, 3).Value = "01 Oct";
+        ws.Cell(1, 4).Value = "02 Oct";
+        ws.Cell(1, 5).Value = "03 Oct";
+
+        ws.Cell(2, 1).Value = "EMP-001";
+        ws.Cell(2, 2).Value = "John Doe";
+        ws.Cell(2, 3).Value = "ED (09:00-14:00)";
+        ws.Cell(2, 4).Value = "LHD (13:30-18:00)";
+        ws.Cell(2, 5).Value = "P (09:30-18:30)";
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        ms.Position = 0;
+
+        var result = await _service.ValidateAsync("company-1", 2026, 10, ms);
+
+        Assert.True(result.IsValid);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(3, result.ValidEntriesCount);
+    }
+
+    [Fact]
+    public async Task CommitAsync_AccuratelyPersistsEDAndLHDPunchesAndTotalHours()
+    {
+        var emp = new EmpUser
+        {
+            CompanyId = "company-1",
+            UserId = "user-1",
+            EmployeeId = "EMP-001",
+            FirstName = "Satyam",
+            LastName = "Dubey",
+            Status = true,
+            Email = "satyam@company.com",
+            DateOfJoining = "2026-05-01"
+        };
+
+        _employees.Setup(e => e.GetAll(It.IsAny<Expression<Func<EmpUser, bool>>>(), false, true))
+            .ReturnsAsync(new List<EmpUser> { emp });
+
+        _statusService.Setup(s => s.Get("company-1", true))
+            .ReturnsAsync(new List<AttendanceStatusSettingDto>
+            {
+                new() { Code = "P", Name = "Present", RequiresTime = true, IsActive = true },
+                new() { Code = "ED", Name = "Early Departure", RequiresTime = true, IsActive = true },
+                new() { Code = "LHD", Name = "Late Arrival-Half Day", RequiresTime = true, IsActive = true },
+                new() { Code = "HD", Name = "Half Day", RequiresTime = false, IsActive = true },
+            });
+
+        _leaves.Setup(l => l.GetAll(It.IsAny<Expression<Func<LeaveRequest, bool>>>(), false, true))
+            .ReturnsAsync(new List<LeaveRequest>());
+
+        _attendance.Setup(a => a.GetAll(It.IsAny<Expression<Func<AttendanceModel, bool>>>(), false, true))
+            .ReturnsAsync(new List<AttendanceModel>());
+
+        List<AttendanceModel> capturedRecords = new();
+        _attendanceRepository.Setup(r => r.BulkUpsertAsync(It.IsAny<IEnumerable<AttendanceModel>>(), It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<AttendanceModel>, CancellationToken>((recs, ct) => capturedRecords.AddRange(recs))
+            .ReturnsAsync(3);
+
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("Attendance Muster");
+        ws.Cell(1, 1).Value = "Employee ID";
+        ws.Cell(1, 2).Value = "Employee Name";
+        ws.Cell(1, 3).Value = "01 May";
+        ws.Cell(1, 4).Value = "02 May";
+        ws.Cell(1, 5).Value = "03 May";
+
+        ws.Cell(2, 1).Value = "EMP-001";
+        ws.Cell(2, 2).Value = "Satyam Dubey";
+        ws.Cell(2, 3).Value = "ED (09:00-14:00)";
+        ws.Cell(2, 4).Value = "LHD (13:30-18:00)";
+        ws.Cell(2, 5).Value = "ED"; // Plain ED should get early departure punch out, NOT full 18:00!
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        ms.Position = 0;
+
+        var result = await _service.CommitAsync("company-1", "admin-1", 2026, 5, ms);
+
+        Assert.True(result.Success);
+        Assert.Equal(3, capturedRecords.Count);
+
+        // Day 1: ED (09:00-14:00) -> 03:30 UTC to 08:30 UTC -> 5.0 hours
+        var day1 = capturedRecords.First(r => r.Date.Day == 1);
+        Assert.Equal("ED", day1.Status);
+        Assert.NotNull(day1.CheckInTime);
+        Assert.NotNull(day1.CheckOutTime);
+        Assert.Equal(3, day1.CheckInTime.Value.Hour);
+        Assert.Equal(30, day1.CheckInTime.Value.Minute);
+        Assert.Equal(8, day1.CheckOutTime.Value.Hour);
+        Assert.Equal(30, day1.CheckOutTime.Value.Minute);
+        Assert.Equal(5.0m, day1.TotalHours);
+        Assert.Equal(1, day1.EarlyExitCount);
+        Assert.Equal(0, day1.LateCount);
+
+        // Day 2: LHD (13:30-18:00) -> 08:00 UTC to 12:30 UTC -> 4.5 hours
+        var day2 = capturedRecords.First(r => r.Date.Day == 2);
+        Assert.Equal("LHD", day2.Status);
+        Assert.NotNull(day2.CheckInTime);
+        Assert.NotNull(day2.CheckOutTime);
+        Assert.Equal(8, day2.CheckInTime.Value.Hour);
+        Assert.Equal(0, day2.CheckInTime.Value.Minute);
+        Assert.Equal(12, day2.CheckOutTime.Value.Hour);
+        Assert.Equal(30, day2.CheckOutTime.Value.Minute);
+        Assert.Equal(4.5m, day2.TotalHours);
+        Assert.Equal(1, day2.LateCount);
+        Assert.Equal(0, day2.EarlyExitCount);
+
+        // Day 3: Plain ED without times -> defaults to 09:00 - 14:00 (NOT full day 18:00!)
+        var day3 = capturedRecords.First(r => r.Date.Day == 3);
+        Assert.Equal("ED", day3.Status);
+        Assert.NotNull(day3.CheckInTime);
+        Assert.NotNull(day3.CheckOutTime);
+        Assert.Equal(3, day3.CheckInTime.Value.Hour); // 09:00 IST = 03:30 UTC
+        Assert.Equal(30, day3.CheckInTime.Value.Minute);
+        Assert.Equal(8, day3.CheckOutTime.Value.Hour); // 14:00 IST = 08:30 UTC
+        Assert.Equal(30, day3.CheckOutTime.Value.Minute);
+        Assert.Equal(5.0m, day3.TotalHours);
+        Assert.Equal(1, day3.EarlyExitCount);
     }
 }
