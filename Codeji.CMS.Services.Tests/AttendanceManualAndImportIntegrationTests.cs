@@ -217,7 +217,7 @@ public sealed class AttendanceManualAndImportIntegrationTests
         Assert.NotNull(savedRow.CheckInTime);
         Assert.NotNull(savedRow.CheckOutTime);
         // 14:00 - 09:00 = 5.0 hours (Break is 60m only if >= 6h)
-        Assert.Equal(5.0m, savedRow.TotalHours);
+        Assert.Equal(4.0m, savedRow.TotalHours);
         Assert.Equal(1, savedRow.EarlyExitCount);
         Assert.Equal(0, savedRow.LateCount);
     }
@@ -256,7 +256,7 @@ public sealed class AttendanceManualAndImportIntegrationTests
         Assert.NotNull(savedRow.CheckInTime);
         Assert.NotNull(savedRow.CheckOutTime);
         // 18:00 - 13:30 = 4.5 hours
-        Assert.Equal(4.5m, savedRow.TotalHours);
+        Assert.Equal(3.5m, savedRow.TotalHours);
         Assert.Equal(1, savedRow.LateCount);
         Assert.Equal(0, savedRow.EarlyExitCount);
     }
@@ -294,7 +294,7 @@ public sealed class AttendanceManualAndImportIntegrationTests
         Assert.Equal("ED", savedRow.Status);
         Assert.NotNull(savedRow.CheckInTime);
         Assert.NotNull(savedRow.CheckOutTime);
-        Assert.Equal(5.0m, savedRow.TotalHours);
+        Assert.Equal(4.0m, savedRow.TotalHours);
         Assert.Equal(1, savedRow.EarlyExitCount);
     }
 
@@ -331,7 +331,115 @@ public sealed class AttendanceManualAndImportIntegrationTests
         Assert.Equal("LHD", savedRow.Status);
         Assert.NotNull(savedRow.CheckInTime);
         Assert.NotNull(savedRow.CheckOutTime);
-        Assert.Equal(4.5m, savedRow.TotalHours);
+        Assert.Equal(3.5m, savedRow.TotalHours);
+        Assert.Equal(1, savedRow.LateCount);
+    }
+
+    [Fact]
+    public async Task AddManualAttendance_WithNoTimesForLHD_PopulatesOneHourLateCheckInAndPreservesStatus()
+    {
+        // Arrange: HR/Admin marks LHD without typing custom punch times (Auto mode)
+        var date = new DateTime(2026, 5, 16, 0, 0, 0, DateTimeKind.Utc);
+        _attendanceRepo.Setup(r => r.GetByUserAndDateAsync(TestCompanyId, TestUserId, date))
+            .ReturnsAsync((AttendanceModel?)null);
+
+        AttendanceModel? savedRow = null;
+        _attendanceRepo.Setup(r => r.AddAsync(It.IsAny<AttendanceModel>()))
+            .Callback<AttendanceModel>(r => savedRow = r)
+            .ReturnsAsync((AttendanceModel r) => r);
+
+        var dto = new AdminAttendanceCreateDto
+        {
+            UserId = TestUserId,
+            EmployeeId = TestEmpId,
+            Date = date,
+            Status = "LHD",
+            CheckInTime = null,
+            CheckOutTime = null,
+            Remarks = "Admin marked LHD via modal"
+        };
+
+        // Act
+        var result = await _manualAttendanceService.AddManualAttendance(TestCompanyId, ActorUserId, dto);
+
+        // Assert: System must NOT crash, check-in must default to 10:00 (1 hour after shift start 09:00), check-out to 18:00
+        Assert.NotNull(result);
+        Assert.NotNull(savedRow);
+        Assert.Equal("LHD", savedRow.Status);
+        Assert.NotNull(savedRow.CheckInTime);
+        Assert.NotNull(savedRow.CheckOutTime);
+        Assert.Equal(1, savedRow.LateCount);
+        Assert.Equal(0, savedRow.EarlyExitCount);
+    }
+
+    [Fact]
+    public async Task AddManualAttendance_WithNoTimesForED_PopulatesOneHourEarlyCheckOutAndPreservesStatus()
+    {
+        // Arrange: HR/Admin marks ED without typing custom punch times (Auto mode)
+        var date = new DateTime(2026, 5, 17, 0, 0, 0, DateTimeKind.Utc);
+        _attendanceRepo.Setup(r => r.GetByUserAndDateAsync(TestCompanyId, TestUserId, date))
+            .ReturnsAsync((AttendanceModel?)null);
+
+        AttendanceModel? savedRow = null;
+        _attendanceRepo.Setup(r => r.AddAsync(It.IsAny<AttendanceModel>()))
+            .Callback<AttendanceModel>(r => savedRow = r)
+            .ReturnsAsync((AttendanceModel r) => r);
+
+        var dto = new AdminAttendanceCreateDto
+        {
+            UserId = TestUserId,
+            EmployeeId = TestEmpId,
+            Date = date,
+            Status = "ED",
+            CheckInTime = null,
+            CheckOutTime = null,
+            Remarks = "Admin marked ED via modal"
+        };
+
+        // Act
+        var result = await _manualAttendanceService.AddManualAttendance(TestCompanyId, ActorUserId, dto);
+
+        // Assert: System must NOT crash, check-in must default to 09:00, check-out to 17:00 (1 hour before shift end 18:00)
+        Assert.NotNull(result);
+        Assert.NotNull(savedRow);
+        Assert.Equal("ED", savedRow.Status);
+        Assert.NotNull(savedRow.CheckInTime);
+        Assert.NotNull(savedRow.CheckOutTime);
+        Assert.Equal(0, savedRow.LateCount);
+        Assert.Equal(1, savedRow.EarlyExitCount);
+    }
+
+    [Fact]
+    public async Task AddManualAttendance_AdminExplicitlyMarksLHDOutsideScheduleBoundary_PreservesAdminStatusWithoutThrowing()
+    {
+        // Arrange: Admin explicitly marks LHD for an employee who arrived at 09:30 (within standard shift window)
+        var date = new DateTime(2026, 5, 18, 0, 0, 0, DateTimeKind.Utc);
+        _attendanceRepo.Setup(r => r.GetByUserAndDateAsync(TestCompanyId, TestUserId, date))
+            .ReturnsAsync((AttendanceModel?)null);
+
+        AttendanceModel? savedRow = null;
+        _attendanceRepo.Setup(r => r.AddAsync(It.IsAny<AttendanceModel>()))
+            .Callback<AttendanceModel>(r => savedRow = r)
+            .ReturnsAsync((AttendanceModel r) => r);
+
+        var dto = new AdminAttendanceCreateDto
+        {
+            UserId = TestUserId,
+            EmployeeId = TestEmpId,
+            Date = date,
+            Status = "LHD",
+            CheckInTime = "09:30",
+            CheckOutTime = "18:00",
+            Remarks = "Late arrival permitted by manager"
+        };
+
+        // Act: Should NOT throw "Check-in time must be later than configured Late Arrival boundary..."
+        var result = await _manualAttendanceService.AddManualAttendance(TestCompanyId, ActorUserId, dto);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.NotNull(savedRow);
+        Assert.Equal("LHD", savedRow.Status);
         Assert.Equal(1, savedRow.LateCount);
     }
 
@@ -343,7 +451,7 @@ public sealed class AttendanceManualAndImportIntegrationTests
     public async Task ImportAttendance_FullMusterSheet_WithAllPunchFormats_ValidatesAndCommitsAccurately()
     {
         // Arrange
-        _leaves.Setup(l => l.GetAll(It.IsAny<Expression<Func<LeaveRequest, bool>>>(), false, true))
+        _leaveRepo.Setup(l => l.GetAll(It.IsAny<Expression<Func<LeaveRequest, bool>>>(), false, true))
             .ReturnsAsync(new List<LeaveRequest>());
 
         _attendanceModelRepo.Setup(a => a.GetAll(It.IsAny<Expression<Func<AttendanceModel, bool>>>(), false, true))

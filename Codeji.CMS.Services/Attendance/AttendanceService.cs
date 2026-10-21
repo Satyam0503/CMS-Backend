@@ -68,6 +68,7 @@ namespace Codeji.CMS.Services.Attendance
         private readonly IMongoDbRepository<AttendanceStatusSetting> _attendanceStatuses;
         private readonly IMongoDbRepository<Department>? _departments;
         private readonly IAttendanceInitializationService? _initializationService;
+        private readonly IMongoDbRepository<AttendancePenaltyPolicy>? _penaltyPolicies;
 
         public AdminAttendanceService(
             IAttendanceRepository attendanceRepository,
@@ -81,7 +82,8 @@ namespace Codeji.CMS.Services.Attendance
             IMongoDbRepository<CalendarEntity> calendar,
             IMongoDbRepository<AttendanceStatusSetting> attendanceStatuses,
             IMongoDbRepository<Department>? departments = null,
-            IAttendanceInitializationService? initializationService = null
+            IAttendanceInitializationService? initializationService = null,
+            IMongoDbRepository<AttendancePenaltyPolicy>? penaltyPolicies = null
         )
         {
             _attendanceRepository = attendanceRepository;
@@ -96,6 +98,7 @@ namespace Codeji.CMS.Services.Attendance
             _attendanceStatuses = attendanceStatuses;
             _departments = departments;
             _initializationService = initializationService;
+            _penaltyPolicies = penaltyPolicies;
         }
 
         public async Task<AttendanceResponseDto> AddManualAttendance(
@@ -580,6 +583,29 @@ namespace Codeji.CMS.Services.Attendance
                 }
             }
 
+            Dictionary<string, AttendancePenaltyPolicy> policyMap = [];
+            if (_penaltyPolicies != null)
+            {
+                try
+                {
+                    var policies = await _penaltyPolicies.GetAll(x =>
+                        x.CompanyId == companyId && x.IsEnabled && !x.IsDeleted &&
+                        x.EffectiveFrom <= monthEnd && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value >= monthStart)
+                    );
+                    policyMap = policies
+                        .Where(p => !string.IsNullOrWhiteSpace(p.UserId))
+                        .GroupBy(p => p.UserId)
+                        .ToDictionary(
+                            g => g.Key,
+                            g => g.OrderByDescending(p => p.EffectiveFrom).ThenByDescending(p => p.Version).First()
+                        );
+                }
+                catch
+                {
+                    // Fallback to default allowance if policy query fails
+                }
+            }
+
             using var workbook = new XLWorkbook();
             var sheet = workbook.Worksheets.Add("Attendance report");
             sheet.Cell(1, 1).Value = "Employee ID";
@@ -645,6 +671,24 @@ namespace Codeji.CMS.Services.Attendance
                 decimal holidayCount = 0;
                 decimal paidDays = 0;
 
+                var allowedLimit = policyMap.TryGetValue(employee.UserId, out var empPolicy)
+                    ? empPolicy.CombinedLhdEdMonthlyLimit
+                    : 2;
+
+                var empInfractions = new List<(DateTime Date, string? Status)>();
+                for (var scanDate = monthStart; scanDate <= monthEnd; scanDate = scanDate.AddDays(1))
+                {
+                    if (attendance.TryGetValue((employee.UserId, scanDate.Date), out var d) && AttendancePayrollRules.IsPunctualityInfraction(d?.Status))
+                        empInfractions.Add((scanDate.Date, d?.Status));
+                    else if (segments.TryGetValue((employee.UserId, scanDate.Date), out var segs))
+                    {
+                        var seg = segs.FirstOrDefault(s => AttendancePayrollRules.IsPunctualityInfraction(s.Status));
+                        if (seg != null)
+                            empInfractions.Add((scanDate.Date, seg.Status));
+                    }
+                }
+                var graceExemptDates = AttendancePayrollRules.ResolveGraceExemptDates(empInfractions, allowedLimit);
+
                 for (var date = monthStart; date <= monthEnd; date = date.AddDays(1))
                 {
                     attendance.TryGetValue((employee.UserId, date.Date), out var daily);
@@ -672,6 +716,7 @@ namespace Codeji.CMS.Services.Attendance
                         daySegments,
                         statusCode,
                         statusSettingsMap,
+                        graceExemptDates.Contains(date.Date),
                         ref presentCount,
                         ref halfDayCount,
                         ref absentCount,
@@ -834,6 +879,7 @@ namespace Codeji.CMS.Services.Attendance
             IReadOnlyCollection<AttendanceDaySegment>? segments,
             string statusCode,
             IReadOnlyDictionary<string, AttendanceStatusSetting> statusSettingsMap,
+            bool isGraceExemptDate,
             ref decimal presentCount,
             ref decimal halfDayCount,
             ref decimal absentCount,
@@ -852,7 +898,7 @@ namespace Codeji.CMS.Services.Attendance
                 {
                     var code = segment.Status?.Trim().ToUpperInvariant() ?? string.Empty;
                     statusSettingsMap.TryGetValue(code, out var setting);
-                    var paidFraction =
+                    var rawPaid =
                         setting?.PaidDayFraction
                         ?? (
                             code switch
@@ -873,11 +919,12 @@ namespace Codeji.CMS.Services.Attendance
                             }
                         );
 
+                    var paidFraction = AttendancePayrollRules.ResolveEffectivePaidDayFraction(code, isGraceExemptDate, rawPaid);
                     paidDays += 0.5m * paidFraction;
 
-                    if (code is "P" or "PRESENT" or "WFH" or "WORK_FROM_HOME")
+                    if (code is "P" or "PRESENT" or "WFH" or "WORK_FROM_HOME" || (isGraceExemptDate && code is "LHD" or "LHD+ED"))
                         presentCount += 0.5m;
-                    else if (code is "HD" or "HALF_DAY")
+                    else if (code is "HD" or "HALF_DAY" || (!isGraceExemptDate && code is "LHD" or "LHD+ED"))
                         halfDayCount += 0.5m;
                     else if (code is "A" or "ABSENT")
                         absentCount += 0.5m;
@@ -889,7 +936,7 @@ namespace Codeji.CMS.Services.Attendance
                         leaveCount += 0.5m;
                     else if (setting != null)
                     {
-                        if (setting.PaidDayFraction >= 1m)
+                        if (setting.PaidDayFraction >= 1m || isGraceExemptDate)
                             presentCount += 0.5m;
                         else if (setting.UnpaidDayFraction >= 1m)
                             absentCount += 0.5m;
@@ -904,7 +951,7 @@ namespace Codeji.CMS.Services.Attendance
             {
                 var code = daily.Status?.Trim().ToUpperInvariant() ?? string.Empty;
                 statusSettingsMap.TryGetValue(code, out var setting);
-                var paidFraction =
+                var rawPaid =
                     setting?.PaidDayFraction
                     ?? (
                         code switch
@@ -925,11 +972,12 @@ namespace Codeji.CMS.Services.Attendance
                         }
                     );
 
+                var paidFraction = AttendancePayrollRules.ResolveEffectivePaidDayFraction(code, isGraceExemptDate, rawPaid);
                 paidDays += paidFraction;
 
-                if (code is "P" or "PRESENT" or "WFH" or "WORK_FROM_HOME")
+                if (code is "P" or "PRESENT" or "WFH" or "WORK_FROM_HOME" || (isGraceExemptDate && code is "LHD" or "LHD+ED"))
                     presentCount += 1m;
-                else if (code is "HD" or "HALF_DAY")
+                else if (code is "HD" or "HALF_DAY" || (!isGraceExemptDate && code is "LHD" or "LHD+ED"))
                 {
                     halfDayCount += 1m;
                     presentCount += 0.5m;
@@ -944,7 +992,7 @@ namespace Codeji.CMS.Services.Attendance
                     leaveCount += 1m;
                 else if (setting != null)
                 {
-                    if (setting.PaidDayFraction >= 1m)
+                    if (setting.PaidDayFraction >= 1m || isGraceExemptDate)
                         presentCount += 1m;
                     else if (setting.UnpaidDayFraction >= 1m)
                         absentCount += 1m;

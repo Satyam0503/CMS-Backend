@@ -15,10 +15,13 @@ public interface IPayrollTemplateService
     Task<Result> SaveComponent(string companyId, string actorUserId, PayrollSalaryComponentDto dto);
     Task<Result> SavePolicy(string companyId, string actorUserId, PayrollPolicyProfileDto dto);
     Task<Result> DeletePolicyDraft(string companyId, string policyId, int version);
+    Task<Result> CancelPolicySubmission(string companyId, string actorUserId, string policyId, int version);
+    Task<Result> RetirePolicy(string companyId, string actorUserId, string policyId, int version);
     Task<Result> SubmitPolicy(string companyId, string actorUserId, string policyId, int version);
     Task<Result> ApprovePolicy(string companyId, string actorUserId, string policyId, int version, bool isCompanyAdministrator = false);
     Task<Result> SaveTemplate(string companyId, string actorUserId, SalaryTemplateDto dto);
     Task<Result> RetireTemplate(string companyId, string actorUserId, string templateId, int version);
+    Task<Result> DeleteTemplate(string companyId, string actorUserId, string templateId, int version);
     Task<Result> SeedStandardComponents(string companyId, string actorUserId);
 }
 
@@ -26,7 +29,9 @@ public sealed class PayrollTemplateService(
     IMongoDbRepository<PayrollPolicyProfile> policies,
     IMongoDbRepository<SalaryTemplate> templates,
     IMongoDbRepository<PayrollPayGroup> payGroups,
-    IMongoDbRepository<PayrollSalaryComponentDefinition>? componentDefinitions = null) : IPayrollTemplateService
+    IMongoDbRepository<PayrollSalaryComponentDefinition>? componentDefinitions = null,
+    IMongoDbRepository<EmpPayRoll>? payrolls = null,
+    IMongoDbRepository<EmployeePayrollAssignment>? assignments = null) : IPayrollTemplateService
 {
     private static readonly string ExemptMode = string.Concat('E', 'X', 'E', 'M', 'P', 'T');
 
@@ -217,6 +222,8 @@ public sealed class PayrollTemplateService(
             (dto.EffectiveTo.HasValue && dto.EffectiveTo.Value.Date !=
                 new DateTime(dto.EffectiveTo.Value.Year, dto.EffectiveTo.Value.Month, DateTime.DaysInMonth(dto.EffectiveTo.Value.Year, dto.EffectiveTo.Value.Month))))
             return new Result { Success = false, StatusCode = 400, Message = "Payroll policy dates must cover whole months: start on the first day and end on the last day of a month." };
+        var effectiveFrom = dto.EffectiveFrom.Date;
+        var effectiveTo = dto.EffectiveTo?.Date;
         var epfMode = dto.EpfMode.Trim().ToUpperInvariant();
         var esicMode = dto.EsicMode.Trim().ToUpperInvariant();
         var tdsMode = dto.TdsMode.Trim().ToUpperInvariant();
@@ -242,22 +249,22 @@ public sealed class PayrollTemplateService(
             existingDraft = await policies.FirstOrDefault(x => x.CompanyId == companyId && x.Id == dto.Id);
             if (existingDraft is null) return new Result { Success = false, StatusCode = 404, Message = "Payroll policy was not found." };
             if (existingDraft.Version != dto.Version) return new Result { Success = false, StatusCode = 409, Message = "Payroll policy changed; reload and retry." };
-            if (existingDraft.ApprovalStatus != "DRAFT")
+            if (existingDraft.ApprovalStatus == "APPROVED")
                 return new Result { Success = false, StatusCode = 409, Message = "Submitted or approved payroll policy versions are immutable. Create a new effective-dated version for changes." };
         }
         // Profiles may overlap because an employee or pay group can intentionally use a
         // different approved profile from the company default. Effective dates select the
         // newest company default, while explicit assignments remain pinned to their profile.
         var duplicate = await policies.Exist(x => x.CompanyId == companyId && x.Name == dto.Name.Trim() &&
-            x.EffectiveFrom == dto.EffectiveFrom.Date && x.Id != dto.Id);
+            x.EffectiveFrom == effectiveFrom && x.Id != dto.Id);
         if (duplicate) return new Result { Success = false, StatusCode = 409, Message = "A policy with this name and start date already exists. Choose a new effective date or name." };
 
         var entity = new PayrollPolicyProfile
         {
             Id = dto.Id ?? string.Empty, CompanyId = companyId, Name = dto.Name.Trim(), CreatedBy = existingDraft?.CreatedBy ?? actorUserId,
             Version = Math.Max(1, dto.Version), DivisorPolicy = divisorPolicy, Scope = scope,
-            RequireAttendanceLock = dto.RequireAttendanceLock, EpfMode = epfMode, EpfWageCeiling = dto.EpfWageCeiling, EsicMode = esicMode, EsicWageCeiling = dto.EsicWageCeiling, TdsMode = tdsMode, StatutoryJurisdiction = dto.StatutoryJurisdiction.Trim().ToUpperInvariant(), FinancialYear = dto.FinancialYear.Trim(), StatutoryRuleVersion = dto.StatutoryRuleVersion.Trim(), ApprovalStatus = "DRAFT", EffectiveFrom = dto.EffectiveFrom.Date,
-            EffectiveTo = dto.EffectiveTo?.Date, IsActive = dto.IsActive,
+            RequireAttendanceLock = dto.RequireAttendanceLock, EpfMode = epfMode, EpfWageCeiling = dto.EpfWageCeiling, EsicMode = esicMode, EsicWageCeiling = dto.EsicWageCeiling, TdsMode = tdsMode, StatutoryJurisdiction = dto.StatutoryJurisdiction.Trim().ToUpperInvariant(), FinancialYear = dto.FinancialYear.Trim(), StatutoryRuleVersion = dto.StatutoryRuleVersion.Trim(), ApprovalStatus = "DRAFT", EffectiveFrom = effectiveFrom,
+            EffectiveTo = effectiveTo, IsActive = dto.IsActive,
             EpfEmployeeRatePercent = dto.EpfEmployeeRatePercent, EpfEmployerRatePercent = dto.EpfEmployerRatePercent,
             EsicEmployeeRatePercent = dto.EsicEmployeeRatePercent, EsicEmployerRatePercent = dto.EsicEmployerRatePercent
         };
@@ -267,8 +274,7 @@ public sealed class PayrollTemplateService(
             return await policies.Update(
                 Builders<PayrollPolicyProfile>.Filter.Eq(x => x.Id, dto.Id) &
                 Builders<PayrollPolicyProfile>.Filter.Eq(x => x.CompanyId, companyId) &
-                Builders<PayrollPolicyProfile>.Filter.Eq(x => x.Version, dto.Version) &
-                Builders<PayrollPolicyProfile>.Filter.Eq(x => x.ApprovalStatus, "DRAFT"), entity);
+                Builders<PayrollPolicyProfile>.Filter.Eq(x => x.Version, dto.Version), entity);
         }
         return await policies.AddOne(entity);
     }
@@ -286,6 +292,39 @@ public sealed class PayrollTemplateService(
             Builders<PayrollPolicyProfile>.Filter.Eq(x => x.Id, policyId) &
             Builders<PayrollPolicyProfile>.Filter.Eq(x => x.Version, version) &
             Builders<PayrollPolicyProfile>.Filter.Eq(x => x.ApprovalStatus, "DRAFT"));
+    }
+
+    public async Task<Result> CancelPolicySubmission(string companyId, string actorUserId, string policyId, int version)
+    {
+        var policy = await policies.FirstOrDefault(x => x.CompanyId == companyId && x.Id == policyId);
+        if (policy is null) return new Result { Success = false, StatusCode = 404, Message = "Payroll policy was not found." };
+        if (policy.Version != version) return new Result { Success = false, StatusCode = 409, Message = "Payroll policy changed; reload and retry." };
+        if (policy.ApprovalStatus != "SUBMITTED") return new Result { Success = false, StatusCode = 409, Message = "Only submitted payroll policies can be withdrawn to draft." };
+        policy.ApprovalStatus = "DRAFT";
+        policy.SubmittedBy = null;
+        policy.SubmittedAtUtc = null;
+        policy.Version++;
+        return await policies.Update(Builders<PayrollPolicyProfile>.Filter.Eq(x => x.CompanyId, companyId) & Builders<PayrollPolicyProfile>.Filter.Eq(x => x.Id, policyId) & Builders<PayrollPolicyProfile>.Filter.Eq(x => x.Version, version), policy);
+    }
+
+    public async Task<Result> RetirePolicy(string companyId, string actorUserId, string policyId, int version)
+    {
+        var policy = await policies.FirstOrDefault(x => x.CompanyId == companyId && x.Id == policyId);
+        if (policy is null) return new Result { Success = false, StatusCode = 404, Message = "Payroll policy was not found." };
+        if (policy.Version != version) return new Result { Success = false, StatusCode = 409, Message = "Payroll policy changed; refresh and retry." };
+        if (!policy.IsActive) return new Result { Success = true, Message = "Payroll policy is already inactive." };
+
+        policy.IsActive = false;
+        if (policy.EffectiveFrom > DateTime.UtcNow.Date)
+            policy.EffectiveTo = policy.EffectiveFrom;
+        else if (!policy.EffectiveTo.HasValue || policy.EffectiveTo.Value > DateTime.UtcNow.Date)
+            policy.EffectiveTo = DateTime.UtcNow.Date;
+        policy.Version++;
+        return await policies.Update(
+            Builders<PayrollPolicyProfile>.Filter.Eq(x => x.CompanyId, companyId) &
+            Builders<PayrollPolicyProfile>.Filter.Eq(x => x.Id, policyId) &
+            Builders<PayrollPolicyProfile>.Filter.Eq(x => x.Version, version),
+            policy);
     }
 
     public async Task<Result> SubmitPolicy(string companyId, string actorUserId, string policyId, int version)
@@ -470,6 +509,23 @@ public sealed class PayrollTemplateService(
         return !result.Success && result.StatusCode == 400
             ? new Result { Success = false, StatusCode = 409, Message = "Salary template changed; refresh it before retiring." }
             : result;
+    }
+
+    public async Task<Result> DeleteTemplate(string companyId, string actorUserId, string templateId, int version)
+    {
+        var template = await templates.FirstOrDefault(x => x.CompanyId == companyId && x.Id == templateId);
+        if (template is null)
+            return new Result { Success = false, StatusCode = 404, Message = "Salary template was not found in this company." };
+        if (assignments is not null)
+        {
+            var inUse = await assignments.Exist(x => x.CompanyId == companyId && x.SalaryTemplateId == templateId && !x.IsRejected && !x.IsCancelled);
+            if (inUse)
+                return new Result { Success = false, StatusCode = 409, Message = "This salary template cannot be deleted because employees are assigned to it. Retire it instead to preserve payroll history." };
+        }
+        return await templates.Delete(
+            Builders<SalaryTemplate>.Filter.Eq(x => x.CompanyId, companyId) &
+            Builders<SalaryTemplate>.Filter.Eq(x => x.Id, templateId) &
+            Builders<SalaryTemplate>.Filter.Eq(x => x.Version, version));
     }
 
     private static PayrollSalaryComponentDto Map(PayrollSalaryComponentDefinition x) => new()

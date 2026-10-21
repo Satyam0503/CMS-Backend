@@ -17,6 +17,9 @@ public interface IPayrollConfigurationService
     Task<Result> CancelAssignment(string companyId, string actorUserId, string employeeId, DateTime effectiveFrom);
     Task<Result<PayrollBulkAssignmentPreviewRowDto>> PreviewBulkAssignments(string companyId, PayrollBulkAssignmentRequestDto request);
     Task<Result<PayrollBulkAssignmentResultDto>> SubmitBulkAssignments(string companyId, string actorUserId, PayrollBulkAssignmentRequestDto request);
+    Task<Result> DeletePayGroup(string companyId, string actorUserId, string payGroupId);
+    Task<Result> EndAssignment(string companyId, string actorUserId, string employeeId, DateTime effectiveFrom, DateTime effectiveTo);
+    Task<Result> DeleteAssignment(string companyId, string actorUserId, string employeeId, DateTime effectiveFrom);
 }
 
 public sealed class PayrollConfigurationService(
@@ -70,6 +73,20 @@ public sealed class PayrollConfigurationService(
             return updated;
         }
         return await payGroups.AddOne(entity);
+    }
+
+    public async Task<Result> DeletePayGroup(string companyId, string actorUserId, string payGroupId)
+    {
+        var existing = await payGroups.FirstOrDefault(x => x.CompanyId == companyId && x.Id == payGroupId);
+        if (existing is null)
+            return new Result { Success = false, StatusCode = 404, Message = "Pay group was not found in this company." };
+        var hasAssignments = await assignments.Exist(x => x.CompanyId == companyId && x.PayGroupId == payGroupId && !x.IsRejected && !x.IsCancelled);
+        if (hasAssignments)
+            return new Result { Success = false, StatusCode = 409, Message = "This pay group cannot be deleted because it is assigned to employees. Deactivate it instead to preserve payroll history." };
+        var hasTemplates = await salaryTemplates.Exist(x => x.CompanyId == companyId && x.PayGroupId == payGroupId && !x.IsRetired);
+        if (hasTemplates)
+            return new Result { Success = false, StatusCode = 409, Message = "This pay group cannot be deleted because salary templates are linked to it. Unlink or retire the templates first." };
+        return await payGroups.Delete(Builders<PayrollPayGroup>.Filter.Eq(x => x.CompanyId, companyId) & Builders<PayrollPayGroup>.Filter.Eq(x => x.Id, payGroupId));
     }
 
     public async Task<List<EmployeePayrollAssignmentDto>> GetAssignments(string companyId) =>
@@ -136,6 +153,31 @@ public sealed class PayrollConfigurationService(
             item.CancelledBy = actorUserId;
             item.CancelledAtUtc = DateTime.UtcNow;
         }, "cancelled");
+    }
+
+    public async Task<Result> EndAssignment(string companyId, string actorUserId, string employeeId, DateTime effectiveFrom, DateTime effectiveTo)
+    {
+        if (effectiveTo.Date < effectiveFrom.Date)
+            return new Result { Success = false, StatusCode = 400, Message = "The end date must be on or after the effective start date." };
+        var assignment = await assignments.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeId == employeeId && x.EffectiveFrom == effectiveFrom.Date);
+        if (assignment is null)
+            return new Result { Success = false, StatusCode = 404, Message = "Payroll assignment was not found." };
+        assignment.EffectiveTo = effectiveTo.Date;
+        assignment.Version++;
+        return await assignments.Update(
+            Builders<EmployeePayrollAssignment>.Filter.Eq(x => x.Id, assignment.Id) &
+            Builders<EmployeePayrollAssignment>.Filter.Eq(x => x.CompanyId, companyId),
+            assignment);
+    }
+
+    public async Task<Result> DeleteAssignment(string companyId, string actorUserId, string employeeId, DateTime effectiveFrom)
+    {
+        var assignment = await assignments.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeId == employeeId && x.EffectiveFrom == effectiveFrom.Date);
+        if (assignment is null)
+            return new Result { Success = false, StatusCode = 404, Message = "Payroll assignment was not found." };
+        return await assignments.Delete(
+            Builders<EmployeePayrollAssignment>.Filter.Eq(x => x.Id, assignment.Id) &
+            Builders<EmployeePayrollAssignment>.Filter.Eq(x => x.CompanyId, companyId));
     }
 
     private async Task<Result> TransitionPendingAssignment(string companyId, string actorUserId, string employeeId, DateTime effectiveFrom, Action<EmployeePayrollAssignment> transition, string status)

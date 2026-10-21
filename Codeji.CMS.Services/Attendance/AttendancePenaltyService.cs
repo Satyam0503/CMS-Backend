@@ -137,7 +137,7 @@ public class AttendancePenaltyService : IAttendancePenaltyService
             var effectiveRecords=records.Where(x=>!segmentDates.Contains(x.Date.Date)).ToList();
             var lhd=effectiveRecords.Count(x=>x.Status is "LHD" or "LHD+ED")+daySegments.Count(x=>x.Status is "LHD" or "LHD+ED");
             var ed=effectiveRecords.Count(x=>x.Status is "ED" or "LHD+ED")+daySegments.Count(x=>x.Status is "ED" or "LHD+ED");
-            var combined=effectiveRecords.Select(x=>x.Date.Date).Concat(daySegments.Select(x=>x.Date.Date)).Distinct().Count();
+            var combined=lhd+ed;
             var exceeded=AttendancePayrollRules.ExceededOccurrences(combined,policy.CombinedLhdEdMonthlyLimit);
             var existing=await _exceptions.FirstOrDefault(x=>x.CompanyId==companyId&&x.UserId==emp.UserId&&x.EmployeeId==emp.EmployeeId&&x.PayrollMonth==start&&x.ExceptionType=="LHD_ED_LIMIT_EXCEEDED");
             if(exceeded==0)
@@ -324,16 +324,35 @@ public class AttendancePenaltyService : IAttendancePenaltyService
             var summary=existing??new MonthlyAttendanceSummary{CompanyId=companyId,UserId=emp.UserId,EmployeeId=emp.EmployeeId,PayrollMonth=start};
             summary.EligibleFrom=from;summary.EligibleTo=to;summary.ExpectedWorkingDays=expectedDates.Count;summary.EligibleWorkingDays=expectedDates.Count;
             summary.MissingAttendanceDays=missingDates.Count;summary.MissingCheckoutDays=missingCheckoutDates.Count;
-            summary.UnpaidDays=effectiveRecords.Sum(x=>rules.TryGetValue(x.Status,out var r)?r.UnpaidDayFraction:0)+daySegments.Sum(x=>rules.TryGetValue(x.Status,out var r)?r.UnpaidDayFraction:0);
-            var eligibleCalendarDays=(decimal)((to.Date-from.Date).Days+1);
-            var empException=monthExceptions.FirstOrDefault(x=>x.EmployeeId==emp.EmployeeId);
-            decimal approvedPenaltyDays=empException?.Status is "DEDUCTION_APPROVED" or "APPLIED_TO_PAYROLL"?empException.DeductionDayFraction:0m;
-            summary.PaidDays=Math.Max(0m,eligibleCalendarDays-summary.UnpaidDays-approvedPenaltyDays);
-            summary.PresentDays=effectiveRecords.Count(x=>x.Status=="P");summary.WfhDays=effectiveRecords.Count(x=>x.Status is "WFH" or "WFH+WFO")+daySegments.Count(x=>x.SourceType=="WFH_REQUEST")/2m;
-            summary.PaidLeaveDays=effectiveRecords.Where(x=>rules.TryGetValue(x.Status,out var r)&&r.PaidDayFraction>0&&x.Status is not "P" and not "WFH" and not "WFH+WFO").Sum(x=>rules.TryGetValue(x.Status,out var r)?r.PaidDayFraction:0)+daySegments.Where(x=>x.SourceType is "LEAVE" or "LIFECYCLE_CASE").Sum(x=>rules.TryGetValue(x.Status,out var r)?r.PaidDayFraction:0);
-            summary.UnpaidLeaveDays=effectiveRecords.Where(x=>rules.TryGetValue(x.Status,out var r)&&r.UnpaidDayFraction>0).Sum(x=>rules.TryGetValue(x.Status,out var r)?r.UnpaidDayFraction:0)+daySegments.Where(x=>x.SourceType is "LEAVE" or "LIFECYCLE_CASE").Sum(x=>rules.TryGetValue(x.Status,out var r)?r.UnpaidDayFraction:0);
-            summary.HalfDays=effectiveRecords.Count(x=>x.Status is "HD" or "LHD" or "LHD+ED" or "CL-HALF" or "SL-HALF" or "WFH-HD")*.5m+daySegments.Count*.5m;summary.AbsentDays=effectiveRecords.Count(x=>x.Status=="A");
-            summary.LhdCount=records.Count(x=>x.Status is "LHD" or "LHD+ED");summary.EdCount=records.Count(x=>x.Status is "ED" or "LHD+ED");summary.CombinedLhdEdCount=records.Count(x=>x.Status is "LHD" or "ED" or "LHD+ED");
+            var policy = await GetEffectiveEmployeePolicy(companyId, emp.UserId, end);
+            var allowedLimit = policy?.CombinedLhdEdMonthlyLimit ?? 2;
+            var infractions = effectiveRecords.Where(x => AttendancePayrollRules.IsPunctualityInfraction(x.Status))
+                .Select(x => (x.Date.Date, x.Status))
+                .Concat(daySegments.Where(x => AttendancePayrollRules.IsPunctualityInfraction(x.Status)).Select(x => (x.Date.Date, x.Status)));
+            var graceDates = AttendancePayrollRules.ResolveGraceExemptDates(infractions, allowedLimit);
+
+            summary.UnpaidDays = effectiveRecords.Sum(x =>
+            {
+                var rawUnpaid = rules.TryGetValue(x.Status, out var r) ? r.UnpaidDayFraction : 0m;
+                return AttendancePayrollRules.ResolveEffectiveUnpaidDayFraction(x.Status, graceDates.Contains(x.Date.Date), rawUnpaid);
+            }) + daySegments.Sum(x =>
+            {
+                var rawUnpaid = rules.TryGetValue(x.Status, out var r) ? r.UnpaidDayFraction : 0m;
+                return AttendancePayrollRules.ResolveEffectiveUnpaidDayFraction(x.Status, graceDates.Contains(x.Date.Date), rawUnpaid);
+            });
+            var eligibleCalendarDays = (decimal)((to.Date - from.Date).Days + 1);
+            var empException = monthExceptions.FirstOrDefault(x => x.EmployeeId == emp.EmployeeId);
+            decimal approvedPenaltyDays = empException?.Status is "DEDUCTION_APPROVED" or "APPLIED_TO_PAYROLL" ? empException.DeductionDayFraction : 0m;
+            summary.PaidDays = Math.Max(0m, eligibleCalendarDays - summary.UnpaidDays - approvedPenaltyDays);
+            summary.PresentDays = effectiveRecords.Count(x => x.Status == "P" || ((x.Status is "LHD" or "LHD+ED") && graceDates.Contains(x.Date.Date)));
+            summary.WfhDays = effectiveRecords.Count(x => x.Status is "WFH" or "WFH+WFO") + daySegments.Count(x => x.SourceType == "WFH_REQUEST") / 2m;
+            summary.PaidLeaveDays = effectiveRecords.Where(x => rules.TryGetValue(x.Status, out var r) && r.PaidDayFraction > 0 && x.Status is not "P" and not "WFH" and not "WFH+WFO").Sum(x => rules.TryGetValue(x.Status, out var r) ? r.PaidDayFraction : 0) + daySegments.Where(x => x.SourceType is "LEAVE" or "LIFECYCLE_CASE").Sum(x => rules.TryGetValue(x.Status, out var r) ? r.PaidDayFraction : 0);
+            summary.UnpaidLeaveDays = effectiveRecords.Where(x => rules.TryGetValue(x.Status, out var r) && r.UnpaidDayFraction > 0).Sum(x => rules.TryGetValue(x.Status, out var r) ? r.UnpaidDayFraction : 0) + daySegments.Where(x => x.SourceType is "LEAVE" or "LIFECYCLE_CASE").Sum(x => rules.TryGetValue(x.Status, out var r) ? r.UnpaidDayFraction : 0);
+            summary.HalfDays = effectiveRecords.Count(x => (x.Status is "HD" or "CL-HALF" or "SL-HALF" or "WFH-HD") || ((x.Status is "LHD" or "LHD+ED") && !graceDates.Contains(x.Date.Date))) * .5m + daySegments.Count(x => !graceDates.Contains(x.Date.Date)) * .5m;
+            summary.AbsentDays = effectiveRecords.Count(x => x.Status == "A");
+            summary.LhdCount = records.Count(x => x.Status is "LHD" or "LHD+ED");
+            summary.EdCount = records.Count(x => x.Status is "ED" or "LHD+ED");
+            summary.CombinedLhdEdCount = summary.LhdCount + summary.EdCount;
             summary.BlockingExceptionCount=missingDates.Count+missingCheckoutDates.Count+duplicateDates.Count+invalidTimeDates.Count+invalidStatusDates.Count;
             if(existing==null)await _summaries.AddOne(summary);else if(!existing.IsLocked)await _summaries.Update(Builders<MonthlyAttendanceSummary>.Filter.Eq(x=>x.Id,existing.Id),summary);
             summaries.Add(summary);

@@ -549,7 +549,7 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         if (employee == null) return new Result { Success = false, Message = "Employee does not belong to the authenticated company." };
         if (employee.Lifecycle is not null && EmploymentPeriod.ResolveAvailabilityOn(employee, requestStartDate.ToDateTime(TimeOnly.MinValue)) != EmployeeLifecycleStatuses.Working)
             return new Result { Success = false, Message = "LEAVE_LIFECYCLE_NOT_WORKING: Leave cannot be requested while the employee is on another leave, sabbatical, suspension, or absence state." };
-        var lastWorkingDate = employee.LastWorkingDate ?? (DateTime.TryParse(employee.ExitDate, out var legacyExit) ? legacyExit.Date : (DateTime?)null);
+        var lastWorkingDate = EmploymentPeriod.GetLastWorkingDate(employee);
         if (lastWorkingDate.HasValue && requestEndDate > DateOnly.FromDateTime(lastWorkingDate.Value))
             return new Result { Success = false, Message = "LEAVE_AFTER_EXIT" };
         if (!IsPolicyApplicableToEmployee(leavePolicy, employee.UserId))

@@ -24,6 +24,4 @@ public interface IAttendanceRepository
         DateTime? lastWorkingDate = null);
 
     Task<int> BulkUpsertAsync(IEnumerable<AttendanceModel> items, CancellationToken cancellationToken = default);
-
-    Task GetAll(Func<object, bool> value);
 }

@@ -1,3 +1,4 @@
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.PayRoll;
 using Codeji.CMS.Repository.Entities.Employees;
@@ -30,6 +31,7 @@ namespace Codeji.CMS.Services.PayRoll
         private readonly IMongoDbRepository<PayrollPayGroup>? _payGroups;
         private readonly IMongoDbRepository<SalaryTemplate>? _salaryTemplates;
         private readonly IMongoDbRepository<EmployeeSalaryStructure>? _employeeSalaryStructures;
+        private readonly IMongoDbRepository<AttendancePenaltyPolicy>? _penaltyPolicies;
 
         public AutoPayrollServices(
             IPayRollServices payRollServices,
@@ -47,7 +49,8 @@ namespace Codeji.CMS.Services.PayRoll
             IMongoDbRepository<PayrollPolicyProfile> policyProfiles,
             IMongoDbRepository<PayrollPayGroup>? payGroups = null,
             IMongoDbRepository<SalaryTemplate>? salaryTemplates = null,
-            IMongoDbRepository<EmployeeSalaryStructure>? employeeSalaryStructures = null)
+            IMongoDbRepository<EmployeeSalaryStructure>? employeeSalaryStructures = null,
+            IMongoDbRepository<AttendancePenaltyPolicy>? penaltyPolicies = null)
         {
             _payRollServices = payRollServices;
             _employeeRepository = employeeRepository;
@@ -65,6 +68,7 @@ namespace Codeji.CMS.Services.PayRoll
             _payGroups = payGroups;
             _salaryTemplates = salaryTemplates;
             _employeeSalaryStructures = employeeSalaryStructures;
+            _penaltyPolicies = penaltyPolicies;
         }
 
         public async Task<Result> GeneratePayrollForMonthAsync(string companyId, DateTime payMonth, IReadOnlyCollection<string>? targetEmployeeIds = null)
@@ -147,9 +151,8 @@ namespace Codeji.CMS.Services.PayRoll
                     companyId, employee.EmployeeId, policyPeriodStart, policyPeriodEnd,
                     assignmentRows, canonicalSalaryStructures, policyProfiles, payGroups,
                     joiningDate: joining.Date);
-                if (!validationPolicy.IsConsistent)
-                    validationErrors.Add($"{employee.EmployeeId}: approved payroll policy changes within this pay period (from {validationPolicy.FirstConflictDate:yyyy-MM-dd}). One monthly payroll row cannot safely mix policy versions; align the approved policy to a period boundary before processing.");
-                var validationProfile = validationPolicy.Profile;
+                // Mid-month policy transitions adopt the active policy as of period end instead of blocking the whole company
+                var validationProfile = validationPolicy.Profile ?? PayrollPolicyResolver.ResolvePolicy(companyId, policyPeriodEnd, PayrollPolicyResolver.ResolveAssignment(companyId, employee.EmployeeId, policyPeriodEnd, assignmentRows), policyProfiles, payGroups);
                 var validationTdsMode = validationProfile?.TdsMode ?? divisorSetting.TdsMode;
                 if (!PayrollCalculationRules.IsSupportedTdsMode(validationTdsMode))
                     validationErrors.Add($"{employee.EmployeeId}: configured TDS mode '{validationTdsMode}' is unsupported; choose AUTO_NEW_REGIME, AUTO_OLD_REGIME, or MANUAL_ONLY before processing payroll.");
@@ -218,7 +221,7 @@ namespace Codeji.CMS.Services.PayRoll
                         companyId, emp.EmployeeId, policyPeriodStart, policyPeriodEnd,
                         assignmentRows, canonicalSalaryStructures, policyProfiles, payGroups,
                         joiningDate: joiningDate.Date);
-                    var resolvedProfile = resolvedPolicyPeriod.Profile;
+                    var resolvedProfile = resolvedPolicyPeriod.Profile ?? PayrollPolicyResolver.ResolvePolicy(companyId, policyPeriodEnd, assignment, policyProfiles, payGroups);
                     var salaryResolution = PayrollSalarySourceResolver.Resolve(
                         companyId, emp.EmployeeId, monthStart, monthEnd, canonicalSalaryStructures,
                         () => _salaryRepository.Get(s => s.CompanyId == companyId && s.EmployeeId == emp.EmployeeId && s.EffectiveFrom <= monthEnd && (!s.EffectiveTo.HasValue || s.EffectiveTo.Value >= monthStart)).ToList(),
@@ -413,10 +416,31 @@ namespace Codeji.CMS.Services.PayRoll
                         resolvedDivisor);
 
                     var segmentDates = attendanceSegments.Select(x => x.Date.Date).ToHashSet();
-                    decimal configuredUnpaidDays = attendanceRecords.Where(a => !segmentDates.Contains(a.Date.Date)).Sum(a => statusRules.TryGetValue(a.Status, out var rule)
-                        ? rule.UnpaidDayFraction
-                        : PayrollCalculationRules.ResolveFallbackUnpaidDayFraction(a.Status))
-                        + attendanceSegments.Sum(a => statusRules.TryGetValue(a.Status, out var rule) ? rule.UnpaidDayFraction : 0m);
+                    var allowedLimit = 2;
+                    if (_penaltyPolicies != null)
+                    {
+                        var pol = await _penaltyPolicies.FirstOrDefault(x =>
+                            x.CompanyId == companyId && x.UserId == emp.UserId && x.IsEnabled && !x.IsDeleted &&
+                            x.EffectiveFrom <= monthEnd && (!x.EffectiveTo.HasValue || x.EffectiveTo >= monthStart));
+                        if (pol != null) allowedLimit = pol.CombinedLhdEdMonthlyLimit;
+                    }
+                    var effectiveMonthRecords = attendanceRecords.Where(a => !segmentDates.Contains(a.Date.Date));
+                    var infractions = effectiveMonthRecords.Where(a => AttendancePayrollRules.IsPunctualityInfraction(a.Status))
+                        .Select(a => (a.Date.Date, a.Status))
+                        .Concat(attendanceSegments.Where(s => AttendancePayrollRules.IsPunctualityInfraction(s.Status)).Select(s => (s.Date.Date, s.Status)));
+                    var graceDates = AttendancePayrollRules.ResolveGraceExemptDates(infractions, allowedLimit);
+
+                    decimal configuredUnpaidDays = attendanceRecords.Where(a => !segmentDates.Contains(a.Date.Date)).Sum(a =>
+                    {
+                        var rawUnpaid = statusRules.TryGetValue(a.Status, out var rule)
+                            ? rule.UnpaidDayFraction
+                            : PayrollCalculationRules.ResolveFallbackUnpaidDayFraction(a.Status);
+                        return AttendancePayrollRules.ResolveEffectiveUnpaidDayFraction(a.Status, graceDates.Contains(a.Date.Date), rawUnpaid);
+                    }) + attendanceSegments.Sum(a =>
+                    {
+                        var rawUnpaid = statusRules.TryGetValue(a.Status, out var rule) ? rule.UnpaidDayFraction : 0m;
+                        return AttendancePayrollRules.ResolveEffectiveUnpaidDayFraction(a.Status, graceDates.Contains(a.Date.Date), rawUnpaid);
+                    });
                     decimal approvedPenaltyDays = attendanceException?.Status is "DEDUCTION_APPROVED" or "APPLIED_TO_PAYROLL"
                         ? attendanceException.DeductionDayFraction
                         : 0m;

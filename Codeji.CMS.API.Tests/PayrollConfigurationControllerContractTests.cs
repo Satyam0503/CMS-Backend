@@ -33,6 +33,7 @@ public sealed class PayrollConfigurationControllerContractTests
     [InlineData("RetireTemplate")]
     [InlineData("SavePolicy")]
     [InlineData("SaveAssignment")]
+    [InlineData("EndAssignment")]
     [InlineData("PreviewBulkAssignments")]
     [InlineData("SubmitBulkAssignments")]
     [InlineData("PreviewEmployeeSalaryPdf")]
@@ -73,10 +74,14 @@ public sealed class PayrollConfigurationControllerContractTests
         Assert.Equal("AdminOnly", authorization!.Policy);
     }
 
-    [Fact]
-    public void Statutory_policy_delete_requires_payroll_settings_delete_permission()
+    [Theory]
+    [InlineData("DeletePolicyDraft")]
+    [InlineData("DeletePayGroup")]
+    [InlineData("DeleteTemplate")]
+    [InlineData("DeleteAssignment")]
+    public void Configuration_deletes_require_payroll_settings_delete(string methodName)
     {
-        var method = typeof(PayrollConfigurationController).GetMethod("DeletePolicyDraft", BindingFlags.Instance | BindingFlags.Public);
+        var method = typeof(PayrollConfigurationController).GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public);
         var permission = method?.GetCustomAttribute<ModulePermissionAttribute>();
         var route = method?.GetCustomAttribute<HttpDeleteAttribute>();
 

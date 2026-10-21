@@ -548,6 +548,111 @@ public sealed class PayrollTemplateServiceTests
         Assert.Equal("admin", policy.ApprovedBy);
         Assert.NotNull(policy.ApprovedAtUtc);
     }
+    [Fact]
+    public async Task SavePolicy_AllowsEditingSubmittedPolicyInPlaceAndResetsToDraft()
+    {
+        var policies = Repository<PayrollPolicyProfile>();
+        var submitted = new PayrollPolicyProfile
+        {
+            Id = "sub-1", CompanyId = "company-1", Name = "Submitted Policy", ApprovalStatus = "SUBMITTED",
+            Version = 2, EffectiveFrom = new DateTime(2026, 9, 1), EpfMode = "CAPPED_CEILING", EsicMode = "STATUTORY",
+            StatutoryJurisdiction = "IN-KA", FinancialYear = "2026-27", StatutoryRuleVersion = "rules-1"
+        };
+        policies.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<PayrollPolicyProfile, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync(submitted);
+        PayrollPolicyProfile? updated = null;
+        policies.Setup(x => x.Update(It.IsAny<FilterDefinition<PayrollPolicyProfile>>(), It.IsAny<PayrollPolicyProfile>()))
+            .Callback<FilterDefinition<PayrollPolicyProfile>, PayrollPolicyProfile>((_, val) => updated = val)
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+        var service = new PayrollTemplateService(policies.Object, Repository<SalaryTemplate>().Object, Repository<PayrollPayGroup>().Object);
+
+        var result = await service.SavePolicy("company-1", "maker", new PayrollPolicyProfileDto
+        {
+            Id = submitted.Id, Version = submitted.Version, Name = "Corrected Submitted Policy",
+            EffectiveFrom = submitted.EffectiveFrom, EpfMode = "CAPPED_CEILING", EsicMode = "STATUTORY",
+            StatutoryJurisdiction = "IN-KA", FinancialYear = "2026-27", StatutoryRuleVersion = "rules-1"
+        });
+
+        Assert.True(result.Success);
+        Assert.NotNull(updated);
+        Assert.Equal("DRAFT", updated!.ApprovalStatus);
+        Assert.Equal("Corrected Submitted Policy", updated.Name);
+        Assert.Equal(3, updated.Version);
+    }
+
+    [Fact]
+    public async Task CancelPolicySubmission_WithdrawsSubmittedPolicyToDraft()
+    {
+        var policies = Repository<PayrollPolicyProfile>();
+        var submitted = new PayrollPolicyProfile
+        {
+            Id = "sub-1", CompanyId = "company-1", Name = "Submitted Policy", ApprovalStatus = "SUBMITTED",
+            SubmittedBy = "maker", Version = 2, EffectiveFrom = new DateTime(2026, 9, 1)
+        };
+        policies.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<PayrollPolicyProfile, bool>>>(), It.IsAny<bool>())).ReturnsAsync(submitted);
+        policies.Setup(x => x.Update(It.IsAny<FilterDefinition<PayrollPolicyProfile>>(), It.IsAny<PayrollPolicyProfile>()))
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+        var service = new PayrollTemplateService(policies.Object, Repository<SalaryTemplate>().Object, Repository<PayrollPayGroup>().Object);
+
+        var result = await service.CancelPolicySubmission("company-1", "maker", "sub-1", 2);
+
+        Assert.True(result.Success);
+        Assert.Equal("DRAFT", submitted.ApprovalStatus);
+        Assert.Null(submitted.SubmittedBy);
+        Assert.Equal(3, submitted.Version);
+    }
+
+    [Fact]
+    public async Task DeleteTemplate_RejectsWhenAssignedToEmployees()
+    {
+        var template = new SalaryTemplate { Id = "tpl-1", CompanyId = "company-1", Name = "Standard", Version = 1 };
+        var templates = Repository<SalaryTemplate>();
+        templates.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<SalaryTemplate, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync(template);
+        var assignments = Repository<EmployeePayrollAssignment>();
+        assignments.Setup(x => x.Exist(It.IsAny<Expression<Func<EmployeePayrollAssignment, bool>>>(), It.IsAny<bool>())).ReturnsAsync(true);
+        var service = new PayrollTemplateService(Repository<PayrollPolicyProfile>().Object, templates.Object, Repository<PayrollPayGroup>().Object, null, null, assignments.Object);
+
+        var result = await service.DeleteTemplate("company-1", "admin", "tpl-1", 1);
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Contains("employees are assigned to it", result.Message);
+    }
+
+    [Fact]
+    public async Task DeleteTemplate_DeletesWhenUnused()
+    {
+        var template = new SalaryTemplate { Id = "tpl-1", CompanyId = "company-1", Name = "Standard", Version = 1 };
+        var templates = Repository<SalaryTemplate>();
+        templates.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<SalaryTemplate, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync(template);
+        templates.Setup(x => x.Delete(It.IsAny<FilterDefinition<SalaryTemplate>>())).ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+        var assignments = Repository<EmployeePayrollAssignment>();
+        var service = new PayrollTemplateService(Repository<PayrollPolicyProfile>().Object, templates.Object, Repository<PayrollPayGroup>().Object, null, null, assignments.Object);
+
+        var result = await service.DeleteTemplate("company-1", "admin", "tpl-1", 1);
+        Assert.True(result.Success);
+    }
+
+    [Fact]
+    public async Task RetirePolicy_DeactivatesActivePolicyAndSetsEffectiveTo()
+    {
+        var policies = Repository<PayrollPolicyProfile>();
+        var approved = new PayrollPolicyProfile
+        {
+            Id = "app-1", CompanyId = "company-1", Name = "Approved Active", ApprovalStatus = "APPROVED",
+            IsActive = true, Version = 2, EffectiveFrom = new DateTime(2026, 1, 1)
+        };
+        policies.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<PayrollPolicyProfile, bool>>>(), It.IsAny<bool>())).ReturnsAsync(approved);
+        policies.Setup(x => x.Update(It.IsAny<FilterDefinition<PayrollPolicyProfile>>(), It.IsAny<PayrollPolicyProfile>()))
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+        var service = new PayrollTemplateService(policies.Object, Repository<SalaryTemplate>().Object, Repository<PayrollPayGroup>().Object);
+
+        var result = await service.RetirePolicy("company-1", "admin", "app-1", 2);
+
+        Assert.True(result.Success);
+        Assert.False(approved.IsActive);
+        Assert.NotNull(approved.EffectiveTo);
+        Assert.Equal(3, approved.Version);
+    }
+
     private static Mock<IMongoDbRepository<TEntity>> Repository<TEntity>()
     {
         var repository = new Mock<IMongoDbRepository<TEntity>>();

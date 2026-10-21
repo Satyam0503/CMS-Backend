@@ -158,9 +158,4 @@ public class AttendanceRepository : IAttendanceRepository
         var result = await _collection.BulkWriteAsync(writes, new BulkWriteOptions { IsOrdered = false }, cancellationToken);
         return (int)(result.Upserts.Count + result.ModifiedCount);
     }
-
-    public Task GetAll(Func<object, bool> value)
-    {
-        throw new NotImplementedException();
-    }
 }
