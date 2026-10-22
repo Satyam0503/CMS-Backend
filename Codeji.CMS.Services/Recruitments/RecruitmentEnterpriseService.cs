@@ -87,7 +87,7 @@ public sealed class RecruitmentEnterpriseService(
  public async Task<Result<List<RecruitmentOfferPendingQueueItem>>> PendingOffers(string? vacancyId)
  {
   var company=CurrentContext.CompanyId(context); if(string.IsNullOrWhiteSpace(company)) return new Result<List<RecruitmentOfferPendingQueueItem>>{Success=false,StatusCode=400,ErrorCode=RecruitmentErrorCodes.InvalidRequest,Message="Company context is required."};
-  var pending=(await offers.GetAll(x=>x.CompanyId==company&&!x.IsDeleted&&(x.Status==RecruitmentOfferStatus.Draft||x.Status==RecruitmentOfferStatus.PendingApproval||x.Status==RecruitmentOfferStatus.ChangeRequested)&&(string.IsNullOrWhiteSpace(vacancyId)||x.VacancyId==vacancyId))).ToList();
+  var pending=(await offers.GetAll(x=>x.CompanyId==company&&!x.IsDeleted&&(x.Status!=RecruitmentOfferStatus.Withdrawn&&x.Status!=RecruitmentOfferStatus.Expired)&&(string.IsNullOrWhiteSpace(vacancyId)||x.VacancyId==vacancyId))).ToList();
   var ids=pending.Select(x=>x.ApplicantId).Distinct().ToHashSet(); var names=(await applicants.GetAll(x=>x.CompanyId==company&&!x.IsDeleted&&ids.Contains(x.ApplicantId))).ToDictionary(x=>x.ApplicantId,x=>$"{x.FirstName} {x.LastName}".Trim());
   var items=pending.OrderByDescending(x=>x.UpdatedDate).Select(x=>new RecruitmentOfferPendingQueueItem{OfferId=x.OfferId,ApplicantId=x.ApplicantId,VacancyId=x.VacancyId,ApplicantName=names.GetValueOrDefault(x.ApplicantId,string.Empty),Status=x.Status,Salary=x.Salary,Currency=x.Currency,ApprovalRequired=x.Status==RecruitmentOfferStatus.PendingApproval}).ToList();
   return new Result<List<RecruitmentOfferPendingQueueItem>>{Success=true,StatusCode=200,MethodResult=items,Data=items,TotalRecords=items.Count,Message="Offer-pending queue loaded."};

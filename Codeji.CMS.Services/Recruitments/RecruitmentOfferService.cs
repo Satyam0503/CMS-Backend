@@ -22,7 +22,8 @@ public sealed class RecruitmentOfferService(
     IMongoDbRepository<JobVacancy>? vacancies = null,
     IRecruitmentExternalActionService? externalActions = null,
     IMongoDbRepository<RecruitmentPreboardingCase>? preboardingCases = null,
-    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null) : IRecruitmentOfferService
+    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null,
+    IMongoDbRepository<RecruitmentJobApplication>? applications = null) : IRecruitmentOfferService
 {
     public async Task<Result<string>> Upsert(RecruitmentOfferCommand command, string actorUserId)
     {
@@ -38,8 +39,8 @@ public sealed class RecruitmentOfferService(
             return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Offer expiry must be in the future.");
         if (command.StartDateUtc.HasValue && command.StartDateUtc.Value.Date < DateTime.UtcNow.Date)
             return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Offer start date cannot be in the past.");
-        if (command.ExpiresAtUtc.HasValue && command.StartDateUtc.HasValue && command.ExpiresAtUtc.Value <= command.StartDateUtc.Value)
-            return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Offer expiry must be after the offer start date.");
+        if (command.ExpiresAtUtc.HasValue && command.StartDateUtc.HasValue && command.ExpiresAtUtc.Value > command.StartDateUtc.Value)
+            return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Offer expiry must be on or before the offer start date.");
 
         var applicant = await applicants.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && !x.IsDeleted);
         if (applicant is null)
@@ -208,6 +209,37 @@ public sealed class RecruitmentOfferService(
             }
 
             // REC-BUG-03 & REC-BUG-04 Fix: Ensure RecruitmentPreboardingCase exists when offer becomes Accepted (whether via candidate link or HR action)
+            if (string.Equals(offer.Status, RecruitmentOfferStatus.Accepted, StringComparison.OrdinalIgnoreCase))
+            {
+                if (applicant.ActivityType != ActivityType.Selected)
+                {
+                    applicant.ActivityType = ActivityType.Selected;
+                    applicant.UpdatedBy = actorUserId;
+                    applicant.UpdatedDate = DateTime.UtcNow;
+                    await applicants.Update(Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId), applicant);
+
+                    if (applications is not null)
+                    {
+                        var canonical = await applications.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted);
+                        if (canonical is not null)
+                        {
+                            canonical.StageHistory.Add(new RecruitmentApplicationStageEvent
+                            {
+                                FromStage = canonical.CurrentStage,
+                                ToStage = nameof(ActivityType.Selected),
+                                ActorUserId = actorUserId,
+                                Reason = "Offer accepted"
+                            });
+                            canonical.CurrentStage = nameof(ActivityType.Selected);
+                            canonical.Version = (canonical.Version <= 0 ? 1 : canonical.Version) + 1;
+                            canonical.UpdatedBy = actorUserId;
+                            canonical.UpdatedDate = DateTime.UtcNow;
+                            await applications.Update(Builders<RecruitmentJobApplication>.Filter.Where(x => x.CompanyId == companyId && x.ApplicationId == canonical.ApplicationId), canonical);
+                        }
+                    }
+                }
+            }
+
             if (string.Equals(offer.Status, RecruitmentOfferStatus.Accepted, StringComparison.OrdinalIgnoreCase)
                 && preboardingCases is not null)
             {
@@ -243,6 +275,17 @@ public sealed class RecruitmentOfferService(
         {
             // Secondary side-effects must not roll back the primary offer persistence.
         }
+    }
+
+    public async Task<Result<RecruitmentOffer?>> GetByApplicant(string applicantId)
+    {
+        var companyId = CurrentContext.CompanyId(context);
+        if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(applicantId))
+            return new Result<RecruitmentOffer?> { Success = false, StatusCode = StatusCodes.Status400BadRequest, ErrorCode = RecruitmentErrorCodes.InvalidRequest, Message = "Company context and applicant ID are required." };
+
+        var list = await offers.GetAll(x => x.CompanyId == companyId && x.ApplicantId == applicantId.Trim() && !x.IsDeleted);
+        var latest = list?.OrderByDescending(x => x.UpdatedDate ?? x.CreatedDate).FirstOrDefault();
+        return new Result<RecruitmentOffer?> { Success = true, StatusCode = StatusCodes.Status200OK, MethodResult = latest, Message = latest != null ? "Offer loaded." : "No offer found." };
     }
 
     private static bool TryBuildCandidateOfferUrl(string token, out string offerUrl)

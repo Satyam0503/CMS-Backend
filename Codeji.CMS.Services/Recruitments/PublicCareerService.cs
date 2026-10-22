@@ -219,7 +219,7 @@ public class PublicCareerService : IPublicCareerService
             Email = email,
             Phone = request.Phone.Trim(),
             State = request.State?.Trim() ?? string.Empty,
-            Experience = request.Experience,
+            Experience = request.Experience * 12,
             CurrentCompany = request.CurrentCompany?.Trim(),
             CurrentJobTitle = request.CurrentJobTitle?.Trim(),
             NoticePeriodDays = request.NoticePeriodDays,

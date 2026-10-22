@@ -62,6 +62,17 @@ public class JobVacancyController : BaseApiController
         return data?.Title ?? string.Empty;
     }
 
+    [Route("GetJobVacancyDetails")]
+    [HttpGet]
+    [ModulePermission(AppModule.Jobs, Permission.View)]
+    public async Task<Result<JobVacancyModel>> GetJobVacancyDetails([FromQuery] string vacancyId)
+    {
+        var data = await _jobVacancyService.GetVacancyById(vacancyId);
+        if (data is null)
+            return new Result<JobVacancyModel> { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "Job vacancy was not found." };
+        return new Result<JobVacancyModel> { Success = true, StatusCode = StatusCodes.Status200OK, MethodResult = data, Data = data };
+    }
+
     [Route("DeleteJobVacancy")]
     [HttpDelete]
     [ModulePermission(AppModule.Jobs, Permission.Delete)]

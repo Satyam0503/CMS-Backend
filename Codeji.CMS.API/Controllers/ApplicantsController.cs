@@ -92,6 +92,33 @@ namespace Codeji.CMS.API.Controllers
             if (model?.File is null) return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Resume is required." };
             return await _applicantsService.UploadResumeForApplicant(applicantId, model.File, CurrentContext.UserId(_httpContextAccessor));
         }
+
+        [HttpGet]
+        [Route("Resume/{applicantId}")]
+        [ModulePermission(AppModule.Applications, Permission.View)]
+        public async Task<IActionResult> GetResume(string applicantId)
+        {
+            if (string.IsNullOrWhiteSpace(applicantId))
+                return BadRequest(new { success = false, message = "Applicant ID is required." });
+
+            var applicantResult = await _applicantsService.ApplicantById(applicantId);
+            if (!applicantResult.Success || applicantResult.MethodResult is null)
+                return NotFound(new { success = false, message = "Applicant was not found." });
+
+            var applicant = applicantResult.MethodResult;
+            if (string.IsNullOrWhiteSpace(applicant.ResumeUrl))
+                return NotFound(new { success = false, message = "No resume uploaded for this applicant." });
+
+            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Resume");
+            string fileName = Path.GetFileName(applicant.ResumeUrl);
+            string filePath = Path.Combine(uploadFolder, fileName);
+
+            if (!System.IO.File.Exists(filePath))
+                return NotFound(new { success = false, message = "Resume file not found on server." });
+
+            var fileBytes = await System.IO.File.ReadAllBytesAsync(filePath);
+            return File(fileBytes, "application/pdf", $"{applicant.FirstName}_{applicant.LastName}_Resume.pdf");
+        }
         [HttpPost]
         [Route("HandoffToPreboarding")]
         [ModulePermission(AppModule.Applications, Permission.Edit)]
@@ -119,6 +146,12 @@ namespace Codeji.CMS.API.Controllers
         [ModulePermission(AppModule.Applications, Permission.Edit)]
         public async Task<Result<string>> UpsertOffer([FromBody] RecruitmentOfferCommand command)
             => await _recruitmentOfferService.Upsert(command, CurrentContext.UserId(_httpContextAccessor));
+
+        [HttpGet]
+        [Route("Offer/{applicantId}")]
+        [ModulePermission(AppModule.Applications, Permission.View)]
+        public async Task<Result<RecruitmentOffer?>> GetOfferByApplicant(string applicantId)
+            => await _recruitmentOfferService.GetByApplicant(applicantId);
 
         [Route("AddComment")]
         [HttpPost]

@@ -25,7 +25,19 @@ public sealed class RecruitmentCandidatePrivacyService(
         if (action == "Anonymize" && string.IsNullOrWhiteSpace(command.Reason)) return Fail(400, "A reason is required before anonymization.");
         if (action == "Grant") { var config = await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted); var retentionDays = command.RetentionDays ?? config?.DefaultCandidateRetentionDays ?? 730; if (retentionDays is < 30 or > 3650) return Fail(400, "Candidate retention must be between 30 and 3650 days."); var nowUtc = DateTime.UtcNow; applicant.ConsentStatus = "Granted"; applicant.ConsentGrantedAtUtc = nowUtc; applicant.RetentionUntilUtc = nowUtc.AddDays(retentionDays); }
         else if (action == "Revoke") { applicant.ConsentStatus = "Revoked"; applicant.ConsentGrantedAtUtc = null; }
-        else { applicant.ConsentStatus = "Anonymized"; applicant.AnonymizedAtUtc = DateTime.UtcNow; applicant.Email = $"anonymized-{applicant.ApplicantId}@invalid.local"; applicant.Phone = "0000000000"; applicant.FirstName = "Anonymized"; applicant.LastName = "Candidate"; applicant.ResumeUrl = string.Empty; applicant.CoverLetter = null; applicant.LinkedInUrl = null; applicant.PortfolioUrl = null; }
+        else {
+            if (!string.IsNullOrWhiteSpace(applicant.ResumeUrl))
+            {
+                try
+                {
+                    var uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Resume");
+                    var resumePath = Path.Combine(uploadFolder, Path.GetFileName(applicant.ResumeUrl));
+                    if (File.Exists(resumePath)) File.Delete(resumePath);
+                }
+                catch { }
+            }
+            applicant.ConsentStatus = "Anonymized"; applicant.AnonymizedAtUtc = DateTime.UtcNow; applicant.Email = $"anonymized-{applicant.ApplicantId}@invalid.local"; applicant.Phone = "0000000000"; applicant.FirstName = "Anonymized"; applicant.LastName = "Candidate"; applicant.ResumeUrl = string.Empty; applicant.CoverLetter = null; applicant.LinkedInUrl = null; applicant.PortfolioUrl = null;
+        }
         applicant.LastCommandIdempotencyKey = key; applicant.Version = Math.Max(1, applicant.Version) + 1; applicant.UpdatedBy = actorUserId; applicant.UpdatedDate = DateTime.UtcNow;
         var expectedVersion = Math.Max(1, applicant.Version) - 1;
         var updated = await applicants.Update(Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && (x.Version == expectedVersion || x.Version == 0)), applicant); if (!updated.Success) return Fail(409, "Applicant privacy state could not be saved.");

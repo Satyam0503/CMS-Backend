@@ -2,6 +2,7 @@ using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.Repository.Entities.Recruitments;
+using Codeji.CMS.Services.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.middlewares;
@@ -64,6 +65,11 @@ public sealed class RecruitmentPlanningController(
     [ModulePermission(AppModule.Applications, Permission.View)]
     public Task<Result<List<RecruitmentScorecard>>> GetScorecards(string applicantId, string vacancyId) => scorecardService.GetByApplicant(applicantId, vacancyId);
 
+    [HttpGet("FinalInterviewScore/{applicantId}")]
+    [ModulePermission(AppModule.Applications, Permission.View)]
+    public Task<Result<RecruitmentFinalScoreResult>> GetFinalInterviewScore(string applicantId) =>
+        scorecardService.GetFinalInterviewScore(applicantId);
+
     [HttpPost("UpsertScorecard")]
     [ModulePermission(AppModule.Applications, Permission.Edit)]
     public Task<Result<string>> UpsertScorecard([FromBody] RecruitmentScorecardCommand command) =>
@@ -74,13 +80,3 @@ public sealed class RecruitmentPlanningController(
     public Task<Result<string>> UpsertTalentPoolMember([FromBody] RecruitmentTalentPoolCommand command) =>
         talentPoolService.Upsert(command, CurrentContext.UserId(context));
 }
-// Scorecard commands share the Applications.Edit permission and existing audit stream.
-
-
-
-
-
-
-
-
-

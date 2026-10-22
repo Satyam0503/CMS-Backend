@@ -18,7 +18,8 @@ public sealed class RecruitmentInterviewService(
     IMongoDbRepository<RecruitmentInterview> interviews,
     ICalendarServices calendarServices,
     IHttpContextAccessor context,
-    IMongoDbRepository<EmpUser>? employees = null) : IRecruitmentInterviewService
+    IMongoDbRepository<EmpUser>? employees = null,
+    IMongoDbRepository<JobVacancy>? vacancies = null) : IRecruitmentInterviewService
 {
     public async Task<Result<string>> Upsert(RecruitmentInterviewCommand command, string actorUserId)
     {
@@ -165,16 +166,30 @@ public sealed class RecruitmentInterviewService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+        var applicant = await applicants.FirstOrDefault(x => x.CompanyId == interview.CompanyId && x.ApplicantId == interview.ApplicantId && !x.IsDeleted);
+        var candidateName = applicant != null ? $"{applicant.FirstName} {applicant.LastName}".Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(candidateName)) candidateName = applicant?.Email ?? "Candidate";
+
+        var roleTitle = "Candidate";
+        if (vacancies is not null && !string.IsNullOrWhiteSpace(interview.VacancyId))
+        {
+            var vac = await vacancies.FirstOrDefault(x => x.CompanyId == interview.CompanyId && (x.JobId == interview.VacancyId || x.PublicJobId == interview.VacancyId) && !x.IsDeleted);
+            if (vac is not null && !string.IsNullOrWhiteSpace(vac.Title)) roleTitle = vac.Title;
+        }
+
+        var meetingInfo = !string.IsNullOrWhiteSpace(interview.MeetingUrl) ? interview.MeetingUrl : (!string.IsNullOrWhiteSpace(interview.Location) ? interview.Location : "Virtual");
+        var panelistNames = string.Join(", ", interview.PanelistUserIds ?? []);
+
         var sync = await calendarServices.AddUpdateCalendarItem(new CalendarRequestDto
         {
             Id = interview.CalendarItemId,
-            Name = $"Interview: {interview.Title}",
+            Name = $"Interview: {candidateName} - {interview.Title}",
             Date = interview.StartsAtUtc.Date,
             StartTimeUtc = interview.StartsAtUtc,
             EndTimeUtc = interview.EndsAtUtc,
             Type = CalendarItem.Event,
             Recurring = false,
-            Description = $"Applicant {interview.ApplicantId}; {interview.StartsAtUtc:u} - {interview.EndsAtUtc:u}; panel: {string.Join(", ", interview.PanelistUserIds)}",
+            Description = $"Candidate: {candidateName} | Role: {roleTitle} | Round {interview.RoundNumber} ({interview.RoundType ?? "Interview"}) | Time: {interview.StartsAtUtc:yyyy-MM-dd HH:mm} UTC | Location: {meetingInfo} | Panel: {panelistNames} | ApplicantId: {interview.ApplicantId} | VacancyId: {interview.VacancyId} | InterviewId: {interview.InterviewId}",
             TargetUserIds = targetUsers,
             RestrictToTargetUsersAndHrAdmin = true
         });

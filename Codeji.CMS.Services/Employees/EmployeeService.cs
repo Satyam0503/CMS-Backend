@@ -10077,9 +10077,20 @@ namespace Codeji.CMS.Services.Employees
             string userId
         )
         {
-            Expression<Func<UserNotifications, bool>> wherecondition = x =>
-                x.UserId == userId && !x.IsDismissed;
-            int userNotificationsCount = await _userNotificationRepository.Count(wherecondition);
+            var now = DateTime.UtcNow;
+            Expression<Func<UserNotifications, bool>> allCondition = x =>
+                x.UserId == userId
+                && x.IsDismissed != true
+                && !(x.SnoozedUntilUtc > now);
+
+            int userNotificationsCount = await _userNotificationRepository.Count(allCondition);
+            int unReadNotificationCount = await _userNotificationRepository.Count(x =>
+                x.UserId == userId
+                && x.IsRead != true
+                && x.IsDismissed != true
+                && !(x.SnoozedUntilUtc > now)
+            );
+
             if (userNotificationsCount == 0)
             {
                 return new NotificationResponseModel()
@@ -10089,16 +10100,15 @@ namespace Codeji.CMS.Services.Employees
                     Unread = 0,
                 };
             }
-            if (model.Type != "all")
-            {
-                wherecondition = x => x.UserId == userId && !x.IsRead;
-            }
-            int unReadNotificationCount = await _userNotificationRepository.Count(x =>
-                x.UserId == userId
-                && !x.IsRead
-                && !x.IsDismissed
-                && (x.SnoozedUntilUtc == null || x.SnoozedUntilUtc <= DateTime.UtcNow)
-            );
+
+            Expression<Func<UserNotifications, bool>> wherecondition = model.Type == "all"
+                ? allCondition
+                : x =>
+                    x.UserId == userId
+                    && x.IsRead != true
+                    && x.IsDismissed != true
+                    && !(x.SnoozedUntilUtc > now);
+
             List<UserNotifications> userNotifications = (
                 await _userNotificationRepository.GetAggregateDataAsync<UserNotifications>(
                     wherecondition,
@@ -10108,25 +10118,32 @@ namespace Codeji.CMS.Services.Employees
                     pageSize: model.Records
                 )
             ).ToList();
-            string[] notificationsId = userNotifications.Select(x => x.NotificationId).ToArray();
+
+            string[] notificationsId = userNotifications.Select(x => x.NotificationId).Distinct().ToArray();
             IEnumerable<Notifications> notifications = await _notificationsRepository.GetAll(x =>
                 notificationsId.Contains(x.NotificationId)
             );
-            var data = (
-                from usrNft in userNotifications
-                join ntf in notifications on usrNft.NotificationId equals ntf.NotificationId
-                select new NotificationViewModel
+            var notifDict = notifications.ToDictionary(x => x.NotificationId);
+
+            var data = userNotifications
+                .Where(usrNft => notifDict.ContainsKey(usrNft.NotificationId))
+                .Select(usrNft =>
                 {
-                    UserNotificationId = usrNft.UserNotificationId,
-                    IsRead = usrNft.IsRead,
-                    Title = ntf.Title,
-                    Body = ntf.Body,
-                    TargetId = ntf.TargetId,
-                    SentDateTime = usrNft.CreatedDateTime,
-                    SentBy = ntf.CreatedBy,
-                    NotificationTypes = ntf.NotificationType,
-                }
-            ).ToList();
+                    var ntf = notifDict[usrNft.NotificationId];
+                    return new NotificationViewModel
+                    {
+                        UserNotificationId = usrNft.UserNotificationId,
+                        IsRead = usrNft.IsRead,
+                        Title = ntf.Title,
+                        Body = ntf.Body,
+                        TargetId = ntf.TargetId,
+                        SentDateTime = usrNft.CreatedDateTime,
+                        SentBy = ntf.CreatedBy,
+                        NotificationTypes = ntf.NotificationType,
+                    };
+                })
+                .ToList();
+
             return new NotificationResponseModel()
             {
                 NotificationList = data,

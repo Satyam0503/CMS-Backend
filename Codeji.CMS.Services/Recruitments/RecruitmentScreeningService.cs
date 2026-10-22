@@ -18,7 +18,8 @@ public sealed class RecruitmentScreeningService(
     IHttpContextAccessor context,
     IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null,
     IMongoDbRepository<EmpUser>? employees = null,
-    IMongoDbRepository<RecruitmentJobApplication>? applications = null) : IRecruitmentScreeningService
+    IMongoDbRepository<RecruitmentJobApplication>? applications = null,
+    IMongoDbRepository<JobVacancy>? vacancies = null) : IRecruitmentScreeningService
 {
     public async Task<Result<string>> Upsert(RecruitmentScreeningReviewCommand command, string actorUserId)
     {
@@ -31,7 +32,8 @@ public sealed class RecruitmentScreeningService(
         if (employees is not null && !string.IsNullOrWhiteSpace(reviewer))
         {
             var activeReviewer = await employees.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == reviewer && x.Status && !x.IsDeleted);
-            if (activeReviewer is null) return Fail(RecruitmentErrorCodes.InvalidRequest, "Reviewer is not active in the current company.");
+            if (activeReviewer is null && string.IsNullOrWhiteSpace(CurrentContext.AdminUserId(context)) && !string.Equals(reviewer, actorUserId, StringComparison.OrdinalIgnoreCase))
+                return Fail(RecruitmentErrorCodes.InvalidRequest, "Reviewer is not active in the current company.");
         }
         if (decision is not (RecruitmentScreeningDecision.Pending or RecruitmentScreeningDecision.Pass or RecruitmentScreeningDecision.Hold or RecruitmentScreeningDecision.Reject))
             return Fail(RecruitmentErrorCodes.InvalidRequest, "Screening decision must be Pending, Pass, Hold, or Reject.");
@@ -39,12 +41,26 @@ public sealed class RecruitmentScreeningService(
             return Fail(RecruitmentErrorCodes.InvalidRequest, "Screening requires at least one named criterion and a score from 0 to 100.");
 
         var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
-        if (config is not null && config.ScreeningPassScore > 0 && decision == RecruitmentScreeningDecision.Pass && command.Score < config.ScreeningPassScore)
-            return Fail(RecruitmentErrorCodes.InvalidRequest, $"Screening pass requires a score of at least {config.ScreeningPassScore}.");
+
+        JobVacancy? vacancy = null;
+        if (vacancies is not null && !string.IsNullOrWhiteSpace(command.VacancyId))
+        {
+            vacancy = await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == command.VacancyId && !x.IsDeleted);
+        }
+
+        // Active pass score: vacancy-specific threshold takes first precedence, followed by company config, default 60
+        int passScoreThreshold = (vacancy?.ScreeningPassScore is > 0)
+            ? vacancy.ScreeningPassScore.Value
+            : (config?.ScreeningPassScore ?? 60);
+        if (passScoreThreshold > 0 && decision == RecruitmentScreeningDecision.Pass && command.Score < passScoreThreshold)
+            return Fail(RecruitmentErrorCodes.InvalidRequest, $"Screening pass requires a score of at least {passScoreThreshold}.");
 
         // REC-BUG-06 Fix: When bulk screening sends "Bulk recruiter review", automatically expand it to match the company's configured ScreeningCriteria.
         var criteriaToSave = command.Criteria;
-        if (config?.ScreeningCriteria is { Count: > 0 } configuredCriteria)
+        var configuredCriteria = (vacancy?.ScreeningCriteria is { Count: > 0 } vCriteria)
+            ? vCriteria
+            : config?.ScreeningCriteria;
+        if (configuredCriteria is { Count: > 0 })
         {
             if (criteriaToSave.Count == 1 && string.Equals(criteriaToSave[0].Name.Trim(), "Bulk recruiter review", StringComparison.OrdinalIgnoreCase))
             {

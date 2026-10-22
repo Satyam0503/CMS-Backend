@@ -1940,9 +1940,14 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
                 ("Reason", leaveDomain.Reason), ("Status", status.ToString()),
                 ("Requested on", leaveDomain.CreatedDate?.ToLocalTime().ToString("dd MMM yyyy hh:mm tt")),
             };
-            if (reviewer is not null) detailRows.Add((status == EnumsHelper.LeaveRequestStatus.Accepted ? "Approved by" : "Reviewed by", $"{reviewer.FirstName} {reviewer.LastName}".Trim()));
-            if (leaveDomain.ReviewedAt.HasValue) detailRows.Add(("Decision date", leaveDomain.ReviewedAt.Value.ToLocalTime().ToString("dd MMM yyyy hh:mm tt")));
-            if (!string.IsNullOrWhiteSpace(leaveDomain.Comment)) detailRows.Add(("Approver remarks", leaveDomain.Comment));
+            if (reviewer is not null && status != EnumsHelper.LeaveRequestStatus.WithDrawn)
+                detailRows.Add((status == EnumsHelper.LeaveRequestStatus.Accepted ? "Approved by" : "Reviewed by", $"{reviewer.FirstName} {reviewer.LastName}".Trim()));
+            else if (status == EnumsHelper.LeaveRequestStatus.WithDrawn)
+                detailRows.Add(("Withdrawn by", actorUserId == leaveDomain.EmployeeId ? employeeName : $"{reviewer?.FirstName} {reviewer?.LastName}".Trim()));
+            if (leaveDomain.ReviewedAt.HasValue)
+                detailRows.Add((status == EnumsHelper.LeaveRequestStatus.WithDrawn ? "Withdrawn date" : "Decision date", leaveDomain.ReviewedAt.Value.ToLocalTime().ToString("dd MMM yyyy hh:mm tt")));
+            if (!string.IsNullOrWhiteSpace(leaveDomain.Comment))
+                detailRows.Add((status == EnumsHelper.LeaveRequestStatus.WithDrawn ? "Remarks" : "Approver remarks", leaveDomain.Comment));
             string detailsHtml = "<table role=\"presentation\" style=\"border-collapse:collapse;width:100%;max-width:620px\">" + string.Concat(detailRows.Where(x => !string.IsNullOrWhiteSpace(x.Value)).Select(x => $"<tr><td style=\"padding:7px 12px 7px 0;color:#5f6b7a;font-weight:600;vertical-align:top\">{WebUtility.HtmlEncode(x.Label)}</td><td style=\"padding:7px 0;vertical-align:top\">{WebUtility.HtmlEncode(x.Value)}</td></tr>")) + "</table>";
 
             List<EmpUser> recipients;
@@ -1968,6 +1973,42 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
                 body = $"{employeeName} has submitted a leave request for {dateRange}.";
                 notificationType = EnumsHelper.NotificationTypes.LeaveRequest;
                 mailType = EnumsHelper.MailType.LeaveMailToHR;
+            }
+            else if (status == EnumsHelper.LeaveRequestStatus.WithDrawn)
+            {
+                bool isSelfWithdrawal = actorUserId == leaveDomain.EmployeeId;
+                if (isSelfWithdrawal)
+                {
+                    // When an employee withdraws their own leave request, notify HR and Admin managers
+                    // instead of sending an erroneous "Leave Rejected" message to the employee.
+                    var roleIds = (await _roleRepository.GetAll(x =>
+                        x.CompanyId == companyId &&
+                        (x.RoleType == Convert.ToInt32(EnumsHelper.Roles.Administrator) || x.RoleType == Convert.ToInt32(EnumsHelper.Roles.HR) || x.RoleType == Convert.ToInt32(EnumsHelper.Roles.HRExecutive))))
+                        .Select(x => x.RolesId)
+                        .ToHashSet();
+                    recipients = (await _employeeRepository.GetAll(x =>
+                            x.CompanyId == companyId && x.Status && roleIds.Contains(x.RoleId)))
+                        .Where(x => x.UserId != leaveDomain.EmployeeId)
+                        .GroupBy(x => x.UserId)
+                        .Select(x => x.First())
+                        .ToList();
+                    title = $"Leave Request Withdrawn - {employeeName} - {leaveType}";
+                    body = $"{employeeName} has withdrawn their leave request for {dateRange}.";
+                    notificationType = EnumsHelper.NotificationTypes.Notice;
+                    mailType = EnumsHelper.MailType.LeaveMailToHR;
+                }
+                else
+                {
+                    // When Admin/HR cancels an employee's leave request
+                    if (!await _middlewareService.IsUserNotificationPreferenceEnabled(
+                            leaveDomain.EmployeeId, EnumsHelper.NotificationPreferenceType.LeaveStatusUpdate)) return;
+                    recipients = [employee];
+                    var cancellerName = reviewer != null ? $"{reviewer.FirstName} {reviewer.LastName}".Trim() : "an administrator";
+                    title = $"Leave Request Cancelled - {leaveType} - {dateRange}";
+                    body = $"Your leave request from {leaveDomain.StartDate:dd MMM yyyy} to {leaveDomain.EndDate:dd MMM yyyy} has been cancelled by {cancellerName}.";
+                    notificationType = EnumsHelper.NotificationTypes.Notice;
+                    mailType = EnumsHelper.MailType.LeaveReplyMail;
+                }
             }
             else
             {

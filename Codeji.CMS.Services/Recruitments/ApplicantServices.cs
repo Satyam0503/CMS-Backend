@@ -42,6 +42,9 @@ namespace Codeji.CMS.Services.Recruitments
         private readonly IMongoDbRepository<PublicApplicationToken>? _applicationTokenRepository;
         private readonly IMongoDbRepository<RecruitmentJobApplication>? _jobApplicationRepository;
         private readonly IMongoDbRepository<RecruitmentEnterpriseConfig>? _configRepository;
+        private readonly IMongoDbRepository<RecruitmentHandoff>? _handoffRepository;
+        private readonly IMongoDbRepository<RecruitmentScorecard>? _scorecardRepository;
+        private readonly IMongoDbRepository<RecruitmentInterview>? _interviewRepository;
 
         public ApplicantServices(IMongoDbRepository<Applicant> applicantDbRepository,
             IMapper mapper,
@@ -57,7 +60,10 @@ namespace Codeji.CMS.Services.Recruitments
             IHttpContextAccessor httpContextAccessor,
             IMongoDbRepository<PublicApplicationToken>? applicationTokenRepository = null,
             IMongoDbRepository<RecruitmentJobApplication>? jobApplicationRepository = null,
-            IMongoDbRepository<RecruitmentEnterpriseConfig>? configRepository = null
+            IMongoDbRepository<RecruitmentEnterpriseConfig>? configRepository = null,
+            IMongoDbRepository<RecruitmentHandoff>? handoffRepository = null,
+            IMongoDbRepository<RecruitmentScorecard>? scorecardRepository = null,
+            IMongoDbRepository<RecruitmentInterview>? interviewRepository = null
             )
         {
             _applicantRepository = applicantDbRepository;
@@ -75,6 +81,9 @@ namespace Codeji.CMS.Services.Recruitments
             _applicationTokenRepository = applicationTokenRepository;
             _jobApplicationRepository = jobApplicationRepository;
             _configRepository = configRepository;
+            _handoffRepository = handoffRepository;
+            _scorecardRepository = scorecardRepository;
+            _interviewRepository = interviewRepository;
         }
         /// <summary>
         /// For Annonymous add and update applicants
@@ -450,7 +459,11 @@ namespace Codeji.CMS.Services.Recruitments
                                                  State = applicant.State,
                                                  Experience = applicant.Experience,
                                                  ApplyDate = applicant.CreatedDate,
-                                                 ResumeUrl = Common.GetApplicantResumeFullPath(applicant.ResumeUrl)
+                                                 ResumeUrl = Common.GetApplicantResumeFullPath(applicant.ResumeUrl),
+                                                 FinalInterviewScore = applicant.FinalInterviewScore,
+                                                 FinalInterviewRating = applicant.FinalInterviewRating,
+                                                 FinalInterviewRecommendation = applicant.FinalInterviewRecommendation,
+                                                 EvaluatedRoundsCount = applicant.EvaluatedRoundsCount
                                              }).OrderByDescending(x => x.ApplyDate).ToList();
             return new Result<ApplicantViewModel>
             {
@@ -468,6 +481,35 @@ namespace Codeji.CMS.Services.Recruitments
             JobVacancy? vacancy = await _jobVacancyRepository.FirstOrDefault(x => applicant != null && x.CompanyId == companyId && applicant.VacancyId == x.JobId);
             if (applicant is not null)
             {
+                // Dynamic self-healing of interview benchmark if scorecards exist but were not yet persisted
+                if ((applicant.FinalInterviewScore == null || applicant.FinalInterviewScore == 0) && _scorecardRepository is not null)
+                {
+                    try
+                    {
+                        var allScorecards = (await _scorecardRepository.GetAll(x => x.CompanyId == companyId && x.ApplicantId == applicantId && !x.IsDeleted)).ToList();
+                        if (allScorecards.Count > 0)
+                        {
+                            var allInterviews = _interviewRepository is not null
+                                ? (await _interviewRepository.GetAll(x => x.CompanyId == companyId && x.ApplicantId == applicantId && !x.IsDeleted)).ToList()
+                                : null;
+                            var computed = RecruitmentInterviewScoreCalculator.Compute(allScorecards, allInterviews);
+                            if (computed.FinalInterviewScore > 0)
+                            {
+                                applicant.FinalInterviewScore = computed.FinalInterviewScore;
+                                applicant.FinalInterviewRating = computed.FinalInterviewRating;
+                                applicant.FinalInterviewRecommendation = computed.FinalInterviewRecommendation;
+                                applicant.EvaluatedRoundsCount = computed.EvaluatedRoundsCount;
+                                applicant.FinalScoreCalculatedAtUtc = DateTime.UtcNow;
+                                await _applicantRepository.Update(Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId), applicant);
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Non-blocking telemetry
+                    }
+                }
+
                 ApplicantViewModel data = new ApplicantViewModel
                 {
                     ApplicantId = applicant.ApplicantId,
@@ -482,10 +524,51 @@ namespace Codeji.CMS.Services.Recruitments
                     State = applicant.State,
                     Experience = applicant.Experience,
                     ApplyDate = applicant.CreatedDate,
-                    ResumeUrl = Common.GetApplicantResumeFullPath(applicant.ResumeUrl)
+                    ResumeUrl = Common.GetApplicantResumeFullPath(applicant.ResumeUrl),
+                    FinalInterviewScore = applicant.FinalInterviewScore,
+                    FinalInterviewRating = applicant.FinalInterviewRating,
+                    FinalInterviewRecommendation = applicant.FinalInterviewRecommendation,
+                    EvaluatedRoundsCount = applicant.EvaluatedRoundsCount
                 };
+
+                if (_handoffRepository is not null)
+                {
+                    var handoff = await _handoffRepository.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicantId && !x.IsDeleted);
+                    if (handoff is not null)
+                    {
+                        data.IsHired = true;
+                        data.EmployeeUserId = handoff.EmployeeUserId;
+                    }
+                }
+
+                if (!data.IsHired && _employeeRepository is not null && !string.IsNullOrWhiteSpace(applicant.Email))
+                {
+                    var emp = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.Email.ToLower() == applicant.Email.ToLower() && !x.IsDeleted);
+                    if (emp is not null)
+                    {
+                        data.IsHired = true;
+                        data.EmployeeUserId = emp.UserId;
+                        data.EmployeeId = emp.EmployeeId;
+                    }
+                }
+                else if (data.IsHired && !string.IsNullOrWhiteSpace(data.EmployeeUserId) && _employeeRepository is not null)
+                {
+                    var emp = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == data.EmployeeUserId && !x.IsDeleted);
+                    if (emp is not null)
+                    {
+                        data.EmployeeId = emp.EmployeeId;
+                    }
+                }
+
                 result.Success = true;
+                result.StatusCode = StatusCodes.Status200OK;
                 result.MethodResult = data;
+            }
+            else
+            {
+                result.Success = false;
+                result.StatusCode = StatusCodes.Status404NotFound;
+                result.Message = "Applicant was not found in the current company.";
             }
             return result;
         }

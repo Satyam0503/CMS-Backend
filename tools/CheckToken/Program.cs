@@ -1,56 +1,37 @@
 using MongoDB.Bson;
 using MongoDB.Driver;
-using Codeji.CMS.Utility.Helpers;
-using Codeji.CMS.Domain.Models;
 
 var configPath = @"d:\CMS\CMS-Backend-Core\Codeji.CMS.API\appsettings.json";
 using var config = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(configPath));
 var connection = config.RootElement.GetProperty("ConnectionStrings").GetProperty("mongodb").GetString();
-ConfigManager.AppSettings = new AppSettings
-{
-    APIUrl = "http://localhost:5036/",
-    AppUrl = "http://localhost:5173/",
-    AppVersion = "v4.0.0.15102024"
-};
-ConfigManager.Jwt = new JwtSettings
-{
-    SecretKey = config.RootElement.GetProperty("Jwt").GetProperty("SecretKey").GetString() ?? "",
-    Expiry = 1440
-};
-
 var db = new MongoClient(connection).GetDatabase(MongoUrl.Create(connection).DatabaseName);
-var users = db.GetCollection<BsonDocument>("EmpUser");
-var anchor = await users.Find(new BsonDocument("Email", new BsonRegularExpression(@"^\s*satyam@codeji\.in\s*$", "i"))).FirstOrDefaultAsync();
 
-if (anchor == null)
+var applicants = db.GetCollection<BsonDocument>("Applicant");
+var vacancies = db.GetCollection<BsonDocument>("JobVacancy");
+
+var app = await applicants.Find(new BsonDocument("_id", "4c5adde3-7ba3-499d-91f2-9c850fa083e0")).FirstOrDefaultAsync();
+if (app != null)
 {
-    Console.WriteLine("User not found!");
-    return;
+    var fn = app.Contains("FirstName") ? app["FirstName"].AsString : "";
+    var ln = app.Contains("LastName") ? app["LastName"].AsString : "";
+    var vacId = app.Contains("VacancyId") ? app["VacancyId"].AsString : "";
+    Console.WriteLine($"Applicant: {fn} {ln}, VacancyId: {vacId}");
+
+    var vac = await vacancies.Find(new BsonDocument { { "$or", new BsonArray { new BsonDocument("_id", vacId), new BsonDocument("JobId", vacId), new BsonDocument("PublicJobId", vacId) } } }).FirstOrDefaultAsync();
+    if (vac != null)
+    {
+        var title = vac.Contains("Title") ? vac["Title"].AsString : "";
+        var jid = vac.Contains("JobId") ? vac["JobId"].ToString() : (vac.Contains("_id") ? vac["_id"].ToString() : "");
+        var passScore = vac.Contains("ScreeningPassScore") ? vac["ScreeningPassScore"].ToString() : "NOT PRESENT";
+        var criteria = vac.Contains("ScreeningCriteria") ? vac["ScreeningCriteria"].ToString() : "NOT PRESENT";
+        Console.WriteLine($"Vacancy found: Title={title}, Id={jid}, ScreeningPassScore={passScore}, ScreeningCriteria={criteria}");
+    }
+    else
+    {
+        Console.WriteLine($"Vacancy NOT found for id: {vacId}");
+    }
 }
-
-var userId = anchor.TryGetValue("UserId", out var u) ? u.ToString() : anchor["_id"].ToString();
-var companyId = anchor["CompanyId"].AsString;
-var roleId = anchor["RoleId"].AsString;
-
-var roles = db.GetCollection<BsonDocument>("Roles");
-var roleDoc = await roles.Find(new BsonDocument("RolesId", roleId)).FirstOrDefaultAsync();
-var roleTitle = roleDoc != null ? roleDoc.GetValue("Titles", "Administrator").AsString : "Administrator";
-
-var token = AuthenticationHandler.GenerateJwtToken(userId, companyId, roleId, new List<string> { roleTitle });
-var refreshToken = Guid.NewGuid().ToString("N");
-
-var refreshTokens = db.GetCollection<BsonDocument>("RefreshToken");
-var hashed = TokenHelper.ComputeSha256Hash(refreshToken);
-await refreshTokens.InsertOneAsync(new BsonDocument
+else
 {
-    { "_id", Guid.NewGuid().ToString() },
-    { "UserId", userId },
-    { "Token", hashed },
-    { "ExpireAt", DateTime.UtcNow.AddDays(7) },
-    { "CreatedAt", DateTime.UtcNow }
-});
-
-Console.WriteLine($"TOKEN:{token}");
-Console.WriteLine($"REFRESH:{refreshToken}");
-Console.WriteLine($"USERID:{userId}");
-Console.WriteLine($"COMPANYID:{companyId}");
+    Console.WriteLine("Applicant 4c5adde3-7ba3-499d-91f2-9c850fa083e0 not found by _id!");
+}

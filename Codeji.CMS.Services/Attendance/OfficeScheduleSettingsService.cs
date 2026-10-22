@@ -17,7 +17,8 @@ public interface IOfficeScheduleSettingsService
 public sealed class OfficeScheduleSettingsService(
     IMongoDbRepository<CompanyOfficeSchedule> schedules,
     IMongoDbRepository<EmployeeScheduleAssignment> employeeAssignments,
-    IMongoDbRepository<DepartmentScheduleAssignment> departmentAssignments) : IOfficeScheduleSettingsService
+    IMongoDbRepository<DepartmentScheduleAssignment> departmentAssignments,
+    IShiftAttendanceReconciliationService? shiftReconciliation = null) : IOfficeScheduleSettingsService
 {
     public async Task<Result<OfficeScheduleSettingsDto>> GetAsync(string companyId, CancellationToken cancellationToken = default)
     {
@@ -132,6 +133,11 @@ public sealed class OfficeScheduleSettingsService(
         if (!writeResult.Success)
         {
             return Fail("OFFICE_SCHEDULE_SAVE_FAILED");
+        }
+        if (shiftReconciliation != null)
+        {
+            try { await shiftReconciliation.ReconcileTodayShiftAttendanceAsync(companyId, cancellationToken); }
+            catch { /* Non-blocking */ }
         }
         return new Result<OfficeScheduleSettingsDto> { Success = true, MethodResult = ToDto(entity), Message = "Office schedule saved." };
     }

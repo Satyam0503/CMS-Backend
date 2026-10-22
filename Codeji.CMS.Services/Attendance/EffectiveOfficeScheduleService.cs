@@ -85,6 +85,9 @@ public sealed class EffectiveOfficeScheduleService(
                 PunchInAllowedUntil = schedule?.CheckInAllowedUntil?.ToString(@"hh\:mm"),
                 PunchOutAllowedFrom = schedule?.CheckOutAllowedFrom?.ToString(@"hh\:mm"),
                 PunchOutAllowedUntil = schedule?.CheckOutAllowedUntil?.ToString(@"hh\:mm"),
+                GraceMinutes = schedule?.GraceMinutes ?? 15,
+                BreakMinutes = schedule?.BreakMinutes ?? 60,
+                RequiredWorkingMinutes = schedule?.RequiredWorkingMinutes ?? 480,
                 Source = schedule is null ? "Unassigned" : source,
             };
         }).ToList();

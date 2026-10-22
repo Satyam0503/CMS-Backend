@@ -10,6 +10,8 @@ using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
+using MongoDB.Driver;
+using Codeji.CMS.Repository.Entities.Employees;
 using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.Services.Recruitments;
@@ -24,7 +26,11 @@ public sealed class RecruitmentHandoffService(
     IMongoDbRepository<RecruitmentOnboardingCase>? onboardingCases = null,
     IMongoDbRepository<RecruitmentOffer>? offers = null,
     IMongoDbRepository<RecruitmentJobApplication>? applications = null,
-    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null, IEmployeeSalaryStructureService? salaries = null) : IRecruitmentHandoffService
+    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null,
+    IEmployeeSalaryStructureService? salaries = null,
+    IMongoDbRepository<EmpUser>? employees = null,
+    IMongoDbRepository<RecruitmentScorecard>? scorecards = null,
+    IMongoDbRepository<RecruitmentInterview>? interviews = null) : IRecruitmentHandoffService
 {
     public async Task<Result<string>> HandoffToPreboarding(CandidateHandoffRequest request, string actorUserId)
     {
@@ -61,6 +67,23 @@ public sealed class RecruitmentHandoffService(
         var isSelected = canonicalApplication is not null
             ? string.Equals(canonicalApplication.CurrentStage, nameof(ActivityType.Selected), StringComparison.OrdinalIgnoreCase)
             : applicant.ActivityType == ActivityType.Selected;
+        if (!isSelected && offers is not null)
+        {
+            var accepted = await offers.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.Status == RecruitmentOfferStatus.Accepted && !x.IsDeleted);
+            if (accepted is not null)
+            {
+                isSelected = true;
+                applicant.ActivityType = ActivityType.Selected;
+                applicant.UpdatedBy = actorUserId;
+                applicant.UpdatedDate = DateTime.UtcNow;
+                await applicants.Update(MongoDB.Driver.Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId), applicant);
+                if (canonicalApplication is not null)
+                {
+                    canonicalApplication.CurrentStage = nameof(ActivityType.Selected);
+                    await applications!.Update(MongoDB.Driver.Builders<RecruitmentJobApplication>.Filter.Where(x => x.CompanyId == companyId && x.ApplicationId == canonicalApplication.ApplicationId), canonicalApplication);
+                }
+            }
+        }
         if (!isSelected)
         {
             result.ErrorCode = RecruitmentErrorCodes.InvalidTransition;
@@ -148,12 +171,15 @@ public sealed class RecruitmentHandoffService(
             }
         }
 
+        string assignedEmployeeId = request.EmployeeId?.Trim() ?? string.Empty;
+        string assignedUserId = string.Empty;
+
         var invite = await employeeService.InviteNewEmployee(new InviteEmployeeDto
         {
             FirstName = request.FirstName.Trim(),
             LastName = request.LastName.Trim(),
             Email = request.Email.Trim(),
-            EmployeeId = request.EmployeeId.Trim(),
+            EmployeeId = assignedEmployeeId,
             RoleId = request.RoleId,
             DepartmentId = request.DepartmentId,
             JobRoleId = request.JobRoleId,
@@ -161,12 +187,39 @@ public sealed class RecruitmentHandoffService(
             ReportingManager = request.ReportingManager,
             ScheduleId = request.ScheduleId
         }, actorUserId);
-        if (!invite.Success || string.IsNullOrWhiteSpace(invite.MethodResult?.UserId))
+
+        if (invite.Success && !string.IsNullOrWhiteSpace(invite.MethodResult?.UserId))
         {
-            result.ErrorCode = RecruitmentErrorCodes.InvalidRequest;
-            result.StatusCode = invite.StatusCode == 0 ? StatusCodes.Status400BadRequest : invite.StatusCode;
-            result.Message = invite.Message;
-            return result;
+            assignedUserId = invite.MethodResult.UserId;
+            assignedEmployeeId = !string.IsNullOrWhiteSpace(invite.MethodResult.EmployeeId)
+                ? invite.MethodResult.EmployeeId
+                : assignedEmployeeId;
+        }
+        else
+        {
+            // Defensive recovery: If employee already exists with this email in the company (e.g. from an interrupted prior attempt),
+            // recover their identity so the hiring workflow can complete cleanly instead of staying permanently blocked.
+            EmpUser? existingEmp = null;
+            if (employees is not null)
+            {
+                existingEmp = await employees.FirstOrDefault(x =>
+                    x.CompanyId == companyId &&
+                    x.Email.ToLower() == request.Email.Trim().ToLower() &&
+                    !x.IsDeleted);
+            }
+
+            if (existingEmp is not null)
+            {
+                assignedUserId = existingEmp.UserId;
+                assignedEmployeeId = existingEmp.EmployeeId;
+            }
+            else
+            {
+                result.ErrorCode = RecruitmentErrorCodes.InvalidRequest;
+                result.StatusCode = invite.StatusCode == 0 ? StatusCodes.Status400BadRequest : invite.StatusCode;
+                result.Message = invite.Message;
+                return result;
+            }
         }
 
         if (salaries is not null && acceptedOffer is not null)
@@ -182,29 +235,85 @@ public sealed class RecruitmentHandoffService(
             var effectiveFrom = (acceptedOffer.StartDateUtc ?? DateTime.UtcNow).Date;
             var salaryDraft = await salaries.SaveDraft(companyId, actorUserId, new EmployeeSalaryStructureDto
             {
-                EmployeeId = request.EmployeeId.Trim(), UserId = invite.MethodResult.UserId, OfferId = acceptedOffer.OfferId, OfferVersion = acceptedOffer.Version,
+                EmployeeId = assignedEmployeeId, UserId = assignedUserId, OfferId = acceptedOffer.OfferId, OfferVersion = acceptedOffer.Version,
                 Currency = acceptedOffer.Currency, PaymentFrequency = "MONTHLY", AnnualCtc = acceptedOffer.TotalCtc, MonthlyGross = acceptedOffer.TotalCtc / 12m,
                 EffectiveFrom = effectiveFrom, Status = "DRAFT", ApprovalStatus = "DRAFT", Source = "OFFER_HANDOFF", Version = 1, Components = components
             });
             if (!salaryDraft.Success)
             {
-                result.ErrorCode = RecruitmentErrorCodes.InvalidRequest;
-                result.StatusCode = salaryDraft.StatusCode == 0 ? StatusCodes.Status409Conflict : salaryDraft.StatusCode;
-                result.Message = $"Employee created, but offer compensation could not be staged for payroll: {salaryDraft.Message}";
-                return result;
+                // Note: The employee has already been created. An unconfigured salary template or paygroup must not crash the entire handoff.
+                // We record a warning audit log and proceed so the candidate can complete onboarding.
+                await applicantLogs.AddOne(new ApplicantLogs
+                {
+                    CompanyId = companyId,
+                    ApplicantId = applicant.ApplicantId,
+                    ApplicantName = $"{applicant.FirstName} {applicant.LastName}".Trim(),
+                    JobRole = applicant.VacancyId,
+                    UserId = actorUserId,
+                    ActivityCategory = 0,
+                    Description = $"Employee {assignedEmployeeId} created. Payroll salary draft staging warning: {salaryDraft.Message}",
+                    EventType = "SalaryStagingWarning",
+                    PreviousStage = applicant.ActivityType.ToString(),
+                    CurrentStage = "Preboarding",
+                    CreatedBy = actorUserId,
+                    UpdatedBy = actorUserId
+                });
             }
         }
+
+        var allScorecards = scorecards is not null
+            ? (await scorecards.GetAll(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted)).ToList()
+            : [];
+        var allInterviews = interviews is not null
+            ? (await interviews.GetAll(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted)).ToList()
+            : null;
+        var finalScoreResult = RecruitmentInterviewScoreCalculator.Compute(allScorecards, allInterviews);
+
+        var hiringScore = finalScoreResult.FinalInterviewScore > 0 ? finalScoreResult.FinalInterviewScore : applicant.FinalInterviewScore;
+        var hiringRating = finalScoreResult.FinalInterviewRating > 0 ? finalScoreResult.FinalInterviewRating : applicant.FinalInterviewRating;
+        var hiringRec = !string.IsNullOrEmpty(finalScoreResult.FinalInterviewRecommendation) && finalScoreResult.FinalInterviewRecommendation != "Pending"
+            ? finalScoreResult.FinalInterviewRecommendation
+            : applicant.FinalInterviewRecommendation;
+        var evaluatedCount = finalScoreResult.EvaluatedRoundsCount > 0 ? finalScoreResult.EvaluatedRoundsCount : applicant.EvaluatedRoundsCount;
 
         var handoff = new RecruitmentHandoff
         {
             CompanyId = companyId,
             ApplicantId = applicant.ApplicantId,
-            EmployeeUserId = invite.MethodResult.UserId!,
+            EmployeeUserId = assignedUserId,
             IdempotencyKey = request.IdempotencyKey.Trim(),
+            HiringBenchmarkScore = hiringScore,
+            HiringBenchmarkRating = hiringRating,
+            HiringRecommendation = hiringRec,
+            EvaluatedRoundsCount = evaluatedCount,
             CreatedBy = actorUserId,
             UpdatedBy = actorUserId
         };
         var saved = await handoffs.AddOne(handoff);
+        if (saved.Success)
+        {
+            if (employees is not null && !string.IsNullOrWhiteSpace(assignedUserId))
+            {
+                var emp = await employees.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == assignedUserId && !x.IsDeleted);
+                if (emp is not null)
+                {
+                    emp.HiringBenchmarkScore = hiringScore;
+                    emp.HiringBenchmarkRating = hiringRating;
+                    emp.HiringRecommendation = hiringRec;
+                    emp.EvaluatedRoundsCount = evaluatedCount;
+                    await employees.Update(Builders<EmpUser>.Filter.Where(x => x.CompanyId == companyId && x.UserId == assignedUserId), emp);
+                }
+            }
+            if (hiringScore.HasValue && hiringScore.Value > 0)
+            {
+                applicant.FinalInterviewScore = hiringScore;
+                applicant.FinalInterviewRating = hiringRating;
+                applicant.FinalInterviewRecommendation = hiringRec;
+                applicant.EvaluatedRoundsCount = evaluatedCount;
+                applicant.FinalScoreCalculatedAtUtc = DateTime.UtcNow;
+                await applicants.Update(Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId), applicant);
+            }
+        }
         if (!saved.Success)
         {
             var committed = await handoffs.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == request.ApplicantId && !x.IsDeleted);
@@ -262,6 +371,26 @@ public sealed class RecruitmentHandoffService(
             }
         }
 
+        if (applications is not null)
+        {
+            var canonical = await applications.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted);
+            if (canonical is not null)
+            {
+                canonical.StageHistory.Add(new RecruitmentApplicationStageEvent
+                {
+                    FromStage = canonical.CurrentStage,
+                    ToStage = "Preboarding",
+                    ActorUserId = actorUserId,
+                    Reason = $"Candidate handed off to preboarding with Employee ID {assignedEmployeeId}."
+                });
+                canonical.CurrentStage = "Preboarding";
+                canonical.Version = (canonical.Version <= 0 ? 1 : canonical.Version) + 1;
+                canonical.UpdatedBy = actorUserId;
+                canonical.UpdatedDate = DateTime.UtcNow;
+                await applications.Update(Builders<RecruitmentJobApplication>.Filter.Where(x => x.CompanyId == companyId && x.ApplicationId == canonical.ApplicationId), canonical);
+            }
+        }
+
         await applicantLogs.AddOne(new ApplicantLogs
         {
             CompanyId = companyId,
@@ -270,7 +399,7 @@ public sealed class RecruitmentHandoffService(
             JobRole = applicant.VacancyId,
             UserId = actorUserId,
             ActivityCategory = 0,
-            Description = "Candidate handed off to preboarding.",
+            Description = $"Candidate handed off to preboarding. Employee ID: {assignedEmployeeId}",
             EventType = "HandoffToPreboarding",
             PreviousStage = applicant.ActivityType.ToString(),
             CurrentStage = "Preboarding",
@@ -280,7 +409,7 @@ public sealed class RecruitmentHandoffService(
         result.Success = true;
         result.StatusCode = StatusCodes.Status200OK;
         result.MethodResult = handoff.EmployeeUserId;
-        result.Message = "Candidate handed off to preboarding.";
+        result.Message = $"Candidate handed off to preboarding. Employee created with ID: {assignedEmployeeId}";
         return result;
     }
 }

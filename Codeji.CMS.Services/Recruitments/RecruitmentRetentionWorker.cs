@@ -76,6 +76,16 @@ public sealed class RecruitmentRetentionWorker(
             applicant.Phone = "0000000000";
             applicant.FirstName = "Anonymized";
             applicant.LastName = "Candidate";
+            if (!string.IsNullOrWhiteSpace(applicant.ResumeUrl))
+            {
+                try
+                {
+                    var uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Resume");
+                    var resumePath = Path.Combine(uploadFolder, Path.GetFileName(applicant.ResumeUrl));
+                    if (File.Exists(resumePath)) File.Delete(resumePath);
+                }
+                catch { }
+            }
             applicant.ResumeUrl = string.Empty;
             applicant.CoverLetter = null;
             applicant.LinkedInUrl = null;

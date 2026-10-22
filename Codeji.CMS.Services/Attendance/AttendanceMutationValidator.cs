@@ -377,7 +377,7 @@ public sealed class AttendanceMutationValidator(
         return result;
     }
 
-    private static DateTime ToScheduleUtc(DateTime attendanceDate, TimeSpan localTime, string? timeZoneId)
+    public static DateTime ToScheduleUtc(DateTime attendanceDate, TimeSpan localTime, string? timeZoneId)
     {
         var localDateTime = DateTime.SpecifyKind(attendanceDate.Date.Add(localTime), DateTimeKind.Unspecified);
         try

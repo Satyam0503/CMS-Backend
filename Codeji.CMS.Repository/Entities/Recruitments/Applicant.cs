@@ -37,9 +37,14 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         public DateTime? RetentionUntilUtc { get; set; }
         public DateTime? AnonymizedAtUtc { get; set; }
 
+        /// <summary>Recruitment final interview benchmark score (0–100%) stored at hiring to measure ongoing performance.</summary>
+        public int? FinalInterviewScore { get; set; }
+        /// <summary>Recruitment final interview rating (1.0–5.0 scale) aggregated across non-HR evaluation rounds.</summary>
+        public decimal? FinalInterviewRating { get; set; }
+        /// <summary>Consensus recommendation from evaluation rounds (Strong Hire, Hire, Hold, No Hire).</summary>
+        public string? FinalInterviewRecommendation { get; set; }
+        /// <summary>Number of substantive evaluation rounds rated.</summary>
+        public int? EvaluatedRoundsCount { get; set; }
+        public DateTime? FinalScoreCalculatedAtUtc { get; set; }
     }
 }
-
-
-
-

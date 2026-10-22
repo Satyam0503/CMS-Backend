@@ -142,7 +142,7 @@ public sealed class RecruitmentLifecycleServiceTests
         applicants.Verify(x => x.FirstOrDefault(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()), Times.Never);
     }
 [Fact]
-    public async Task Offer_rejects_expiry_before_start_date()
+    public async Task Offer_rejects_expiry_after_start_date()
     {
         var applicants = new Mock<IMongoDbRepository<Applicant>>();
         var offers = new Mock<IMongoDbRepository<RecruitmentOffer>>();
@@ -157,12 +157,12 @@ public sealed class RecruitmentLifecycleServiceTests
             Currency = "INR",
             Status = RecruitmentOfferStatus.Draft,
             StartDateUtc = start,
-            ExpiresAtUtc = start.AddHours(-1),
+            ExpiresAtUtc = start.AddHours(2),
             IdempotencyKey = "expiry-order-1"
         }, "actor-1");
 
         Assert.False(result.Success);
-        Assert.Contains("expiry must be after", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("on or before the offer start date", result.Message, StringComparison.OrdinalIgnoreCase);
         applicants.Verify(x => x.FirstOrDefault(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()), Times.Never);
     }
 [Fact]

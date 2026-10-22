@@ -69,6 +69,7 @@ namespace Codeji.CMS.Services.Attendance
         private readonly IMongoDbRepository<Department>? _departments;
         private readonly IAttendanceInitializationService? _initializationService;
         private readonly IMongoDbRepository<AttendancePenaltyPolicy>? _penaltyPolicies;
+        private readonly IShiftAttendanceReconciliationService? _shiftReconciliation;
 
         public AdminAttendanceService(
             IAttendanceRepository attendanceRepository,
@@ -83,7 +84,8 @@ namespace Codeji.CMS.Services.Attendance
             IMongoDbRepository<AttendanceStatusSetting> attendanceStatuses,
             IMongoDbRepository<Department>? departments = null,
             IAttendanceInitializationService? initializationService = null,
-            IMongoDbRepository<AttendancePenaltyPolicy>? penaltyPolicies = null
+            IMongoDbRepository<AttendancePenaltyPolicy>? penaltyPolicies = null,
+            IShiftAttendanceReconciliationService? shiftReconciliation = null
         )
         {
             _attendanceRepository = attendanceRepository;
@@ -99,6 +101,7 @@ namespace Codeji.CMS.Services.Attendance
             _departments = departments;
             _initializationService = initializationService;
             _penaltyPolicies = penaltyPolicies;
+            _shiftReconciliation = shiftReconciliation;
         }
 
         public async Task<AttendanceResponseDto> AddManualAttendance(
@@ -326,6 +329,19 @@ namespace Codeji.CMS.Services.Attendance
                             // Non-blocking: calendar query still succeeds if initialization encounters an exception
                         }
                     }
+                }
+            }
+
+            var today = Codeji.CMS.Utility.Helpers.IndiaTime.Now.Date;
+            if (_shiftReconciliation != null && fromDate <= today && toDateInclusive >= today)
+            {
+                try
+                {
+                    await _shiftReconciliation.ReconcileTodayShiftAttendanceAsync(companyId, CancellationToken.None);
+                }
+                catch
+                {
+                    // Non-blocking: calendar query still succeeds if reconciliation encounters an exception
                 }
             }
 
@@ -814,7 +830,7 @@ namespace Codeji.CMS.Services.Attendance
                 lines.Add(daily.Status);
                 if (daily.CheckInTime.HasValue || daily.CheckOutTime.HasValue)
                     lines.Add(
-                        $"In {FormatAttendanceTime(daily.CheckInTime)} · Out {FormatAttendanceTime(daily.CheckOutTime)}"
+                        $"In {FormatAttendanceTime(daily.CheckInTime)} Â· Out {FormatAttendanceTime(daily.CheckOutTime)}"
                     );
                 return (
                     string.Join(Environment.NewLine, lines),
@@ -833,7 +849,7 @@ namespace Codeji.CMS.Services.Attendance
                     lines.Add($"{label}: {segment.Status}");
                     if (segment.CheckInTime.HasValue || segment.CheckOutTime.HasValue)
                         lines.Add(
-                            $"In {FormatAttendanceTime(segment.CheckInTime)} · Out {FormatAttendanceTime(segment.CheckOutTime)}"
+                            $"In {FormatAttendanceTime(segment.CheckInTime)} Â· Out {FormatAttendanceTime(segment.CheckOutTime)}"
                         );
                 }
                 return (
@@ -849,11 +865,11 @@ namespace Codeji.CMS.Services.Attendance
                 EmploymentPeriod.TryGetJoiningDate(employee, out var joiningDate)
                 && date.Date < joiningDate.Date
             )
-                return ("—", "NOT_ELIGIBLE");
+                return ("â€”", "NOT_ELIGIBLE");
 
             var lastWorkingDate = EmploymentPeriod.GetLastWorkingDate(employee);
             if (lastWorkingDate.HasValue && date.Date > lastWorkingDate.Value)
-                return ("—", "NOT_EMPLOYED");
+                return ("â€”", "NOT_EMPLOYED");
 
             if (!workingDates.Contains(DateOnly.FromDateTime(date)))
             {
@@ -1048,7 +1064,7 @@ namespace Codeji.CMS.Services.Attendance
                     "Weekly Off" or "Weekend" => "F5F5F5",
                     string s when s.StartsWith("Holiday", StringComparison.OrdinalIgnoreCase) =>
                         "EDE7F6",
-                    "—" or "Future" or "Not eligible" or "Not employed" => "FAFAFA",
+                    "â€”" or "Future" or "Not eligible" or "Not employed" => "FAFAFA",
                     _ when IsLeaveCode(normalizedStatus) => "E1F5FE",
                     _ => "FFFFFF",
                 };
@@ -1062,6 +1078,6 @@ namespace Codeji.CMS.Services.Attendance
             && System.Text.RegularExpressions.Regex.IsMatch(value, "^#[0-9A-Fa-f]{6}$");
 
         private static string FormatAttendanceTime(DateTime? time) =>
-            time.HasValue ? IndiaTime.ToIndiaTime(time.Value).ToString("HH:mm") : "–";
+            time.HasValue ? IndiaTime.ToIndiaTime(time.Value).ToString("HH:mm") : "â€“";
     }
 }

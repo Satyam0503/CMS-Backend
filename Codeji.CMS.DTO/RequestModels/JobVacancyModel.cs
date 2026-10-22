@@ -1,4 +1,4 @@
-﻿namespace Codeji.CMS.DTO.RequestModels
+namespace Codeji.CMS.DTO.RequestModels
 {
     public class JobVacancyModel
     {
@@ -50,5 +50,7 @@
         public string? RecruiterContactEmail { get; set; }
         public int? NoticePeriodMaxDays { get; set; }
         public bool? ShowSalary { get; set; }
+        public int? ScreeningPassScore { get; set; }
+        public List<string>? ScreeningCriteria { get; set; }
     }
 }
