@@ -17,7 +17,8 @@ public sealed class RecruitmentHiringDecisionService(
     IMongoDbRepository<ApplicantLogs> logs,
     IHttpContextAccessor context,
     IMongoDbRepository<RecruitmentJobApplication>? applications = null,
-    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null) : IRecruitmentHiringDecisionService
+    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null,
+    IMongoDbRepository<JobVacancy>? vacancies = null) : IRecruitmentHiringDecisionService
 {
     private static readonly HashSet<string> Valid = [RecruitmentHiringDecisionStatus.Approve, RecruitmentHiringDecisionStatus.Hold, RecruitmentHiringDecisionStatus.Reject];
 
@@ -42,7 +43,14 @@ public sealed class RecruitmentHiringDecisionService(
             return Ok(existing.DecisionId, "Hiring decision already applied.");
 
         var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
-        var allowDirectFromEarlyStage = config is not null && (!config.ApplicationReview || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase));
+        var vacancy = vacancies is null ? null : await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == applicant.VacancyId && !x.IsDeleted);
+
+        var allowDirectFromEarlyStage = vacancy?.WorkflowMode switch
+        {
+            "Direct" => true,
+            "Enterprise" => false,
+            _ => config is not null && (!config.ApplicationReview || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase))
+        };
 
         if (string.Equals(decisionValue, RecruitmentHiringDecisionStatus.Approve, StringComparison.OrdinalIgnoreCase)
             && applicant.ActivityType is not (ActivityType.Shortlisted or ActivityType.OnHold or ActivityType.Selected)
@@ -54,13 +62,18 @@ public sealed class RecruitmentHiringDecisionService(
         if (string.Equals(decisionValue, RecruitmentHiringDecisionStatus.Approve, StringComparison.OrdinalIgnoreCase))
         {
             var openInterviews = (await interviews.GetAll(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.VacancyId == applicant.VacancyId && !x.IsDeleted && x.Status != RecruitmentInterviewStatus.Cancelled)).ToList();
-            var requireInterviewGate = config is null || (config.RequireInterviewBeforeDecision && (config.InterviewRounds || config.Scorecards || !string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)));
+            var requireInterviewGate = vacancy?.RequireInterview ?? (vacancy?.WorkflowMode switch
+            {
+                "Direct" => false,
+                "Standard" => true,
+                "Enterprise" => true,
+                _ => config is null || (config.RequireInterviewBeforeDecision && (config.InterviewRounds || config.Scorecards || !string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)))
+            });
             if (openInterviews.Count == 0 && requireInterviewGate)
                 return Fail(409, RecruitmentErrorCodes.InvalidTransition, "At least one interview round must be completed and debriefed before approval.");
-            if (openInterviews.Any(x => x.Status != RecruitmentInterviewStatus.Completed || x.DebriefStatus != RecruitmentDebriefStatus.Complete))
+            if (requireInterviewGate && openInterviews.Any(x => x.Status != RecruitmentInterviewStatus.Completed || x.DebriefStatus != RecruitmentDebriefStatus.Complete))
                 return Fail(409, RecruitmentErrorCodes.InvalidTransition, "All scheduled interview rounds must be completed and debriefed before approval.");
         }
-
         if (existing is null)
         {
             existing = new RecruitmentHiringDecision { CompanyId = companyId, ApplicantId = applicant.ApplicantId, VacancyId = applicant.VacancyId, Decision = decisionValue!, Notes = command.Notes?.Trim(), LastCommandIdempotencyKey = key, CreatedBy = actorUserId, UpdatedBy = actorUserId };

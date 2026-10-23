@@ -30,7 +30,8 @@ public sealed class RecruitmentHandoffService(
     IEmployeeSalaryStructureService? salaries = null,
     IMongoDbRepository<EmpUser>? employees = null,
     IMongoDbRepository<RecruitmentScorecard>? scorecards = null,
-    IMongoDbRepository<RecruitmentInterview>? interviews = null) : IRecruitmentHandoffService
+    IMongoDbRepository<RecruitmentInterview>? interviews = null,
+    IMongoDbRepository<JobVacancy>? vacancies = null) : IRecruitmentHandoffService
 {
     public async Task<Result<string>> HandoffToPreboarding(CandidateHandoffRequest request, string actorUserId)
     {
@@ -93,19 +94,27 @@ public sealed class RecruitmentHandoffService(
         }
 
         var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
-        var startupFastTrack = config is not null && (!config.RequirePreboardingBeforeHandoff || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase));
+        var vacancy = vacancies is null ? null : await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == applicant.VacancyId && !x.IsDeleted);
 
+        var isDirectVacancy = string.Equals(vacancy?.WorkflowMode, "Direct", StringComparison.OrdinalIgnoreCase);
+        var requirePreboarding = vacancy?.RequirePreboarding ?? (vacancy?.WorkflowMode switch
+        {
+            "Direct" => false,
+            "Enterprise" => true,
+            _ => (config is null || config.RequirePreboardingBeforeHandoff) && !string.Equals(config?.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)
+        });
+        var startupFastTrack = isDirectVacancy || (config is not null && (!config.RequirePreboardingBeforeHandoff || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)));
         RecruitmentOffer? acceptedOffer = null;
 
         if (offers is not null)
         {
             acceptedOffer = await offers.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.Status == RecruitmentOfferStatus.Accepted && !x.IsDeleted);
-            if (acceptedOffer is null && request.AutoCompletePreboarding)
+            if (acceptedOffer is null && (request.AutoCompletePreboarding || startupFastTrack))
             {
-                // If an offer is Sent or Approved and HR confirms handoff with AutoCompletePreboarding, mark it Accepted automatically
+                // If an offer is Sent, Approved, or Draft and HR confirms handoff with fast-track, mark it Accepted automatically
                 var latestOffer = (await offers.GetAll(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted))
                     ?.OrderByDescending(x => x.UpdatedDate ?? x.CreatedDate)
-                    .FirstOrDefault(x => x.Status is RecruitmentOfferStatus.Sent or RecruitmentOfferStatus.Approved);
+                    .FirstOrDefault(x => x.Status is RecruitmentOfferStatus.Sent or RecruitmentOfferStatus.Approved or RecruitmentOfferStatus.Draft or RecruitmentOfferStatus.PendingApproval);
                 if (latestOffer is not null)
                 {
                     latestOffer.Status = RecruitmentOfferStatus.Accepted;
@@ -115,6 +124,27 @@ public sealed class RecruitmentHandoffService(
                     await offers.Update(MongoDB.Driver.Builders<RecruitmentOffer>.Filter.Where(x => x.CompanyId == companyId && x.OfferId == latestOffer.OfferId), latestOffer);
                     acceptedOffer = latestOffer;
                 }
+            }
+            if (acceptedOffer is null && isDirectVacancy)
+            {
+                var salary = vacancy?.SalaryMin ?? 0;
+                var currency = string.IsNullOrWhiteSpace(vacancy?.Currency) ? (config?.CompensationCurrency ?? "INR") : vacancy.Currency;
+                acceptedOffer = new RecruitmentOffer
+                {
+                    CompanyId = companyId,
+                    ApplicantId = applicant.ApplicantId,
+                    VacancyId = applicant.VacancyId,
+                    Salary = salary,
+                    TotalCtc = salary,
+                    Currency = currency.ToUpperInvariant(),
+                    Status = RecruitmentOfferStatus.Accepted,
+                    SentAtUtc = DateTime.UtcNow,
+                    RespondedAtUtc = DateTime.UtcNow,
+                    LastCommandIdempotencyKey = $"fast-track-offer-{applicant.ApplicantId}",
+                    CreatedBy = actorUserId,
+                    UpdatedBy = actorUserId
+                };
+                await offers.AddOne(acceptedOffer);
             }
             if (acceptedOffer is null)
             {
@@ -188,7 +218,7 @@ public sealed class RecruitmentHandoffService(
             ScheduleId = request.ScheduleId
         }, actorUserId);
 
-        if (invite.Success && !string.IsNullOrWhiteSpace(invite.MethodResult?.UserId))
+        if (invite is { Success: true, MethodResult: not null } && !string.IsNullOrWhiteSpace(invite.MethodResult.UserId))
         {
             assignedUserId = invite.MethodResult.UserId;
             assignedEmployeeId = !string.IsNullOrWhiteSpace(invite.MethodResult.EmployeeId)

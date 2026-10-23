@@ -58,6 +58,8 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         public bool? ShowSalary { get; set; }
         public int? ScreeningPassScore { get; set; }
         public List<string> ScreeningCriteria { get; set; } = [];
+        public string WorkflowMode { get; set; } = "Inherit";
+        public bool? RequireInterview { get; set; }
+        public bool? RequirePreboarding { get; set; }
     }
 }
-

@@ -64,7 +64,13 @@ public sealed class RecruitmentOfferService(
             return Ok(result, existing.OfferId, "Offer command already applied.");
 
         var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
-        var fastTrackOfferAllowed = config is not null && (!config.OfferApproval || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase));
+        JobVacancy? vacancy = vacancies is null ? null : await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == command.VacancyId && !x.IsDeleted);
+        var fastTrackOfferAllowed = vacancy?.WorkflowMode switch
+        {
+            "Direct" => true,
+            "Enterprise" => false,
+            _ => config is not null && (!config.OfferApproval || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase))
+        };
 
         if (existing is null)
         {
@@ -105,9 +111,15 @@ public sealed class RecruitmentOfferService(
         if (!isAllowedTransition)
             return Fail(result, RecruitmentErrorCodes.InvalidTransition, "Offer status transition is not allowed.", StatusCodes.Status409Conflict);
 
-        if (string.Equals(command.Status, RecruitmentOfferStatus.Approved, StringComparison.OrdinalIgnoreCase) && (config is null || config.OfferApproval))
+        var requireOfferApproval = vacancy?.WorkflowMode switch
         {
-            JobVacancy? vacancy = vacancies is null ? null : await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == command.VacancyId && !x.IsDeleted);
+            "Direct" => false,
+            "Enterprise" => true,
+            _ => (config is null || config.OfferApproval) && !string.Equals(config?.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)
+        };
+        if (string.Equals(command.Status, RecruitmentOfferStatus.Approved, StringComparison.OrdinalIgnoreCase) && requireOfferApproval)
+        {
+
             var policy = approvalPolicies is null ? null : await approvalPolicies.FirstOrDefault(x => x.CompanyId == companyId && x.VacancyId == command.VacancyId && !x.IsDeleted);
             if (policy is null && approvalPolicies is not null && vacancy is not null && (!string.IsNullOrWhiteSpace(vacancy.LegalEntityId) || !string.IsNullOrWhiteSpace(vacancy.DepartmentId) || !string.IsNullOrWhiteSpace(vacancy.Grade)))
                 policy = await approvalPolicies.FirstOrDefault(x => x.CompanyId == companyId && string.IsNullOrEmpty(x.VacancyId) && x.LegalEntityId == vacancy.LegalEntityId && x.DepartmentId == vacancy.DepartmentId && x.Grade == vacancy.Grade && !x.IsDeleted);

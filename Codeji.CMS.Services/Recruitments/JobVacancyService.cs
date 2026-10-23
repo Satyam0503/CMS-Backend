@@ -76,6 +76,9 @@ namespace Codeji.CMS.Services.Recruitments
                 ShowSalary = jobVacancy.ShowSalary,
                 ScreeningPassScore = jobVacancy.ScreeningPassScore,
                 ScreeningCriteria = jobVacancy.ScreeningCriteria ?? [],
+                WorkflowMode = string.IsNullOrWhiteSpace(jobVacancy.WorkflowMode) ? "Inherit" : jobVacancy.WorkflowMode.Trim(),
+                RequireInterview = jobVacancy.RequireInterview,
+                RequirePreboarding = jobVacancy.RequirePreboarding,
             };
 
             Result saved = await _jobVacancyRepo.AddOne(vacancy);
@@ -142,6 +145,9 @@ namespace Codeji.CMS.Services.Recruitments
                 ShowSalary = jobVacancy.ShowSalary ?? existing?.ShowSalary,
                 ScreeningPassScore = jobVacancy.ScreeningPassScore ?? existing?.ScreeningPassScore,
                 ScreeningCriteria = (jobVacancy.ScreeningCriteria is { Count: > 0 } sc ? sc : existing?.ScreeningCriteria) ?? [],
+                WorkflowMode = jobVacancy.WorkflowMode ?? existing?.WorkflowMode ?? "Inherit",
+                RequireInterview = jobVacancy.RequireInterview ?? existing?.RequireInterview,
+                RequirePreboarding = jobVacancy.RequirePreboarding ?? existing?.RequirePreboarding,
             };
             Expression<Func<JobVacancy, bool>> whereCondition = x => x.JobId == jobId && x.CompanyId == companyId;
             Result saved = await _jobVacancyRepo.Update(whereCondition, editedJob);
@@ -216,6 +222,9 @@ namespace Codeji.CMS.Services.Recruitments
                 NoticePeriodMaxDays = job.NoticePeriodMaxDays, ShowSalary = job.ShowSalary,
                 ScreeningPassScore = job.ScreeningPassScore,
                 ScreeningCriteria = job.ScreeningCriteria,
+                WorkflowMode = job.WorkflowMode ?? "Inherit",
+                RequireInterview = job.RequireInterview,
+                RequirePreboarding = job.RequirePreboarding,
             });
             Result<GetJobVacancyModel> result = new Result<GetJobVacancyModel>()
             {
