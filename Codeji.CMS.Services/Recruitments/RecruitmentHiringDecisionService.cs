@@ -44,13 +44,14 @@ public sealed class RecruitmentHiringDecisionService(
 
         var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
         var vacancy = vacancies is null ? null : await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == applicant.VacancyId && !x.IsDeleted);
+        var allowCustomWorkflows = config is null || config.AllowJobWorkflowCustomization;
 
-        var allowDirectFromEarlyStage = vacancy?.WorkflowMode switch
+        var allowDirectFromEarlyStage = (allowCustomWorkflows ? vacancy?.WorkflowMode switch
         {
             "Direct" => true,
             "Enterprise" => false,
-            _ => config is not null && (!config.ApplicationReview || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase))
-        };
+            _ => (bool?)null
+        } : null) ?? (config is not null && (!config.ApplicationReview || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)));
 
         if (string.Equals(decisionValue, RecruitmentHiringDecisionStatus.Approve, StringComparison.OrdinalIgnoreCase)
             && applicant.ActivityType is not (ActivityType.Shortlisted or ActivityType.OnHold or ActivityType.Selected)
@@ -62,13 +63,13 @@ public sealed class RecruitmentHiringDecisionService(
         if (string.Equals(decisionValue, RecruitmentHiringDecisionStatus.Approve, StringComparison.OrdinalIgnoreCase))
         {
             var openInterviews = (await interviews.GetAll(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.VacancyId == applicant.VacancyId && !x.IsDeleted && x.Status != RecruitmentInterviewStatus.Cancelled)).ToList();
-            var requireInterviewGate = vacancy?.RequireInterview ?? (vacancy?.WorkflowMode switch
+            var requireInterviewGate = (allowCustomWorkflows ? vacancy?.RequireInterview : null) ?? (allowCustomWorkflows ? vacancy?.WorkflowMode switch
             {
                 "Direct" => false,
                 "Standard" => true,
                 "Enterprise" => true,
-                _ => config is null || (config.RequireInterviewBeforeDecision && (config.InterviewRounds || config.Scorecards || !string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)))
-            });
+                _ => (bool?)null
+            } : null) ?? (config is null || (config.RequireInterviewBeforeDecision && (config.InterviewRounds || config.Scorecards || !string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase))));
             if (openInterviews.Count == 0 && requireInterviewGate)
                 return Fail(409, RecruitmentErrorCodes.InvalidTransition, "At least one interview round must be completed and debriefed before approval.");
             if (requireInterviewGate && openInterviews.Any(x => x.Status != RecruitmentInterviewStatus.Completed || x.DebriefStatus != RecruitmentDebriefStatus.Complete))

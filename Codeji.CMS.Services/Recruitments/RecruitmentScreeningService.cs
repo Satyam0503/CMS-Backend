@@ -48,8 +48,10 @@ public sealed class RecruitmentScreeningService(
             vacancy = await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == command.VacancyId && !x.IsDeleted);
         }
 
-        // Active pass score: vacancy-specific threshold takes first precedence, followed by company config, default 60
-        int passScoreThreshold = (vacancy?.ScreeningPassScore is > 0)
+        var allowCustomWorkflows = config is null || config.AllowJobWorkflowCustomization;
+
+        // Active pass score: vacancy-specific threshold takes first precedence if customization allowed, followed by company config, default 60
+        int passScoreThreshold = (allowCustomWorkflows && vacancy?.ScreeningPassScore is > 0)
             ? vacancy.ScreeningPassScore.Value
             : (config?.ScreeningPassScore ?? 60);
         if (passScoreThreshold > 0 && decision == RecruitmentScreeningDecision.Pass && command.Score < passScoreThreshold)
@@ -57,7 +59,7 @@ public sealed class RecruitmentScreeningService(
 
         // REC-BUG-06 Fix: When bulk screening sends "Bulk recruiter review", automatically expand it to match the company's configured ScreeningCriteria.
         var criteriaToSave = command.Criteria;
-        var configuredCriteria = (vacancy?.ScreeningCriteria is { Count: > 0 } vCriteria)
+        var configuredCriteria = (allowCustomWorkflows && vacancy?.ScreeningCriteria is { Count: > 0 } vCriteria)
             ? vCriteria
             : config?.ScreeningCriteria;
         if (configuredCriteria is { Count: > 0 })

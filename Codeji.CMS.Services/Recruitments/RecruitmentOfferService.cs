@@ -65,12 +65,13 @@ public sealed class RecruitmentOfferService(
 
         var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
         JobVacancy? vacancy = vacancies is null ? null : await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == command.VacancyId && !x.IsDeleted);
-        var fastTrackOfferAllowed = vacancy?.WorkflowMode switch
+        var allowCustomWorkflows = config is null || config.AllowJobWorkflowCustomization;
+        var fastTrackOfferAllowed = (allowCustomWorkflows ? vacancy?.WorkflowMode switch
         {
             "Direct" => true,
             "Enterprise" => false,
-            _ => config is not null && (!config.OfferApproval || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase))
-        };
+            _ => (bool?)null
+        } : null) ?? (config is not null && (!config.OfferApproval || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)));
 
         if (existing is null)
         {
@@ -111,12 +112,12 @@ public sealed class RecruitmentOfferService(
         if (!isAllowedTransition)
             return Fail(result, RecruitmentErrorCodes.InvalidTransition, "Offer status transition is not allowed.", StatusCodes.Status409Conflict);
 
-        var requireOfferApproval = vacancy?.WorkflowMode switch
+        var requireOfferApproval = (allowCustomWorkflows ? vacancy?.WorkflowMode switch
         {
             "Direct" => false,
             "Enterprise" => true,
-            _ => (config is null || config.OfferApproval) && !string.Equals(config?.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)
-        };
+            _ => (bool?)null
+        } : null) ?? ((config is null || config.OfferApproval) && !string.Equals(config?.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase));
         if (string.Equals(command.Status, RecruitmentOfferStatus.Approved, StringComparison.OrdinalIgnoreCase) && requireOfferApproval)
         {
 

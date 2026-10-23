@@ -95,14 +95,15 @@ public sealed class RecruitmentHandoffService(
 
         var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
         var vacancy = vacancies is null ? null : await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == applicant.VacancyId && !x.IsDeleted);
+        var allowCustomWorkflows = config is null || config.AllowJobWorkflowCustomization;
 
-        var isDirectVacancy = string.Equals(vacancy?.WorkflowMode, "Direct", StringComparison.OrdinalIgnoreCase);
-        var requirePreboarding = vacancy?.RequirePreboarding ?? (vacancy?.WorkflowMode switch
+        var isDirectVacancy = allowCustomWorkflows && string.Equals(vacancy?.WorkflowMode, "Direct", StringComparison.OrdinalIgnoreCase);
+        var requirePreboarding = (allowCustomWorkflows ? vacancy?.RequirePreboarding : null) ?? (allowCustomWorkflows ? vacancy?.WorkflowMode switch
         {
             "Direct" => false,
             "Enterprise" => true,
-            _ => (config is null || config.RequirePreboardingBeforeHandoff) && !string.Equals(config?.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)
-        });
+            _ => (bool?)null
+        } : null) ?? ((config is null || config.RequirePreboardingBeforeHandoff) && !string.Equals(config?.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase));
         var startupFastTrack = isDirectVacancy || (config is not null && (!config.RequirePreboardingBeforeHandoff || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)));
         RecruitmentOffer? acceptedOffer = null;
 
