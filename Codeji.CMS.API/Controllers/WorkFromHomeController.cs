@@ -23,7 +23,8 @@ public class WorkFromHomeController(IWorkFromHomeService service) : ControllerBa
     [HttpPost("requests/{id}/return"), ModulePermission(AppModule.WorkFromHome, Permission.ApproveTeam)] public Task<Result> Return(string id, WorkFromHomeDecisionDto dto) => service.Decide(id, "Returned", dto);
     [HttpPost("requests/{id}/cancel")] public Task<Result> Cancel(string id, WorkFromHomeCancelDto dto) => service.Cancel(id, dto);
     [HttpPost("requests/{id}/check-in")] public Task<Result> CheckIn(string id) => service.CheckIn(id);
-    [HttpPost("requests/{id}/check-out")] public Task<Result> CheckOut(string id) => service.CheckOut(id);
+    [HttpPost("requests/{id}/check-out")] public Task<Result> CheckOut(string id, [FromBody] WorkFromHomeCheckOutDto? dto = null) => service.CheckOut(id, dto);
+    [HttpPost("requests/{id}/regularize"), ModulePermission(AppModule.WorkFromHome, Permission.ApproveTeam)] public Task<Result> Regularize(string id, [FromBody] WorkFromHomeRegularizeAttendanceDto dto) => service.RegularizeAttendance(id, dto);
     [HttpGet("requests/{id}/timing")] public Task<Result<WorkFromHomeTimingDto>> Timing(string id) => service.GetTiming(id);
     [HttpPatch("attendance-exceptions/{id}/hours"), ModulePermission(AppModule.Attendance, Permission.Edit)]
     public async Task<IActionResult> CorrectHours(string id, WorkFromHomeHoursCorrectionDto dto)

@@ -193,31 +193,34 @@ public sealed class RecruitmentOfferService(
                 && !string.IsNullOrWhiteSpace(applicant.Email)
                 && (config?.CandidateEmailActions ?? true))
             {
-                var issuanceKey = $"offer-sent:{offer.OfferId}:{idempotencyKey}";
-                if (issuanceKey.Length < 12) issuanceKey = issuanceKey.PadRight(12, '0');
-                var tokenResult = await externalActions.Issue(new RecruitmentExternalActionIssueCommand
+                var candidateName = $"{applicant.FirstName} {applicant.LastName}".Trim();
+                var vacancyTitle = string.Empty;
+                if (vacancies is not null && !string.IsNullOrWhiteSpace(offer.VacancyId))
                 {
-                    ActionType = "OfferResponse",
-                    ApplicantId = applicant.ApplicantId,
-                    VacancyId = applicant.VacancyId,
-                    OfferId = offer.OfferId,
-                    RecipientEmail = applicant.Email.Trim(),
-                    ExpiresInMinutes = 24 * 60,
-                    IssuanceKey = issuanceKey,
-                    ResourceVersion = offer.Version
-                }, actorUserId);
+                    var vac = await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == offer.VacancyId && !x.IsDeleted);
+                    if (vac is not null && !string.IsNullOrWhiteSpace(vac.Title)) vacancyTitle = vac.Title.Trim();
+                }
+                var jobTitle = !string.IsNullOrWhiteSpace(vacancyTitle) ? vacancyTitle : (!string.IsNullOrWhiteSpace(applicant.VacancyId) ? applicant.VacancyId : "Open Role");
+                var renderedSubject = HtmlTemplate.Render(
+                    config?.OfferLetterSubjectTemplate ?? "Formal Offer of Employment: [JobTitle] - [CandidateName]",
+                    new { CandidateName = candidateName, JobTitle = jobTitle, Currency = offer.Currency, TotalCtc = offer.TotalCtc.ToString("N2") });
 
-                var tokenParam = tokenResult.Success ? tokenResult.MethodResult?.RawToken : null;
-                if (string.IsNullOrWhiteSpace(tokenParam) || !TryBuildCandidateOfferUrl(tokenParam, out var offerUrl))
-                    return;
+                var renderedBody = HtmlTemplate.Render(
+                    config?.OfferLetterBodyTemplate ?? "<p>Dear [CandidateName],</p><p>We are pleased to offer you the [JobTitle] position.</p><p>Compensation: [Currency] [TotalCtc]</p>",
+                    new { CandidateName = candidateName, JobTitle = jobTitle, Currency = offer.Currency, TotalCtc = offer.TotalCtc.ToString("N2") });
+
+                var professionalFooter = "<hr style=\"border:none;border-top:1px solid #E2E8F0;margin:24px 0;\"/>" +
+                    "<p style=\"font-size:0.875rem;color:#475569;\"><strong>Formal Offer Acceptance Instructions:</strong><br/>" +
+                    "Please review the employment terms detailed above. To confirm your acceptance, kindly reply directly to this email with your written confirmation and signed copy of the offer letter.</p>" +
+                    "<p style=\"font-size:0.825rem;color:#64748B;\">This email and its contents are confidential and intended solely for the recipient named above. If you have questions regarding this offer, please contact your Human Resources department.</p>";
+
                 await externalActions.QueueEmail(new RecruitmentEmailQueueCommand
                 {
                     DedupeKey = $"offer-email:{offer.OfferId}:{idempotencyKey}",
                     EventType = "OfferSent",
                     RecipientEmail = applicant.Email.Trim(),
-                    Subject = HtmlTemplate.Render(config?.OfferLetterSubjectTemplate ?? "Your offer for [JobTitle]", new { CandidateName = $"{applicant.FirstName} {applicant.LastName}".Trim(), JobTitle = applicant.VacancyId, Currency = offer.Currency, TotalCtc = offer.TotalCtc.ToString("N2") }),
-                    HtmlBody = HtmlTemplate.Render(config?.OfferLetterBodyTemplate ?? "<p>Dear [CandidateName],</p><p>We are pleased to offer you the [JobTitle] position.</p><p>Compensation: [Currency] [TotalCtc]</p>", new { CandidateName = $"{applicant.FirstName} {applicant.LastName}".Trim(), JobTitle = applicant.VacancyId, Currency = offer.Currency, TotalCtc = offer.TotalCtc.ToString("N2") }) +
-                               $"<p><a href=\"{System.Net.WebUtility.HtmlEncode(offerUrl)}\">Review your offer</a></p><p>This secure link expires in 24 hours.</p>"
+                    Subject = renderedSubject,
+                    HtmlBody = renderedBody + professionalFooter
                 }, actorUserId);
             }
 
@@ -301,15 +304,6 @@ public sealed class RecruitmentOfferService(
         return new Result<RecruitmentOffer?> { Success = true, StatusCode = StatusCodes.Status200OK, MethodResult = latest, Message = latest != null ? "Offer loaded." : "No offer found." };
     }
 
-    private static bool TryBuildCandidateOfferUrl(string token, out string offerUrl)
-    {
-        offerUrl = string.Empty;
-        var appUrl = ConfigManager.AppSettings?.AppUrl?.Trim().TrimEnd('/');
-        if (string.IsNullOrWhiteSpace(appUrl) || !Uri.TryCreate(appUrl, UriKind.Absolute, out var baseUri) || baseUri.Scheme is not ("http" or "https"))
-            return false;
-        offerUrl = $"{appUrl}/candidate/offer?token={Uri.EscapeDataString(token)}";
-        return true;
-    }
     private static Result<string> Ok(Result<string> result, string id, string message) { result.Success = true; result.StatusCode = StatusCodes.Status200OK; result.MethodResult = id; result.Message = message; return result; }
     private static Result<string> Fail(Result<string> result, string code, string message, int status = StatusCodes.Status400BadRequest) { result.ErrorCode = code; result.StatusCode = status; result.Message = message; return result; }
 }

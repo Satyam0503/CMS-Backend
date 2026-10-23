@@ -42,12 +42,31 @@ public class WorkFromHomeTimingDto
     public DateTime? CheckOutTime { get; set; }
     public decimal? TotalHours { get; set; }
     public decimal RequiredHours { get; set; }
+    public decimal HalfDayRequiredHours { get; set; } = 4m;
     public TimeSpan? OfficeStartTime { get; set; }
     public TimeSpan? OfficeEndTime { get; set; }
     public TimeSpan? CheckInAvailableFrom { get; set; }
     public TimeSpan? CheckInAvailableUntil { get; set; }
     public TimeSpan? CheckOutAvailableFrom { get; set; }
     public TimeSpan? CheckOutAvailableUntil { get; set; }
+    public string? Status { get; set; }
+    public bool IsHalfDay { get; set; }
+    public bool IsUnderHours { get; set; }
+    public string? Remarks { get; set; }
+    public string? RemarkCode { get; set; }
+}
+
+public class WorkFromHomeCheckOutDto
+{
+    public string? AttendanceType { get; set; }
+    public string? Remarks { get; set; }
+}
+
+public class WorkFromHomeRegularizeAttendanceDto
+{
+    [Required] public string AttendanceStatus { get; set; } = "WFH-HD";
+    public decimal? TotalHours { get; set; }
+    [Required, MinLength(3)] public string Remarks { get; set; } = string.Empty;
 }
 
 /// <summary>HR/Admin correction for a WFH-owned attendance row.</summary>
@@ -81,6 +100,11 @@ public class EmployeeWfhContextDto
     public DateTime BusinessDate { get; set; }
     public bool IsSameDayRequestCutoffPassed { get; set; }
     public TimeSpan? EffectiveOfficeStartTime { get; set; }
+    public TimeSpan? EffectiveCutoffTime { get; set; }
+    public TimeSpan? SecondHalfCutoffTime { get; set; }
+    public TimeSpan? SameDayCutoffTime { get; set; }
+    public int SameDayGraceMinutes { get; set; }
+    public bool AllowLateApplicationWithApproval { get; set; } = true;
     public TimeSpan? OfficeStartTime { get; set; }
     public TimeSpan? OfficeEndTime { get; set; }
     public TimeSpan? CheckInAvailableFrom { get; set; }
@@ -127,6 +151,9 @@ public class WorkFromHomePolicyDto
     public string MixedAttendanceStatusCode { get; set; } = "WFH+WFO";
     public string? WfhWfoAttendanceStatusCode { get; set; } = "WFH+WFO";
     public string? WfhHdAttendanceStatusCode { get; set; } = "WFH-HD";
+    public TimeSpan? SameDayCutoffTime { get; set; }
+    public int SameDayGraceMinutes { get; set; }
+    public bool AllowLateApplicationWithApproval { get; set; } = true;
 }
 
 public class WorkFromHomeEmployeeAllocationDto
@@ -153,6 +180,7 @@ public class WorkFromHomeResponseDto : WorkFromHomeRequestDto
     public DateTime? CreatedDate { get; set; }
     public string? ReviewedByUserId { get; set; }
     public DateTime? ReviewedAt { get; set; }
+    public bool IsLateSubmission { get; set; }
 }
 
 public class WorkFromHomeRequestFilterDto

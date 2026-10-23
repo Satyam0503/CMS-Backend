@@ -1,6 +1,7 @@
 using MongoDB.Bson.Serialization.Attributes;
 using Codeji.CMS.Repository.Entities;
 
+[BsonIgnoreExtraElements]
 public class WorkFromHomeRequest : BaseClass
 {
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))] public string RequestId { get; set; } = string.Empty;
@@ -22,6 +23,7 @@ public class WorkFromHomeRequest : BaseClass
     public string? CancelledByUserId { get; set; }
     public DateTime? RevokedAt { get; set; }
     public string? RevokedByUserId { get; set; }
+    public bool IsLateSubmission { get; set; }
 }
 
 // Policy documents predate several WFH schema revisions. Ignore retired fields so a
@@ -73,6 +75,10 @@ public class WorkFromHomePolicy : BaseClass
     public string MixedAttendanceStatusCode { get; set; } = "WFH+WFO";
     public string? WfhWfoAttendanceStatusCode { get; set; } = "WFH+WFO";
     public string? WfhHdAttendanceStatusCode { get; set; } = "WFH-HD";
+    public TimeSpan? SameDayCutoffTime { get; set; }
+    public int SameDayGraceMinutes { get; set; }
+    [MongoDB.Bson.Serialization.Attributes.BsonDefaultValue(true)]
+    public bool AllowLateApplicationWithApproval { get; set; } = true;
 }
 
 public class WorkFromHomeEmployeeAllocation

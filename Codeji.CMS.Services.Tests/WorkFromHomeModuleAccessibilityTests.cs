@@ -143,4 +143,61 @@ public class WorkFromHomeModuleAccessibilityTests
         Assert.Empty(result.MethodResults);
         Assert.Equal(0, result.TotalRecords);
     }
+
+    [Fact]
+    public async Task GetAll_WhenModuleDisabled_ReturnsEmptyResults()
+    {
+        var service = CreateService(isModuleAccessible: false);
+
+        var result = await service.GetAll(new WorkFromHomeRequestFilterDto());
+
+        Assert.True(result.Success);
+        Assert.Empty(result.MethodResults);
+        Assert.Equal(0, result.TotalRecords);
+    }
+
+    [Fact]
+    public async Task GetTeam_WhenModuleDisabled_ReturnsEmptyResults()
+    {
+        var service = CreateService(isModuleAccessible: false);
+
+        var result = await service.GetTeam(new WorkFromHomeRequestFilterDto());
+
+        Assert.True(result.Success);
+        Assert.Empty(result.MethodResults);
+        Assert.Equal(0, result.TotalRecords);
+    }
+
+    [Fact]
+    public async Task Decide_WhenModuleDisabled_ReturnsAccessError()
+    {
+        var service = CreateService(isModuleAccessible: false);
+
+        var result = await service.Decide("req-1", "Approved", new WorkFromHomeDecisionDto { Version = 1 });
+
+        Assert.False(result.Success);
+        Assert.Contains("WFH_MODULE_DISABLED", result.Message);
+    }
+
+    [Fact]
+    public async Task Cancel_WhenModuleDisabled_ReturnsAccessError()
+    {
+        var service = CreateService(isModuleAccessible: false);
+
+        var result = await service.Cancel("req-1", new WorkFromHomeCancelDto { Version = 1 });
+
+        Assert.False(result.Success);
+        Assert.Contains("WFH_MODULE_DISABLED", result.Message);
+    }
+
+    [Fact]
+    public async Task GetTiming_WhenModuleDisabled_ReturnsAccessError()
+    {
+        var service = CreateService(isModuleAccessible: false);
+
+        var result = await service.GetTiming("req-1");
+
+        Assert.False(result.Success);
+        Assert.Contains("WFH_MODULE_DISABLED", result.Message);
+    }
 }

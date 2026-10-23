@@ -68,7 +68,8 @@ namespace Codeji.CMS.Utility.Enums
             BirthDay = 5,
             WorkAnniversary = 6,
             WorkFromHomeRequest = 7,
-            WorkFromHomeApproved = 8
+            WorkFromHomeApproved = 8,
+            WorkFromHomeRejected = 9
         }
         public enum NotificationPreferenceType
         {

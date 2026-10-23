@@ -50,11 +50,29 @@ public sealed class RecruitmentScreeningService(
 
         var allowCustomWorkflows = config is null || config.AllowJobWorkflowCustomization;
 
-        // Active pass score: vacancy-specific threshold takes first precedence if customization allowed, followed by company config, default 60
-        int passScoreThreshold = (allowCustomWorkflows && vacancy?.ScreeningPassScore is > 0)
-            ? vacancy.ScreeningPassScore.Value
-            : (config?.ScreeningPassScore ?? 60);
-        if (passScoreThreshold > 0 && decision == RecruitmentScreeningDecision.Pass && command.Score < passScoreThreshold)
+        // Active pass score: vacancy-specific threshold takes first precedence if customization allowed, followed by company config (only when enabled)
+        bool isThresholdActive = false;
+        int passScoreThreshold = 0;
+
+        if (string.Equals(vacancy?.WorkflowMode, "Direct", StringComparison.OrdinalIgnoreCase))
+        {
+            // Direct hire vacancies fast-track without score gates
+            isThresholdActive = false;
+        }
+        else if (allowCustomWorkflows && vacancy?.ScreeningPassScore is > 0)
+        {
+            // Role specifically configured a screening pass threshold
+            passScoreThreshold = vacancy.ScreeningPassScore.Value;
+            isThresholdActive = true;
+        }
+        else if (config is not null && !string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase) && config.AutoAdvanceOnScreening && config.ScreeningPassScore > 0)
+        {
+            // Mid-market / Enterprise tenant with active screening gate policy
+            passScoreThreshold = config.ScreeningPassScore;
+            isThresholdActive = true;
+        }
+
+        if (isThresholdActive && passScoreThreshold > 0 && decision == RecruitmentScreeningDecision.Pass && command.Score < passScoreThreshold)
             return Fail(RecruitmentErrorCodes.InvalidRequest, $"Screening pass requires a score of at least {passScoreThreshold}.");
 
         // REC-BUG-06 Fix: When bulk screening sends "Bulk recruiter review", automatically expand it to match the company's configured ScreeningCriteria.
@@ -94,6 +112,8 @@ public sealed class RecruitmentScreeningService(
         if (existing is null)
         {
             var entity = new RecruitmentScreeningReview { CompanyId = companyId, ApplicantId = applicant.ApplicantId, VacancyId = command.VacancyId, ReviewerUserId = reviewer, ResumeVersion = command.ResumeVersion?.Trim(), Score = command.Score, Decision = decision!, RejectionReason = command.RejectionReason?.Trim(), Evidence = command.Evidence?.Trim(), Criteria = criteriaToSave.Select(Map).ToList(), LastCommandIdempotencyKey = key, CreatedBy = actorUserId, UpdatedBy = actorUserId };
+            if (string.IsNullOrWhiteSpace(entity.ReviewId))
+                entity.ReviewId = Guid.NewGuid().ToString("N");
             var saved = await reviews.AddOne(entity);
             if (!saved.Success) return Fail(RecruitmentErrorCodes.ConcurrencyConflict, "Screening review could not be saved.", StatusCodes.Status409Conflict);
             await AutoAdvanceApplicantStage(companyId, applicant, decision!, config, actorUserId);

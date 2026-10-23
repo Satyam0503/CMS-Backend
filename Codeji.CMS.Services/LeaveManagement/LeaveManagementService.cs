@@ -18,6 +18,7 @@ using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Employees;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility;
+using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Codeji.CMS.Utility.middlewares;
@@ -52,6 +53,7 @@ public class LeaveManagementService : ILeaveManagementService
     private readonly IEmployeeLifecycleCaseService? _lifecycleCases;
     private readonly IMongoDbRepository<EmployeeLifecyclePolicy>? _lifecyclePolicyRepository;
     private readonly IEmployeeLifecyclePolicyService? _lifecyclePolicyService;
+    private readonly IRoleService? _roleService;
     public LeaveManagementService(
     IMongoDbRepository<EmpUser> employeeRepository,
     IMongoDbRepository<LeaveRequest> leave,
@@ -73,7 +75,8 @@ public class LeaveManagementService : ILeaveManagementService
     IMongoClient mongoClient,
     IEmployeeLifecycleCaseService? lifecycleCases = null,
     IMongoDbRepository<EmployeeLifecyclePolicy>? lifecyclePolicyRepository = null,
-    IEmployeeLifecyclePolicyService? lifecyclePolicyService = null
+    IEmployeeLifecyclePolicyService? lifecyclePolicyService = null,
+    IRoleService? roleService = null
     )
     {
         _httpContextAccessor = httpContextAccessor;
@@ -98,6 +101,7 @@ public class LeaveManagementService : ILeaveManagementService
         _lifecycleCases = lifecycleCases;
         _lifecyclePolicyRepository = lifecyclePolicyRepository;
         _lifecyclePolicyService = lifecyclePolicyService;
+        _roleService = roleService;
     }
 
     // updated services
@@ -109,6 +113,8 @@ public class LeaveManagementService : ILeaveManagementService
         NormalizeLeaveAttendanceMappings(leavePolicyDto);
         if (!await ValidatePolicyShape(company_id, leavePolicyDto.PolicyType, leavePolicyDto.FullDayAttendanceStatusCode, leavePolicyDto.HalfDayAttendanceStatusCode, leavePolicyDto.HalfDayAllowed, leavePolicyDto.WorkFromHome))
             return new Result { Success = false, Message = "LEAVE_POLICY_CONFIGURATION_INVALID: The policy type and attendance configuration are not valid for this company." };
+        if (leavePolicyDto.PolicyType == EnumsHelper.LeavePolicyType.WorkFromHome && _roleService is not null && !await _roleService.IsModuleAccessibleForCompany(AppModule.WorkFromHome, company_id))
+            return new Result { Success = false, Message = "WFH_MODULE_DISABLED: Work from home module is not enabled for this company." };
         if (leavePolicyDto.PolicyType == EnumsHelper.LeavePolicyType.WorkFromHome &&
             await _workFromHomePolicies.Exist(x => x.CompanyId == company_id && !string.IsNullOrEmpty(x.LeavePolicyId)))
             return new Result { Success = false, Message = "WFH_POLICY_ALREADY_CONFIGURED: This company already has a typed WFH policy. Update that policy instead." };
@@ -118,7 +124,10 @@ public class LeaveManagementService : ILeaveManagementService
         // WFH is attendance work, not unpaid leave. Keep the policy flag aligned
         // with the WFH attendance status so payroll and the policy UI agree.
         if (leavePolicyDto.PolicyType == EnumsHelper.LeavePolicyType.WorkFromHome)
+        {
             leavePolicyDto.Paid = true;
+            leavePolicyDto.MinNoticeDays = 0;
+        }
         // A leave policy may be created before its attendance status has been configured.
         // The mapping is optional and is checked again when a leave request is approved,
         // which prevents an invalid mapping from creating attendance while allowing HR to
@@ -182,8 +191,13 @@ public class LeaveManagementService : ILeaveManagementService
 
         model.Name = model.Name.Trim();
         model.Code = model.Code.Trim().ToUpperInvariant();
+        if (model.PolicyType == EnumsHelper.LeavePolicyType.WorkFromHome && _roleService is not null && !await _roleService.IsModuleAccessibleForCompany(AppModule.WorkFromHome, companyId))
+            return new Result<UpdateLeavePolicyRequest> { Success = false, Message = "WFH_MODULE_DISABLED: Work from home module is not enabled for this company." };
         if (model.PolicyType == EnumsHelper.LeavePolicyType.WorkFromHome)
+        {
             model.Paid = true;
+            model.MinNoticeDays = 0;
+        }
         NormalizeUnpaidLeavePolicy(model);
         NormalizeLifecycleLeavePolicy(model);
         NormalizeLeaveAttendanceMappings(model);
@@ -468,6 +482,9 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
                 FullDayRequiredWorkingMinutes = (int)(operationalPolicy.FullDayMinimumHours * 60),
                 HalfDayRequiredWorkingMinutes = (int)(operationalPolicy.HalfDayMinimumHours * 60),
                 BreakMinutes = 0,
+                SameDayCutoffTime = operationalPolicy.SameDayCutoffTime,
+                SameDayGraceMinutes = operationalPolicy.SameDayGraceMinutes,
+                AllowLateApplicationWithApproval = operationalPolicy.AllowLateApplicationWithApproval,
             };
         }
         foreach (var policy in list.Where(IsUnpaidLeavePolicy))
@@ -476,6 +493,10 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
             // employee self-service can use the same no-credit workflow.
             policy.PolicyType = EnumsHelper.LeavePolicyType.UnpaidLeave;
             NormalizeUnpaidLeavePolicy(policy);
+        }
+        if (_roleService is not null && !await _roleService.IsModuleAccessibleForCompany(AppModule.WorkFromHome, companyId))
+        {
+            list = list.Where(x => x.PolicyType != EnumsHelper.LeavePolicyType.WorkFromHome).ToList();
         }
         return new Result<UpdateLeavePolicyRequest>()
         {
@@ -1470,6 +1491,7 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
 
         existing.LeavePolicyId = leavePolicy.Id;
         existing.IsEnabled = leavePolicy.Status;
+        existing.MinimumAdvanceNoticeHours = 0;
         existing.ManagerApprovalRequired = settings.ApprovalRequired;
         existing.RequireReason = settings.ReasonRequired;
         existing.RequireAttachment = settings.AttachmentRequired;
@@ -1503,6 +1525,9 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         existing.WfhHdAttendanceStatusCode = settings.WfhHdAttendanceStatusCode?.Trim().ToUpperInvariant();
         existing.FullDayMinimumHours = (settings.FullDayRequiredWorkingMinutes ?? 480) / 60m;
         existing.HalfDayMinimumHours = (settings.HalfDayRequiredWorkingMinutes ?? 240) / 60m;
+        existing.SameDayCutoffTime = settings.SameDayCutoffTime;
+        existing.SameDayGraceMinutes = settings.SameDayGraceMinutes;
+        existing.AllowLateApplicationWithApproval = settings.AllowLateApplicationWithApproval;
         existing.UpdatedDate = DateTime.UtcNow;
         return string.IsNullOrWhiteSpace(existing.PolicyId)
             ? await _workFromHomePolicies.AddOne(existing)
@@ -1762,7 +1787,7 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         IEnumerable<EmployeeLeaveBalance> employeeLeaveBalances = await _employeeLeaveBalanceRepo.GetAll(elb =>
             elb.CompanyId == companyId && elb.UserId == employeeId);
         IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(lp =>
-            lp.CompanyId == companyId && lp.Status);
+            lp.CompanyId == companyId && lp.Status && lp.PolicyType == EnumsHelper.LeavePolicyType.Leave);
         var lifecyclePolicyIds = _lifecyclePolicyRepository is null
             ? new HashSet<string>(StringComparer.Ordinal)
             : (await _lifecyclePolicyRepository.GetAll(x => x.CompanyId == companyId && x.IsActive && !x.IsDeleted && !string.IsNullOrWhiteSpace(x.LeavePolicyId)))

@@ -140,6 +140,108 @@ public sealed class RecruitmentHiringDecisionServiceTests
         Assert.Contains("interview round must be completed", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Shortlisted_candidate_can_be_manually_rejected_for_interview_no_show_with_notes()
+    {
+        var applicant = new Applicant
+        {
+            CompanyId = "company-1",
+            ApplicantId = "applicant-noshow-1",
+            VacancyId = "job-qa-1",
+            FirstName = "Aman",
+            LastName = "Singh",
+            Phone = "9876543210",
+            ActivityType = ActivityType.Shortlisted,
+            Status = ActivityStatus.Active
+        };
+
+        var canonicalApplication = new RecruitmentJobApplication
+        {
+            CompanyId = "company-1",
+            ApplicantId = "applicant-noshow-1",
+            VacancyId = "job-qa-1",
+            ApplicationId = "app-1",
+            CurrentStage = "Shortlisted"
+        };
+
+        var applicants = new Mock<IMongoDbRepository<Applicant>>();
+        applicants.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(applicant);
+        applicants.Setup(x => x.Update(It.IsAny<FilterDefinition<Applicant>>(), It.IsAny<Applicant>()))
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+
+        var applications = new Mock<IMongoDbRepository<RecruitmentJobApplication>>();
+        applications.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentJobApplication, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(canonicalApplication);
+        applications.Setup(x => x.Update(It.IsAny<FilterDefinition<RecruitmentJobApplication>>(), It.IsAny<RecruitmentJobApplication>()))
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+
+        var decisions = new Mock<IMongoDbRepository<RecruitmentHiringDecision>>();
+        decisions.Setup(x => x.AddOne(It.IsAny<RecruitmentHiringDecision>()))
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+
+        ApplicantLogs? capturedLog = null;
+        var logs = new Mock<IMongoDbRepository<ApplicantLogs>>();
+        logs.Setup(x => x.AddOne(It.IsAny<ApplicantLogs>()))
+            .Callback<ApplicantLogs>(log => capturedLog = log)
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+
+        var service = new RecruitmentHiringDecisionService(
+            applicants.Object,
+            new Mock<IMongoDbRepository<RecruitmentInterview>>().Object,
+            decisions.Object,
+            logs.Object,
+            TenantContext("company-1"),
+            applications.Object);
+
+        var result = await service.Upsert(new Codeji.CMS.DTO.Recruitments.RecruitmentHiringDecisionCommand
+        {
+            ApplicantId = "applicant-noshow-1",
+            VacancyId = "job-qa-1",
+            Decision = RecruitmentHiringDecisionStatus.Reject,
+            IdempotencyKey = "reject-noshow-1",
+            Notes = "Candidate was a no-show for the scheduled technical interview and did not respond to follow-up emails."
+        }, "hr-manager-1");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(200, result.StatusCode);
+        Assert.Equal(ActivityType.Rejected, applicant.ActivityType);
+        Assert.Equal("Rejected", canonicalApplication.CurrentStage);
+        Assert.Contains(canonicalApplication.StageHistory, h => h.FromStage == "Shortlisted" && h.ToStage == "Rejected");
+
+        Assert.NotNull(capturedLog);
+        Assert.Equal("HiringDecisionRecorded", capturedLog!.EventType);
+        Assert.Equal("Shortlisted", capturedLog.PreviousStage);
+        Assert.Equal("Rejected", capturedLog.CurrentStage);
+        Assert.Contains("no-show", capturedLog.Description, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Rejection_fails_if_notes_are_missing()
+    {
+        var applicants = new Mock<IMongoDbRepository<Applicant>>();
+        var service = new RecruitmentHiringDecisionService(
+            applicants.Object,
+            new Mock<IMongoDbRepository<RecruitmentInterview>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentHiringDecision>>().Object,
+            new Mock<IMongoDbRepository<ApplicantLogs>>().Object,
+            TenantContext("company-1"));
+
+        var result = await service.Upsert(new Codeji.CMS.DTO.Recruitments.RecruitmentHiringDecisionCommand
+        {
+            ApplicantId = "applicant-1",
+            VacancyId = "job-1",
+            Decision = RecruitmentHiringDecisionStatus.Reject,
+            IdempotencyKey = "reject-empty-notes-1",
+            Notes = "" // Empty notes
+        }, "hr-1");
+
+        Assert.False(result.Success);
+        Assert.Equal(400, result.StatusCode);
+        Assert.Equal(RecruitmentErrorCodes.InvalidRequest, result.ErrorCode);
+        Assert.Contains("notes are required", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static IHttpContextAccessor TenantContext(string companyId)
     {
         var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("company_id", companyId)], "TestAuth")) };

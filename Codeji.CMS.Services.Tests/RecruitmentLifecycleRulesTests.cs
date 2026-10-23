@@ -50,4 +50,22 @@ public sealed class RecruitmentLifecycleRulesTests
         Assert.Contains("back", backwardError, StringComparison.OrdinalIgnoreCase);
         Assert.False(RecruitmentPipelineRules.IsAllowedTransition(ActivityType.Selected, ActivityType.Rejected, out var terminalError));
         Assert.Contains("cannot", terminalError, StringComparison.OrdinalIgnoreCase);
-    }}
+    }
+
+    [Fact]
+    public void Shortlisted_candidate_can_transition_to_rejected_directly()
+    {
+        Assert.True(RecruitmentPipelineRules.IsAllowedTransition(ActivityType.Shortlisted, ActivityType.Rejected, out var error));
+        Assert.True(string.IsNullOrWhiteSpace(error));
+
+        Assert.True(RecruitmentPipelineRules.IsAllowedTransition(ActivityType.InProgress, ActivityType.Rejected, out var error2));
+        Assert.True(string.IsNullOrWhiteSpace(error2));
+
+        Assert.True(RecruitmentPipelineRules.IsAllowedTransition(ActivityType.OnHold, ActivityType.Rejected, out var error3));
+        Assert.True(string.IsNullOrWhiteSpace(error3));
+
+        // Once rejected, terminal state cannot transition to any other stage
+        Assert.False(RecruitmentPipelineRules.IsAllowedTransition(ActivityType.Rejected, ActivityType.Shortlisted, out var error4));
+        Assert.Contains("cannot be changed after it is Rejected", error4, StringComparison.OrdinalIgnoreCase);
+    }
+}
