@@ -442,6 +442,83 @@ public sealed class PayrollConfigurationServiceTests
     }
 
     [Fact]
+    public async Task DeletePayGroup_RejectsDeletionWhenAssignedToEmployees()
+    {
+        var group = new PayrollPayGroup { Id = "group-1", CompanyId = "company-1", Name = "Monthly" };
+        var groups = Repository(new[] { group });
+        var assignments = Repository(new[] { new EmployeePayrollAssignment { Id = "assign-1", CompanyId = "company-1", EmployeeId = "emp-1", PayGroupId = "group-1" } });
+        var service = new PayrollConfigurationService(groups.Object, assignments.Object, Repository(Array.Empty<SalaryTemplate>()).Object, Repository(Array.Empty<PayrollPolicyProfile>()).Object);
+
+        var result = await service.DeletePayGroup("company-1", "admin", "group-1");
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Contains("assigned to employees", result.Message);
+    }
+
+    [Fact]
+    public async Task DeletePayGroup_RejectsDeletionWhenLinkedToSalaryTemplates()
+    {
+        var group = new PayrollPayGroup { Id = "group-1", CompanyId = "company-1", Name = "Monthly" };
+        var groups = Repository(new[] { group });
+        var templates = Repository(new[] { new SalaryTemplate { Id = "tpl-1", CompanyId = "company-1", Name = "Standard", PayGroupId = "group-1" } });
+        var service = new PayrollConfigurationService(groups.Object, Repository(Array.Empty<EmployeePayrollAssignment>()).Object, templates.Object, Repository(Array.Empty<PayrollPolicyProfile>()).Object);
+
+        var result = await service.DeletePayGroup("company-1", "admin", "group-1");
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Contains("salary templates are linked to it", result.Message);
+    }
+
+    [Fact]
+    public async Task DeletePayGroup_DeletesWhenUnused()
+    {
+        var group = new PayrollPayGroup { Id = "group-1", CompanyId = "company-1", Name = "Monthly" };
+        var groups = Repository(new[] { group });
+        groups.Setup(x => x.Delete(It.IsAny<FilterDefinition<PayrollPayGroup>>())).ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+        var service = new PayrollConfigurationService(groups.Object, Repository(Array.Empty<EmployeePayrollAssignment>()).Object, Repository(Array.Empty<SalaryTemplate>()).Object, Repository(Array.Empty<PayrollPolicyProfile>()).Object);
+
+        var result = await service.DeletePayGroup("company-1", "admin", "group-1");
+        Assert.True(result.Success);
+    }
+
+    [Fact]
+    public async Task EndAssignment_RejectsEndDateBeforeStartDate()
+    {
+        var service = new PayrollConfigurationService(Repository(Array.Empty<PayrollPayGroup>()).Object, Repository(Array.Empty<EmployeePayrollAssignment>()).Object, Repository(Array.Empty<SalaryTemplate>()).Object, Repository(Array.Empty<PayrollPolicyProfile>()).Object);
+        var result = await service.EndAssignment("company-1", "admin", "emp-1", new DateTime(2026, 10, 1), new DateTime(2026, 9, 30));
+        Assert.False(result.Success);
+        Assert.Equal(400, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task EndAssignment_UpdatesEffectiveToOnAssignment()
+    {
+        var assignment = new EmployeePayrollAssignment { Id = "assign-1", CompanyId = "company-1", EmployeeId = "emp-1", EffectiveFrom = new DateTime(2026, 1, 1), Version = 1 };
+        var assignments = Repository(new[] { assignment });
+        assignments.Setup(x => x.Update(It.IsAny<FilterDefinition<EmployeePayrollAssignment>>(), It.IsAny<EmployeePayrollAssignment>()))
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+        var service = new PayrollConfigurationService(Repository(Array.Empty<PayrollPayGroup>()).Object, assignments.Object, Repository(Array.Empty<SalaryTemplate>()).Object, Repository(Array.Empty<PayrollPolicyProfile>()).Object);
+
+        var result = await service.EndAssignment("company-1", "admin", "emp-1", new DateTime(2026, 1, 1), new DateTime(2026, 10, 31));
+        Assert.True(result.Success);
+        Assert.Equal(new DateTime(2026, 10, 31), assignment.EffectiveTo);
+        Assert.Equal(2, assignment.Version);
+    }
+
+    [Fact]
+    public async Task DeleteAssignment_DeletesAssignment()
+    {
+        var assignment = new EmployeePayrollAssignment { Id = "assign-1", CompanyId = "company-1", EmployeeId = "emp-1", EffectiveFrom = new DateTime(2026, 1, 1) };
+        var assignments = Repository(new[] { assignment });
+        assignments.Setup(x => x.Delete(It.IsAny<FilterDefinition<EmployeePayrollAssignment>>()))
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+        var service = new PayrollConfigurationService(Repository(Array.Empty<PayrollPayGroup>()).Object, assignments.Object, Repository(Array.Empty<SalaryTemplate>()).Object, Repository(Array.Empty<PayrollPolicyProfile>()).Object);
+
+        var result = await service.DeleteAssignment("company-1", "admin", "emp-1", new DateTime(2026, 1, 1));
+        Assert.True(result.Success);
+    }
+
+    [Fact]
     public async Task CancelAssignment_PersistsAdminWithdrawalAudit()
     {
         var assignment = new EmployeePayrollAssignment { Id = "assignment-1", CompanyId = "company-1", EmployeeId = "employee-1", EffectiveFrom = new DateTime(2026, 9, 1), CreatedBy = "maker", Version = 1 };

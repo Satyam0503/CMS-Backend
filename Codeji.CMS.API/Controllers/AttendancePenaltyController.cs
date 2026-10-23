@@ -34,4 +34,6 @@ public class AttendancePenaltyController : ControllerBase
     public Task<AttendanceMonthLockStatusDto> GetMonthLockStatus([FromQuery]DateTime month)=>_service.GetMonthLockStatus(CurrentContext.CompanyId(_context),month);
     [HttpPost("month/validate-lock"),ModulePermission(AppModule.Attendance,Permission.Edit)]
     public Task<Result<AttendanceMonthLockValidationResultDto>> ValidateAndLock(AttendanceMonthRequestDto dto)=>_service.ValidateAndLock(CurrentContext.CompanyId(_context),CurrentContext.UserId(_context),dto.PayrollMonth);
+    [HttpPost("month/unlock"),ModulePermission(AppModule.Attendance,Permission.Edit)]
+    public Task<Result> UnlockMonth(AttendanceMonthRequestDto dto)=>_service.UnlockMonth(CurrentContext.CompanyId(_context),CurrentContext.UserId(_context),dto.PayrollMonth);
 }

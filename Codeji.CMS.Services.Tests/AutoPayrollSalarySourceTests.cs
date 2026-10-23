@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.PayRoll;
 using Codeji.CMS.DTO.Salary;
 using Codeji.CMS.GenericRepository.Interfaces;
@@ -255,6 +256,195 @@ public sealed class AutoPayrollSalarySourceTests
         Assert.Contains("Employee IDs: employee-1.", result.Message);
         legacySalaries.Verify(x => x.Get(It.IsAny<Expression<Func<SalaryModel, bool>>>(), It.IsAny<Func<IQueryable<SalaryModel>, IOrderedQueryable<SalaryModel>>>(), It.IsAny<bool>()), Times.Never);
         payrollRows.Verify(x => x.AddOne(It.IsAny<EmpPayRoll>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GeneratePayroll_CalculatesRemainingEmployees_WhenOtherEmployeesAreAlreadyProcessed()
+    {
+        var emp1 = new EmpUser
+        {
+            CompanyId = "company-1", UserId = "user-1", EmployeeId = "emp-1", FirstName = "Emp",
+            LastName = "One", Email = "emp1@example.com", DateOfJoining = "2026-09-01", Status = true
+        };
+        var emp2 = new EmpUser
+        {
+            CompanyId = "company-1", UserId = "user-2", EmployeeId = "emp-2", FirstName = "Emp",
+            LastName = "Two", Email = "emp2@example.com", DateOfJoining = "2026-09-01", Status = true
+        };
+        var processedRowEmp1 = new EmpPayRoll
+        {
+            CompanyId = "company-1", UserId = "user-1", EmployeeId = "emp-1",
+            PayMonth = new DateTime(2026, 9, 1), PaidDate = new DateTime(2026, 10, 1),
+            BasicPay = 50000m, PaidDays = 30, IsProcessed = true, WorkflowStatus = "PROCESSED"
+        };
+        var emp2Salary = new EmployeeSalaryStructure
+        {
+            Id = "88888888-8888-8888-8888-888888888888",
+            CompanyId = "company-1", EmployeeId = "emp-2", EffectiveFrom = new DateTime(2026, 10, 14),
+            Status = "ACTIVE", ApprovalStatus = "APPROVED", Version = 1,
+            Components = [new EmployeeSalaryComponentValue { ComponentCode = "BASIC", ComponentName = "Basic", Value = 60000m, Kind = "EARNING", IsRecurring = true, IsTaxable = true }]
+        };
+
+        var payrollRows = Repository(processedRowEmp1);
+        var payrollService = new Mock<IPayRollServices>();
+        payrollService.Setup(x => x.AddUpdatePayRoll(It.IsAny<AddUpdatePayRollRequestDto>(), "company-1"))
+            .ReturnsAsync(new Result { Success = true });
+        var divisor = new Mock<IPayrollDivisorPolicyService>();
+        divisor.Setup(x => x.GetEffective("company-1", new DateTime(2026, 9, 1)))
+            .ReturnsAsync(new PayrollDivisorPolicyDto { RequireAttendanceLock = false, TdsMode = "AUTO_NEW_REGIME" });
+        var workingCalendar = new Mock<ICompanyWorkingCalendarService>();
+        workingCalendar.Setup(x => x.CountWorkingDaysAsync("company-1", new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30), It.IsAny<CancellationToken>())).ReturnsAsync(22);
+
+        var service = new AutoPayrollServices(
+            payrollService.Object, Repository(emp1, emp2).Object, payrollRows.Object,
+            Repository<AttendanceModel>().Object, Repository<AttendanceDaySegment>().Object, Repository<SalaryModel>().Object,
+            Repository<AttendanceStatusSetting>().Object, Repository<MonthlyAttendanceSummary>().Object,
+            Repository<AttendancePayrollException>().Object, divisor.Object, workingCalendar.Object,
+            Repository<EmployeePayrollAssignment>().Object, Repository<PayrollPolicyProfile>().Object,
+            Repository<PayrollPayGroup>().Object, Repository<SalaryTemplate>().Object,
+            Repository(emp2Salary).Object);
+
+        var result = await service.GeneratePayrollForMonthAsync("company-1", new DateTime(2026, 9, 1));
+
+        Assert.True(result.Success, result.Message);
+        Assert.Contains("Generated payroll draft for 1 employee(s)", result.Message);
+        payrollService.Verify(x => x.AddUpdatePayRoll(It.Is<AddUpdatePayRollRequestDto>(dto => dto.EmployeeId == "emp-2"), "company-1"), Times.Once);
+        payrollService.Verify(x => x.AddUpdatePayRoll(It.Is<AddUpdatePayRollRequestDto>(dto => dto.EmployeeId == "emp-1"), "company-1"), Times.Never);
+    }
+
+    [Fact]
+    public async Task GeneratePayroll_CalculatesOctoberEntireMonth_WhenSalaryConfiguredMidMonthAndEmployeeJoinedEarlier()
+    {
+        var employee = new EmpUser
+        {
+            CompanyId = "company-1", UserId = "user-1", EmployeeId = "emp-1", FirstName = "Test",
+            LastName = "Employee", Email = "emp1@example.com", DateOfJoining = "2026-09-01", Status = true
+        };
+        var empSalary = new EmployeeSalaryStructure
+        {
+            Id = "99999999-9999-9999-9999-999999999999",
+            CompanyId = "company-1", EmployeeId = "emp-1", EffectiveFrom = new DateTime(2026, 10, 14),
+            Status = "ACTIVE", ApprovalStatus = "APPROVED", Version = 1,
+            Components =
+            [
+                new EmployeeSalaryComponentValue { ComponentCode = "BASIC", ComponentName = "Basic", Value = 50000m, Kind = "EARNING", IsRecurring = true, IsTaxable = true },
+                new EmployeeSalaryComponentValue { ComponentCode = "SPECIAL_ALLOWANCE", ComponentName = "Special Allowance", Value = 10000m, Kind = "EARNING", IsRecurring = true, IsTaxable = true }
+            ]
+        };
+
+        var payrollRows = Repository<EmpPayRoll>();
+        var payrollService = new Mock<IPayRollServices>();
+        AddUpdatePayRollRequestDto? capturedDto = null;
+        payrollService.Setup(x => x.AddUpdatePayRoll(It.IsAny<AddUpdatePayRollRequestDto>(), "company-1"))
+            .Callback<AddUpdatePayRollRequestDto, string>((dto, _) => capturedDto = dto)
+            .ReturnsAsync(new Result { Success = true });
+        var divisor = new Mock<IPayrollDivisorPolicyService>();
+        divisor.Setup(x => x.GetEffective("company-1", new DateTime(2026, 10, 1)))
+            .ReturnsAsync(new PayrollDivisorPolicyDto { RequireAttendanceLock = false, TdsMode = "AUTO_NEW_REGIME" });
+        var workingCalendar = new Mock<ICompanyWorkingCalendarService>();
+        workingCalendar.Setup(x => x.CountWorkingDaysAsync("company-1", new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31), It.IsAny<CancellationToken>())).ReturnsAsync(22);
+
+        var service = new AutoPayrollServices(
+            payrollService.Object, Repository(employee).Object, payrollRows.Object,
+            Repository<AttendanceModel>().Object, Repository<AttendanceDaySegment>().Object, Repository<SalaryModel>().Object,
+            Repository<AttendanceStatusSetting>().Object, Repository<MonthlyAttendanceSummary>().Object,
+            Repository<AttendancePayrollException>().Object, divisor.Object, workingCalendar.Object,
+            Repository<EmployeePayrollAssignment>().Object, Repository<PayrollPolicyProfile>().Object,
+            Repository<PayrollPayGroup>().Object, Repository<SalaryTemplate>().Object,
+            Repository(empSalary).Object);
+
+        var result = await service.GeneratePayrollForMonthAsync("company-1", new DateTime(2026, 10, 1));
+
+        Assert.True(result.Success, result.Message);
+        Assert.NotNull(capturedDto);
+        Assert.Equal("emp-1", capturedDto.EmployeeId);
+        // Over the full 31 days of October, weighted basic should be 50,000 and other allowances should include 10,000 special allowance
+        Assert.Equal(50000m, capturedDto.BasicPay);
+        Assert.Equal(10000m, capturedDto.OtherAllowance);
+        Assert.Equal(31, capturedDto.PaidDays);
+    }
+
+    [Fact]
+    public async Task GeneratePayroll_RejectsGracefully_WhenAllEmployeesInCompanyAreAlreadyProcessed()
+    {
+        var employee = new EmpUser
+        {
+            CompanyId = "company-1", UserId = "user-1", EmployeeId = "emp-1", FirstName = "Test",
+            LastName = "Employee", Email = "emp1@example.com", DateOfJoining = "2026-09-01", Status = true
+        };
+        var processedRow = new EmpPayRoll
+        {
+            CompanyId = "company-1", UserId = "user-1", EmployeeId = "emp-1",
+            PayMonth = new DateTime(2026, 9, 1), PaidDate = new DateTime(2026, 10, 1),
+            BasicPay = 50000m, PaidDays = 30, IsProcessed = true, WorkflowStatus = "PROCESSED"
+        };
+
+        var payrollRows = Repository(processedRow);
+        var payrollService = new Mock<IPayRollServices>();
+        var divisor = new Mock<IPayrollDivisorPolicyService>();
+        var workingCalendar = new Mock<ICompanyWorkingCalendarService>();
+        var service = new AutoPayrollServices(
+            payrollService.Object, Repository(employee).Object, payrollRows.Object,
+            Repository<AttendanceModel>().Object, Repository<AttendanceDaySegment>().Object, Repository<SalaryModel>().Object,
+            Repository<AttendanceStatusSetting>().Object, Repository<MonthlyAttendanceSummary>().Object,
+            Repository<AttendancePayrollException>().Object, divisor.Object, workingCalendar.Object,
+            Repository<EmployeePayrollAssignment>().Object, Repository<PayrollPolicyProfile>().Object,
+            Repository<PayrollPayGroup>().Object, Repository<SalaryTemplate>().Object,
+            Repository<EmployeeSalaryStructure>().Object);
+
+        var result = await service.GeneratePayrollForMonthAsync("company-1", new DateTime(2026, 9, 1));
+
+        Assert.False(result.Success);
+        Assert.Contains("already processed and cannot be regenerated", result.Message);
+        payrollService.Verify(x => x.AddUpdatePayRoll(It.IsAny<AddUpdatePayRollRequestDto>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GeneratePayroll_CalculatesEmployee_WhenDateOfJoiningIsNull_ButCreatedDateIsPresent()
+    {
+        var employee = new EmpUser
+        {
+            CompanyId = "company-1", UserId = "user-1", EmployeeId = "emp-1", FirstName = "Test",
+            LastName = "Employee", Email = "emp1@example.com", DateOfJoining = null, CreatedDate = new DateTime(2026, 8, 25), Status = true
+        };
+        var empSalary = new EmployeeSalaryStructure
+        {
+            Id = "99999999-9999-9999-9999-999999999999",
+            CompanyId = "company-1", EmployeeId = "emp-1", EffectiveFrom = new DateTime(2026, 10, 13),
+            Status = "ACTIVE", ApprovalStatus = "APPROVED", Version = 1,
+            Components =
+            [
+                new EmployeeSalaryComponentValue { ComponentCode = "BASIC", ComponentName = "Basic", Value = 29000m, Kind = "EARNING", IsRecurring = true, IsTaxable = true }
+            ]
+        };
+
+        var payrollRows = Repository<EmpPayRoll>();
+        var payrollService = new Mock<IPayRollServices>();
+        AddUpdatePayRollRequestDto? capturedDto = null;
+        payrollService.Setup(x => x.AddUpdatePayRoll(It.IsAny<AddUpdatePayRollRequestDto>(), "company-1"))
+            .Callback<AddUpdatePayRollRequestDto, string>((dto, _) => capturedDto = dto)
+            .ReturnsAsync(new Result { Success = true });
+        var divisor = new Mock<IPayrollDivisorPolicyService>();
+        divisor.Setup(x => x.GetEffective("company-1", new DateTime(2026, 9, 1)))
+            .ReturnsAsync(new PayrollDivisorPolicyDto { RequireAttendanceLock = false, TdsMode = "AUTO_NEW_REGIME" });
+        var workingCalendar = new Mock<ICompanyWorkingCalendarService>();
+
+        var service = new AutoPayrollServices(
+            payrollService.Object, Repository(employee).Object, payrollRows.Object,
+            Repository<AttendanceModel>().Object, Repository<AttendanceDaySegment>().Object, Repository<SalaryModel>().Object,
+            Repository<AttendanceStatusSetting>().Object, Repository<MonthlyAttendanceSummary>().Object,
+            Repository<AttendancePayrollException>().Object, divisor.Object, workingCalendar.Object,
+            Repository<EmployeePayrollAssignment>().Object, Repository<PayrollPolicyProfile>().Object,
+            Repository<PayrollPayGroup>().Object, Repository<SalaryTemplate>().Object,
+            Repository(empSalary).Object);
+
+        var result = await service.GeneratePayrollForMonthAsync("company-1", new DateTime(2026, 9, 1));
+
+        Assert.True(result.Success, result.Message);
+        Assert.NotNull(capturedDto);
+        Assert.Equal("emp-1", capturedDto.EmployeeId);
+        Assert.Equal(29000m, capturedDto.BasicPay);
+        Assert.Equal(30, capturedDto.PaidDays);
     }
 
     private static Mock<IMongoDbRepository<TEntity>> Repository<TEntity>(params TEntity[] items)

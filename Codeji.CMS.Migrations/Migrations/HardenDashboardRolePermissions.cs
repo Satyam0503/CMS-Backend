@@ -20,7 +20,7 @@ public sealed class HardenDashboardRolePermissions : IMigration
         if (await migrations.Find(x => x.Id == Id).AnyAsync()) return;
 
         var modules = db.GetCollection<Module>(nameof(Module));
-        var permissions = db.GetCollection<PermissionEntity>(nameof(PermissionEntity));
+        var permissions = db.GetCollection<PermissionEntity>("Permission");
         var modulePermissions = db.GetCollection<ModulePermission>(nameof(ModulePermission));
         var roles = db.GetCollection<Roles>(nameof(Roles));
         var rolePermissions = db.GetCollection<RolePermission>(nameof(RolePermission));

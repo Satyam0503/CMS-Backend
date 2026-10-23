@@ -11,6 +11,7 @@ public class GetAllEmployeeResponseModel
     public string? EmployeeId { get; set; }
     public Dictionary<string, string>? JobRole { get; set; }
     public Dictionary<string, string>? Department { get; set; }
+    public string? DepartmentId { get; set; }
     public string? PhoneNumber { get; set; }
     public string? DateOfBirth { get; set; }
     public string? DateOfJoining { get; set; }

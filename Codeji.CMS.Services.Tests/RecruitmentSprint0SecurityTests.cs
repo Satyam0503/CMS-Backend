@@ -5,6 +5,7 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
+using static Codeji.CMS.Utility.Enums.EnumsHelper;
 using System.Security.Claims;
 using Moq;
 
@@ -123,6 +124,55 @@ ActionType = "AcceptOffer",
 
         Assert.True(result.Success);
         external.Verify(x => x.Validate("response-token", true), Times.Once);
+    }
+
+    [Fact]
+    public async Task Candidate_accepting_offer_advances_applicant_to_selected_and_prepares_preboarding()
+    {
+        var external = new Mock<IRecruitmentExternalActionService>();
+        external.Setup(x => x.Validate("accept-token", false)).ReturnsAsync(new Result<RecruitmentExternalActionTokenDto>
+        {
+            Success = true,
+            MethodResult = new RecruitmentExternalActionTokenDto { CompanyId = "company-a", ActionType = "OfferResponse", ApplicantId = "app-1", OfferId = "offer-1" }
+        });
+        external.Setup(x => x.Validate("accept-token", true)).ReturnsAsync(new Result<RecruitmentExternalActionTokenDto> { Success = true, MethodResult = new RecruitmentExternalActionTokenDto() });
+        var applicant = new Applicant { CompanyId = "company-a", ApplicantId = "app-1", Email = "candidate@example.com", ActivityType = ActivityType.Shortlisted, Phone = "1" };
+        var applicants = Repository<Applicant>();
+        applicants.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync(applicant);
+        applicants.Setup(x => x.Update(It.IsAny<MongoDB.Driver.FilterDefinition<Applicant>>(), It.IsAny<Applicant>())).ReturnsAsync(new Result { Success = true });
+        var offers = Repository<RecruitmentOffer>();
+        offers.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentOffer, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new RecruitmentOffer { CompanyId = "company-a", OfferId = "offer-1", ApplicantId = "app-1", Status = RecruitmentOfferStatus.Sent, Version = 1, Salary = 95000, Currency = "INR" });
+        offers.Setup(x => x.UpdateMany(It.IsAny<MongoDB.Driver.FilterDefinition<RecruitmentOffer>>(), It.IsAny<MongoDB.Driver.UpdateDefinition<RecruitmentOffer>>(), It.IsAny<bool>()))
+            .ReturnsAsync(new Result { Success = true });
+        var outbox = Repository<RecruitmentEmailOutbox>();
+        outbox.Setup(x => x.AddOne(It.IsAny<RecruitmentEmailOutbox>())).ReturnsAsync(new Result { Success = true });
+        var preboarding = Repository<RecruitmentPreboardingCase>();
+        preboarding.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentPreboardingCase, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync((RecruitmentPreboardingCase?)null);
+        preboarding.Setup(x => x.AddOne(It.IsAny<RecruitmentPreboardingCase>())).ReturnsAsync(new Result { Success = true });
+
+        var service = new RecruitmentCandidateActionService(
+            external.Object,
+            applicants.Object,
+            offers.Object,
+            Repository<RecruitmentInterview>().Object,
+            outbox.Object,
+            preboardingCases: preboarding.Object);
+
+        var result = await service.RespondToOffer(new RecruitmentCandidateOfferActionCommand
+        {
+            Token = "accept-token",
+            Decision = "Accepted",
+            IdempotencyKey = "candidate-command-accept-001"
+        });
+
+        Assert.True(result.Success);
+        Assert.Equal(ActivityType.Selected, applicant.ActivityType);
+        applicants.Verify(x => x.Update(It.IsAny<MongoDB.Driver.FilterDefinition<Applicant>>(), It.Is<Applicant>(a => a.ActivityType == ActivityType.Selected)), Times.Once);
+        preboarding.Verify(x => x.AddOne(It.Is<RecruitmentPreboardingCase>(c => c.OfferId == "offer-1" && c.ApplicantId == "app-1")), Times.Once);
+
+        Assert.True(result.Success);
+        external.Verify(x => x.Validate("accept-token", true), Times.Once);
     }
     private static Mock<IMongoDbRepository<T>> Repository<T>() where T : class
         => new();

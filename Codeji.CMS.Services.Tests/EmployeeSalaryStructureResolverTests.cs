@@ -40,4 +40,39 @@ public sealed class EmployeeSalaryStructureResolverTests
 
         Assert.True(EmployeeSalaryStructureResolver.Overlaps(candidate, existing));
     }
+
+    [Fact]
+    public void Resolve_BackdatesInitialStructureToJoiningDate_WhenTargetDateIsBetweenJoiningAndEffectiveFrom()
+    {
+        var initial = new EmployeeSalaryStructure
+        {
+            Id = "october-initial", CompanyId = "company-1", EmployeeId = "employee-1",
+            EffectiveFrom = new DateTime(2026, 10, 14), ApprovalStatus = "APPROVED", Status = "ACTIVE"
+        };
+        var joiningDate = new DateTime(2026, 9, 1);
+
+        var result = EmployeeSalaryStructureResolver.Resolve(
+            "company-1", "employee-1", new DateTime(2026, 9, 15),
+            [initial], approvedOnly: true, joiningDate: joiningDate);
+
+        Assert.NotNull(result);
+        Assert.Equal("october-initial", result.Id);
+    }
+
+    [Fact]
+    public void Resolve_DoesNotBackdateWhenTargetDateIsBeforeJoiningDate()
+    {
+        var initial = new EmployeeSalaryStructure
+        {
+            Id = "october-initial", CompanyId = "company-1", EmployeeId = "employee-1",
+            EffectiveFrom = new DateTime(2026, 10, 14), ApprovalStatus = "APPROVED", Status = "ACTIVE"
+        };
+        var joiningDate = new DateTime(2026, 9, 15);
+
+        var result = EmployeeSalaryStructureResolver.Resolve(
+            "company-1", "employee-1", new DateTime(2026, 9, 1),
+            [initial], approvedOnly: true, joiningDate: joiningDate);
+
+        Assert.Null(result);
+    }
 }

@@ -3,6 +3,8 @@ using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Recruitments.Interface;
+using Codeji.CMS.Utility.Enums;
+using static Codeji.CMS.Utility.Enums.EnumsHelper;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
 
@@ -16,16 +18,40 @@ public sealed class RecruitmentCandidateActionService(
     IMongoDbRepository<RecruitmentEmailOutbox> outbox,
     IMongoDbRepository<RecruitmentAutomationOutboxEvent>? automationOutbox = null,
     IMongoDbRepository<RecruitmentPreboardingCase>? preboardingCases = null,
-    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null) : IRecruitmentCandidateActionService
+    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null,
+    IMongoDbRepository<JobVacancy>? vacancies = null,
+    IMongoDbRepository<RecruitmentJobApplication>? applications = null,
+    IMongoDbRepository<ApplicantLogs>? applicantLogs = null) : IRecruitmentCandidateActionService
 {
-    public async Task<Result<string>> RecordOfferView(RecruitmentCandidateOfferViewCommand command)
+    public async Task<Result<RecruitmentCandidateOfferDetailsDto>> RecordOfferView(RecruitmentCandidateOfferViewCommand command)
     {
-        if (string.IsNullOrWhiteSpace(command.Token)) return Fail(RecruitmentErrorCodes.InvalidRequest, "A valid action link is required.");
+        if (string.IsNullOrWhiteSpace(command.Token)) return Fail<RecruitmentCandidateOfferDetailsDto>(RecruitmentErrorCodes.InvalidRequest, "A valid action link is required.");
         var token = await external.Validate(command.Token.Trim(), false);
         var item = token.MethodResult;
-        if (!token.Success || item is null || item.ActionType is not ("OfferResponse" or "AcceptOffer" or "DeclineOffer" or "RequestOfferChange") || string.IsNullOrWhiteSpace(item.OfferId)) return Fail(RecruitmentErrorCodes.InvalidRequest, "This offer link is invalid or expired.", StatusCodes.Status410Gone);
+        if (!token.Success || item is null || item.ActionType is not ("OfferResponse" or "AcceptOffer" or "DeclineOffer" or "RequestOfferChange") || string.IsNullOrWhiteSpace(item.OfferId)) return Fail<RecruitmentCandidateOfferDetailsDto>(RecruitmentErrorCodes.InvalidRequest, "This offer link is invalid or expired.", StatusCodes.Status410Gone);
         var updated = await offers.UpdateMany(Builders<RecruitmentOffer>.Filter.Where(x => x.CompanyId == item.CompanyId && x.OfferId == item.OfferId && x.ApplicantId == item.ApplicantId && x.Status == RecruitmentOfferStatus.Sent && x.ViewedAtUtc == null && !x.IsDeleted), Builders<RecruitmentOffer>.Update.Set(x => x.ViewedAtUtc, DateTime.UtcNow));
-        return updated.Success ? Ok(item.OfferId, "Offer view recorded.") : Ok(item.OfferId, "Offer view already recorded.");
+        var offer = await offers.FirstOrDefault(x => x.CompanyId == item.CompanyId && x.OfferId == item.OfferId && !x.IsDeleted);
+        var applicant = await applicants.FirstOrDefault(x => x.CompanyId == item.CompanyId && x.ApplicantId == item.ApplicantId && !x.IsDeleted);
+        var vacancyTitle = string.Empty;
+        if (vacancies != null && applicant != null && !string.IsNullOrWhiteSpace(applicant.VacancyId))
+        {
+            var vac = await vacancies.FirstOrDefault(x => x.CompanyId == item.CompanyId && x.JobId == applicant.VacancyId && !x.IsDeleted);
+            if (vac != null) vacancyTitle = vac.Title;
+        }
+        var dto = new RecruitmentCandidateOfferDetailsDto
+        {
+            OfferId = item.OfferId,
+            CandidateName = applicant != null ? $"{applicant.FirstName} {applicant.LastName}".Trim() : string.Empty,
+            JobTitle = !string.IsNullOrWhiteSpace(vacancyTitle) ? vacancyTitle : (applicant?.CurrentJobTitle ?? string.Empty),
+            Currency = offer?.Currency ?? "INR",
+            Salary = offer?.Salary ?? 0,
+            TotalCtc = offer?.TotalCtc ?? (offer?.Salary ?? 0),
+            StartDateUtc = offer?.StartDateUtc,
+            ExpiresAtUtc = offer?.ExpiresAtUtc,
+            Status = offer?.Status ?? string.Empty,
+            ActionType = item.ActionType
+        };
+        return Ok(dto, "Offer view recorded.");
     }
     public async Task<Result<string>> RespondToOffer(RecruitmentCandidateOfferActionCommand command)
     {
@@ -72,9 +98,56 @@ public sealed class RecruitmentCandidateActionService(
         var eventType = next == RecruitmentOfferStatus.ChangeRequested ? "OfferChangeRequested" : "OfferResponse";
         var message = next == RecruitmentOfferStatus.ChangeRequested ? command.Message!.Trim() : $"Offer {next}";
         await Queue(offer.CompanyId, $"offer-response:{offer.OfferId}:{command.IdempotencyKey.Trim()}", eventType, applicant.Email, $"Offer {next}", $"<p>{System.Net.WebUtility.HtmlEncode(message)}</p>");
+        if (next == RecruitmentOfferStatus.Accepted)
+        {
+            var prevStage = applicant.ActivityType;
+            applicant.ActivityType = ActivityType.Selected;
+            applicant.UpdatedBy = "candidate-action";
+            applicant.UpdatedDate = DateTime.UtcNow;
+            await applicants.Update(Builders<Applicant>.Filter.Where(x => x.CompanyId == applicant.CompanyId && x.ApplicantId == applicant.ApplicantId), applicant);
+
+            if (applications is not null)
+            {
+                var canonical = await applications.FirstOrDefault(x => x.CompanyId == applicant.CompanyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted);
+                if (canonical is not null)
+                {
+                    canonical.StageHistory.Add(new RecruitmentApplicationStageEvent
+                    {
+                        FromStage = canonical.CurrentStage,
+                        ToStage = nameof(ActivityType.Selected),
+                        ActorUserId = "candidate-action",
+                        Reason = "Candidate accepted offer"
+                    });
+                    canonical.CurrentStage = nameof(ActivityType.Selected);
+                    canonical.Version = (canonical.Version <= 0 ? 1 : canonical.Version) + 1;
+                    canonical.UpdatedBy = "candidate-action";
+                    canonical.UpdatedDate = DateTime.UtcNow;
+                    await applications.Update(Builders<RecruitmentJobApplication>.Filter.Where(x => x.CompanyId == applicant.CompanyId && x.ApplicationId == canonical.ApplicationId), canonical);
+                }
+            }
+
+            if (applicantLogs is not null)
+            {
+                await applicantLogs.AddOne(new ApplicantLogs
+                {
+                    CompanyId = applicant.CompanyId,
+                    ApplicantId = applicant.ApplicantId,
+                    ApplicantName = $"{applicant.FirstName} {applicant.LastName}".Trim(),
+                    JobRole = applicant.VacancyId,
+                    UserId = "candidate-action",
+                    ActivityCategory = 0,
+                    Description = $"Candidate accepted offer ({offer.Currency} {offer.Salary:N2}). Status advanced to Selected.",
+                    EventType = "OfferAcceptedByCandidate",
+                    PreviousStage = prevStage.ToString(),
+                    CurrentStage = nameof(ActivityType.Selected),
+                    CreatedBy = "candidate-action",
+                    UpdatedBy = "candidate-action"
+                });
+            }
+        }
         if (next == RecruitmentOfferStatus.Accepted && preboardingCases is not null)
         {
-            var existingCase = await preboardingCases.FirstOrDefault(x => x.CompanyId == offer.CompanyId && x.OfferId == offer.OfferId && !x.IsDeleted);
+            var existingCase = await preboardingCases.FirstOrDefault(x => x.CompanyId == offer.CompanyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted);
             if (existingCase is null) { var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == offer.CompanyId && !x.IsDeleted); var codes = config?.PreboardingChecklist is { Count: > 0 } ? config.PreboardingChecklist : ["candidate-details", "documents", "verification"]; var tasks = codes.Select(code => new RecruitmentPreboardingTask { Code = code, Title = code.Replace("-", " ") }).ToList(); await preboardingCases.AddOne(new RecruitmentPreboardingCase { CompanyId = offer.CompanyId, ApplicantId = applicant.ApplicantId, OfferId = offer.OfferId, Status = RecruitmentPreboardingStatus.PendingCandidateDetails, OwnerUserId = "", LastCommandIdempotencyKey = command.IdempotencyKey.Trim(), Tasks = tasks, CreatedBy = "candidate-action", UpdatedBy = "candidate-action" }); }
         }
         if (next == RecruitmentOfferStatus.Accepted && automationOutbox is not null)
@@ -124,8 +197,10 @@ public sealed class RecruitmentCandidateActionService(
         if (existing is not null) return;
         await outbox.AddOne(new RecruitmentEmailOutbox { CompanyId = companyId, DedupeKey = dedupe, EventType = type, RecipientEmail = email, Subject = subject, HtmlBody = html, AvailableAtUtc = DateTime.UtcNow, CreatedBy = "candidate-action", UpdatedBy = "candidate-action" });
     }
-    private static Result<string> Fail(string code, string message, int status = 400) => new() { Success = false, StatusCode = status, ErrorCode = code, Message = message };
-    private static Result<string> Ok(string value, string message) => new() { Success = true, StatusCode = 200, MethodResult = value, Message = message };
+    private static Result<string> Fail(string code, string message, int status = 400) => Fail<string>(code, message, status);
+    private static Result<T> Fail<T>(string code, string message, int status = 400) => new() { Success = false, StatusCode = status, ErrorCode = code, Message = message };
+    private static Result<string> Ok(string value, string message) => Ok<string>(value, message);
+    private static Result<T> Ok<T>(T value, string message) => new() { Success = true, StatusCode = 200, MethodResult = value, Message = message };
 }
 
 

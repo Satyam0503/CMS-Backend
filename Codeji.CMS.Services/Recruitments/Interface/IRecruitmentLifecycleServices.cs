@@ -14,4 +14,5 @@ public interface IRecruitmentInterviewService
 public interface IRecruitmentOfferService
 {
     Task<Result<string>> Upsert(RecruitmentOfferCommand command, string actorUserId);
+    Task<Result<RecruitmentOffer?>> GetByApplicant(string applicantId);
 }

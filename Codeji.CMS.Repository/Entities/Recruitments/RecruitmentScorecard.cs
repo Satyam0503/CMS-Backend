@@ -22,8 +22,13 @@ public sealed class RecruitmentScorecard : BaseClass
 
 public sealed class RecruitmentScorecardCriterion
 {
+    public string? Code { get; set; }
     public string Name { get; set; } = string.Empty;
-    public int Rating { get; set; }
+    public decimal Rating { get; set; }
+    public decimal? NormalizedScore { get; set; }
+    public string? QualitativeLabel { get; set; }
+    public decimal? Weight { get; set; }
+    public bool IsMandatory { get; set; }
     public string? Notes { get; set; }
 }
 
@@ -33,4 +38,3 @@ public static class RecruitmentScorecardStatus
     public const string Submitted = "Submitted";
     public const string Locked = "Locked";
 }
-

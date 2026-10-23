@@ -67,7 +67,8 @@ public static class PayrollPolicyResolver
         IEnumerable<EmployeeSalaryStructure> salaryStructures,
         IEnumerable<PayrollPolicyProfile> profiles,
         IEnumerable<PayrollPayGroup> payGroups,
-        string? fallbackPayGroupId = null)
+        string? fallbackPayGroupId = null,
+        DateTime? joiningDate = null)
     {
         var firstDate = periodStart.Date;
         var lastDate = periodEnd.Date;
@@ -80,7 +81,7 @@ public static class PayrollPolicyResolver
         for (var date = firstDate; date <= lastDate; date = date.AddDays(1))
         {
             var assignment = ResolveAssignment(companyId, employeeId, date, assignments);
-            var salary = EmployeeSalaryStructureResolver.Resolve(companyId, employeeId, date, salaryStructures);
+            var salary = EmployeeSalaryStructureResolver.Resolve(companyId, employeeId, date, salaryStructures, approvedOnly: true, joiningDate: joiningDate);
             var payGroupId = assignment?.PayGroupId ?? salary?.PayGroupId ?? fallbackPayGroupId;
             var profile = ResolvePolicy(companyId, date, assignment, profiles, payGroups, salary?.PayGroupId ?? fallbackPayGroupId);
             if (firstDay)

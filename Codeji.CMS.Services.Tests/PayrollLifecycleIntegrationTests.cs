@@ -81,6 +81,118 @@ public sealed class PayrollLifecycleIntegrationTests
         Assert.Contains(run.AuditHistory, item => item.Action == "RunCalculated");
         Assert.Contains(run.AuditHistory, item => item.Action == "RunPaid");
     }
+
+    [Fact]
+    public async Task Run_WhenCompanyOptsOutOfEpfEsicAndHealth_CalculatesFlawlesslyWithoutDeductions()
+    {
+        var run = new PayrollRun
+        {
+            Id = "run-exempt-1", CompanyId = "company-exempt",
+            PeriodStart = new DateTime(2026, 9, 1), PeriodEnd = new DateTime(2026, 9, 30),
+            PayDate = new DateTime(2026, 10, 1), Status = "DRAFT", EmployeeCount = 1,
+            ConfigurationSnapshot = new PayrollConfigurationSnapshot
+            {
+                RequireAttendanceLock = false
+            }
+        };
+        var member = new PayrollRunEmployee
+        {
+            Id = "line-exempt-1", CompanyId = "company-exempt", PayrollRunId = run.Id,
+            EmployeeId = "emp-exempt", Status = "READY",
+            InputSnapshot = new PayrollEmployeeInputSnapshot
+            {
+                EpfMode = "EXEMPT",
+                EsicMode = "EXEMPT",
+                TdsMode = "MANUAL_ONLY",
+                RequireAttendanceLock = false,
+                SalaryStructureId = "salary-exempt-1",
+                SalaryStructures =
+                [
+                    new PayrollSalaryStructureSnapshot
+                    {
+                        SalaryStructureId = "salary-exempt-1",
+                        Version = 1,
+                        EffectiveFrom = new DateTime(2026, 1, 1),
+                        Components =
+                        [
+                            new PayrollComponentSnapshot { Code = "BASIC", Name = "Basic Pay", Kind = "EARNING", Value = 50000m, IsRecurring = true },
+                            new PayrollComponentSnapshot { Code = "HRA", Name = "House Rent Allowance", Kind = "EARNING", Value = 20000m, IsRecurring = true }
+                        ]
+                    }
+                ]
+            }
+        };
+        var payroll = new EmpPayRoll
+        {
+            Id = "payroll-exempt-1", CompanyId = "company-exempt", UserId = "user-exempt", EmployeeId = member.EmployeeId,
+            PayMonth = new DateTime(2026, 9, 1), PaidDate = new DateTime(2026, 10, 1),
+            BasicPay = 50000m, PaidDays = 30,
+            Allowance = new Allowance { HRA = 20000m, OtherAllowance = 0m },
+            Deduction = new Deduction
+            {
+                LossOfPay = 0m,
+                IncomeTax = 0m,
+                EPF = 0m,
+                ESIC = 0m,
+                HealthInsurance = 0m
+            },
+            CalculationSnapshot = new PayrollCalculationSnapshot
+            {
+                EpfMode = "EXEMPT",
+                EsicMode = "EXEMPT",
+                TdsMode = "MANUAL_ONLY",
+                SalaryRevisions = [new PayrollSalaryRevisionReference { SalaryStructureId = "salary-exempt-1", Version = 1 }],
+                SalaryStructures = member.InputSnapshot.SalaryStructures.ToList()
+            }
+        };
+
+        var runs = InMemoryRepository.Create(run);
+        var members = InMemoryRepository.Create(member);
+        var payrollRows = InMemoryRepository.Create(payroll);
+        var batches = InMemoryRepository.Create<PayrollPaymentBatch>();
+
+        var calculation = new PayrollRunCalculationService(runs.Object, members.Object, payrollRows.Object);
+        var workflow = new PayrollRunWorkflowService(runs.Object, members.Object);
+        var review = new PayrollRunReviewService(runs.Object, members.Object);
+        var payment = new PayrollPaymentBatchService(batches.Object, runs.Object, members.Object);
+
+        // 1. Calculate Run
+        var calculated = await calculation.SyncCalculatedRows("company-exempt", run.Id, "admin-calculator");
+        Assert.True(calculated.Success);
+        Assert.Equal("CALCULATED", run.Status);
+        Assert.Equal(70000m, run.GrossTotal);
+        Assert.Equal(0m, run.DeductionTotal);
+        Assert.Equal(70000m, run.NetTotal);
+        Assert.Equal(0, run.BlockedCount);
+
+        // Verify Statutory Snapshot is 0 across the board
+        Assert.NotNull(member.StatutorySnapshot);
+        Assert.Equal(0m, member.StatutorySnapshot!.EmployeeEpf);
+        Assert.Equal(0m, member.StatutorySnapshot.EmployerEpf);
+        Assert.Equal(0m, member.StatutorySnapshot.EmployeeEsic);
+        Assert.Equal(0m, member.StatutorySnapshot.EmployerEsic);
+        Assert.Equal(0m, member.StatutorySnapshot.IncomeTax);
+
+        // 2. Review & Maker-Checker Approval
+        Assert.True((await review.Record("company-exempt", run.Id, "hr-reviewer", new PayrollRunReviewRequestDto { Comment = "Verified non-statutory gross payout" })).Success);
+        Assert.True((await workflow.Approve("company-exempt", run.Id, "admin-approver")).Success);
+        Assert.Equal("APPROVED", run.Status);
+
+        // 3. Process Run
+        Assert.True((await workflow.Process("company-exempt", run.Id, "admin-processor")).Success);
+        Assert.Equal("PROCESSED", run.Status);
+
+        // 4. Create Payment Batch & Reconcile
+        var batchResult = await payment.Create("company-exempt", run.Id, "finance-officer");
+        Assert.True(batchResult.Success);
+        Assert.Equal(70000m, batchResult.MethodResult!.TotalNetAmount);
+        Assert.True((await payment.Submit("company-exempt", batchResult.MethodResult.Id, "finance-officer", new PaymentBatchRequestDto { ProviderReference = "DISB-70000" })).Success);
+        Assert.True((await payment.Reconcile("company-exempt", batchResult.MethodResult.Id, "finance-officer", new PaymentBatchRequestDto { Note = "Direct bank transfer confirmed", PaymentConfirmed = true })).Success);
+
+        // 5. Close Run
+        Assert.True((await workflow.Close("company-exempt", run.Id, "admin-closer")).Success);
+        Assert.Equal("CLOSED", run.Status);
+    }
 }
 
 internal static class InMemoryRepository

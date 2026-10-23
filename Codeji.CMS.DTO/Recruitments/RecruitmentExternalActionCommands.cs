@@ -59,6 +59,20 @@ public sealed class RecruitmentCandidateInterviewActionCommand
 
 public sealed class RecruitmentCandidateOfferViewCommand { [System.ComponentModel.DataAnnotations.Required] public string Token { get; set; } = string.Empty; }
 
+public sealed class RecruitmentCandidateOfferDetailsDto
+{
+    public string OfferId { get; set; } = string.Empty;
+    public string CandidateName { get; set; } = string.Empty;
+    public string JobTitle { get; set; } = string.Empty;
+    public string Currency { get; set; } = string.Empty;
+    public decimal Salary { get; set; }
+    public decimal TotalCtc { get; set; }
+    public DateTime? StartDateUtc { get; set; }
+    public DateTime? ExpiresAtUtc { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string ActionType { get; set; } = string.Empty;
+}
+
 public sealed class RecruitmentCandidateOfferActionCommand
 {
     [System.ComponentModel.DataAnnotations.Required] public string Token { get; set; } = string.Empty;

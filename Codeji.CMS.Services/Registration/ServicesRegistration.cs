@@ -68,10 +68,12 @@ public static class ServicesRegistration
         services.AddScoped<IAccountServices, AccountServices>();
         services.AddScoped<IPayRollServices, PayRollServices>();
         services.AddScoped<IAttendanceStatusService, AttendanceStatusService>();
+        services.AddScoped<IAttendanceImportService, AttendanceImportService>();
         services.AddScoped<IAttendancePenaltyService, AttendancePenaltyService>();
         services.AddScoped<IWeeklyOffService, WeeklyOffService>();
         services.AddScoped<IAttendanceEditGuard, AttendanceEditGuard>();
         services.AddScoped<IEffectiveOfficeScheduleService, EffectiveOfficeScheduleService>();
+        services.AddScoped<IShiftAttendanceReconciliationService, ShiftAttendanceReconciliationService>();
         services.AddScoped<IAttendanceStatusCalculationService, AttendanceStatusCalculationService>();
         services.AddScoped<IOfficeScheduleSettingsService, OfficeScheduleSettingsService>();
         services.AddScoped<IOfficeScheduleAssignmentService, OfficeScheduleAssignmentService>();

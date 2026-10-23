@@ -12,7 +12,8 @@ public interface IEmployeeSalaryStructureService
     Task<List<EmployeeSalaryStructureDto>> GetPending(string companyId);
     Task<Result<EmployeeSalaryStructureDto>> SaveDraft(string companyId, string actorUserId, EmployeeSalaryStructureDto dto);
     Task<Result> Submit(string companyId, string actorUserId, string id, int version);
-    Task<Result> Approve(string companyId, string actorUserId, string id, int version);
+    Task<Result> Approve(string companyId, string actorUserId, string id, int version, bool isCompanyAdministrator = false);
+    Task<Result> Reject(string companyId, string actorUserId, string id, int version, string? reason = null);
 }
 
 public sealed class EmployeeSalaryStructureService(
@@ -73,6 +74,8 @@ public sealed class EmployeeSalaryStructureService(
             if (payGroup.EffectiveFrom.Date > dto.EffectiveFrom.Date || (payGroup.EffectiveTo.HasValue && payGroup.EffectiveTo.Value.Date < dto.EffectiveFrom.Date))
                 return FailDto(400, "The pay group is not effective on the salary structure start date.");
         }
+        var candidateStart = dto.EffectiveFrom.Date;
+        var candidateEnd = dto.EffectiveTo?.Date ?? DateTime.MaxValue.Date;
         EmployeeSalaryStructure? existingRecord = null;
         if (!string.IsNullOrWhiteSpace(dto.Id))
         {
@@ -84,9 +87,17 @@ public sealed class EmployeeSalaryStructureService(
             if (existingRecord.ApprovalStatus != "DRAFT")
                 return FailDto(409, "Submitted or approved salary structures are immutable. Create a new effective-dated revision.");
         }
+        else
+        {
+            var openDraft = await repository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeId == employeeId && x.ApprovalStatus == "DRAFT" && x.EffectiveFrom.Date == candidateStart);
+            if (openDraft is not null)
+            {
+                existingRecord = openDraft;
+                dto.Id = openDraft.Id;
+                dto.Version = openDraft.Version;
+            }
+        }
         var existing = (await repository.GetAll(x => x.CompanyId == companyId && x.EmployeeId == employeeId)).ToList();
-        var candidateStart = dto.EffectiveFrom.Date;
-        var candidateEnd = dto.EffectiveTo?.Date ?? DateTime.MaxValue.Date;
         var overlaps = existing.Where(x => x.Id != dto.Id && !(x.EffectiveFrom.Date < candidateStart && !x.EffectiveTo.HasValue && x.ApprovalStatus == "APPROVED" && x.Status == "ACTIVE") && x.EffectiveFrom.Date <= candidateEnd && (x.EffectiveTo?.Date ?? DateTime.MaxValue.Date) >= candidateStart).ToList();
         if (overlaps.Any(x => x.ApprovalStatus is "APPROVED" or "SUBMITTED"))
             return FailDto(409, "The employee already has an overlapping approved or submitted salary structure.");
@@ -188,13 +199,24 @@ public sealed class EmployeeSalaryStructureService(
         return await repository.Update(Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.CompanyId, companyId) & Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.Id, id) & Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.Version, version), row);
     }
 
-    public async Task<Result> Approve(string companyId, string actorUserId, string id, int version)
+    public async Task<Result> Approve(string companyId, string actorUserId, string id, int version, bool isCompanyAdministrator = false)
     {
         var row = await repository.FirstOrDefault(x => x.CompanyId == companyId && x.Id == id);
         if (row is null) return Fail(404, "Salary structure was not found.");
-        if (row.Version != version || row.ApprovalStatus != "SUBMITTED") return Fail(409, "Salary structure must be submitted before approval.");
-        if ((!string.IsNullOrWhiteSpace(row.CreatedBy) && string.Equals(row.CreatedBy, actorUserId, StringComparison.OrdinalIgnoreCase)) ||
-            (!string.IsNullOrWhiteSpace(row.SubmittedBy) && string.Equals(row.SubmittedBy, actorUserId, StringComparison.OrdinalIgnoreCase)))
+        if (row.Version != version) return Fail(409, "Salary structure changed; reload and retry.");
+
+        // If a company administrator approves a draft directly, auto-advance it to submitted
+        if (row.ApprovalStatus == "DRAFT" && isCompanyAdministrator)
+        {
+            row.ApprovalStatus = "SUBMITTED";
+            row.SubmittedBy = actorUserId;
+        }
+
+        if (row.ApprovalStatus != "SUBMITTED") return Fail(409, "Salary structure must be submitted before approval.");
+
+        if (!isCompanyAdministrator &&
+            ((!string.IsNullOrWhiteSpace(row.CreatedBy) && string.Equals(row.CreatedBy, actorUserId, StringComparison.OrdinalIgnoreCase)) ||
+             (!string.IsNullOrWhiteSpace(row.SubmittedBy) && string.Equals(row.SubmittedBy, actorUserId, StringComparison.OrdinalIgnoreCase))))
             return Fail(403, "A salary structure must be approved by someone other than its creator or submitter.");
         var overlaps = (await repository.GetAll(x => x.CompanyId == companyId && x.EmployeeId == row.EmployeeId && x.Id != row.Id &&
             x.ApprovalStatus == "APPROVED" && x.Status == "ACTIVE" &&
@@ -208,6 +230,11 @@ public sealed class EmployeeSalaryStructureService(
         var conflictingOverlap = overlaps.FirstOrDefault(x => priorOpen is null || x.Id != priorOpen.Id);
         if (conflictingOverlap is not null)
             return Fail(409, $"This salary revision overlaps approved salary revision '{conflictingOverlap.Id}'. Resolve the overlapping effective dates before approval.");
+        var allowedApprovalStatuses = isCompanyAdministrator ? new[] { "SUBMITTED", "DRAFT" } : new[] { "SUBMITTED" };
+        var approvalFilter = Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.CompanyId, companyId) &
+                             Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.Id, id) &
+                             Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.Version, version) &
+                             Builders<EmployeeSalaryStructure>.Filter.In(x => x.ApprovalStatus, allowedApprovalStatuses);
         if (priorOpen is not null)
         {
             if (mongoClient is null)
@@ -229,10 +256,6 @@ public sealed class EmployeeSalaryStructureService(
                               Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.Status, "ACTIVE") &
                               Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.EffectiveTo, null);
             row.ApprovalStatus = "APPROVED"; row.Status = "ACTIVE"; row.ApprovedBy = actorUserId; row.ApprovedAtUtc = DateTime.UtcNow; row.Version++;
-            var approvalFilter = Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.CompanyId, companyId) &
-                                 Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.Id, id) &
-                                 Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.Version, version) &
-                                 Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.ApprovalStatus, "SUBMITTED");
             try
             {
                 using var session = await mongoClient.StartSessionAsync();
@@ -251,9 +274,31 @@ public sealed class EmployeeSalaryStructureService(
             {
                 return Fail(409, "A salary revision changed during approval. No salary timeline changes were committed; reload both revisions and retry.");
             }
-            catch (MongoCommandException exception) when (exception.Code == 20)
+            catch (Exception ex) when (ex is NotSupportedException || (ex is MongoCommandException exception && exception.Code == 20))
             {
-                return Fail(503, "Salary revision approval requires MongoDB replica-set or sharded-cluster transaction support. No salary timeline changes were committed.");
+                // Standalone MongoDB deployments do not support multi-document transactions.
+                // Fall back to sequential optimistic concurrency updates with compensating rollback on failure.
+                var close = await repository.GetCollection().ReplaceOneAsync(closeFilter, priorOpen);
+                if (close.MatchedCount != 1)
+                {
+                    return Fail(409, "A salary revision changed during approval. No salary timeline changes were committed; reload both revisions and retry.");
+                }
+
+                var approve = await repository.GetCollection().ReplaceOneAsync(approvalFilter, row);
+                if (approve.MatchedCount != 1)
+                {
+                    // Compensating rollback: revert prior revision back to open/active state
+                    priorOpen.EffectiveTo = null;
+                    priorOpen.Version = priorVersion;
+                    await repository.GetCollection().ReplaceOneAsync(
+                        Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.Id, priorOpen.Id) &
+                        Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.Version, priorVersion + 1),
+                        priorOpen);
+                    return Fail(409, "A salary revision changed during approval. Prior revision was reverted; reload and retry.");
+                }
+
+                committed = true;
+                return new Result { Success = true, StatusCode = 200, ResourceId = row.Id, Message = "Salary structure approved." };
             }
             catch (MongoException)
             {
@@ -274,7 +319,25 @@ public sealed class EmployeeSalaryStructureService(
             }
         }
         row.ApprovalStatus = "APPROVED"; row.Status = "ACTIVE"; row.ApprovedBy = actorUserId; row.ApprovedAtUtc = DateTime.UtcNow; row.Version++;
-        return await repository.Update(Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.CompanyId, companyId) & Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.Id, id) & Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.Version, version) & Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.ApprovalStatus, "SUBMITTED"), row);
+        return await repository.Update(approvalFilter, row);
+    }
+
+    public async Task<Result> Reject(string companyId, string actorUserId, string id, int version, string? reason = null)
+    {
+        var row = await repository.FirstOrDefault(x => x.CompanyId == companyId && x.Id == id);
+        if (row is null) return Fail(404, "Salary structure was not found.");
+        if (row.Version != version) return Fail(409, "Salary structure changed; reload and retry.");
+        if (row.ApprovalStatus != "DRAFT" && row.ApprovalStatus != "SUBMITTED")
+            return Fail(409, "Only draft or submitted salary structures can be rejected or discarded.");
+
+        row.ApprovalStatus = "REJECTED";
+        row.Status = "REJECTED";
+        row.Version++;
+        return await repository.Update(
+            Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.CompanyId, companyId) &
+            Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.Id, id) &
+            Builders<EmployeeSalaryStructure>.Filter.Eq(x => x.Version, version),
+            row);
     }
 
     private static EmployeeSalaryStructureDto Map(EmployeeSalaryStructure x) => new()

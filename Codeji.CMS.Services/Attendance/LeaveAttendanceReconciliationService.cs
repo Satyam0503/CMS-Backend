@@ -103,15 +103,28 @@ public sealed class LeaveAttendanceReconciliationService(
         }
 
         var hasConflict = false;
+        var affectedMonthsList = dates.Select(x => new DateTime(x.Year, x.Month, 1)).Distinct().ToList();
+        var lockedMonths = (await summaries.GetAll(x => x.CompanyId == companyId && x.UserId == employee.UserId && affectedMonthsList.Contains(x.PayrollMonth) && x.IsLocked))
+            .Select(x => x.PayrollMonth).ToHashSet();
+
         foreach (var day in dates)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var date = UtcMidnight(day);
+            var month = new DateTime(date.Year, date.Month, 1);
+            if (lockedMonths.Contains(month))
+            {
+                hasConflict = true;
+                var conflict = await exceptions.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.PayrollMonth == month && x.ExceptionType == "LEAVE_APPLIED_FOR_LOCKED_MONTH" && x.AttendanceDate == date && x.LeaveRequestId == request.LeaveRequestId);
+                if (conflict == null)
+                    await exceptions.AddOne(new AttendancePayrollException { CompanyId = companyId, UserId = employee.UserId, EmployeeId = employee.EmployeeId, PayrollMonth = month, AttendanceDate = date, AffectedDates = [date], ExceptionType = "LEAVE_APPLIED_FOR_LOCKED_MONTH", Severity = "BLOCKING", Status = "PENDING_REVIEW", LeaveRequestId = request.LeaveRequestId, RequestedLeaveStatus = statusCode, SourceVersion = request.Version, Reason = $"Approved leave for {date:yyyy-MM-dd} falls into an already locked payroll month ({month:MMMM yyyy}). Unlock the month in Attendance settings to apply retroactive adjustments.", CreatedBy = actorUserId });
+                continue;
+            }
+
             var existingSegments = await segments.GetAll(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.Date >= date && x.Date < date.AddDays(1));
             if (existingSegments.Any())
             {
                 hasConflict = true;
-                var month = new DateTime(date.Year, date.Month, 1);
                 var existingSegment = existingSegments.First();
                 var conflict = await exceptions.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.PayrollMonth == month && x.ExceptionType == "LEAVE_ATTENDANCE_SEGMENT_CONFLICT" && x.AttendanceDate == date && x.LeaveRequestId == request.LeaveRequestId);
                 if (conflict == null)
@@ -122,7 +135,6 @@ public sealed class LeaveAttendanceReconciliationService(
             if (existing != null && !(existing.SourceType == "LEAVE" && existing.SourceId == request.LeaveRequestId) && !AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent(existing.SourceType))
             {
                 hasConflict = true;
-                var month = new DateTime(date.Year, date.Month, 1);
                 var conflict = await exceptions.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.PayrollMonth == month && x.ExceptionType == "LEAVE_ATTENDANCE_CONFLICT" && x.AttendanceDate == date && x.LeaveRequestId == request.LeaveRequestId);
                 if (conflict == null)
                     await exceptions.AddOne(new AttendancePayrollException { CompanyId = companyId, UserId = employee.UserId, EmployeeId = employee.EmployeeId, PayrollMonth = month, AttendanceDate = date, AffectedDates = [date], ExceptionType = "LEAVE_ATTENDANCE_CONFLICT", Severity = "BLOCKING", Status = "PENDING_REVIEW", LeaveRequestId = request.LeaveRequestId, ExistingAttendanceId = existing.AttendanceId, ExistingStatus = existing.Status, RequestedLeaveStatus = statusCode, SourceVersion = request.Version, Reason = "Approved leave conflicts with existing attendance.", CreatedBy = actorUserId });
@@ -178,7 +190,7 @@ public sealed class LeaveAttendanceReconciliationService(
         foreach (var month in affectedMonths)
         {
             await summaries.DeleteAll(Builders<MonthlyAttendanceSummary>.Filter.Where(x => x.CompanyId == companyId && x.UserId == request.EmployeeId && x.PayrollMonth == month && !x.IsLocked));
-            await initialization.InitializeMonthAsync(companyId, actorUserId, month, cancellationToken);
+            await initialization.InitializeEmployeeAttendanceAsync(companyId, actorUserId, request.EmployeeId, month, cancellationToken);
         }
         await leaves.GetCollection().UpdateOneAsync(
             x => x.CompanyId == companyId && x.LeaveRequestId == leaveRequestId && x.Version == request.Version,
@@ -199,11 +211,18 @@ public sealed class LeaveAttendanceReconciliationService(
     private async Task<Result> ReconcileHalfDayAsync(string companyId, LeaveRequest request, EmpUser employee, string statusCode, string actorUserId, CancellationToken cancellationToken)
     {
         var date = UtcMidnight(DateOnly.FromDateTime(request.StartDate));
+        var month = new DateTime(date.Year, date.Month, 1);
+        var isLocked = await summaries.Exist(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.PayrollMonth == month && x.IsLocked);
+        if (isLocked)
+        {
+            if (!await exceptions.Exist(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.PayrollMonth == month && x.ExceptionType == "LEAVE_APPLIED_FOR_LOCKED_MONTH" && x.AttendanceDate == date && x.LeaveRequestId == request.LeaveRequestId))
+                await exceptions.AddOne(new AttendancePayrollException { CompanyId = companyId, UserId = employee.UserId, EmployeeId = employee.EmployeeId, PayrollMonth = month, AttendanceDate = date, AffectedDates = [date], ExceptionType = "LEAVE_APPLIED_FOR_LOCKED_MONTH", Severity = "BLOCKING", Status = "PENDING_REVIEW", LeaveRequestId = request.LeaveRequestId, RequestedLeaveStatus = statusCode, SourceVersion = request.Version, Reason = $"Approved half-day leave for {date:yyyy-MM-dd} falls into an already locked payroll month ({month:MMMM yyyy}). Unlock the month in Attendance settings to apply retroactive adjustments.", CreatedBy = actorUserId });
+            return new Result { Success = true, Message = "LEAVE_APPLIED_FOR_LOCKED_MONTH: Attendance synchronization requires review." };
+        }
         var segmentName = request.HalfDayPeriod == "SECOND_HALF" ? "SECOND_HALF" : "FIRST_HALF";
         var existing = await segments.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.Date >= date && x.Date < date.AddDays(1) && x.Segment == segmentName);
         if (existing is not null && !(existing.SourceType == "LEAVE" && existing.SourceId == request.LeaveRequestId))
         {
-            var month = new DateTime(date.Year, date.Month, 1);
             if (!await exceptions.Exist(x => x.CompanyId == companyId && x.UserId == employee.UserId && x.PayrollMonth == month && x.ExceptionType == "LEAVE_ATTENDANCE_SEGMENT_CONFLICT" && x.AttendanceDate == date && x.LeaveRequestId == request.LeaveRequestId))
                 await exceptions.AddOne(new AttendancePayrollException { CompanyId = companyId, UserId = employee.UserId, EmployeeId = employee.EmployeeId, PayrollMonth = month, AttendanceDate = date, AffectedDates = [date], ExceptionType = "LEAVE_ATTENDANCE_SEGMENT_CONFLICT", Severity = "BLOCKING", Status = "PENDING_REVIEW", LeaveRequestId = request.LeaveRequestId, ExistingAttendanceId = existing.AttendanceDaySegmentId, ExistingStatus = existing.Status, RequestedLeaveStatus = statusCode, SourceVersion = request.Version, Reason = $"Approved leave conflicts with the {segmentName} attendance segment.", CreatedBy = actorUserId });
             return new Result { Success = true, Message = "LEAVE_ATTENDANCE_SEGMENT_CONFLICT: Attendance synchronization requires review." };

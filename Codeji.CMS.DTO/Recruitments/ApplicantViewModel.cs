@@ -1,5 +1,3 @@
-﻿
-
 using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.DTO.Recruitments
@@ -19,6 +17,12 @@ namespace Codeji.CMS.DTO.Recruitments
         public decimal Experience { get; set; }
         public DateTime? ApplyDate { get; set; }
         public string? ResumeUrl { get; set; }
+        public bool IsHired { get; set; }
+        public string? EmployeeUserId { get; set; }
+        public string? EmployeeId { get; set; }
+        public int? FinalInterviewScore { get; set; }
+        public decimal? FinalInterviewRating { get; set; }
+        public string? FinalInterviewRecommendation { get; set; }
+        public int? EvaluatedRoundsCount { get; set; }
     }
 }
-

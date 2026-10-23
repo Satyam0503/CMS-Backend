@@ -85,6 +85,38 @@ public sealed class PayrollSalarySourceResolverTests
         Assert.Same(legacy, Assert.Single(result.Records));
     }
 
+    [Fact]
+    public void Resolve_BackdatesInitialStructureToJoiningDate_WhenJoiningInPriorPeriod()
+    {
+        var initialCanonical = Structure("company-1", "employee-1", new DateTime(2026, 10, 14));
+        var joiningDate = new DateTime(2026, 9, 1);
+
+        var result = PayrollSalarySourceResolver.Resolve(
+            "company-1", "employee-1", new DateTime(2026, 9, 1), new DateTime(2026, 9, 30),
+            [initialCanonical], () => [], joiningDate);
+
+        Assert.True(result.UsesCanonicalSource);
+        var resolved = Assert.Single(result.Records);
+        Assert.Equal(50000m, resolved.BasicPay);
+        Assert.Equal(joiningDate, resolved.EffectiveFrom);
+    }
+
+    [Fact]
+    public void Resolve_StretchesInitialStructureBackToJoiningDate_WhenPeriodCoversInitialNominalEffectiveFrom()
+    {
+        var initialCanonical = Structure("company-1", "employee-1", new DateTime(2026, 10, 14));
+        var joiningDate = new DateTime(2026, 9, 1);
+
+        var result = PayrollSalarySourceResolver.Resolve(
+            "company-1", "employee-1", new DateTime(2026, 10, 1), new DateTime(2026, 10, 31),
+            [initialCanonical], () => [], joiningDate);
+
+        Assert.True(result.UsesCanonicalSource);
+        var resolved = Assert.Single(result.Records);
+        Assert.Equal(50000m, resolved.BasicPay);
+        Assert.Equal(joiningDate, resolved.EffectiveFrom);
+    }
+
     private static EmployeeSalaryStructure Structure(string companyId, string employeeId, DateTime from, DateTime? to = null) => new()
     {
         Id = "77777777-7777-7777-7777-777777777777",

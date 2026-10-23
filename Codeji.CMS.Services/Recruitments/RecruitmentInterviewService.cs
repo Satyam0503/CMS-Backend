@@ -9,6 +9,7 @@ using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
+using Codeji.CMS.Utility;
 using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.Services.Recruitments;
@@ -18,7 +19,10 @@ public sealed class RecruitmentInterviewService(
     IMongoDbRepository<RecruitmentInterview> interviews,
     ICalendarServices calendarServices,
     IHttpContextAccessor context,
-    IMongoDbRepository<EmpUser>? employees = null) : IRecruitmentInterviewService
+    IMongoDbRepository<EmpUser>? employees = null,
+    IMongoDbRepository<JobVacancy>? vacancies = null,
+    IRecruitmentExternalActionService? externalActions = null,
+    IMongoDbRepository<ApplicantLogs>? applicantLogs = null) : IRecruitmentInterviewService
 {
     public async Task<Result<string>> Upsert(RecruitmentInterviewCommand command, string actorUserId)
     {
@@ -69,7 +73,10 @@ public sealed class RecruitmentInterviewService(
         if (existing is not null && string.Equals(existing.LastCommandIdempotencyKey, idempotencyKey, StringComparison.Ordinal))
         {
             if (existing.Status is RecruitmentInterviewStatus.Scheduled or RecruitmentInterviewStatus.Confirmed && existing.CalendarSyncStatus != "Synced")
-                await SyncCalendar(existing, actorUserId);
+            {
+            await SyncCalendar(existing, actorUserId);
+            await NotifyParticipantsAsync(existing, applicant, actorUserId, companyId);
+        }
             return Ok(result, existing.InterviewId, "Interview command already applied.");
         }
 
@@ -90,8 +97,12 @@ public sealed class RecruitmentInterviewService(
                 StartsAtUtc = startsAtUtc,
                 EndsAtUtc = endsAtUtc,
                 TimeZoneId = (command.TimeZoneId ?? "UTC").Trim(),
-                Location = command.Location?.Trim(),
-                MeetingUrl = command.MeetingUrl?.Trim(),
+                Location = !string.IsNullOrWhiteSpace(command.Location) && !command.Location.Trim().StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                    ? command.Location.Trim()
+                    : (!string.IsNullOrWhiteSpace(command.Location) ? command.Location.Trim() : (command.MeetingUrl != null ? "Virtual (Video Call)" : null)),
+                MeetingUrl = !string.IsNullOrWhiteSpace(command.MeetingUrl)
+                    ? command.MeetingUrl.Trim()
+                    : (command.Location?.Trim().StartsWith("http", StringComparison.OrdinalIgnoreCase) == true ? command.Location.Trim() : null),
                 PanelistUserIds = panelists,
                 QuorumRequired = Math.Max(1, (panelists.Length + 1) / 2),
                 Status = status,
@@ -103,7 +114,10 @@ public sealed class RecruitmentInterviewService(
             if (!saved.Success)
                 return Fail(result, RecruitmentErrorCodes.ConcurrencyConflict, "Interview could not be created.", StatusCodes.Status409Conflict);
             if (interview.Status is RecruitmentInterviewStatus.Scheduled or RecruitmentInterviewStatus.Confirmed)
+            {
                 await SyncCalendar(interview, actorUserId);
+                await NotifyParticipantsAsync(interview, applicant, actorUserId, companyId);
+            }
             return Ok(result, interview.InterviewId, interview.CalendarSyncStatus == "Synced" ? "Interview created and added to calendar." : "Interview created; calendar sync is pending.");
         }
 
@@ -120,8 +134,12 @@ public sealed class RecruitmentInterviewService(
         existing.StartsAtUtc = startsAtUtc;
         existing.EndsAtUtc = endsAtUtc;
         existing.TimeZoneId = (command.TimeZoneId ?? "UTC").Trim();
-        existing.Location = command.Location?.Trim();
-        existing.MeetingUrl = command.MeetingUrl?.Trim();
+        existing.Location = !string.IsNullOrWhiteSpace(command.Location) && !command.Location.Trim().StartsWith("http", StringComparison.OrdinalIgnoreCase)
+            ? command.Location.Trim()
+            : (!string.IsNullOrWhiteSpace(command.Location) ? command.Location.Trim() : (command.MeetingUrl != null ? "Virtual (Video Call)" : existing.Location));
+        existing.MeetingUrl = !string.IsNullOrWhiteSpace(command.MeetingUrl)
+            ? command.MeetingUrl.Trim()
+            : (command.Location?.Trim().StartsWith("http", StringComparison.OrdinalIgnoreCase) == true ? command.Location.Trim() : existing.MeetingUrl);
         existing.PanelistUserIds = panelists;
         existing.QuorumRequired = Math.Max(1, (panelists.Length + 1) / 2);
         existing.Status = nextStatus;
@@ -134,7 +152,10 @@ public sealed class RecruitmentInterviewService(
         if (!updated.Success)
             return Fail(result, RecruitmentErrorCodes.ConcurrencyConflict, "Interview was changed by another user.", StatusCodes.Status409Conflict);
         if (existing.Status is RecruitmentInterviewStatus.Scheduled or RecruitmentInterviewStatus.Confirmed)
+        {
             await SyncCalendar(existing, actorUserId);
+            await NotifyParticipantsAsync(existing, applicant, actorUserId, companyId);
+        }
         return Ok(result, existing.InterviewId, existing.CalendarSyncStatus == "Synced" ? "Interview updated and calendar synchronized." : "Interview updated; calendar sync is pending.");
     }
 
@@ -165,16 +186,30 @@ public sealed class RecruitmentInterviewService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+        var applicant = await applicants.FirstOrDefault(x => x.CompanyId == interview.CompanyId && x.ApplicantId == interview.ApplicantId && !x.IsDeleted);
+        var candidateName = applicant != null ? $"{applicant.FirstName} {applicant.LastName}".Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(candidateName)) candidateName = applicant?.Email ?? "Candidate";
+
+        var roleTitle = "Candidate";
+        if (vacancies is not null && !string.IsNullOrWhiteSpace(interview.VacancyId))
+        {
+            var vac = await vacancies.FirstOrDefault(x => x.CompanyId == interview.CompanyId && (x.JobId == interview.VacancyId || x.PublicJobId == interview.VacancyId) && !x.IsDeleted);
+            if (vac is not null && !string.IsNullOrWhiteSpace(vac.Title)) roleTitle = vac.Title;
+        }
+
+        var meetingInfo = !string.IsNullOrWhiteSpace(interview.MeetingUrl) ? interview.MeetingUrl : (!string.IsNullOrWhiteSpace(interview.Location) ? interview.Location : "Virtual");
+        var panelistNames = string.Join(", ", interview.PanelistUserIds ?? []);
+
         var sync = await calendarServices.AddUpdateCalendarItem(new CalendarRequestDto
         {
             Id = interview.CalendarItemId,
-            Name = $"Interview: {interview.Title}",
+            Name = $"Interview: {candidateName} - {interview.Title}",
             Date = interview.StartsAtUtc.Date,
             StartTimeUtc = interview.StartsAtUtc,
             EndTimeUtc = interview.EndsAtUtc,
             Type = CalendarItem.Event,
             Recurring = false,
-            Description = $"Applicant {interview.ApplicantId}; {interview.StartsAtUtc:u} - {interview.EndsAtUtc:u}; panel: {string.Join(", ", interview.PanelistUserIds)}",
+            Description = $"Candidate: {candidateName} | Role: {roleTitle} | Round {interview.RoundNumber} ({interview.RoundType ?? "Interview"}) | Time: {interview.StartsAtUtc:yyyy-MM-dd HH:mm} UTC | Location: {meetingInfo} | Panel: {panelistNames} | ApplicantId: {interview.ApplicantId} | VacancyId: {interview.VacancyId} | InterviewId: {interview.InterviewId}",
             TargetUserIds = targetUsers,
             RestrictToTargetUsersAndHrAdmin = true
         });
@@ -182,6 +217,170 @@ public sealed class RecruitmentInterviewService(
         interview.CalendarSyncStatus = sync.Success && !string.IsNullOrWhiteSpace(sync.ResourceId) ? "Synced" : "Pending";
         if (sync.Success && !string.IsNullOrWhiteSpace(sync.ResourceId)) interview.CalendarItemId = sync.ResourceId;
         await interviews.Update(Builders<RecruitmentInterview>.Filter.Where(x => x.CompanyId == interview.CompanyId && x.InterviewId == interview.InterviewId), interview);
+    }
+
+    private async Task NotifyParticipantsAsync(RecruitmentInterview interview, Applicant applicant, string actorUserId, string companyId)
+    {
+        try
+        {
+            var candidateName = $"{applicant.FirstName} {applicant.LastName}".Trim();
+            if (string.IsNullOrWhiteSpace(candidateName)) candidateName = applicant.Email ?? "Candidate";
+
+            var roleTitle = "Candidate";
+            if (vacancies is not null && !string.IsNullOrWhiteSpace(interview.VacancyId))
+            {
+                var vac = await vacancies.FirstOrDefault(x => x.CompanyId == companyId && (x.JobId == interview.VacancyId || x.PublicJobId == interview.VacancyId) && !x.IsDeleted);
+                if (vac is not null && !string.IsNullOrWhiteSpace(vac.Title)) roleTitle = vac.Title;
+            }
+
+            var meetingInfo = !string.IsNullOrWhiteSpace(interview.MeetingUrl) ? interview.MeetingUrl : (!string.IsNullOrWhiteSpace(interview.Location) ? interview.Location : "Virtual / Online");
+            string? resumeUrl = null;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(applicant.ResumeUrl))
+                {
+                    resumeUrl = applicant.ResumeUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                        ? applicant.ResumeUrl
+                        : (Common.GetApplicantResumeFullPath(applicant.ResumeUrl) ?? applicant.ResumeUrl);
+                }
+            }
+            catch
+            {
+                resumeUrl = applicant.ResumeUrl;
+            }
+            var scheduleFormatted = $"{interview.StartsAtUtc:dddd, MMMM dd, yyyy · hh:mm tt} UTC";
+
+            // 1. Queue email to each panelist / interviewer
+            if (externalActions is not null && interview.PanelistUserIds is { Length: > 0 } && employees is not null)
+            {
+                var panelistEmployees = await employees.GetAll(x => x.CompanyId == companyId && interview.PanelistUserIds.Contains(x.UserId) && !x.IsDeleted);
+                foreach (var panelist in panelistEmployees)
+                {
+                    if (string.IsNullOrWhiteSpace(panelist.Email)) continue;
+
+                    var panelistName = $"{panelist.FirstName} {panelist.LastName}".Trim();
+                    var meetingHtml = !string.IsNullOrWhiteSpace(interview.MeetingUrl)
+                        ? $"<p style=\"margin:8px 0;\"><strong>Meeting Link:</strong> <a href=\"{interview.MeetingUrl}\" target=\"_blank\" style=\"color:#2563EB;font-weight:600;\">{interview.MeetingUrl}</a></p>"
+                        : $"<p style=\"margin:8px 0;\"><strong>Location:</strong> {interview.Location ?? "Virtual"}</p>";
+
+                    var resumeHtml = !string.IsNullOrWhiteSpace(resumeUrl)
+                        ? $"<p style=\"margin:8px 0;\"><strong>Candidate Resume:</strong> <a href=\"{resumeUrl}\" target=\"_blank\" style=\"color:#2563EB;font-weight:600;\">View Candidate CV / Resume</a></p>"
+                        : string.Empty;
+
+                    var panelistBody = $@"
+<div style=""font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1E293B; max-width: 600px; margin: 0 auto; border: 1px solid #E2E8F0; border-radius: 8px; overflow: hidden;"">
+    <div style=""background-color: #0F172A; padding: 20px 24px; color: #FFFFFF;"">
+        <h2 style=""margin: 0; font-size: 1.25rem; font-weight: 700;"">Interview Kit &amp; Evaluation Brief</h2>
+        <p style=""margin: 4px 0 0 0; color: #94A3B8; font-size: 0.875rem;"">Round {interview.RoundNumber}: {interview.Title}</p>
+    </div>
+    <div style=""padding: 24px;"">
+        <p>Hello <strong>{panelistName}</strong>,</p>
+        <p>You have been assigned as an interviewer for <strong>{candidateName}</strong> applying for the position of <strong>{roleTitle}</strong>.</p>
+        
+        <div style=""background-color: #F8FAFC; border-left: 4px solid #3B82F6; padding: 16px; border-radius: 4px; margin: 16px 0;"">
+            <h3 style=""margin: 0 0 10px 0; font-size: 1rem; color: #1E293B;"">Interview Details</h3>
+            <p style=""margin: 4px 0;""><strong>Candidate:</strong> {candidateName}</p>
+            <p style=""margin: 4px 0;""><strong>Role:</strong> {roleTitle}</p>
+            <p style=""margin: 4px 0;""><strong>Experience:</strong> {applicant.Experience} years</p>
+            <p style=""margin: 4px 0;""><strong>Round:</strong> Round {interview.RoundNumber} ({interview.RoundType ?? "Technical"})</p>
+            <p style=""margin: 4px 0;""><strong>Date &amp; Time:</strong> {scheduleFormatted} ({interview.TimeZoneId})</p>
+            {meetingHtml}
+            {resumeHtml}
+        </div>
+
+        <div style=""background-color: #FEF3C7; border: 1px solid #FDE68A; padding: 14px; border-radius: 6px; margin: 16px 0;"">
+            <p style=""margin: 0; font-size: 0.875rem; color: #92400E;"">
+                <strong>Scorecard Instructions:</strong> Please review the candidate's resume prior to the session. Following the interview, please log in to Codeji CMS to submit your competency ratings, feedback notes, and hiring recommendation.
+            </p>
+        </div>
+
+        <p style=""font-size: 0.8125rem; color: #64748B; margin-top: 24px; border-top: 1px solid #E2E8F0; padding-top: 12px;"">
+            This notification was dispatched automatically by Codeji Recruitment ATS.
+        </p>
+    </div>
+</div>";
+
+                    await externalActions.QueueEmail(new RecruitmentEmailQueueCommand
+                    {
+                        DedupeKey = $"interview-panelist:{interview.InterviewId}:{panelist.UserId}:{interview.Version}",
+                        EventType = "InterviewPanelistInvited",
+                        RecipientEmail = panelist.Email.Trim(),
+                        RecipientUserId = panelist.UserId,
+                        Subject = $"[Interview Kit] {candidateName} - {roleTitle} (Round {interview.RoundNumber})",
+                        HtmlBody = panelistBody
+                    }, actorUserId);
+                }
+            }
+
+            // 2. Queue email to the candidate
+            if (externalActions is not null && !string.IsNullOrWhiteSpace(applicant.Email))
+            {
+                var meetingCandidateHtml = !string.IsNullOrWhiteSpace(interview.MeetingUrl)
+                    ? $"<p style=\"margin:8px 0;\"><strong>Video Meeting Link:</strong> <a href=\"{interview.MeetingUrl}\" target=\"_blank\" style=\"color:#2563EB;font-weight:600;\">{interview.MeetingUrl}</a></p>"
+                    : $"<p style=\"margin:8px 0;\"><strong>Location:</strong> {interview.Location ?? "Virtual / Online"}</p>";
+
+                var candidateBody = $@"
+<div style=""font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1E293B; max-width: 600px; margin: 0 auto; border: 1px solid #E2E8F0; border-radius: 8px; overflow: hidden;"">
+    <div style=""background-color: #0F172A; padding: 20px 24px; color: #FFFFFF;"">
+        <h2 style=""margin: 0; font-size: 1.25rem; font-weight: 700;"">Interview Confirmation</h2>
+        <p style=""margin: 4px 0 0 0; color: #94A3B8; font-size: 0.875rem;"">{roleTitle} Application</p>
+    </div>
+    <div style=""padding: 24px;"">
+        <p>Dear <strong>{candidateName}</strong>,</p>
+        <p>Thank you for your interest in joining our team. Your interview for the position of <strong>{roleTitle}</strong> has been scheduled.</p>
+        
+        <div style=""background-color: #F8FAFC; border-left: 4px solid #10B981; padding: 16px; border-radius: 4px; margin: 16px 0;"">
+            <h3 style=""margin: 0 0 10px 0; font-size: 1rem; color: #1E293B;"">Schedule Summary</h3>
+            <p style=""margin: 4px 0;""><strong>Round:</strong> Round {interview.RoundNumber} ({interview.RoundType ?? "Interview"})</p>
+            <p style=""margin: 4px 0;""><strong>Date &amp; Time:</strong> {scheduleFormatted} ({interview.TimeZoneId})</p>
+            {meetingCandidateHtml}
+        </div>
+
+        <p style=""font-size: 0.875rem; color: #475569;"">
+            Please ensure your audio, camera, and internet connection are tested prior to joining. If you have any questions or require rescheduling, please reply directly to this email.
+        </p>
+        <p style=""font-size: 0.875rem; color: #475569;"">We look forward to speaking with you!</p>
+        <p style=""font-size: 0.875rem; color: #64748B; margin-top: 24px; border-top: 1px solid #E2E8F0; padding-top: 12px;"">
+            Kind regards,<br/>
+            <strong>Talent Acquisition Team</strong>
+        </p>
+    </div>
+</div>";
+
+                await externalActions.QueueEmail(new RecruitmentEmailQueueCommand
+                {
+                    DedupeKey = $"interview-candidate:{interview.InterviewId}:{interview.Version}",
+                    EventType = "InterviewCandidateInvited",
+                    RecipientEmail = applicant.Email.Trim(),
+                    Subject = $"Interview Scheduled: {roleTitle} (Round {interview.RoundNumber})",
+                    HtmlBody = candidateBody
+                }, actorUserId);
+            }
+
+            // 3. Record audit trail in ApplicantLogs
+            if (applicantLogs is not null)
+            {
+                await applicantLogs.AddOne(new ApplicantLogs
+                {
+                    CompanyId = companyId,
+                    ApplicantId = applicant.ApplicantId,
+                    ApplicantName = candidateName,
+                    JobRole = roleTitle,
+                    UserId = actorUserId,
+                    ActivityCategory = 0,
+                    Description = $"Interview Round {interview.RoundNumber} ({interview.Title}) scheduled for {scheduleFormatted}. Panelists: {interview.PanelistUserIds?.Length ?? 0}. Meeting: {meetingInfo}.",
+                    EventType = "InterviewScheduled",
+                    PreviousStage = applicant.ActivityType.ToString(),
+                    CurrentStage = "Interview",
+                    CreatedBy = actorUserId,
+                    UpdatedBy = actorUserId
+                });
+            }
+        }
+        catch
+        {
+            // Non-blocking notification telemetry
+        }
     }
 
     private static Result<string> Ok(Result<string> result, string id, string message)

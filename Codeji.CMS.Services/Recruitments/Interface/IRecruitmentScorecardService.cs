@@ -8,4 +8,5 @@ public interface IRecruitmentScorecardService
 {
     Task<Result<string>> Upsert(RecruitmentScorecardCommand command, string actorUserId);
     Task<Result<List<RecruitmentScorecard>>> GetByApplicant(string applicantId, string vacancyId);
+    Task<Result<RecruitmentFinalScoreResult>> GetFinalInterviewScore(string applicantId);
 }

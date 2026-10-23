@@ -74,6 +74,11 @@ namespace Codeji.CMS.Services.Recruitments
                 WalkInStartAt = jobVacancy.WalkInStartAt, WalkInEndAt = jobVacancy.WalkInEndAt, WalkInAddress = jobVacancy.WalkInAddress,
                 RecruiterContactEmail = jobVacancy.RecruiterContactEmail, NoticePeriodMaxDays = jobVacancy.NoticePeriodMaxDays,
                 ShowSalary = jobVacancy.ShowSalary,
+                ScreeningPassScore = jobVacancy.ScreeningPassScore,
+                ScreeningCriteria = jobVacancy.ScreeningCriteria ?? [],
+                WorkflowMode = string.IsNullOrWhiteSpace(jobVacancy.WorkflowMode) ? "Inherit" : jobVacancy.WorkflowMode.Trim(),
+                RequireInterview = jobVacancy.RequireInterview,
+                RequirePreboarding = jobVacancy.RequirePreboarding,
             };
 
             Result saved = await _jobVacancyRepo.AddOne(vacancy);
@@ -138,6 +143,11 @@ namespace Codeji.CMS.Services.Recruitments
                 RecruiterContactEmail = jobVacancy.RecruiterContactEmail ?? existing?.RecruiterContactEmail,
                 NoticePeriodMaxDays = jobVacancy.NoticePeriodMaxDays ?? existing?.NoticePeriodMaxDays,
                 ShowSalary = jobVacancy.ShowSalary ?? existing?.ShowSalary,
+                ScreeningPassScore = jobVacancy.ScreeningPassScore ?? existing?.ScreeningPassScore,
+                ScreeningCriteria = (jobVacancy.ScreeningCriteria is { Count: > 0 } sc ? sc : existing?.ScreeningCriteria) ?? [],
+                WorkflowMode = jobVacancy.WorkflowMode ?? existing?.WorkflowMode ?? "Inherit",
+                RequireInterview = jobVacancy.RequireInterview ?? existing?.RequireInterview,
+                RequirePreboarding = jobVacancy.RequirePreboarding ?? existing?.RequirePreboarding,
             };
             Expression<Func<JobVacancy, bool>> whereCondition = x => x.JobId == jobId && x.CompanyId == companyId;
             Result saved = await _jobVacancyRepo.Update(whereCondition, editedJob);
@@ -210,6 +220,11 @@ namespace Codeji.CMS.Services.Recruitments
                 IsWalkIn = job.IsWalkIn, WalkInStartAt = job.WalkInStartAt, WalkInEndAt = job.WalkInEndAt,
                 WalkInAddress = job.WalkInAddress, RecruiterContactEmail = job.RecruiterContactEmail,
                 NoticePeriodMaxDays = job.NoticePeriodMaxDays, ShowSalary = job.ShowSalary,
+                ScreeningPassScore = job.ScreeningPassScore,
+                ScreeningCriteria = job.ScreeningCriteria,
+                WorkflowMode = job.WorkflowMode ?? "Inherit",
+                RequireInterview = job.RequireInterview,
+                RequirePreboarding = job.RequirePreboarding,
             });
             Result<GetJobVacancyModel> result = new Result<GetJobVacancyModel>()
             {

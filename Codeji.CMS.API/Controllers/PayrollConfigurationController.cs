@@ -34,6 +34,10 @@ public sealed class PayrollConfigurationController(
     public Task<Codeji.CMS.Domain.Models.Result> SavePayGroup(PayrollPayGroupDto dto) =>
         service.SavePayGroup(CurrentContext.CompanyId(context), CurrentContext.UserId(context), dto);
 
+    [HttpDelete("pay-groups/{id}"), ModulePermission(AppModule.PayrollSettings, Permission.Delete)]
+    public Task<Codeji.CMS.Domain.Models.Result> DeletePayGroup(string id) =>
+        service.DeletePayGroup(CurrentContext.CompanyId(context), CurrentContext.UserId(context), id);
+
     [HttpGet("assignments"), ModulePermission(AppModule.PayrollSettings, Permission.View)]
     public Task<List<EmployeePayrollAssignmentDto>> GetAssignments() =>
         service.GetAssignments(CurrentContext.CompanyId(context));
@@ -53,6 +57,14 @@ public sealed class PayrollConfigurationController(
     [HttpPost("assignments/cancel"), Authorize(Policy = "AdminOnly"), ModulePermission(AppModule.PayrollSettings, Permission.Approve)]
     public Task<Codeji.CMS.Domain.Models.Result> CancelAssignment([FromQuery] string employeeId, [FromQuery] DateTime effectiveFrom) =>
         service.CancelAssignment(CurrentContext.CompanyId(context), CurrentContext.UserId(context), employeeId, effectiveFrom);
+
+    [HttpPost("assignments/end"), ModulePermission(AppModule.PayrollSettings, Permission.Edit)]
+    public Task<Codeji.CMS.Domain.Models.Result> EndAssignment([FromQuery] string employeeId, [FromQuery] DateTime effectiveFrom, [FromQuery] DateTime effectiveTo) =>
+        service.EndAssignment(CurrentContext.CompanyId(context), CurrentContext.UserId(context), employeeId, effectiveFrom, effectiveTo);
+
+    [HttpDelete("assignments"), ModulePermission(AppModule.PayrollSettings, Permission.Delete)]
+    public Task<Codeji.CMS.Domain.Models.Result> DeleteAssignment([FromQuery] string employeeId, [FromQuery] DateTime effectiveFrom) =>
+        service.DeleteAssignment(CurrentContext.CompanyId(context), CurrentContext.UserId(context), employeeId, effectiveFrom);
     [HttpPost("assignments/bulk/preview"), ModulePermission(AppModule.PayrollSettings, Permission.Edit)]
     public Task<Codeji.CMS.Domain.Models.Result<PayrollBulkAssignmentPreviewRowDto>> PreviewBulkAssignments(PayrollBulkAssignmentRequestDto dto) =>
         service.PreviewBulkAssignments(CurrentContext.CompanyId(context), dto);
@@ -77,6 +89,14 @@ public sealed class PayrollConfigurationController(
     public Task<Codeji.CMS.Domain.Models.Result> DeletePolicyDraft(string policyId, [FromQuery] int version) =>
         templates.DeletePolicyDraft(CurrentContext.CompanyId(context), policyId, version);
 
+    [HttpPost("policies/cancel"), ModulePermission(AppModule.PayrollSettings, Permission.Edit)]
+    public Task<Codeji.CMS.Domain.Models.Result> CancelPolicySubmission([FromQuery] string policyId, [FromQuery] int version) =>
+        templates.CancelPolicySubmission(CurrentContext.CompanyId(context), CurrentContext.UserId(context), policyId, version);
+
+    [HttpPost("policies/retire"), ModulePermission(AppModule.PayrollSettings, Permission.Edit)]
+    public Task<Codeji.CMS.Domain.Models.Result> RetirePolicy([FromQuery] string policyId, [FromQuery] int version) =>
+        templates.RetirePolicy(CurrentContext.CompanyId(context), CurrentContext.UserId(context), policyId, version);
+
     [HttpPost("policies/submit"), ModulePermission(AppModule.PayrollSettings, Permission.Edit)]
     public Task<Codeji.CMS.Domain.Models.Result> SubmitPolicy([FromQuery] string policyId, [FromQuery] int version) =>
         templates.SubmitPolicy(CurrentContext.CompanyId(context), CurrentContext.UserId(context), policyId, version);
@@ -91,6 +111,10 @@ public sealed class PayrollConfigurationController(
     [HttpPost("salary-templates/retire"), ModulePermission(AppModule.PayrollSettings, Permission.Edit)]
     public Task<Codeji.CMS.Domain.Models.Result> RetireTemplate([FromQuery] string templateId, [FromQuery] int version) =>
         templates.RetireTemplate(CurrentContext.CompanyId(context), CurrentContext.UserId(context), templateId, version);
+
+    [HttpDelete("salary-templates/{templateId}"), ModulePermission(AppModule.PayrollSettings, Permission.Delete)]
+    public Task<Codeji.CMS.Domain.Models.Result> DeleteTemplate(string templateId, [FromQuery] int version) =>
+        templates.DeleteTemplate(CurrentContext.CompanyId(context), CurrentContext.UserId(context), templateId, version);
     [HttpPost("employee-salaries/import/pdf/preview"), ModulePermission(AppModule.PayrollSettings, Permission.Edit)]
     public async Task<EmployeeSalaryPdfImportParseResult> PreviewEmployeeSalaryPdf([FromForm] IFormFile pdf, [FromForm] string? employeeId, [FromForm] DateTime? effectiveFrom)
     {
@@ -143,6 +167,10 @@ public sealed class PayrollConfigurationController(
 
     [HttpPost("employee-salaries/approve"), Authorize(Policy = "AdminOnly"), ModulePermission(AppModule.PayrollSettings, Permission.Approve)]
     public Task<Codeji.CMS.Domain.Models.Result> ApproveEmployeeSalary([FromQuery] string id, [FromQuery] int version) =>
-        salaries.Approve(CurrentContext.CompanyId(context), CurrentContext.UserId(context), id, version);
+        salaries.Approve(CurrentContext.CompanyId(context), CurrentContext.UserId(context), id, version, isCompanyAdministrator: true);
+
+    [HttpPost("employee-salaries/reject"), Authorize(Policy = "AdminOnly"), ModulePermission(AppModule.PayrollSettings, Permission.Approve)]
+    public Task<Codeji.CMS.Domain.Models.Result> RejectEmployeeSalary([FromQuery] string id, [FromQuery] int version, [FromQuery] string? reason = null) =>
+        salaries.Reject(CurrentContext.CompanyId(context), CurrentContext.UserId(context), id, version, reason);
 }
 

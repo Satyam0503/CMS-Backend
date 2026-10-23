@@ -33,9 +33,9 @@ public class PayRollController : BaseApiController
     public async Task<ActionResult<Result<GetEmpPayRollResponseDto>>> GetEmpPayRollData([FromBody] GetEmpPayRollRequestDto payload)
     {
         var requestPeriod = new DateTime(payload.PayMonth.Year, payload.PayMonth.Month, 1);
-        if (!PayrollPeriodRules.IsClosedPeriod(requestPeriod, IndiaTime.Now))
+        if (PayrollPeriodRules.IsFuturePeriod(requestPeriod, IndiaTime.Now))
         {
-            return BadRequest("Payroll cannot be generated for current or future months");
+            return BadRequest("Payroll cannot be generated for future months");
         }
         var companyId = CurrentContext.CompanyId(_httpContextAccessor);
         var userId = CurrentContext.UserId(_httpContextAccessor);
@@ -118,7 +118,8 @@ public class PayRollController : BaseApiController
         var currentDate = DateTime.UtcNow;
         if (!PayrollPeriodRules.IsClosedPeriod(model.PayMonth, currentDate)) return BadRequest();
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-        var result = await _payRollServices.UploadPayrollData(model, companyId);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        var result = await _payRollServices.UploadPayrollData(model, companyId, userId);
         return Ok(result);
     }
 

@@ -22,7 +22,8 @@ public sealed class RecruitmentOfferService(
     IMongoDbRepository<JobVacancy>? vacancies = null,
     IRecruitmentExternalActionService? externalActions = null,
     IMongoDbRepository<RecruitmentPreboardingCase>? preboardingCases = null,
-    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null) : IRecruitmentOfferService
+    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null,
+    IMongoDbRepository<RecruitmentJobApplication>? applications = null) : IRecruitmentOfferService
 {
     public async Task<Result<string>> Upsert(RecruitmentOfferCommand command, string actorUserId)
     {
@@ -38,8 +39,8 @@ public sealed class RecruitmentOfferService(
             return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Offer expiry must be in the future.");
         if (command.StartDateUtc.HasValue && command.StartDateUtc.Value.Date < DateTime.UtcNow.Date)
             return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Offer start date cannot be in the past.");
-        if (command.ExpiresAtUtc.HasValue && command.StartDateUtc.HasValue && command.ExpiresAtUtc.Value <= command.StartDateUtc.Value)
-            return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Offer expiry must be after the offer start date.");
+        if (command.ExpiresAtUtc.HasValue && command.StartDateUtc.HasValue && command.ExpiresAtUtc.Value > command.StartDateUtc.Value)
+            return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Offer expiry must be on or before the offer start date.");
 
         var applicant = await applicants.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && !x.IsDeleted);
         if (applicant is null)
@@ -63,7 +64,14 @@ public sealed class RecruitmentOfferService(
             return Ok(result, existing.OfferId, "Offer command already applied.");
 
         var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
-        var fastTrackOfferAllowed = config is not null && (!config.OfferApproval || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase));
+        JobVacancy? vacancy = vacancies is null ? null : await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == command.VacancyId && !x.IsDeleted);
+        var allowCustomWorkflows = config is null || config.AllowJobWorkflowCustomization;
+        var fastTrackOfferAllowed = (allowCustomWorkflows ? vacancy?.WorkflowMode switch
+        {
+            "Direct" => true,
+            "Enterprise" => false,
+            _ => (bool?)null
+        } : null) ?? (config is not null && (!config.OfferApproval || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)));
 
         if (existing is null)
         {
@@ -104,9 +112,15 @@ public sealed class RecruitmentOfferService(
         if (!isAllowedTransition)
             return Fail(result, RecruitmentErrorCodes.InvalidTransition, "Offer status transition is not allowed.", StatusCodes.Status409Conflict);
 
-        if (string.Equals(command.Status, RecruitmentOfferStatus.Approved, StringComparison.OrdinalIgnoreCase) && (config is null || config.OfferApproval))
+        var requireOfferApproval = (allowCustomWorkflows ? vacancy?.WorkflowMode switch
         {
-            JobVacancy? vacancy = vacancies is null ? null : await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == command.VacancyId && !x.IsDeleted);
+            "Direct" => false,
+            "Enterprise" => true,
+            _ => (bool?)null
+        } : null) ?? ((config is null || config.OfferApproval) && !string.Equals(config?.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase));
+        if (string.Equals(command.Status, RecruitmentOfferStatus.Approved, StringComparison.OrdinalIgnoreCase) && requireOfferApproval)
+        {
+
             var policy = approvalPolicies is null ? null : await approvalPolicies.FirstOrDefault(x => x.CompanyId == companyId && x.VacancyId == command.VacancyId && !x.IsDeleted);
             if (policy is null && approvalPolicies is not null && vacancy is not null && (!string.IsNullOrWhiteSpace(vacancy.LegalEntityId) || !string.IsNullOrWhiteSpace(vacancy.DepartmentId) || !string.IsNullOrWhiteSpace(vacancy.Grade)))
                 policy = await approvalPolicies.FirstOrDefault(x => x.CompanyId == companyId && string.IsNullOrEmpty(x.VacancyId) && x.LegalEntityId == vacancy.LegalEntityId && x.DepartmentId == vacancy.DepartmentId && x.Grade == vacancy.Grade && !x.IsDeleted);
@@ -179,35 +193,69 @@ public sealed class RecruitmentOfferService(
                 && !string.IsNullOrWhiteSpace(applicant.Email)
                 && (config?.CandidateEmailActions ?? true))
             {
-                var issuanceKey = $"offer-sent:{offer.OfferId}:{idempotencyKey}";
-                if (issuanceKey.Length < 12) issuanceKey = issuanceKey.PadRight(12, '0');
-                var tokenResult = await externalActions.Issue(new RecruitmentExternalActionIssueCommand
+                var candidateName = $"{applicant.FirstName} {applicant.LastName}".Trim();
+                var vacancyTitle = string.Empty;
+                if (vacancies is not null && !string.IsNullOrWhiteSpace(offer.VacancyId))
                 {
-                    ActionType = "OfferResponse",
-                    ApplicantId = applicant.ApplicantId,
-                    VacancyId = applicant.VacancyId,
-                    OfferId = offer.OfferId,
-                    RecipientEmail = applicant.Email.Trim(),
-                    ExpiresInMinutes = 24 * 60,
-                    IssuanceKey = issuanceKey,
-                    ResourceVersion = offer.Version
-                }, actorUserId);
+                    var vac = await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == offer.VacancyId && !x.IsDeleted);
+                    if (vac is not null && !string.IsNullOrWhiteSpace(vac.Title)) vacancyTitle = vac.Title.Trim();
+                }
+                var jobTitle = !string.IsNullOrWhiteSpace(vacancyTitle) ? vacancyTitle : (!string.IsNullOrWhiteSpace(applicant.VacancyId) ? applicant.VacancyId : "Open Role");
+                var renderedSubject = HtmlTemplate.Render(
+                    config?.OfferLetterSubjectTemplate ?? "Formal Offer of Employment: [JobTitle] - [CandidateName]",
+                    new { CandidateName = candidateName, JobTitle = jobTitle, Currency = offer.Currency, TotalCtc = offer.TotalCtc.ToString("N2") });
 
-                var tokenParam = tokenResult.Success ? tokenResult.MethodResult?.RawToken : null;
-                if (string.IsNullOrWhiteSpace(tokenParam) || !TryBuildCandidateOfferUrl(tokenParam, out var offerUrl))
-                    return;
+                var renderedBody = HtmlTemplate.Render(
+                    config?.OfferLetterBodyTemplate ?? "<p>Dear [CandidateName],</p><p>We are pleased to offer you the [JobTitle] position.</p><p>Compensation: [Currency] [TotalCtc]</p>",
+                    new { CandidateName = candidateName, JobTitle = jobTitle, Currency = offer.Currency, TotalCtc = offer.TotalCtc.ToString("N2") });
+
+                var professionalFooter = "<hr style=\"border:none;border-top:1px solid #E2E8F0;margin:24px 0;\"/>" +
+                    "<p style=\"font-size:0.875rem;color:#475569;\"><strong>Formal Offer Acceptance Instructions:</strong><br/>" +
+                    "Please review the employment terms detailed above. To confirm your acceptance, kindly reply directly to this email with your written confirmation and signed copy of the offer letter.</p>" +
+                    "<p style=\"font-size:0.825rem;color:#64748B;\">This email and its contents are confidential and intended solely for the recipient named above. If you have questions regarding this offer, please contact your Human Resources department.</p>";
+
                 await externalActions.QueueEmail(new RecruitmentEmailQueueCommand
                 {
                     DedupeKey = $"offer-email:{offer.OfferId}:{idempotencyKey}",
                     EventType = "OfferSent",
                     RecipientEmail = applicant.Email.Trim(),
-                    Subject = HtmlTemplate.Render(config?.OfferLetterSubjectTemplate ?? "Your offer for [JobTitle]", new { CandidateName = $"{applicant.FirstName} {applicant.LastName}".Trim(), JobTitle = applicant.VacancyId, Currency = offer.Currency, TotalCtc = offer.TotalCtc.ToString("N2") }),
-                    HtmlBody = HtmlTemplate.Render(config?.OfferLetterBodyTemplate ?? "<p>Dear [CandidateName],</p><p>We are pleased to offer you the [JobTitle] position.</p><p>Compensation: [Currency] [TotalCtc]</p>", new { CandidateName = $"{applicant.FirstName} {applicant.LastName}".Trim(), JobTitle = applicant.VacancyId, Currency = offer.Currency, TotalCtc = offer.TotalCtc.ToString("N2") }) +
-                               $"<p><a href=\"{System.Net.WebUtility.HtmlEncode(offerUrl)}\">Review your offer</a></p><p>This secure link expires in 24 hours.</p>"
+                    Subject = renderedSubject,
+                    HtmlBody = renderedBody + professionalFooter
                 }, actorUserId);
             }
 
             // REC-BUG-03 & REC-BUG-04 Fix: Ensure RecruitmentPreboardingCase exists when offer becomes Accepted (whether via candidate link or HR action)
+            if (string.Equals(offer.Status, RecruitmentOfferStatus.Accepted, StringComparison.OrdinalIgnoreCase))
+            {
+                if (applicant.ActivityType != ActivityType.Selected)
+                {
+                    applicant.ActivityType = ActivityType.Selected;
+                    applicant.UpdatedBy = actorUserId;
+                    applicant.UpdatedDate = DateTime.UtcNow;
+                    await applicants.Update(Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId), applicant);
+
+                    if (applications is not null)
+                    {
+                        var canonical = await applications.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted);
+                        if (canonical is not null)
+                        {
+                            canonical.StageHistory.Add(new RecruitmentApplicationStageEvent
+                            {
+                                FromStage = canonical.CurrentStage,
+                                ToStage = nameof(ActivityType.Selected),
+                                ActorUserId = actorUserId,
+                                Reason = "Offer accepted"
+                            });
+                            canonical.CurrentStage = nameof(ActivityType.Selected);
+                            canonical.Version = (canonical.Version <= 0 ? 1 : canonical.Version) + 1;
+                            canonical.UpdatedBy = actorUserId;
+                            canonical.UpdatedDate = DateTime.UtcNow;
+                            await applications.Update(Builders<RecruitmentJobApplication>.Filter.Where(x => x.CompanyId == companyId && x.ApplicationId == canonical.ApplicationId), canonical);
+                        }
+                    }
+                }
+            }
+
             if (string.Equals(offer.Status, RecruitmentOfferStatus.Accepted, StringComparison.OrdinalIgnoreCase)
                 && preboardingCases is not null)
             {
@@ -245,15 +293,17 @@ public sealed class RecruitmentOfferService(
         }
     }
 
-    private static bool TryBuildCandidateOfferUrl(string token, out string offerUrl)
+    public async Task<Result<RecruitmentOffer?>> GetByApplicant(string applicantId)
     {
-        offerUrl = string.Empty;
-        var appUrl = ConfigManager.AppSettings?.AppUrl?.Trim().TrimEnd('/');
-        if (string.IsNullOrWhiteSpace(appUrl) || !Uri.TryCreate(appUrl, UriKind.Absolute, out var baseUri) || baseUri.Scheme is not ("http" or "https"))
-            return false;
-        offerUrl = $"{appUrl}/candidate/offer?token={Uri.EscapeDataString(token)}";
-        return true;
+        var companyId = CurrentContext.CompanyId(context);
+        if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(applicantId))
+            return new Result<RecruitmentOffer?> { Success = false, StatusCode = StatusCodes.Status400BadRequest, ErrorCode = RecruitmentErrorCodes.InvalidRequest, Message = "Company context and applicant ID are required." };
+
+        var list = await offers.GetAll(x => x.CompanyId == companyId && x.ApplicantId == applicantId.Trim() && !x.IsDeleted);
+        var latest = list?.OrderByDescending(x => x.UpdatedDate ?? x.CreatedDate).FirstOrDefault();
+        return new Result<RecruitmentOffer?> { Success = true, StatusCode = StatusCodes.Status200OK, MethodResult = latest, Message = latest != null ? "Offer loaded." : "No offer found." };
     }
+
     private static Result<string> Ok(Result<string> result, string id, string message) { result.Success = true; result.StatusCode = StatusCodes.Status200OK; result.MethodResult = id; result.Message = message; return result; }
     private static Result<string> Fail(Result<string> result, string code, string message, int status = StatusCodes.Status400BadRequest) { result.ErrorCode = code; result.StatusCode = status; result.Message = message; return result; }
 }

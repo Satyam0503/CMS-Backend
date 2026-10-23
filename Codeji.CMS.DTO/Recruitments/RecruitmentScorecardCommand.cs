@@ -20,7 +20,11 @@ public sealed class RecruitmentScorecardCommand
 
 public sealed class RecruitmentScorecardCriterionCommand
 {
+    public string? Code { get; set; }
     [Required] public string Name { get; set; } = string.Empty;
-    [Range(1, 5)] public int Rating { get; set; }
+    [Range(0, 100)] public decimal Rating { get; set; }
+    public string? QualitativeLabel { get; set; }
+    public decimal? Weight { get; set; }
+    public bool IsMandatory { get; set; }
     public string? Notes { get; set; }
 }

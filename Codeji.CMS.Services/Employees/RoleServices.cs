@@ -607,7 +607,28 @@ public class RoleServices : IRoleService
             }
 
             var role = await _RolesRepository.FirstOrDefault(x => x.RolesId == user.RoleId && x.CompanyId == companyId);
-            if (role?.RoleType == (int)EnumsHelper.Roles.Administrator)
+            if (role is null)
+            {
+                return false;
+            }
+
+            // If a specific module is targeted, check if it's a known system module and if it is accessible for the company.
+            // If the module is disabled/inaccessible, NO role (including Administrator) can access its endpoints.
+            if (!string.IsNullOrEmpty(module))
+            {
+                var allModules = await _moduleRepository.GetAll();
+                var moduleEntity = allModules?.FirstOrDefault(x => string.Equals(x.ModuleConstant, module, StringComparison.OrdinalIgnoreCase));
+                if (moduleEntity != null)
+                {
+                    bool isAccessible = await IsModuleAccessibleForCompany(module, companyId);
+                    if (!isAccessible)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            if (role.RoleType == (int)EnumsHelper.Roles.Administrator)
             {
                 return true;
             }
@@ -702,6 +723,33 @@ public class RoleServices : IRoleService
         Roles? roles = await _RolesRepository.FirstOrDefault(expression);
         if (roles == null) return false;
         return true;
+    }
+
+    public async Task<bool> IsModuleAccessibleForCompany(string moduleConstant, string companyId)
+    {
+        if (string.IsNullOrWhiteSpace(moduleConstant) || string.IsNullOrWhiteSpace(companyId))
+            return false;
+
+        var allModules = await _moduleRepository.GetAll();
+        var module = allModules?.FirstOrDefault(x => string.Equals(x.ModuleConstant, moduleConstant, StringComparison.OrdinalIgnoreCase));
+        if (module == null)
+            return false;
+
+        var allModulePermissions = await _modulePermissionRepository.GetAll();
+        var modulePermissionIds = allModulePermissions?
+            .Where(x => x.ModuleId == module.ModuleId)
+            .Select(x => x.ModulePermissionId)
+            .ToList() ?? [];
+
+        if (modulePermissionIds.Count == 0)
+            return false;
+
+        var rolePermissions = _rolePermissionRepository.Get(x =>
+            x.CompanyId == companyId &&
+            modulePermissionIds.Contains(x.ModulePermissionId) &&
+            x.IsAccessible);
+
+        return rolePermissions != null && rolePermissions.Any();
     }
 
 }

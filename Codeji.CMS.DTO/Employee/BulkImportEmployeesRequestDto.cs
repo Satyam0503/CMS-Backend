@@ -37,4 +37,8 @@ public class BulkImportEmployeeItemDto
     public required string JobRole { get; set; }
 
     public string Gender { get; set; } = "Not Specified";
+
+    [Required(ErrorMessage = "Date of joining is required.")]
+    public string DateOfJoining { get; set; } = string.Empty;
 }
+

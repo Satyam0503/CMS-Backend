@@ -51,5 +51,8 @@ public sealed class EffectiveOfficeScheduleDto
     public string? PunchInAllowedUntil { get; set; }
     public string? PunchOutAllowedFrom { get; set; }
     public string? PunchOutAllowedUntil { get; set; }
+    public int GraceMinutes { get; set; } = 15;
+    public int BreakMinutes { get; set; } = 60;
+    public int RequiredWorkingMinutes { get; set; } = 480;
     public string Source { get; set; } = "CompanyDefault";
 }

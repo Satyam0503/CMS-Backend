@@ -43,6 +43,15 @@ public class EmpUser : BaseClass
     public string? PanNumber { get; set; }
     public ulong? BankAccountNumber { get; set; } = null;
     public List<EmpUserCustomAttribute> CustomAttributeList { get; set; } = [];
+
+    /// <summary>Recruitment final interview benchmark score (0–100%) stored at hiring to measure ongoing performance.</summary>
+    public int? HiringBenchmarkScore { get; set; }
+    /// <summary>Recruitment final interview rating (1.0–5.0 scale) aggregated across non-HR evaluation rounds.</summary>
+    public decimal? HiringBenchmarkRating { get; set; }
+    /// <summary>Consensus recommendation from evaluation rounds (Strong Hire, Hire, Hold, No Hire).</summary>
+    public string? HiringRecommendation { get; set; }
+    /// <summary>Number of substantive evaluation rounds rated.</summary>
+    public int? EvaluatedRoundsCount { get; set; }
 }
 
 public sealed class EmployeeContractLifecycle
@@ -63,6 +72,3 @@ public sealed class EmployeeContractChange
     public DateTime ChangedAtUtc { get; set; } = DateTime.UtcNow;
     public string? Reason { get; set; }
 }
-
-
-

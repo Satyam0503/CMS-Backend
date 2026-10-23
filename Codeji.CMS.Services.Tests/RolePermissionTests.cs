@@ -148,6 +148,67 @@ public class RolePermissionTests
     }
 
     [Fact]
+    public async Task AdminAccess_WhenModuleIsDisabled_IsDenied()
+    {
+        var fixture = new RoleFixture();
+        fixture.Middleware.Setup(x => x.GetUserById("admin-1"))
+            .ReturnsAsync(new UserModel { UserId = "admin-1", RoleId = "role-admin", CompanyId = "company-1" });
+        fixture.RoleRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Roles, bool>>>(), false))
+            .ReturnsAsync(new Roles { RolesId = "role-admin", CompanyId = "company-1", RoleType = (int)AuthRole.Administrator, Titles = "Admin", UserRoles = [] });
+        fixture.ModuleRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new Module { ModuleId = 1, ModuleConstant = "PayRoll", ModuleName = "PayRoll" }]);
+        fixture.ModulePermissionRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new ModulePermission { ModulePermissionId = 10, ModuleId = 1, PermissionId = 1 }]);
+        // Module disabled in company: IsAccessible = false
+        var disabledPermissions = new[] { new RolePermission { CompanyId = "company-1", RoleId = "role-admin", ModulePermissionId = 10, IsAccessible = false, HasAccess = true } };
+        fixture.RolePermissionRepository.Setup(x => x.Get(It.IsAny<Expression<Func<RolePermission, bool>>>(), null, false))
+            .Returns((Expression<Func<RolePermission, bool>> predicate, object? _, bool _) => disabledPermissions.Where(predicate.Compile()).AsQueryable());
+
+        var allowed = await fixture.Service.VerifyUserAccess("PayRoll", ["View"], "admin-1", "company-1");
+
+        Assert.False(allowed);
+    }
+
+    [Fact]
+    public async Task AdminAccess_WhenModuleIsEnabled_IsAllowed()
+    {
+        var fixture = new RoleFixture();
+        fixture.Middleware.Setup(x => x.GetUserById("admin-1"))
+            .ReturnsAsync(new UserModel { UserId = "admin-1", RoleId = "role-admin", CompanyId = "company-1" });
+        fixture.RoleRepository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Roles, bool>>>(), false))
+            .ReturnsAsync(new Roles { RolesId = "role-admin", CompanyId = "company-1", RoleType = (int)AuthRole.Administrator, Titles = "Admin", UserRoles = [] });
+        fixture.ModuleRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new Module { ModuleId = 1, ModuleConstant = "PayRoll", ModuleName = "PayRoll" }]);
+        fixture.ModulePermissionRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new ModulePermission { ModulePermissionId = 10, ModuleId = 1, PermissionId = 1 }]);
+        // Module enabled in company: IsAccessible = true
+        var enabledPermissions = new[] { new RolePermission { CompanyId = "company-1", RoleId = "role-admin", ModulePermissionId = 10, IsAccessible = true, HasAccess = true } };
+        fixture.RolePermissionRepository.Setup(x => x.Get(It.IsAny<Expression<Func<RolePermission, bool>>>(), null, false))
+            .Returns((Expression<Func<RolePermission, bool>> predicate, object? _, bool _) => enabledPermissions.Where(predicate.Compile()).AsQueryable());
+
+        var allowed = await fixture.Service.VerifyUserAccess("PayRoll", ["View"], "admin-1", "company-1");
+
+        Assert.True(allowed);
+    }
+
+    [Fact]
+    public async Task IsModuleAccessibleForCompany_WhenDisabled_ReturnsFalse()
+    {
+        var fixture = new RoleFixture();
+        fixture.ModuleRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new Module { ModuleId = 5, ModuleConstant = "Work_From_Home", ModuleName = "Work From Home" }]);
+        fixture.ModulePermissionRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new ModulePermission { ModulePermissionId = 50, ModuleId = 5, PermissionId = 1 }]);
+        var disabledPermissions = new[] { new RolePermission { CompanyId = "company-1", RoleId = "role-admin", ModulePermissionId = 50, IsAccessible = false, HasAccess = true } };
+        fixture.RolePermissionRepository.Setup(x => x.Get(It.IsAny<Expression<Func<RolePermission, bool>>>(), null, false))
+            .Returns((Expression<Func<RolePermission, bool>> predicate, object? _, bool _) => disabledPermissions.Where(predicate.Compile()).AsQueryable());
+
+        var accessible = await fixture.Service.IsModuleAccessibleForCompany("Work_From_Home", "company-1");
+
+        Assert.False(accessible);
+    }
+
+    [Fact]
     public async Task AddDefaultRole_CopiesOnlyOneActiveTemplatePerTypeAndWaitsForDistinctPermissions()
     {
         var fixture = new RoleFixture();

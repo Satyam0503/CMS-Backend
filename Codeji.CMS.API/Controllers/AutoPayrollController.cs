@@ -16,6 +16,7 @@ public class AutoPayrollController : BaseApiController
 {
     readonly IAutoPayRollServices _autoPayRollServices;
     readonly IAttendancePenaltyService _attendancePenaltyService;
+    readonly IPayrollDivisorPolicyService _divisorPolicyService;
     readonly IHttpContextAccessor _httpContextAccessor;
     readonly ILogger<AutoPayrollController> _logger;
 
@@ -23,11 +24,13 @@ public class AutoPayrollController : BaseApiController
         IHttpContextAccessor httpContextAccessor,
         IAutoPayRollServices autoPayRollServices,
         IAttendancePenaltyService attendancePenaltyService,
+        IPayrollDivisorPolicyService divisorPolicyService,
         ILogger<AutoPayrollController> logger)
     {
         _httpContextAccessor = httpContextAccessor;
         _autoPayRollServices = autoPayRollServices;
         _attendancePenaltyService = attendancePenaltyService;
+        _divisorPolicyService = divisorPolicyService;
         _logger = logger;
     }
 
@@ -39,12 +42,12 @@ public class AutoPayrollController : BaseApiController
         var result = new Result();
 
         var requestPeriod = new DateTime(model.PayMonth.Year, model.PayMonth.Month, 1);
-        if (!PayrollPeriodRules.IsClosedPeriod(requestPeriod, DateTime.UtcNow))
+        if (PayrollPeriodRules.IsFuturePeriod(requestPeriod, DateTime.UtcNow))
         {
             result.Success = false;
             result.StatusCode = StatusCodes.Status422UnprocessableEntity;
-            result.ErrorCode = "PAYROLL_PERIOD_NOT_CLOSED";
-            result.Message = "Payroll can be processed only for a completed month.";
+            result.ErrorCode = "PAYROLL_PERIOD_FUTURE";
+            result.Message = "Payroll cannot be processed for a future month.";
             return UnprocessableEntity(result);
         }
 
@@ -53,14 +56,18 @@ public class AutoPayrollController : BaseApiController
 
         try
         {
-            // Payroll generation is a finalisation boundary. Validate and lock the exact
-            // selected month on the server so a browser cannot generate payroll from
-            // unreviewed or mutable attendance data.
-            var attendanceLock = await _attendancePenaltyService.ValidateAndLock(companyId, userId, requestPeriod);
-            if (!attendanceLock.Success)
-                return StatusCode(attendanceLock.StatusCode >= 400 ? attendanceLock.StatusCode : 409, attendanceLock);
+            var divisorSetting = await _divisorPolicyService.GetEffective(companyId, requestPeriod);
+            if (divisorSetting.RequireAttendanceLock)
+            {
+                // Payroll generation is a finalisation boundary when attendance lock is required.
+                // Validate and lock the exact selected month on the server so unreviewed or
+                // mutable attendance data cannot generate payroll.
+                var attendanceLock = await _attendancePenaltyService.ValidateAndLock(companyId, userId, requestPeriod);
+                if (!attendanceLock.Success)
+                    return StatusCode(attendanceLock.StatusCode >= 400 ? attendanceLock.StatusCode : 409, attendanceLock);
+            }
 
-            result = await _autoPayRollServices.GeneratePayrollForMonthAsync(companyId, requestPeriod);
+            result = await _autoPayRollServices.GeneratePayrollForMonthAsync(companyId, requestPeriod, model.EmployeeIds);
         }
         catch (Exception ex)
         {

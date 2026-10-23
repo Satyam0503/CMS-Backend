@@ -1,4 +1,4 @@
-﻿// See https://aka.ms/new-console-template for more information
+// See https://aka.ms/new-console-template for more information
 using System.Reflection;
 using Codeji.CMS.GenericRepository.Settings;
 using Codeji.CMS.Migrations;

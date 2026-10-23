@@ -1,4 +1,4 @@
-﻿using Codeji.CMS.DTO.RolePermissions;
+using Codeji.CMS.DTO.RolePermissions;
 namespace Codeji.CMS.Services.Employees.Interface;
 
 using System.Collections.Generic;
@@ -24,4 +24,5 @@ public interface
     Task<List<ModuleWithPermissionsModel>> GetAllRolesWithPermission(string companyId);
     Task<Result> UpdateAppAccessForRole(string roleId, bool hasAppAccess);
     Task<bool> IsRoleTypeMatch(string roleId, EnumsHelper.Roles roleType, string companyId);
+    Task<bool> IsModuleAccessibleForCompany(string moduleConstant, string companyId);
 }

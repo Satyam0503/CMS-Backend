@@ -12,11 +12,29 @@ public static class EmploymentPeriod
 {
     public static DateTime? GetLastWorkingDate(EmpUser employee)
     {
+        if (employee == null)
+            return null;
+
+        // An active employee who is NOT exiting (not in notice period, not terminated/resigned/former)
+        // does not have an active last working date, even if a stale legacy field exists on the document.
+        if (
+            EmploymentExitRules.IsCurrentEmployee(employee)
+            && EmploymentExitRules.GetEffectiveEmploymentStatus(employee)
+                != EmployeeLifecycleStatuses.NoticePeriod
+        )
+        {
+            return null;
+        }
+
         if (employee.LastWorkingDate.HasValue)
             return employee.LastWorkingDate.Value.Date;
 
-        return DateTime.TryParse(employee.ExitDate, CultureInfo.InvariantCulture,
-            DateTimeStyles.AllowWhiteSpaces, out var legacyExitDate)
+        return DateTime.TryParse(
+            employee.ExitDate,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AllowWhiteSpaces,
+            out var legacyExitDate
+        )
             ? legacyExitDate.Date
             : null;
     }
@@ -31,7 +49,9 @@ public static class EmploymentPeriod
         var lastWorkingDate = GetLastWorkingDate(employee);
         // Older records may only have ExitDate and Status=false. Treat those
         // as completed exits too, so the migration can be deployed safely.
-        var isCompletedExit = EmploymentExitRules.IsFormerEmployee(employee) || (!employee.Status && lastWorkingDate.HasValue);
+        var isCompletedExit =
+            EmploymentExitRules.IsFormerEmployee(employee)
+            || (!employee.Status && lastWorkingDate.HasValue);
         if (!isCompletedExit)
             return employee.Status;
 
@@ -45,7 +65,9 @@ public static class EmploymentPeriod
             return false;
 
         var lastWorkingDate = GetLastWorkingDate(employee);
-        var isCompletedExit = EmploymentExitRules.IsFormerEmployee(employee) || (!employee.Status && lastWorkingDate.HasValue);
+        var isCompletedExit =
+            EmploymentExitRules.IsFormerEmployee(employee)
+            || (!employee.Status && lastWorkingDate.HasValue);
         if (!isCompletedExit)
             return employee.Status;
 
@@ -60,7 +82,8 @@ public static class EmploymentPeriod
     /// </summary>
     public static bool IsAttendanceExpectedOn(EmpUser employee, DateTime date)
     {
-        if (!WasEmployedOn(employee, date)) return false;
+        if (!WasEmployedOn(employee, date))
+            return false;
         return ResolveAvailabilityOn(employee, date) == EmployeeLifecycleStatuses.Working;
     }
 
@@ -72,13 +95,17 @@ public static class EmploymentPeriod
 
         var lifecycle = employee.Lifecycle ?? new EmployeeLifecycleState();
 
-        if (lifecycle.AvailabilityEffectiveFrom.HasValue &&
-            date.Date < lifecycle.AvailabilityEffectiveFrom.Value.Date)
+        if (
+            lifecycle.AvailabilityEffectiveFrom.HasValue
+            && date.Date < lifecycle.AvailabilityEffectiveFrom.Value.Date
+        )
             return EmployeeLifecycleStatuses.Working;
 
-        if (lifecycle.AvailabilityExpectedReturnDate.HasValue &&
-            date.Date >= lifecycle.AvailabilityExpectedReturnDate.Value.Date &&
-            lifecycle.AvailabilityStatus is not EmployeeLifecycleStatuses.Working)
+        if (
+            lifecycle.AvailabilityExpectedReturnDate.HasValue
+            && date.Date >= lifecycle.AvailabilityExpectedReturnDate.Value.Date
+            && lifecycle.AvailabilityStatus is not EmployeeLifecycleStatuses.Working
+        )
             return EmployeeLifecycleStatuses.Working;
 
         return string.IsNullOrWhiteSpace(lifecycle.AvailabilityStatus)
@@ -94,17 +121,88 @@ public static class EmploymentPeriod
     /// </summary>
     public static bool IsPayrollIncludedForMonth(EmpUser employee, DateTime month)
     {
-        if (!IsEligibleForMonth(employee, month)) return false;
+        if (!IsEligibleForMonth(employee, month))
+            return false;
         var payrollStatus = employee.Lifecycle?.PayrollStatus;
         var isFormer = EmploymentExitRules.IsFormerEmployee(employee);
-        if (!isFormer && payrollStatus is not null && payrollStatus is not EmployeeLifecycleStatuses.PayrollActive and not EmployeeLifecycleStatuses.PayrollFinalSettlement)
+        if (
+            !isFormer
+            && payrollStatus is not null
+            && payrollStatus
+                is not EmployeeLifecycleStatuses.PayrollActive
+                    and not EmployeeLifecycleStatuses.PayrollFinalSettlement
+        )
             return false;
-        if (!string.Equals(payrollStatus, EmployeeLifecycleStatuses.PayrollClosed, StringComparison.OrdinalIgnoreCase)) return true;
+        if (
+            !string.Equals(
+                payrollStatus,
+                EmployeeLifecycleStatuses.PayrollClosed,
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+            return true;
         var lastWorkingDate = GetLastWorkingDate(employee);
-        return lastWorkingDate.HasValue && lastWorkingDate.Value >= new DateTime(month.Year, month.Month, 1);
+        return lastWorkingDate.HasValue
+            && lastWorkingDate.Value >= new DateTime(month.Year, month.Month, 1);
     }
 
-    private static bool TryGetJoiningDate(EmpUser employee, out DateTime joiningDate) =>
-        DateTime.TryParse(employee.DateOfJoining, CultureInfo.InvariantCulture,
-            DateTimeStyles.AllowWhiteSpaces, out joiningDate);
+    public static bool TryGetJoiningDate(EmpUser employee, out DateTime joiningDate)
+    {
+        if (employee != null)
+        {
+            if (!string.IsNullOrWhiteSpace(employee.DateOfJoining))
+            {
+                string[] formats =
+                [
+                    "yyyy-MM-dd",
+                    "dd-MM-yyyy",
+                    "dd/MM/yyyy",
+                    "MM/dd/yyyy",
+                    "yyyy/MM/dd",
+                    "d MMMM yyyy",
+                    "d MMM yyyy",
+                    "dd MMM yyyy",
+                    "dd MMMM yyyy",
+                ];
+                if (
+                    DateTime.TryParseExact(
+                        employee.DateOfJoining.Trim(),
+                        formats,
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.AllowWhiteSpaces,
+                        out joiningDate
+                    )
+                )
+                {
+                    joiningDate = joiningDate.Date;
+                    return true;
+                }
+
+                if (
+                    DateTime.TryParse(
+                        employee.DateOfJoining,
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.AllowWhiteSpaces,
+                        out joiningDate
+                    )
+                )
+                {
+                    joiningDate = joiningDate.Date;
+                    return true;
+                }
+            }
+
+            if (employee.CreatedDate.HasValue)
+            {
+                joiningDate = employee.CreatedDate.Value.Date;
+                return true;
+            }
+        }
+
+        joiningDate = default;
+        return false;
+    }
+
+    public static DateTime? GetJoiningDate(EmpUser employee) =>
+        TryGetJoiningDate(employee, out var date) ? date : null;
 }

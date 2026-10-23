@@ -1,3 +1,4 @@
+using Codeji.CMS.Repository.Entities.Recruitments;
 using System.Globalization;
 using System.Linq.Expressions;
 using MapsterMapper;
@@ -26,14 +27,25 @@ public class CalendarServices : ICalendarServices
     readonly IMongoDbRepository<EmpUser> _employeeRepository;
     readonly IHttpContextAccessor _context;
     readonly ILogger<CalendarServices> _logger;
+    readonly IMongoDbRepository<Applicant>? _applicantRepository;
+    readonly IMongoDbRepository<JobVacancy>? _vacancyRepository;
     string CompanyId => CurrentContext.CompanyId(_context);
-    public CalendarServices(IMapper mapper, IMongoDbRepository<CalendarEntity> calendarRepository, IMongoDbRepository<EmpUser> empRepository, IHttpContextAccessor context, ILogger<CalendarServices> logger)
+    public CalendarServices(
+        IMapper mapper, 
+        IMongoDbRepository<CalendarEntity> calendarRepository, 
+        IMongoDbRepository<EmpUser> empRepository, 
+        IHttpContextAccessor context, 
+        ILogger<CalendarServices> logger,
+        IMongoDbRepository<Applicant>? applicantRepo = null,
+        IMongoDbRepository<JobVacancy>? vacancyRepo = null)
     {
         _mapper = mapper;
         _calendarRepository = calendarRepository;
         _employeeRepository = empRepository;
         _context = context;
         _logger = logger;
+        _applicantRepository = applicantRepo;
+        _vacancyRepository = vacancyRepo;
     }
 
     private async Task<bool> IsCallerHrOrAdminAsync()
@@ -134,6 +146,58 @@ public class CalendarServices : ICalendarServices
                 {
                     if (!string.IsNullOrWhiteSpace(callerEmployee.EmployeeId)) callerIdentities.Add(callerEmployee.EmployeeId.Trim());
                     if (!string.IsNullOrWhiteSpace(callerEmployee.Email)) callerIdentities.Add(callerEmployee.Email.Trim());
+                }
+            }
+
+            if (_applicantRepository is not null)
+            {
+                var interviewItems = rawCalendarItems.Where(IsRestrictedInterviewCalendarItem).ToList();
+                if (interviewItems.Count > 0)
+                {
+                    var applicantIds = interviewItems
+                        .Select(ci => System.Text.RegularExpressions.Regex.Match(ci.Description ?? string.Empty, @"Applicant\s+([a-f0-9\-]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                        .Where(m => m.Success)
+                        .Select(m => m.Groups[1].Value.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    if (applicantIds.Count > 0)
+                    {
+                        var matchingApplicants = (await _applicantRepository.GetAll(a => a.CompanyId == CompanyId && applicantIds.Contains(a.ApplicantId) && !a.IsDeleted)).ToList();
+                        var appMap = matchingApplicants.ToDictionary(a => a.ApplicantId, a => a, StringComparer.OrdinalIgnoreCase);
+
+                        foreach (var ci in interviewItems)
+                        {
+                            var match = System.Text.RegularExpressions.Regex.Match(ci.Description ?? string.Empty, @"Applicant\s+([a-f0-9\-]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                            if (match.Success && appMap.TryGetValue(match.Groups[1].Value.Trim(), out var app))
+                            {
+                                var candName = $"{app.FirstName} {app.LastName}".Trim();
+                                if (string.IsNullOrWhiteSpace(candName)) candName = app.Email;
+
+                                if (ci.Name.Equals("Interview: Interview", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    ci.Name = $"Interview: {candName}";
+                                }
+                                else if (ci.Name.StartsWith("Interview:", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    var suffix = ci.Name.Substring("Interview:".Length).Trim();
+                                    if (suffix.Equals("Interview", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(suffix))
+                                    {
+                                        ci.Name = $"Interview: {candName}";
+                                    }
+                                    else if (!suffix.Contains(candName, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        ci.Name = $"Interview: {candName} - {suffix}";
+                                    }
+                                }
+
+                                if (!ci.Description.Contains("Candidate:", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    ci.Description = $"Candidate: {candName} | {ci.Description}";
+                                }
+                            }
+                        }
+                    }
                 }
             }
 

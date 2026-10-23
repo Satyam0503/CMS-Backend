@@ -6,6 +6,7 @@ using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Employees;
 using MongoDB.Bson;
+using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Attendance;
 
@@ -80,14 +81,28 @@ public sealed class AttendanceMutationValidator(
         // attendance (including the final payroll month) impossible to repair.
         var employee = (await employees.GetAll(x => x.CompanyId == request.CompanyId && x.UserId == request.TargetUserId && !x.IsDeleted, withDefaultFilter: false)).FirstOrDefault();
         if (employee is null) return Fail(result, "ATTENDANCE_TARGET_UNAVAILABLE");
-        if (DateTime.TryParse(employee.DateOfJoining, out var joined) && date.Date < joined.Date)
+        if (EmploymentPeriod.TryGetJoiningDate(employee, out var joined) && date.Date < joined.Date)
             return Fail(result, $"Attendance cannot be marked before the employee's joining date of {joined:dd-MMM-yyyy}.");
-        var lastWorkingDate = employee.LastWorkingDate ?? (DateTime.TryParse(employee.ExitDate, out var exited) ? exited.Date : (DateTime?)null);
+        var lastWorkingDate = EmploymentPeriod.GetLastWorkingDate(employee);
         if (lastWorkingDate.HasValue && date.Date > lastWorkingDate.Value.Date) return Fail(result, "ATTENDANCE_AFTER_EXIT");
+
+        // Self-heal any stale exit fields on active, non-notice employees in the database
+        if (EmploymentExitRules.IsCurrentEmployee(employee) &&
+            EmploymentExitRules.GetEffectiveEmploymentStatus(employee) != EmployeeLifecycleStatuses.NoticePeriod &&
+            (employee.LastWorkingDate.HasValue || !string.IsNullOrWhiteSpace(employee.ExitDate)))
+        {
+            employee.LastWorkingDate = null;
+            employee.ExitDate = null;
+            await employees.Update(MongoDB.Driver.Builders<EmpUser>.Filter.Eq(x => x.UserId, employee.UserId), employee);
+        }
         if (!EmploymentPeriod.WasEmployedOn(employee, date)) return Fail(result, "ATTENDANCE_TARGET_UNAVAILABLE");
         if (!EmploymentPeriod.IsAttendanceExpectedOn(employee, date)) return Fail(result, "ATTENDANCE_NOT_EXPECTED_FOR_LIFECYCLE");
 
-        try { await editGuard.EnsureEditableWorkingDayAsync(request.CompanyId, request.TargetUserId, date); }
+        try
+        {
+            var isExceptionResolution = string.Equals(request.RemarkCode, "MONTHLY_EXCEPTION_RESOLUTION", StringComparison.OrdinalIgnoreCase);
+            await editGuard.EnsureEditableWorkingDayAsync(request.CompanyId, request.TargetUserId, date, isExceptionResolution);
+        }
         catch (InvalidOperationException ex) { return Fail(result, ex.Message); }
 
         var code = request.StatusCode.Trim().ToUpperInvariant();
@@ -102,26 +117,81 @@ public sealed class AttendanceMutationValidator(
         if (status.RequiresTime)
         {
             schedule = await schedules.ResolveAsync(request.CompanyId, employee, date, cancellationToken);
+            schedule ??= new CompanyOfficeSchedule
+            {
+                CompanyId = request.CompanyId,
+                ScheduleId = "DEFAULT_SYSTEM_SCHEDULE",
+                Name = "General Shift (09:00 - 18:00)",
+                StartTime = new TimeSpan(9, 0, 0),
+                EndTime = new TimeSpan(18, 0, 0),
+                GraceMinutes = 15,
+                CheckInAllowedFrom = new TimeSpan(8, 0, 0),
+                CheckInAllowedUntil = new TimeSpan(10, 0, 0),
+                CheckOutAllowedFrom = new TimeSpan(17, 0, 0),
+                CheckOutAllowedUntil = new TimeSpan(20, 0, 0),
+                BreakMinutes = 60,
+                RequiredWorkingMinutes = 480,
+                TimeZoneId = "Asia/Kolkata",
+                IsDefault = true,
+                IsActive = true
+            };
             if (request.TimingMode == AttendanceTimingMode.Auto)
             {
                 // System-generated Present rows carry the effective schedule's planned
-                // punch window.  This is tenant/employee schedule-derived (for example
+                // punch window. This is tenant/employee schedule-derived (for example
                 // 09:00–18:00), never a frontend or global hard-coded value.
-                if (schedule is not null)
+                var shiftStart = schedule?.StartTime ?? new TimeSpan(9, 0, 0);
+                var shiftEnd = schedule?.EndTime ?? new TimeSpan(18, 0, 0);
+                var tz = schedule?.TimeZoneId ?? "Asia/Kolkata";
+
+                var effIn = shiftStart;
+                var effOut = shiftEnd;
+
+                // When marking LHD in Auto mode, default check-in to the 1-hour late window (e.g. 10:00)
+                if (string.Equals(code, "LHD", StringComparison.OrdinalIgnoreCase))
                 {
-                    checkIn = ToScheduleUtc(date, schedule.StartTime, schedule.TimeZoneId);
-                    checkOut = ToScheduleUtc(date, schedule.EndTime, schedule.TimeZoneId);
+                    effIn = shiftStart.Add(TimeSpan.FromHours(1));
+                }
+                // When marking ED in Auto mode, default check-out to the 1-hour early window (e.g. 17:00)
+                else if (string.Equals(code, "ED", StringComparison.OrdinalIgnoreCase))
+                {
+                    effOut = shiftEnd.Subtract(TimeSpan.FromHours(1));
+                }
+                else if (string.Equals(code, "LHD+ED", StringComparison.OrdinalIgnoreCase))
+                {
+                    effIn = shiftStart.Add(TimeSpan.FromHours(1));
+                    effOut = shiftEnd.Subtract(TimeSpan.FromHours(1));
+                }
+                else if (string.Equals(code, "HD", StringComparison.OrdinalIgnoreCase))
+                {
+                    var reqMins = schedule?.RequiredWorkingMinutes ?? 480;
+                    effOut = shiftStart.Add(TimeSpan.FromMinutes(reqMins / 2));
+                }
+
+                checkIn = ToScheduleUtc(date, effIn, tz);
+                checkOut = ToScheduleUtc(date, effOut, tz);
+                if (effOut <= effIn)
+                {
+                    checkOut = checkOut.Value.AddDays(1);
                 }
             }
             else if (request.TimingMode == AttendanceTimingMode.Custom)
             {
-                if (!request.CheckInTime.HasValue || !request.CheckOutTime.HasValue) return Fail(result, "ATTENDANCE_TIMING_REQUIRED");
-                checkIn = schedule is null
-                    ? date.Add(request.CheckInTime.Value.ToTimeSpan())
-                    : ToScheduleUtc(date, request.CheckInTime.Value.ToTimeSpan(), schedule.TimeZoneId);
-                checkOut = schedule is null
-                    ? date.Add(request.CheckOutTime.Value.ToTimeSpan())
-                    : ToScheduleUtc(date, request.CheckOutTime.Value.ToTimeSpan(), schedule.TimeZoneId);
+                var effCheckIn = request.CheckInTime ?? (schedule is not null ? TimeOnly.FromTimeSpan(schedule.StartTime) : new TimeOnly(9, 0));
+                var effCheckOut = request.CheckOutTime ?? (schedule is not null ? TimeOnly.FromTimeSpan(schedule.EndTime) : new TimeOnly(18, 0));
+
+                var tz = schedule?.TimeZoneId ?? "Asia/Kolkata";
+                checkIn = ToScheduleUtc(date, effCheckIn.ToTimeSpan(), tz);
+                checkOut = ToScheduleUtc(date, effCheckOut.ToTimeSpan(), tz);
+                if (checkOut <= checkIn)
+                {
+                    // Check if this is an overnight shift
+                    if ((schedule is not null && schedule.EndTime < schedule.StartTime) ||
+                        effCheckOut < effCheckIn)
+                    {
+                        checkOut = checkOut.Value.AddDays(1);
+                    }
+                }
                 if (checkOut <= checkIn)
                     return Fail(result, "Check-out time cannot be earlier than or equal to check-in time.");
             }
@@ -129,7 +199,7 @@ public sealed class AttendanceMutationValidator(
         }
         else
         {
-            // The selected status owns its timing rules.  A stale editor/API payload must
+            // The selected status owns its timing rules. A stale editor/API payload must
             // never prevent Present -> Absent (or another non-timed transition), and it
             // must never leave former Present clock events on the persisted row.
             checkIn = null;
@@ -138,18 +208,46 @@ public sealed class AttendanceMutationValidator(
 
         var existing = await attendance.GetByUserAndDateAsync(request.CompanyId, request.TargetUserId, date);
         // A split day is owned by its leave/WFH workflow even when there is no
-        // compatibility AttendanceModel row.  Generic manual editing cannot
-        // replace one half of that source-owned day with a full-day status.
-        var sourceOwnedSegment = (await attendanceSegments.GetAll(x =>
+        // compatibility AttendanceModel row.
+        var existingSegments = (await attendanceSegments.GetAll(x =>
                 x.CompanyId == request.CompanyId &&
                 x.UserId == request.TargetUserId &&
                 x.Date >= date &&
-                x.Date < date.AddDays(1)))
-            .FirstOrDefault(x => x.SourceType is "LEAVE" or "WFH_REQUEST");
-        if (sourceOwnedSegment is not null)
-            return Fail(result, string.Equals(sourceOwnedSegment.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase)
+                x.Date < date.AddDays(1))).ToList();
+        var sourceOwnedSegments = existingSegments.Where(x => x.SourceType is "LEAVE" or "WFH_REQUEST").ToList();
+        if (sourceOwnedSegments.Count >= 2)
+        {
+            var firstSource = sourceOwnedSegments[0];
+            return Fail(result, string.Equals(firstSource.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase)
                 ? "ATTENDANCE_SOURCE_OWNED_LEAVE"
                 : "ATTENDANCE_SOURCE_OWNED_WFH");
+        }
+        else if (sourceOwnedSegments.Count == 1)
+        {
+            var owned = sourceOwnedSegments[0];
+            var complement = owned.Segment == "FIRST_HALF" ? "SECOND_HALF" : "FIRST_HALF";
+            var existingComp = existingSegments.FirstOrDefault(x => x.Segment == complement);
+            var compEntity = existingComp ?? new AttendanceDaySegment
+            {
+                CompanyId = request.CompanyId,
+                UserId = employee.UserId,
+                EmployeeId = employee.EmployeeId,
+                Date = DateTime.SpecifyKind(date.Date, DateTimeKind.Utc),
+                Segment = complement
+            };
+            compEntity.Status = code;
+            compEntity.SourceType = string.IsNullOrWhiteSpace(request.SourceType) ? "ADMIN_MANUAL" : request.SourceType.Trim();
+            compEntity.CheckInTime = checkIn;
+            compEntity.CheckOutTime = checkOut;
+            compEntity.TotalHours = checkIn.HasValue && checkOut.HasValue ? Math.Max((decimal)(checkOut.Value - checkIn.Value).TotalHours, 0) : null;
+            compEntity.Remarks = request.OperatorRemark ?? $"Worked segment complement to {owned.Segment} {owned.SourceType}";
+            compEntity.UpdatedAtUtc = DateTime.UtcNow;
+
+            if (string.IsNullOrEmpty(compEntity.AttendanceDaySegmentId))
+                await attendanceSegments.AddOne(compEntity);
+            else
+                await attendanceSegments.Update(Builders<AttendanceDaySegment>.Filter.Eq(x => x.AttendanceDaySegmentId, compEntity.AttendanceDaySegmentId), compEntity);
+        }
         if (existing is not null)
         {
             if (string.Equals(existing.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase)) return Fail(result, "ATTENDANCE_SOURCE_OWNED_LEAVE");
@@ -167,75 +265,81 @@ public sealed class AttendanceMutationValidator(
         row.Status = code; row.SourceType = string.IsNullOrWhiteSpace(request.SourceType) ? "ADMIN_MANUAL" : request.SourceType.Trim(); row.SourceId = null; row.SourceVersion = 0;
         row.CheckInTime = checkIn; row.CheckOutTime = checkOut; row.BreakMinutes = schedule?.BreakMinutes ?? 0;
         row.TotalHours = checkIn.HasValue && checkOut.HasValue ? Math.Max((decimal)(checkOut.Value - checkIn.Value).TotalHours - (row.BreakMinutes / 60m), 0) : 0;
+        row.LateCount = (code is "LHD" or "LC" or "LHD+ED") ? 1 : 0;
+        row.EarlyExitCount = (code is "ED" or "LHD+ED") ? 1 : 0;
         row.SystemRemark = null;
         // Explicit status selection must use the same effective (company/department/employee)
         // schedule as automatic classification. ED is about leaving early; LHD is about arriving late.
         var grace = schedule is null ? TimeSpan.Zero : TimeSpan.FromMinutes(Math.Max(schedule.GraceMinutes, 0));
-        var lateArrivalBoundary = schedule?.CheckInAllowedUntil ?? schedule?.StartTime ?? TimeSpan.Zero;
-        var earlyDepartureBoundary = schedule?.CheckOutAllowedFrom ?? schedule?.EndTime ?? TimeSpan.Zero;
-        TimeSpan? halfDayCheckInBoundary = schedule is null ? null : lateArrivalBoundary.Add(grace);
-        TimeSpan? halfDayCheckOutBoundary = schedule is null ? null : earlyDepartureBoundary.Subtract(grace);
-        if (schedule is not null && code == "ED" && (!request.CheckOutTime.HasValue || request.CheckOutTime.Value.ToTimeSpan() >= earlyDepartureBoundary))
-            return Fail(result, "Check-out time must be earlier than the configured Early Departure boundary to mark Early Departure.");
-        if (schedule is not null && code == "ED" && halfDayCheckOutBoundary.HasValue && request.CheckOutTime!.Value.ToTimeSpan() < halfDayCheckOutBoundary.Value)
-        {
-            var halfDay = await statuses.FirstOrDefault(x => x.CompanyId == request.CompanyId && x.Code == "HD" && x.IsActive);
-            if (halfDay is null) return Fail(result, "Check-out is before the configured Half Day boundary and no active Half Day attendance status is configured.");
-            code = halfDay.Code;
-            row.Status = code;
-            row.SystemRemark = "Check-out exceeded the configured Half Day boundary; normalized from Early Departure to Half Day.";
-        }
-        if (schedule is not null && code == "LHD" && (!request.CheckInTime.HasValue || request.CheckInTime.Value.ToTimeSpan() <= lateArrivalBoundary))
-            return Fail(result, "Check-in time must be later than the configured Late Arrival boundary to mark Late Arrival.");
-        if (schedule is not null && code == "LHD" && halfDayCheckInBoundary.HasValue && request.CheckInTime!.Value.ToTimeSpan() > halfDayCheckInBoundary.Value)
-        {
-            var halfDay = await statuses.FirstOrDefault(x => x.CompanyId == request.CompanyId && x.Code == "HD" && x.IsActive);
-            if (halfDay is null) return Fail(result, "Check-in is after the configured Half Day boundary and no active Half Day attendance status is configured.");
-            code = halfDay.Code;
-            row.Status = code;
-            row.SystemRemark = "Check-in exceeded the configured Half Day boundary; normalized from Late Arrival to Half Day.";
-        }
-        if (schedule is not null && code == "LHD+ED")
-        {
-            if (!request.CheckInTime.HasValue || request.CheckInTime.Value.ToTimeSpan() <= lateArrivalBoundary ||
-                !request.CheckOutTime.HasValue || request.CheckOutTime.Value.ToTimeSpan() >= earlyDepartureBoundary)
-                return Fail(result, "Late Arrival-Half Day + Early Departure requires a late check-in and an early check-out for the effective office schedule.");
+        var lateArrivalBoundary = schedule?.LateArrivalAfter ?? (schedule is null ? TimeSpan.Zero : schedule.StartTime.Add(grace));
+        var earlyDepartureBoundary = schedule?.EarlyDepartureBefore ?? (schedule is null ? TimeSpan.Zero : schedule.EndTime.Subtract(grace));
+        TimeSpan? halfDayCheckInBoundary = schedule?.HalfDayCheckInAfter
+            ?? (schedule is not null && schedule.CheckInAllowedUntil.HasValue && schedule.CheckInAllowedUntil.Value > lateArrivalBoundary
+                ? schedule.CheckInAllowedUntil.Value
+                : (schedule is null ? null : schedule.StartTime.Add(TimeSpan.FromHours(1))));
+        TimeSpan? halfDayCheckOutBoundary = schedule?.HalfDayCheckOutBefore
+            ?? (schedule is not null && schedule.CheckOutAllowedFrom.HasValue && schedule.CheckOutAllowedFrom.Value < earlyDepartureBoundary
+                ? schedule.CheckOutAllowedFrom.Value
+                : (schedule is null ? null : schedule.EndTime.Subtract(TimeSpan.FromHours(1))));
 
-            // Escalation boundaries are schedule-owned.  No global one-hour rule is
-            // applied when a company has not configured these limits.
-            var tooLateForCombinedStatus = halfDayCheckInBoundary.HasValue && request.CheckInTime.Value.ToTimeSpan() > halfDayCheckInBoundary.Value;
-            var tooEarlyForCombinedStatus = halfDayCheckOutBoundary.HasValue && request.CheckOutTime.Value.ToTimeSpan() < halfDayCheckOutBoundary.Value;
-            if (tooLateForCombinedStatus || tooEarlyForCombinedStatus)
+        // When company/admin explicitly marked status (PreserveRequestedStatus == true),
+        // respect their operational authority without blocking them or escalating to HD.
+        if (!request.PreserveRequestedStatus)
+        {
+            if (schedule is not null && code == "ED" && (!request.CheckOutTime.HasValue || request.CheckOutTime.Value.ToTimeSpan() >= earlyDepartureBoundary))
+                return Fail(result, "Check-out time must be earlier than the configured Early Departure boundary to mark Early Departure.");
+            if (schedule is not null && code == "ED" && halfDayCheckOutBoundary.HasValue && request.CheckOutTime!.Value.ToTimeSpan() < halfDayCheckOutBoundary.Value)
             {
                 var halfDay = await statuses.FirstOrDefault(x => x.CompanyId == request.CompanyId && x.Code == "HD" && x.IsActive);
-                if (halfDay is null) return Fail(result, "The LHD+ED time is outside the configured attendance boundary and no active Half Day attendance status is configured.");
-
+                if (halfDay is null) return Fail(result, "Check-out is before the configured Half Day boundary and no active Half Day attendance status is configured.");
                 code = halfDay.Code;
                 row.Status = code;
-                row.SystemRemark = "LHD+ED was normalized to Half Day because a configured schedule boundary was exceeded.";
+                row.SystemRemark = "Check-out exceeded the configured Half Day boundary; normalized from Early Departure to Half Day.";
+            }
+            if (schedule is not null && code == "LHD" && (!request.CheckInTime.HasValue || request.CheckInTime.Value.ToTimeSpan() <= lateArrivalBoundary))
+                return Fail(result, "Check-in time must be later than the configured Late Arrival boundary to mark Late Arrival.");
+            if (schedule is not null && code == "LHD" && halfDayCheckInBoundary.HasValue && request.CheckInTime!.Value.ToTimeSpan() > halfDayCheckInBoundary.Value)
+            {
+                var halfDay = await statuses.FirstOrDefault(x => x.CompanyId == request.CompanyId && x.Code == "HD" && x.IsActive);
+                if (halfDay is null) return Fail(result, "Check-in is after the configured Half Day boundary and no active Half Day attendance status is configured.");
+                code = halfDay.Code;
+                row.Status = code;
+                row.SystemRemark = "Check-in exceeded the configured Half Day boundary; normalized from Late Arrival to Half Day.";
+            }
+            if (schedule is not null && code == "LHD+ED")
+            {
+                if (!request.CheckInTime.HasValue || request.CheckInTime.Value.ToTimeSpan() <= lateArrivalBoundary ||
+                    !request.CheckOutTime.HasValue || request.CheckOutTime.Value.ToTimeSpan() >= earlyDepartureBoundary)
+                    return Fail(result, "Late Arrival-Half Day + Early Departure requires a late check-in and an early check-out for the effective office schedule.");
+
+                var tooLateForCombinedStatus = halfDayCheckInBoundary.HasValue && request.CheckInTime.Value.ToTimeSpan() > halfDayCheckInBoundary.Value;
+                var tooEarlyForCombinedStatus = halfDayCheckOutBoundary.HasValue && request.CheckOutTime.Value.ToTimeSpan() < halfDayCheckOutBoundary.Value;
+                if (tooLateForCombinedStatus || tooEarlyForCombinedStatus)
+                {
+                    var halfDay = await statuses.FirstOrDefault(x => x.CompanyId == request.CompanyId && x.Code == "HD" && x.IsActive);
+                    if (halfDay is null) return Fail(result, "The LHD+ED time is outside the configured attendance boundary and no active Half Day attendance status is configured.");
+
+                    code = halfDay.Code;
+                    row.Status = code;
+                    row.SystemRemark = "LHD+ED was normalized to Half Day because a configured schedule boundary was exceeded.";
+                }
             }
         }
-        if (code == "P" && !request.PreserveRequestedStatus && request.TimingMode == AttendanceTimingMode.Custom && schedule is not null)
+        if (code == "P" && request.TimingMode == AttendanceTimingMode.Custom && schedule is not null)
         {
-            var checkInTime = request.CheckInTime!.Value.ToTimeSpan();
-            var checkOutTime = request.CheckOutTime!.Value.ToTimeSpan();
-            // Early arrival and late checkout remain outside the configured attendance
-            // window. Late arrival and early departure are valid attendance events and
-            // are classified below instead of producing a 400/validation failure.
-            var earliestAllowedCheckIn = schedule.CheckInAllowedFrom ?? schedule.StartTime;
-            if (checkInTime < earliestAllowedCheckIn ||
-                schedule.CheckOutAllowedUntil.HasValue && checkOutTime > schedule.CheckOutAllowedUntil.Value)
-                return Fail(result, checkInTime < earliestAllowedCheckIn
-                    ? $"Check-in time cannot be earlier than the allowed check-in time of {earliestAllowedCheckIn:hh\\:mm}."
-                    : "Check-out time is later than the allowed check-out time for this schedule.");
-            var derivedCode = statusCalculation.CalculateOfficeStatus(schedule, request.CheckInTime.Value, request.CheckOutTime.Value, row.TotalHours ?? 0m);
+            var derivedCode = statusCalculation.CalculateOfficeStatus(schedule, request.CheckInTime!.Value, request.CheckOutTime!.Value, row.TotalHours ?? 0m);
             if (derivedCode != code)
             {
-                status = await statuses.FirstOrDefault(x => x.CompanyId == request.CompanyId && x.Code == derivedCode && x.IsActive);
-                if (status is null) return Fail(result, $"ATTENDANCE_STATUS_CONFIGURATION_MISSING_{derivedCode}");
-                code = derivedCode;
-                row.Status = code;
-                row.SystemRemark = $"Automatically classified as {code} from the effective office schedule.";
+                var derivedStatus = await statuses.FirstOrDefault(x => x.CompanyId == request.CompanyId && x.Code == derivedCode && x.IsActive);
+                if (derivedStatus is not null)
+                {
+                    status = derivedStatus;
+                    code = derivedCode;
+                    row.Status = code;
+                    row.LateCount = (code is "LHD" or "LC" or "LHD+ED") ? 1 : 0;
+                    row.EarlyExitCount = (code is "ED" or "LHD+ED") ? 1 : 0;
+                    row.SystemRemark = $"Automatically classified as {code} from the effective office schedule.";
+                }
             }
         }
         row.ScheduleId = schedule?.ScheduleId; row.ScheduleVersion = schedule?.Version;
@@ -273,7 +377,7 @@ public sealed class AttendanceMutationValidator(
         return result;
     }
 
-    private static DateTime ToScheduleUtc(DateTime attendanceDate, TimeSpan localTime, string? timeZoneId)
+    public static DateTime ToScheduleUtc(DateTime attendanceDate, TimeSpan localTime, string? timeZoneId)
     {
         var localDateTime = DateTime.SpecifyKind(attendanceDate.Date.Add(localTime), DateTimeKind.Unspecified);
         try

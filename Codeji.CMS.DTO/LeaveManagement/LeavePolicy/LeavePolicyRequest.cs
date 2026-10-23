@@ -82,5 +82,8 @@ public class WorkFromHomePolicySettingsRequest
     public int? HalfDayRequiredWorkingMinutes { get; set; }
     public int BreakMinutes { get; set; }
     public TimeSpan? MaximumLateCheckInTime { get; set; }
+    public TimeSpan? SameDayCutoffTime { get; set; }
+    public int SameDayGraceMinutes { get; set; }
+    public bool AllowLateApplicationWithApproval { get; set; } = true;
 }
 

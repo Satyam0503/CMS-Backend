@@ -24,7 +24,8 @@ public sealed class OfficeScheduleAssignmentService(
     IMongoDbRepository<EmpUser> employees,
     IMongoDbRepository<Department> departments,
     IEffectiveOfficeScheduleService effectiveSchedules,
-    IWeeklyOffService weeklyOffs) : IOfficeScheduleAssignmentService
+    IWeeklyOffService weeklyOffs,
+    IShiftAttendanceReconciliationService? shiftReconciliation = null) : IOfficeScheduleAssignmentService
 {
     public async Task<Result<EmployeeOfficeScheduleAssignmentDto>> GetEmployeeAsync(string companyId, string userId, CancellationToken cancellationToken = default)
     {
@@ -73,7 +74,12 @@ public sealed class OfficeScheduleAssignmentService(
         // A repeated save must not create another active assignment. It also avoids
         // a needless close-and-reinsert cycle for an unchanged employee override.
         if (current is not null && string.Equals(current.ScheduleId, scheduleId, StringComparison.Ordinal))
-            return await GetEmployeeAsync(companyId, userId, cancellationToken);
+            if (shiftReconciliation != null)
+        {
+            try { await shiftReconciliation.ReconcileTodayShiftAttendanceAsync(companyId, cancellationToken); }
+            catch { /* Non-blocking */ }
+        }
+        return await GetEmployeeAsync(companyId, userId, cancellationToken);
 
         var now = DateTime.UtcNow;
         // There is nothing to close for an employee currently inheriting the
@@ -97,6 +103,11 @@ public sealed class OfficeScheduleAssignmentService(
             if (!insert.Success) return Fail<EmployeeOfficeScheduleAssignmentDto>("OFFICE_SCHEDULE_ASSIGNMENT_SAVE_FAILED");
         }
 
+        if (shiftReconciliation != null)
+        {
+            try { await shiftReconciliation.ReconcileTodayShiftAttendanceAsync(companyId, cancellationToken); }
+            catch { /* Non-blocking */ }
+        }
         return await GetEmployeeAsync(companyId, userId, cancellationToken);
     }
 
@@ -150,6 +161,11 @@ public sealed class OfficeScheduleAssignmentService(
                 EffectiveFrom = now.Date, IsActive = true, CreatedBy = actorUserId, CreatedDate = now
             });
             if (!insert.Success) return Fail<DepartmentOfficeScheduleAssignmentDto>("OFFICE_SCHEDULE_ASSIGNMENT_SAVE_FAILED");
+        }
+        if (shiftReconciliation != null)
+        {
+            try { await shiftReconciliation.ReconcileTodayShiftAttendanceAsync(companyId, cancellationToken); }
+            catch { /* Non-blocking */ }
         }
         return new Result<DepartmentOfficeScheduleAssignmentDto> { Success = true, MethodResult = new() { DepartmentId = departmentId, ScheduleId = scheduleId, ScheduleName = schedule.MethodResult?.Name } };
     }

@@ -115,8 +115,47 @@ public class AttendanceRepository : IAttendanceRepository
         return result.ModifiedCount > 0 || result.MatchedCount > 0;
     }
 
-    public Task GetAll(Func<object, bool> value)
+    public async Task<long> DeleteDefaultPresentOutsideEmploymentPeriodAsync(
+        string companyId,
+        string userId,
+        DateTime joiningDate,
+        DateTime? lastWorkingDate = null)
     {
-        throw new NotImplementedException();
+        var joiningUtc = UtcMidnight(joiningDate);
+        var replaceableSources = new[] { "SYSTEM_DEFAULT_PRESENT", "SYSTEM_OFFICE_START_PRESENT" };
+        var baseFilter = Builders<AttendanceModel>.Filter.Eq(a => a.CompanyId, companyId)
+            & Builders<AttendanceModel>.Filter.Eq(a => a.UserId, userId)
+            & Builders<AttendanceModel>.Filter.In(a => a.SourceType, replaceableSources);
+
+        FilterDefinition<AttendanceModel> dateFilter = Builders<AttendanceModel>.Filter.Lt(a => a.Date, joiningUtc);
+        if (lastWorkingDate.HasValue)
+        {
+            var exitUtc = UtcMidnight(lastWorkingDate.Value).AddDays(1);
+            dateFilter = Builders<AttendanceModel>.Filter.Or(dateFilter, Builders<AttendanceModel>.Filter.Gte(a => a.Date, exitUtc));
+        }
+
+        var filter = baseFilter & dateFilter;
+        var result = await _collection.DeleteManyAsync(filter);
+        return result.DeletedCount;
+    }
+
+    public async Task<int> BulkUpsertAsync(IEnumerable<AttendanceModel> items, CancellationToken cancellationToken = default)
+    {
+        var list = items.ToList();
+        if (list.Count == 0) return 0;
+
+        var writes = new List<WriteModel<AttendanceModel>>();
+        foreach (var item in list)
+        {
+            item.Date = UtcMidnight(item.Date);
+            if (string.IsNullOrWhiteSpace(item.AttendanceId))
+                item.AttendanceId = MongoDB.Bson.ObjectId.GenerateNewId().ToString();
+
+            var dayFilter = BuildUserDateFilter(item.CompanyId, item.UserId ?? string.Empty, item.Date);
+            writes.Add(new ReplaceOneModel<AttendanceModel>(dayFilter, item) { IsUpsert = true });
+        }
+
+        var result = await _collection.BulkWriteAsync(writes, new BulkWriteOptions { IsOrdered = false }, cancellationToken);
+        return (int)(result.Upserts.Count + result.ModifiedCount);
     }
 }

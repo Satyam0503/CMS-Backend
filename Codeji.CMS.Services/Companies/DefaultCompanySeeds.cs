@@ -168,7 +168,7 @@ public static class DefaultCompanySeeds
                 IsDeleted = false,
                 CreatedBy = createdBy ?? string.Empty,
                 CreatedDate = now,
-                DepartmentId = departmentIds.TryGetValue(item.Department, out var departmentId) ? departmentId : null,
+                DepartmentId = null,
                 Titles = BuildTitles(item.Title, langs),
             })
             .ToList();

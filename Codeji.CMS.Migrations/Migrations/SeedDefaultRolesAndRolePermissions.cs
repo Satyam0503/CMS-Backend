@@ -48,9 +48,7 @@ public class SeedDefaultRolesAndRolePermissions : IMigration
         foreach (var p in FullAccess(AppModule.Jobs)) yield return p;
         foreach (var p in FullAccess(AppModule.Applications)) yield return p;
         yield return (AppModule.ProcessLog, PermissionConst.View);
-        yield return (AppModule.PayRoll, PermissionConst.Create);
-        yield return (AppModule.PayRoll, PermissionConst.Edit);
-        yield return (AppModule.PayRoll, PermissionConst.Delete);
+        foreach (var p in FullAccess(AppModule.PayRoll)) yield return p;
         foreach (var p in FullAccess(AppModule.PayrollSettings)) yield return p;
         yield return (AppModule.Policy, PermissionConst.View);
     }
@@ -60,8 +58,6 @@ public class SeedDefaultRolesAndRolePermissions : IMigration
         yield return (AppModule.Employees, PermissionConst.Create);
         foreach (var p in FullAccess(AppModule.Calendar)) yield return p;
         yield return (AppModule.NoticeBoard, PermissionConst.Create);
-        yield return (AppModule.PayRoll, PermissionConst.Edit);
-        yield return (AppModule.PayrollSettings, PermissionConst.Edit);
     }
 
     public async Task ExecuteAsync(IMongoDatabase db)
