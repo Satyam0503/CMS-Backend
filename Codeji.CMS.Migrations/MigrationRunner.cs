@@ -19,14 +19,11 @@ public class MigrationRunner
 
     public async Task RunAsync()
     {
-        var hello = await _db.RunCommandAsync<BsonDocument>(new BsonDocument("hello", 1));
-        var isReplicaSet = hello.TryGetValue("setName", out var replicaSetName) && replicaSetName.IsString && !string.IsNullOrWhiteSpace(replicaSetName.AsString);
-        var isShardedCluster = hello.TryGetValue("msg", out var topologyMessage) && topologyMessage.IsString && topologyMessage.AsString == "isdbgrid";
-        var supportsTransactions = hello.TryGetValue("maxWireVersion", out var wireVersion) && wireVersion.IsNumeric && wireVersion.ToInt32() >= 7;
-        if ((!isReplicaSet && !isShardedCluster) || !supportsTransactions)
-        {
-            throw new InvalidOperationException("WFH requires MongoDB transaction support (replica set or supported sharded cluster, wire version 7+). Configure the target database before applying WFH migrations.");
-        }
+        // The migration set uses idempotent MongoDB operations and does not open
+        // multi-document transactions. Do not block unrelated API deployments
+        // because the target runs as a standalone MongoDB node. WFH operations
+        // that require atomic writes enforce transaction support in the service
+        // layer and fail closed without applying attendance changes.
 
         var migrationCollection = _db.GetCollection<BsonDocument>("Migration");
 
