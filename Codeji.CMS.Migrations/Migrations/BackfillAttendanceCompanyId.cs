@@ -11,7 +11,7 @@ namespace Codeji.CMS.Migrations.Migrations;
 /// became company-scoped. UserId is the authoritative mapping; EmployeeId is
 /// used only when it uniquely identifies one company.
 /// </summary>
-public sealed class BackfillAttendanceCompanyId : IMigration
+public sealed class BackfillAttendanceCompanyId : IDataBackfillMigration
 {
     public string Id => $"2026-07-22-04-{typeof(BackfillAttendanceCompanyId).Name}";
 
@@ -34,7 +34,9 @@ public sealed class BackfillAttendanceCompanyId : IMigration
             .Select(x => x["EmployeeId"].AsString).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
         var employeeRows = await employees.Find(e => userIds.Contains(e.UserId) || employeeIds.Contains(e.EmployeeId)).ToListAsync();
         var companyByUser = employeeRows.Where(e => !string.IsNullOrWhiteSpace(e.UserId) && !string.IsNullOrWhiteSpace(e.CompanyId))
-            .GroupBy(e => e.UserId).ToDictionary(g => g.Key, g => g.First().CompanyId);
+            .GroupBy(e => e.UserId)
+            .Where(g => g.Select(e => e.CompanyId).Distinct(StringComparer.Ordinal).Count() == 1)
+            .ToDictionary(g => g.Key, g => g.First().CompanyId);
         var companyByUniqueEmployeeId = employeeRows.Where(e => !string.IsNullOrWhiteSpace(e.EmployeeId) && !string.IsNullOrWhiteSpace(e.CompanyId))
             .GroupBy(e => e.EmployeeId)
             .Where(g => g.Select(e => e.CompanyId).Distinct().Count() == 1)
@@ -50,7 +52,7 @@ public sealed class BackfillAttendanceCompanyId : IMigration
             if (string.IsNullOrWhiteSpace(companyId)) continue;
 
             await attendance.UpdateOneAsync(
-                Builders<BsonDocument>.Filter.Eq("_id", record["_id"]),
+                Builders<BsonDocument>.Filter.Eq("_id", record["_id"]) & missingCompany,
                 Builders<BsonDocument>.Update.Set("CompanyId", companyId));
         }
 

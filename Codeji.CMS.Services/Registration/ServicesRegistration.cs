@@ -81,6 +81,7 @@ public static class ServicesRegistration
         services.AddScoped<IAttendanceInitializationService, AttendanceInitializationService>();
         services.AddScoped<IAttendanceAuditWriter, AttendanceAuditWriter>();
         services.AddScoped<IAttendanceOutboxProcessor, AttendanceOutboxProcessor>();
+        services.AddScoped<IWorkFromHomeOutboxProcessor, WorkFromHomeOutboxProcessor>();
         services.AddScoped<IAttendanceReminderProcessor, AttendanceReminderProcessor>();
         services.AddScoped<IAttendancePayrollReadinessService, AttendancePayrollReadinessService>();
         services.AddScoped<ICompanyWorkingCalendarService, CompanyWorkingCalendarService>();

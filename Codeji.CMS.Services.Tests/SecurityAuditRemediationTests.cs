@@ -24,6 +24,7 @@ using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using MongoDB.Bson;
 using MongoDB.Driver;
 using Moq;
 using Xunit;
@@ -47,6 +48,31 @@ public sealed class SecurityAuditRemediationTests
         var result = await fixture.Service.GetEmployeeById("non-existent-user");
 
         Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task MarkNotificationAsRead_IsScopedToTheAuthenticatedTenantAndRecipient()
+    {
+        var fixture = CreateEmployeeFixture();
+        FilterDefinition<UserNotifications>? captured = null;
+        fixture.UserNotificationRepository
+            .Setup(repo => repo.Exist(It.IsAny<Expression<Func<UserNotifications, bool>>>(), false))
+            .ReturnsAsync(true);
+        fixture.UserNotificationRepository
+            .Setup(repo => repo.UpdateMany(It.IsAny<FilterDefinition<UserNotifications>>(), It.IsAny<UpdateDefinition<UserNotifications>>(), false))
+            .Callback<FilterDefinition<UserNotifications>, UpdateDefinition<UserNotifications>, bool>((filter, _, _) => captured = filter)
+            .ReturnsAsync(new Result { Success = true });
+
+        var result = await fixture.Service.MarkNotificationAsRead(CurrentUserId, "notification-row-1");
+
+        Assert.True(result.Success);
+        Assert.NotNull(captured);
+        var rendered = captured!.Render(new RenderArgs<UserNotifications>(
+            MongoDB.Bson.Serialization.BsonSerializer.SerializerRegistry.GetSerializer<UserNotifications>(),
+            MongoDB.Bson.Serialization.BsonSerializer.SerializerRegistry)).ToJson();
+        Assert.Contains(CurrentCompanyId, rendered, StringComparison.Ordinal);
+        Assert.Contains(CurrentUserId, rendered, StringComparison.Ordinal);
+        Assert.Contains("notification-row-1", rendered, StringComparison.Ordinal);
     }
 
     [Fact]

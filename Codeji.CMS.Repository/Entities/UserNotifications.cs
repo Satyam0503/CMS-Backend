@@ -7,6 +7,7 @@ namespace Codeji.CMS.Repository.Entities
     {
         [BsonId(IdGenerator = typeof(UniqueIdGenerator))]
         public string UserNotificationId { get; set; }
+        public string CompanyId { get; set; }
         public string UserId { get; set; }
         public string NotificationId { get; set; }
         public bool IsRead { get; set; }

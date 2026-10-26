@@ -25,6 +25,7 @@ using Codeji.CMS.Utility.middlewares;
 using LinqKit;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
+using MongoDB.Bson;
 using System.Security.Cryptography;
 
 namespace Codeji.CMS.Services.LeaveManagement;
@@ -666,7 +667,37 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
             Status = EnumsHelper.LeaveRequestStatus.Pending
         };
 
-        result = await _leave.AddOne(request);
+        // WFH and leave claim the same per-employee lock inside the write
+        // transaction. Recheck after acquiring it so concurrent claims cannot
+        // both pass the earlier overlap query.
+        try
+        {
+            using var session = await _mongoClient.StartSessionAsync();
+            session.StartTransaction();
+            await AcquireEmployeeWfhClaimLock(session, companyId, leaveRequest.UserId);
+            if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequest.UserId, requestStartDateTime, requestEndDateTime, leaveRequest.IsHalfDay, leaveRequest.HalfDayPeriod))
+            {
+                await session.AbortTransactionAsync();
+                return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: Leave overlaps Work From Home for the same half or a full day." };
+            }
+
+            request.CompanyId = companyId;
+            request.CreatedBy = CurrentContext.UserId(_httpContextAccessor);
+            request.CreatedDate = DateTime.UtcNow;
+            await _leave.GetCollection().InsertOneAsync(session, request);
+            await session.CommitTransactionAsync();
+            result.Success = true;
+            result.StatusCode = StatusCodes.Status200OK;
+            result.Message = "OK";
+        }
+        catch (Exception ex) when (IsTransactionUnsupported(ex))
+        {
+            return new Result { Success = false, Message = "LEAVE_WFH_TRANSACTION_REQUIRED: This operation requires MongoDB transactions to prevent overlapping leave and WFH claims. Contact an administrator." };
+        }
+        catch (MongoException)
+        {
+            return new Result { Success = false, Message = "Leave request could not be created. Please retry." };
+        }
         if (result.Success)
         {
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
@@ -763,18 +794,48 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
             };
         }
 
-        existingLeaveRequest.LeavePolicyId = leaveRequestDto.LeavePolicyId;
-        existingLeaveRequest.StartDate = requestStartDateTime;
-        existingLeaveRequest.EndDate = requestEndDateTime;
-        existingLeaveRequest.TotalDays = totalRequestedDays;
-        existingLeaveRequest.IsHalfDay = leavePolicyEntity.HalfDayAllowed && leaveRequestDto.IsHalfDay;
-        existingLeaveRequest.HalfDayPeriod = leaveRequestDto.IsHalfDay ? NormalizeHalfDayPeriod(leaveRequestDto.HalfDayPeriod) : null;
-        existingLeaveRequest.Reason = leaveRequestDto.Reason;
-        existingLeaveRequest.UpdatedDate = DateTime.UtcNow;
-
-        Expression<Func<LeaveRequest, bool>> expression = lr => lr.LeaveRequestId == leaveRequestDto.LeaveRequestId;
-        result = await _leave.Update(expression, existingLeaveRequest);
-        return result;
+        var now = DateTime.UtcNow;
+        try
+        {
+            using var session = await _mongoClient.StartSessionAsync();
+            session.StartTransaction();
+            await AcquireEmployeeWfhClaimLock(session, companyId, leaveRequestDto.UserId);
+            if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequestDto.UserId, requestStartDateTime, requestEndDateTime, leaveRequestDto.IsHalfDay, leaveRequestDto.HalfDayPeriod))
+            {
+                await session.AbortTransactionAsync();
+                return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: Leave overlaps Work From Home for the same half or a full day." };
+            }
+            var filter = Builders<LeaveRequest>.Filter.Where(lr => lr.CompanyId == companyId &&
+                lr.LeaveRequestId == leaveRequestDto.LeaveRequestId && lr.EmployeeId == leaveRequestDto.UserId &&
+                lr.Status == EnumsHelper.LeaveRequestStatus.Pending && lr.Version == existingLeaveRequest.Version);
+            var update = Builders<LeaveRequest>.Update
+                .Set(lr => lr.LeavePolicyId, leaveRequestDto.LeavePolicyId)
+                .Set(lr => lr.StartDate, requestStartDateTime)
+                .Set(lr => lr.EndDate, requestEndDateTime)
+                .Set(lr => lr.TotalDays, totalRequestedDays)
+                .Set(lr => lr.IsHalfDay, leavePolicyEntity.HalfDayAllowed && leaveRequestDto.IsHalfDay)
+                .Set(lr => lr.HalfDayPeriod, leaveRequestDto.IsHalfDay ? NormalizeHalfDayPeriod(leaveRequestDto.HalfDayPeriod) : null)
+                .Set(lr => lr.Reason, leaveRequestDto.Reason)
+                .Set(lr => lr.UpdatedDate, now)
+                .Set(lr => lr.UpdatedBy, CurrentContext.UserId(_httpContextAccessor))
+                .Inc(lr => lr.Version, 1);
+            var changed = await _leave.GetCollection().UpdateOneAsync(session, filter, update);
+            if (changed.ModifiedCount != 1)
+            {
+                await session.AbortTransactionAsync();
+                return new Result { Success = false, Message = "LEAVE_REQUEST_VERSION_CONFLICT: The leave request changed. Refresh and try again." };
+            }
+            await session.CommitTransactionAsync();
+            return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = "OK" };
+        }
+        catch (Exception ex) when (IsTransactionUnsupported(ex))
+        {
+            return new Result { Success = false, Message = "LEAVE_WFH_TRANSACTION_REQUIRED: This operation requires MongoDB transactions to prevent overlapping leave and WFH claims. Contact an administrator." };
+        }
+        catch (MongoException)
+        {
+            return new Result { Success = false, Message = "Leave request could not be updated. Please retry." };
+        }
     }
 
     private static string NormalizeHalfDayPeriod(string? value)
@@ -1079,6 +1140,16 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
             using var session = await _mongoClient.StartSessionAsync();
             session.StartTransaction();
 
+            if (needsReconciliation)
+            {
+                await AcquireEmployeeWfhClaimLock(session, companyId, existingLeaveRequest.EmployeeId);
+                if (await HasActiveWorkFromHomeOverlap(companyId, existingLeaveRequest.EmployeeId, existingLeaveRequest.StartDate, existingLeaveRequest.EndDate, existingLeaveRequest.IsHalfDay, existingLeaveRequest.HalfDayPeriod))
+                {
+                    await session.AbortTransactionAsync();
+                    return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: Leave cannot be approved because it overlaps Work From Home for the same half or a full day." };
+                }
+            }
+
             if (debitBalance || creditBalance)
             {
                 var balanceFilter = Builders<EmployeeLeaveBalance>.Filter.Where(lb =>
@@ -1121,6 +1192,8 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         }
         catch (Exception ex) when (IsTransactionUnsupported(ex))
         {
+            if (needsReconciliation)
+                return new Result { Success = false, Message = "LEAVE_WFH_TRANSACTION_REQUIRED: Approval requires MongoDB transactions to prevent overlapping leave and WFH claims. Contact an administrator." };
             // Local standalone MongoDB does not support transactions. This fallback keeps
             // compare-and-set protection and compensates the balance when the leave write
             // loses its optimistic-concurrency race. Production must use a replica set.
@@ -1168,6 +1241,196 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
             await LeaveNotification(existingLeaveRequest, model.Status, companyId, reviewedBy);
         }
         return result;
+    }
+
+    /// <summary>
+    /// Executes linked WFH cancellation and leave attendance regeneration while
+    /// preserving an already accepted leave request and its consumed balance.
+    /// The callback must apply all source-owned WFH, attendance, exception, and
+    /// outbox writes using the supplied Mongo session.
+    /// </summary>
+    public async Task<Result> ExecuteAcceptedLeaveWfhConflictTransactionAsync(
+        string leaveRequestId,
+        string reason,
+        Func<IClientSessionHandle, LeaveRequest, Task<Result>> applyLinkedWrites)
+    {
+        var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+        if (string.IsNullOrWhiteSpace(leaveRequestId) || string.IsNullOrWhiteSpace(reason) || reason.Trim().Length is < 3 or > 500 || applyLinkedWrites is null)
+            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "LEAVE_WFH_CONFLICT_REASON_REQUIRED: A leave request, linked write operation, and reason are required." };
+        if (_roleService is null || !await _roleService.VerifyUserAccess(AppModule.Attendance, [Codeji.CMS.Utility.Constraints.Permission.Edit], actorUserId, companyId))
+            return new Result { Success = false, StatusCode = StatusCodes.Status403Forbidden, Message = "LEAVE_WFH_CONFLICT_NOT_AUTHORIZED: Attendance edit permission is required." };
+
+        var request = await _leave.FirstOrDefault(x => x.CompanyId == companyId && x.LeaveRequestId == leaveRequestId);
+        if (request is null || request.Status != EnumsHelper.LeaveRequestStatus.Accepted)
+            return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "LEAVE_WFH_CONFLICT_REQUEST_CHANGED: Only an accepted leave request can be preserved during conflict resolution." };
+        var policy = await _leavePolicyRepo.FirstOrDefault(x => x.CompanyId == companyId && x.Id == request.LeavePolicyId && x.Status);
+        if (policy is null)
+            return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "LEAVE_WFH_CONFLICT_POLICY_UNAVAILABLE: The leave policy is no longer active." };
+
+        try
+        {
+            using var session = await _mongoClient.StartSessionAsync();
+            session.StartTransaction();
+            await AcquireEmployeeWfhClaimLock(session, companyId, request.EmployeeId);
+            var current = await _leave.GetCollection().Find(session,
+                Builders<LeaveRequest>.Filter.Where(x => x.CompanyId == companyId && x.LeaveRequestId == leaveRequestId &&
+                    x.EmployeeId == request.EmployeeId && x.Status == EnumsHelper.LeaveRequestStatus.Accepted && x.Version == request.Version))
+                .FirstOrDefaultAsync();
+            if (current is null)
+            {
+                await session.AbortTransactionAsync();
+                return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "LEAVE_WFH_CONFLICT_REQUEST_CHANGED: The accepted leave changed before conflict resolution." };
+            }
+            var linkedResult = await applyLinkedWrites(session, current);
+            if (!linkedResult.Success)
+            {
+                await session.AbortTransactionAsync();
+                return linkedResult;
+            }
+            await session.CommitTransactionAsync();
+            return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = "Approved leave retained and linked WFH request(s) cancelled atomically." };
+        }
+        catch (Exception ex) when (IsTransactionUnsupported(ex))
+        {
+            return new Result { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, Message = "LEAVE_WFH_CONFLICT_TRANSACTION_REQUIRED: This conflict requires MongoDB transaction support. No leave, WFH, attendance, or exception changes were applied." };
+        }
+        catch
+        {
+            return new Result { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, Message = "LEAVE_WFH_CONFLICT_FAILED: The linked conflict transaction failed. No linked changes were committed." };
+        }
+    }
+
+    /// <summary>
+    /// Withdraws an accepted leave request and executes source-linked attendance
+    /// cleanup in the same Mongo transaction. This is reserved for the HR WFH
+    /// conflict workflow; ordinary leave decisions continue through the normal API.
+    /// </summary>
+    public async Task<Result> WithdrawAcceptedLeaveForWfhConflictAsync(
+        string leaveRequestId,
+        string reason,
+        Func<IClientSessionHandle, LeaveRequest, Task<Result>> applyLinkedWrites)
+    {
+        var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+        if (string.IsNullOrWhiteSpace(leaveRequestId) || string.IsNullOrWhiteSpace(reason) || reason.Trim().Length is < 3 or > 500 || applyLinkedWrites is null)
+            return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "LEAVE_WFH_CONFLICT_REASON_REQUIRED: A leave request, linked write operation, and reason are required." };
+        if (_roleService is null || !await _roleService.VerifyUserAccess(AppModule.Attendance, [Codeji.CMS.Utility.Constraints.Permission.Edit], actorUserId, companyId))
+            return new Result { Success = false, StatusCode = StatusCodes.Status403Forbidden, Message = "LEAVE_WFH_CONFLICT_NOT_AUTHORIZED: Attendance edit permission is required." };
+
+        var request = await _leave.FirstOrDefault(x => x.CompanyId == companyId && x.LeaveRequestId == leaveRequestId);
+        if (request is null || request.Status != EnumsHelper.LeaveRequestStatus.Accepted)
+            return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "LEAVE_WFH_CONFLICT_REQUEST_CHANGED: Only an accepted leave request can be withdrawn for this conflict." };
+        var policy = await _leavePolicyRepo.FirstOrDefault(x => x.CompanyId == companyId && x.Id == request.LeavePolicyId && x.Status);
+        if (policy is null)
+            return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "LEAVE_WFH_CONFLICT_POLICY_UNAVAILABLE: The leave policy is no longer active." };
+        var unpaid = IsUnpaidLeavePolicy(policy);
+        var lifecycleLinked = await IsLifecycleLinkedPolicyAsync(companyId, policy.Id);
+        EmployeeLeaveBalance? balance = null;
+        if (!unpaid && !lifecycleLinked)
+        {
+            balance = await _employeeLeaveBalanceRepo.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == request.EmployeeId && x.LeavePolicyId == request.LeavePolicyId);
+            if (balance is null || balance.Taken < request.TotalDays)
+                return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "LEAVE_WFH_CONFLICT_BALANCE_INVALID: The consumed leave balance cannot be restored safely." };
+        }
+
+        var now = DateTime.UtcNow;
+        var committed = false;
+        try
+        {
+            using var session = await _mongoClient.StartSessionAsync();
+            session.StartTransaction();
+            await AcquireEmployeeWfhClaimLock(session, companyId, request.EmployeeId);
+
+            var leaveFilter = Builders<LeaveRequest>.Filter.Where(x => x.CompanyId == companyId &&
+                x.LeaveRequestId == leaveRequestId && x.EmployeeId == request.EmployeeId &&
+                x.Status == EnumsHelper.LeaveRequestStatus.Accepted && x.Version == request.Version);
+            var transactionRequest = await _leave.GetCollection().Find(session, leaveFilter).FirstOrDefaultAsync();
+            if (transactionRequest is null)
+            {
+                await session.AbortTransactionAsync();
+                return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "LEAVE_WFH_CONFLICT_REQUEST_CHANGED: The leave request changed while the conflict was being reviewed." };
+            }
+
+            if (balance is not null)
+            {
+                var balanceFilter = Builders<EmployeeLeaveBalance>.Filter.Where(x => x.CompanyId == companyId && x.Id == balance.Id &&
+                    x.UserId == transactionRequest.EmployeeId && x.LeavePolicyId == transactionRequest.LeavePolicyId &&
+                    x.Version == balance.Version && x.Taken >= transactionRequest.TotalDays);
+                var balanceUpdate = Builders<EmployeeLeaveBalance>.Update
+                    .Inc(x => x.Remaining, transactionRequest.TotalDays)
+                    .Inc(x => x.Taken, -transactionRequest.TotalDays)
+                    .Inc(x => x.Version, 1)
+                    .Set(x => x.UpdatedDate, now);
+                var balanceWrite = await _employeeLeaveBalanceRepo.GetCollection().UpdateOneAsync(session, balanceFilter, balanceUpdate);
+                if (balanceWrite.ModifiedCount != 1)
+                {
+                    await session.AbortTransactionAsync();
+                    return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "LEAVE_WFH_CONFLICT_BALANCE_CHANGED: The leave balance changed and was not restored." };
+                }
+            }
+
+            var leaveUpdate = Builders<LeaveRequest>.Update
+                .Set(x => x.Status, EnumsHelper.LeaveRequestStatus.WithDrawn)
+                .Set(x => x.ReviewedBy, actorUserId)
+                .Set(x => x.Comment, reason.Trim())
+                .Set(x => x.ReviewedAt, now)
+                .Set(x => x.UpdatedDate, now)
+                .Set(x => x.ReconciliationStatus, "Reversed")
+                .Set(x => x.ReconciliationErrorCode, null)
+                .Set(x => x.ReconciliationErrorMessage, null)
+                .Set(x => x.NextReconciliationAttemptAtUtc, null)
+                .Set(x => x.ReversedAtUtc, now)
+                .Inc(x => x.Version, 1);
+            var leaveWrite = await _leave.GetCollection().UpdateOneAsync(session, leaveFilter, leaveUpdate);
+            if (leaveWrite.ModifiedCount != 1)
+            {
+                await session.AbortTransactionAsync();
+                return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "LEAVE_WFH_CONFLICT_REQUEST_CHANGED: The leave request changed and was not withdrawn." };
+            }
+
+            var linkedResult = await applyLinkedWrites(session, transactionRequest);
+            if (!linkedResult.Success)
+            {
+                await session.AbortTransactionAsync();
+                return linkedResult;
+            }
+            await session.CommitTransactionAsync();
+            committed = true;
+
+            request.Status = EnumsHelper.LeaveRequestStatus.WithDrawn;
+            request.ReviewedBy = actorUserId;
+            request.Comment = reason.Trim();
+            request.ReviewedAt = now;
+            request.Version++;
+            request.ReconciliationStatus = "Reversed";
+            request.ReversedAtUtc = now;
+            if (lifecycleLinked && _lifecycleCases is not null)
+            {
+                try
+                {
+                    var lifecycleResult = await _lifecycleCases.CancelFromLeaveRequestSystemAsync(leaveRequestId, actorUserId, reason.Trim());
+                    if (!lifecycleResult.Success)
+                        return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = "Leave and attendance changes committed. Linked lifecycle cancellation needs retry." };
+                }
+                catch
+                {
+                    return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = "Leave and attendance changes committed. Linked lifecycle cancellation needs retry." };
+                }
+            }
+            await LeaveNotification(request, EnumsHelper.LeaveRequestStatus.WithDrawn, companyId, actorUserId);
+            return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = "Leave withdrawn and linked WFH conflict resolved." };
+        }
+        catch (Exception ex) when (IsTransactionUnsupported(ex))
+        {
+            return new Result { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, Message = "LEAVE_WFH_CONFLICT_TRANSACTION_REQUIRED: This conflict requires MongoDB transaction support. No leave, balance, attendance, or exception changes were applied." };
+        }
+        catch
+        {
+            return committed
+                ? new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = "Leave and attendance changes committed. A follow-up lifecycle or notification action needs retry." }
+                : new Result { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, Message = "LEAVE_WFH_CONFLICT_FAILED: The conflict transaction failed. No linked changes were committed." };
+        }
     }
 
     internal static bool IsValidBalance(EmployeeLeaveBalance balance) =>
@@ -1459,6 +1722,23 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
             (request.Status == "Pending" || request.Status == "Approved" || request.Status == "Returned") &&
             request.FromDate <= endDate && request.ToDate >= startDate);
         return requests.Any(wfh => LeaveConflictsWithWorkFromHome(leaveIsHalfDay, leaveHalfDayPeriod, wfh.DurationType));
+    }
+
+    private async Task AcquireEmployeeWfhClaimLock(IClientSessionHandle session, string companyId, string userId)
+    {
+        var lockId = WorkFromHomeService.BuildQuotaLockId(companyId, userId);
+        var collection = _workFromHomeRequests.GetCollection().Database.GetCollection<BsonDocument>("WorkFromHomeQuotaLock");
+        var filter = Builders<BsonDocument>.Filter.Eq("_id", lockId);
+        var update = Builders<BsonDocument>.Update
+            .SetOnInsert("CompanyId", companyId)
+            .SetOnInsert("UserId", userId)
+            .Set("UpdatedAtUtc", DateTime.UtcNow)
+            .Inc("LockVersion", 1L);
+        await collection.UpdateOneAsync(session, filter, update, new UpdateOptions { IsUpsert = true });
+        var lockDocument = await collection.Find(session, filter).FirstOrDefaultAsync();
+        if (lockDocument is null || lockDocument.GetValue("CompanyId", BsonNull.Value).AsString != companyId ||
+            lockDocument.GetValue("UserId", BsonNull.Value).AsString != userId)
+            throw new InvalidOperationException("WFH_QUOTA_LOCK_TENANT_MISMATCH");
     }
 
     // Full-day and mixed WFH statuses own the entire date. Opposite explicit halves
@@ -2066,6 +2346,7 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
             var userNotifications = recipients.Select(user => new UserNotifications
             {
                 UserNotificationId = Guid.NewGuid().ToString(),
+                CompanyId = companyId,
                 UserId = user.UserId,
                 NotificationId = notification.NotificationId,
                 IsRead = false,

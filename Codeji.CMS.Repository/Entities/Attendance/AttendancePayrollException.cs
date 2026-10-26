@@ -30,6 +30,8 @@ public class AttendancePayrollException : BaseClass
     public int PolicyVersion { get; set; }
     public int Version { get; set; } = 1;
     public string? LeaveRequestId { get; set; }
+    /// <summary>Populated only when ExistingAttendanceId resolves to tenant/user-matched WFH-owned attendance.</summary>
+    public string? WorkFromHomeRequestId { get; set; }
     public string? ExistingAttendanceId { get; set; }
     public string? ExistingStatus { get; set; }
     public string? RequestedLeaveStatus { get; set; }

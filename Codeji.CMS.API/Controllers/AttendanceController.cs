@@ -301,7 +301,7 @@ public class AdminAttendanceController : ControllerBase
         }
 
         var note = new Codeji.CMS.Repository.Entities.Notifications { NotificationId = Guid.NewGuid().ToString(), CompanyId = companyId, CreatedBy = request.ReviewedByUserId, CreatedDateTime = DateTime.UtcNow, TargetId = request.Id, Title = "Attendance correction reviewed", Body = $"Your attendance correction request for {request.AttendanceDate:dd MMM yyyy} was {model.Resolution.ToLowerInvariant()}.", NotificationType = Codeji.CMS.Utility.Enums.EnumsHelper.NotificationTypes.LeaveRequest };
-        if ((await notifications.AddOne(note)).Success) await userNotifications.AddOne(new Codeji.CMS.Repository.Entities.UserNotifications { UserNotificationId = Guid.NewGuid().ToString(), UserId = request.UserId, NotificationId = note.NotificationId, CreatedDateTime = DateTime.UtcNow });
+        if ((await notifications.AddOne(note)).Success) await userNotifications.AddOne(new Codeji.CMS.Repository.Entities.UserNotifications { UserNotificationId = Guid.NewGuid().ToString(), CompanyId = companyId, UserId = request.UserId, NotificationId = note.NotificationId, CreatedDateTime = DateTime.UtcNow });
         return Ok(new { request.Id, request.Status, request.Resolution, request.ReviewedAtUtc });
     }
 

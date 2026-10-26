@@ -23,6 +23,7 @@ public class CalendarController : ControllerBase
 
     [HttpPost]
     [Route("GetAllCalendarItems")]
+    [ModulePermission(AppModule.Calendar, Permission.View)]
     public async Task<Result<CalendarResponseDto>> GetAllCalendarItems([FromBody] CalendarFilters? filters)
     {
         Result<CalendarResponseDto> result = new()

@@ -159,7 +159,7 @@ public sealed class AttendanceReminderProcessor(
             };
             if (!(await notifications.AddOne(notification)).Success) continue;
 
-            var userItems = reviewers.Select(reviewer => new UserNotifications { UserNotificationId = Guid.NewGuid().ToString(), UserId = reviewer.UserId, NotificationId = notification.NotificationId, IsRead = false, CreatedDateTime = DateTime.UtcNow }).ToList();
+            var userItems = reviewers.Select(reviewer => new UserNotifications { UserNotificationId = Guid.NewGuid().ToString(), CompanyId = companyId, UserId = reviewer.UserId, NotificationId = notification.NotificationId, IsRead = false, CreatedDateTime = DateTime.UtcNow }).ToList();
             await userNotifications.AddMany(userItems);
             foreach (var item in userItems)
                 await notificationService.SendNotificationToUser(item.UserId, new NotificationViewModel { UserNotificationId = item.UserNotificationId, Title = notification.Title, Body = notification.Body, TargetId = targetId, SentBy = "system", SentDateTime = DateTime.UtcNow, NotificationTypes = EnumsHelper.NotificationTypes.Notice });
@@ -248,6 +248,7 @@ public sealed class AttendanceReminderProcessor(
             var userItems = recipientIds.Select(userId => new UserNotifications
             {
                 UserNotificationId = Guid.NewGuid().ToString(),
+                CompanyId = companyId,
                 UserId = userId,
                 NotificationId = notification.NotificationId,
                 IsRead = false,

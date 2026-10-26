@@ -175,6 +175,7 @@ builder.Services.AddHostedService<Codeji.CMS.Services.CareerPortal.CareerNotific
 builder.Services.AddHostedService<Codeji.CMS.Services.Recruitments.RecruitmentEmailOutboxWorker>();
 builder.Services.AddHostedService<Codeji.CMS.Services.Recruitments.RecruitmentRetentionWorker>();
 builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceOutboxWorker>();
+builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.WorkFromHomeOutboxWorker>();
 builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceReminderHostedService>();
 builder.Services.AddHostedService<EmployeeExitOutboxWorker>();
 builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.LeaveAttendanceReconciliationHostedService>();

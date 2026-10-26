@@ -10,7 +10,7 @@ namespace Codeji.CMS.Migrations.Migrations;
 /// the prior date).  Only WFH request-owned rows are changed, and a row is
 /// never moved onto an already occupied attendance date.
 /// </summary>
-public sealed class NormalizeLegacyWfhAttendanceBusinessDates : IMigration
+public sealed class NormalizeLegacyWfhAttendanceBusinessDates : IDataBackfillMigration
 {
     public string Id => $"2026-08-05-01-{typeof(NormalizeLegacyWfhAttendanceBusinessDates).Name}";
 

@@ -73,6 +73,7 @@ public class NoticeBoardServices : INoticeBoardService
         Notifications notification = new()
         {
             NotificationId = Guid.NewGuid().ToString(),
+            CompanyId = notice.CompanyId,
             Title = NotificationMessageTemplate.Create(EnumsHelper.NotificationTypes.Notice),
             Body = model.Title,
             TargetId = notice.NoticeId,
@@ -104,6 +105,7 @@ public class NoticeBoardServices : INoticeBoardService
                     UserNotifications userNotification = new()
                     {
                         UserNotificationId = Guid.NewGuid().ToString(),
+                        CompanyId = notice.CompanyId,
                         UserId = user.UserId,
                         NotificationId = notification.NotificationId,
                         IsRead = false,
@@ -114,7 +116,7 @@ public class NoticeBoardServices : INoticeBoardService
                     // add user notification entry
                     userNotifications.Add(userNotification);
 
-                    // queue notification task 
+                    // queue notification task
                     notificationsTasks.Add(_notificationService.SendNotificationToUser(user.UserId, new NotificationViewModel()
                     {
                         Title = notification.Title,

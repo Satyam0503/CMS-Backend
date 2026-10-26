@@ -161,32 +161,6 @@ stages:
                           Write-Host "Resolved: ApiHost=$apiHost"
 
                     - task: PowerShell@2
-                      displayName: "Run Database Migrations"
-                      inputs:
-                        targetType: "inline"
-                        script: |
-                          $migrationsDir = "$(Pipeline.Workspace)\backend-drop\Codeji.CMS.Migrations"
-                          if (-not (Test-Path "$migrationsDir\Codeji.CMS.Migrations.exe")) {
-                            throw "Migrations executable not found at $migrationsDir"
-                          }
-
-                          # Inject env-specific Mongo connection string into the runner's appsettings.json
-                          $appsettings = @{
-                              ConnectionStrings = @{
-                                  mongodb = "$(MongoDB.ConnectionString)"
-                              }
-                          }
-                          $appsettings | ConvertTo-Json -Depth 10 |
-                            Out-File "$migrationsDir\appsettings.json" -Encoding UTF8 -Force
-
-                          Write-Host "Running migrations..."
-                          & "$migrationsDir\Codeji.CMS.Migrations.exe"
-                          if ($LASTEXITCODE -ne 0) {
-                            throw "Migrations runner exited with code $LASTEXITCODE"
-                          }
-                          Write-Host "Migrations completed successfully"
-
-                    - task: PowerShell@2
                       displayName: "Generate appsettings.${{ env.environment }}.json"
                       inputs:
                         targetType: "filePath"
@@ -267,7 +241,8 @@ stages:
                           # still serving traffic (app pool stays stopped).
                           & "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/run-migrations.ps1" `
                             -MigrationsPath $migrationsPath `
-                            -MongoConnectionString "$(MongoDB.ConnectionString)"
+                            -MongoConnectionString "$(MongoDB.ConnectionString)" `
+                            -DeploymentSlot "${{ env.name }}"
 
                           # Start application pool
                           & "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/start-iis-apppool.ps1" -AppPoolName $siteName

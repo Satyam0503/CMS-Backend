@@ -66,7 +66,7 @@ public sealed class MyAttendanceController(IAdminAttendanceService attendance,
                 var note = new Notifications { NotificationId = Guid.NewGuid().ToString(), CompanyId = companyId, CreatedBy = userId, CreatedDateTime = DateTime.UtcNow, TargetId = $"attendance-review-{request.Id}", Title = "Attendance correction request", Body = $"An employee requested an attendance correction for {request.AttendanceDate:dd MMM yyyy}.", NotificationType = EnumsHelper.NotificationTypes.LeaveRequest };
                 if ((await notifications.AddOne(note)).Success)
                 {
-                    var items = recipients.Select(id => new UserNotifications { UserNotificationId = Guid.NewGuid().ToString(), UserId = id, NotificationId = note.NotificationId, CreatedDateTime = DateTime.UtcNow }).ToList();
+                    var items = recipients.Select(id => new UserNotifications { UserNotificationId = Guid.NewGuid().ToString(), CompanyId = companyId, UserId = id, NotificationId = note.NotificationId, CreatedDateTime = DateTime.UtcNow }).ToList();
                     await userNotifications.AddMany(items);
                     await Task.WhenAll(items.Select(item => notificationService.SendNotificationToUser(item.UserId, new Codeji.CMS.DTO.ResponseModel.NotificationViewModel { UserNotificationId = item.UserNotificationId, Title = note.Title, Body = note.Body, TargetId = note.TargetId, SentBy = userId, SentDateTime = DateTime.UtcNow, NotificationTypes = note.NotificationType })));
                 }

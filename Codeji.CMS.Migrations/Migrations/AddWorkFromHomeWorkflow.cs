@@ -71,7 +71,26 @@ public sealed class AddWorkFromHomeWorkflow : IMigration
     private static async Task CreateIndex(IMongoDatabase db, string collection, string name, params string[] fields) => await db.GetCollection<BsonDocument>(collection).Indexes.CreateOneAsync(new CreateIndexModel<BsonDocument>(new BsonDocument(fields.Select(x => new BsonElement(x, 1))), new CreateIndexOptions { Name = name }));
     private static async Task CreateUnique(IMongoDatabase db, string collection, string name, params string[] fields)
     {
-        try { await db.GetCollection<BsonDocument>(collection).Indexes.CreateOneAsync(new CreateIndexModel<BsonDocument>(new BsonDocument(fields.Select(x => new BsonElement(x, 1))), new CreateIndexOptions { Name = name, Unique = true })); }
-        catch (MongoCommandException ex) when (ex.Code == 11000) { Console.WriteLine($"Skipped {name}: legacy duplicate keys require review."); }
+        try
+        {
+            await db.GetCollection<BsonDocument>(collection).Indexes.CreateOneAsync(
+                new CreateIndexModel<BsonDocument>(
+                    new BsonDocument(fields.Select(x => new BsonElement(x, 1))),
+                    new CreateIndexOptions<BsonDocument>
+                    {
+                        Name = name,
+                        Unique = true,
+                        PartialFilterExpression = new BsonDocument("CompanyId", new BsonDocument
+                        {
+                            { "$type", "string" },
+                            { "$gt", "" }
+                        })
+                    }));
+        }
+        catch (MongoCommandException ex) when (ex.Code == 11000)
+        {
+            throw new InvalidOperationException(
+                $"Cannot apply required WFH unique index '{name}' on '{collection}' because duplicate keys exist. Resolve the duplicates before deployment; the migration was not recorded.", ex);
+        }
     }
 }

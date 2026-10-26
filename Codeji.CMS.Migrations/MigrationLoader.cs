@@ -13,6 +13,7 @@ public static class MigrationLoader
             .GetTypes()
             .Where(t =>
                 migrationType.IsAssignableFrom(t) &&
+                !typeof(IRetiredMigration).IsAssignableFrom(t) &&
                 !t.IsAbstract &&
                 !t.IsInterface)
             .Select(t => (IMigration)Activator.CreateInstance(t)!)

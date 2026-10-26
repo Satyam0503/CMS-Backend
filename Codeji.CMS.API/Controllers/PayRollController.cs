@@ -48,6 +48,7 @@ public class PayRollController : BaseApiController
 
     [HttpPost]
     [Route("GeneratePaySlip")]
+    [ModulePermission(AppModule.PayRoll, Permission.View)]
     public async Task<ActionResult> GetSalarySlip(PayslipRequestDto model)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);

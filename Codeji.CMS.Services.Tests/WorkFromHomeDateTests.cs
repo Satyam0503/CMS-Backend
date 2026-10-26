@@ -27,6 +27,49 @@ public class WorkFromHomeDateTests
         Assert.Equal(2m, usage);
     }
 
+    [Theory]
+    [InlineData("FullDay", 1)]
+    [InlineData("FirstHalf", .5)]
+    [InlineData("SecondHalf", .5)]
+    public void WeeklyUsage_ClipsAtMondayBoundary(string durationType, decimal expected)
+    {
+        // Week periods are Monday through Sunday. This request crosses Sunday/Monday.
+        var monday = new DateTime(2026, 8, 10);
+
+        var usage = WorkFromHomeService.WeeklyUsageForPeriod(
+            monday.AddDays(-1), monday, durationType, monday);
+
+        Assert.Equal(expected, usage);
+    }
+
+    [Theory]
+    [InlineData("FullDay", 1)]
+    [InlineData("FirstHalf", .5)]
+    [InlineData("SecondHalf", .5)]
+    public void MonthlyUsage_ClipsAtMonthEndAndCountsHalfDaysFractionally(string durationType, decimal expected)
+    {
+        var month = new DateTime(2026, 8, 1);
+
+        var usage = WorkFromHomeService.MonthlyUsageForPeriod(
+            new DateTime(2026, 7, 31), new DateTime(2026, 8, 1), durationType, month);
+
+        Assert.Equal(expected, usage);
+    }
+
+    [Theory]
+    [InlineData("FullDay", 1)]
+    [InlineData("FirstHalf", .5)]
+    [InlineData("SecondHalf", .5)]
+    public void MonthlyUsage_IncludesLastCalendarDayOfMonth(string durationType, decimal expected)
+    {
+        var month = new DateTime(2026, 8, 1);
+
+        var usage = WorkFromHomeService.MonthlyUsageForPeriod(
+            new DateTime(2026, 8, 31), new DateTime(2026, 9, 1), durationType, month);
+
+        Assert.Equal(expected, usage);
+    }
+
     [Fact]
     public void BusinessDateUtc_PreservesTheSelectedCalendarDay()
     {

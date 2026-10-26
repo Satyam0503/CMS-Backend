@@ -55,7 +55,7 @@ public sealed class EmployeeExitOutboxProcessor(
                     var notification = new Notifications { CompanyId = item.CompanyId, Title = item.Title, Body = item.Body ?? string.Empty, TargetId = item.TargetId ?? item.EmployeeExitId, NotificationType = EnumsHelper.NotificationTypes.Notice, CreatedDateTime = now, CreatedBy = item.CreatedBy };
                     var savedNotification = await notificationRecords.AddOne(notification);
                     if (!savedNotification.Success) throw new InvalidOperationException(savedNotification.Message ?? "Unable to persist employee-exit notification.");
-                    var recipientNotification = new UserNotifications { UserId = item.RecipientUserId, NotificationId = notification.NotificationId, IsRead = false, CreatedDateTime = now };
+                    var recipientNotification = new UserNotifications { CompanyId = item.CompanyId, UserId = item.RecipientUserId, NotificationId = notification.NotificationId, IsRead = false, CreatedDateTime = now };
                     var savedRecipient = await userNotifications.AddOne(recipientNotification);
                     if (!savedRecipient.Success) throw new InvalidOperationException(savedRecipient.Message ?? "Unable to persist recipient notification.");
                     // A persisted unread notification is the source of truth. Live delivery is an enhancement.

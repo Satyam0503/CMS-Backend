@@ -9,7 +9,11 @@ namespace Codeji.CMS.Migrations.Migrations;
 /// Consolidates legacy duplicate attendance documents and enforces the same
 /// UserId + Date identity used by AttendanceRepository.
 /// </summary>
-public class NormalizeAttendanceUniqueRecords : IMigration
+/// <summary>
+/// Retired: this legacy migration merged rows by UserId + Date without CompanyId,
+/// which could combine tenant data. Tenant-scoped index setup supersedes it.
+/// </summary>
+public class NormalizeAttendanceUniqueRecords : IRetiredMigration
 {
     public string Id => $"2026-07-21-02-{typeof(NormalizeAttendanceUniqueRecords).Name}";
 

@@ -24,6 +24,8 @@ public sealed class AttendanceDaySegment
     public string SourceType { get; set; } = string.Empty;
     public string SourceId { get; set; } = string.Empty;
     public int SourceVersion { get; set; }
+    /// <summary>Optimistic concurrency token; absent legacy values deserialize as zero.</summary>
+    public long Version { get; set; }
     public DateTime? CheckInTime { get; set; }
     public DateTime? CheckOutTime { get; set; }
     public decimal? TotalHours { get; set; }

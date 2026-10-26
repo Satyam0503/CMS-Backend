@@ -16,7 +16,11 @@ param(
     [string]$MigrationsPath,
 
     [Parameter(Mandatory = $true)]
-    [string]$MongoConnectionString
+    [string]$MongoConnectionString,
+
+    [Parameter(Mandatory = $true)]
+    [ValidateSet("dep", "test", "prod")]
+    [string]$DeploymentSlot
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,6 +37,7 @@ if (-not (Test-Path $dll)) {
 Write-Host "=========================================="
 Write-Host "Running database migrations"
 Write-Host "   Path: $MigrationsPath"
+Write-Host "   Slot: $DeploymentSlot"
 Write-Host "=========================================="
 
 # Overwrite appsettings.json with the environment's connection string.
@@ -53,7 +58,12 @@ $json = $appsettings | ConvertTo-Json -Depth 10
 # Invoke the runner. The runner is a console app — stdout streams here, exit code propagates.
 Push-Location $MigrationsPath
 try {
-    & dotnet "Codeji.CMS.Migrations.dll"
+    $migrationTarget = switch ($DeploymentSlot) {
+        "dep" { "Development" }
+        "test" { "Uat" }
+        "prod" { "Production" }
+    }
+    & dotnet "Codeji.CMS.Migrations.dll" --deployment-target $migrationTarget
     $exitCode = $LASTEXITCODE
 }
 finally {

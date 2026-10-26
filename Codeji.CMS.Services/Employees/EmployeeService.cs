@@ -941,6 +941,43 @@ namespace Codeji.CMS.Services.Employees
                 };
             }
 
+            string oldEmployeeId = employeeToUpdate.EmployeeId ?? string.Empty;
+            bool employeeIdChanged = false;
+            string? newEmployeeId = null;
+
+            if (!string.IsNullOrWhiteSpace(user.EmployeeId))
+            {
+                newEmployeeId = user.EmployeeId.Trim();
+                if (!string.Equals(newEmployeeId, oldEmployeeId, StringComparison.OrdinalIgnoreCase))
+                {
+                    bool idExists = await _employeeRepository.Exist(e =>
+                        e.CompanyId == companyId
+                        && e.UserId != userId
+                        && e.EmployeeId.Equals(newEmployeeId, StringComparison.OrdinalIgnoreCase)
+                        && !e.IsDeleted
+                    );
+                    if (idExists)
+                    {
+                        return new Result<UserModel>
+                        {
+                            Success = false,
+                            StatusCode = CustomStatusCode.EmployeeIdAlreadyExist,
+                            Message = $"Employee ID {newEmployeeId} is already assigned to another employee."
+                        };
+                    }
+                    user.EmployeeId = newEmployeeId;
+                    employeeIdChanged = true;
+                }
+                else
+                {
+                    user.EmployeeId = employeeToUpdate.EmployeeId;
+                }
+            }
+            else
+            {
+                user.EmployeeId = employeeToUpdate.EmployeeId;
+            }
+
             if (!string.IsNullOrWhiteSpace(user.RoleId))
             {
                 Roles? assignedRole = await _rolesRepository.FirstOrDefault(x =>
@@ -1067,6 +1104,11 @@ namespace Codeji.CMS.Services.Employees
             Expression<Func<EmpUser, bool>> whereCondition = x =>
                 x.UserId == userId && x.CompanyId == companyId && !x.IsDeleted;
             Result result = await _employeeRepository.UpdateMany(whereCondition, data, true);
+
+            if (employeeIdChanged && !string.IsNullOrWhiteSpace(newEmployeeId))
+            {
+                await CascadeEmployeeIdUpdateAsync(companyId, userId, oldEmployeeId, newEmployeeId);
+            }
 
             if (
                 !string.IsNullOrWhiteSpace(user.DateOfJoining)
@@ -1491,6 +1533,8 @@ namespace Codeji.CMS.Services.Employees
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(actorUserId))
                 return new Result { Success = false, Message = "LIFECYCLE_CONTEXT_REQUIRED" };
             if (
@@ -3028,7 +3072,7 @@ namespace Codeji.CMS.Services.Employees
                 if (!await IsHrExitActor(companyId, actorUserId))
                     return new Result { Success = false, Message = "EXIT_CANCEL_FORBIDDEN" };
             }
-            if (selfOnly && exit.Status == "NoticePeriod")
+            if (selfOnly && (exit.Status == "NoticePeriod" || exit.Status == "AwaitingEmployeeNoticeOffer"))
             {
                 if (exit.Withdrawal is not null && exit.Withdrawal.Status == "Pending")
                     return new Result
@@ -3457,6 +3501,72 @@ namespace Codeji.CMS.Services.Employees
             }
         }
 
+        private async Task QueueNoticeOfferDecisionNotifications(
+            string companyId,
+            string actorUserId,
+            EmployeeExit exit,
+            bool accepted,
+            EmployeeExitNoticeAdjustment adjustment
+        )
+        {
+            if (_employeeExitOutboxRepository is null)
+                return;
+
+            var recipients = new List<string>();
+            if (
+                !string.IsNullOrWhiteSpace(exit.ReportingManagerUserId)
+                && exit.ReportingManagerUserId != exit.EmployeeUserId
+            )
+                recipients.Add(exit.ReportingManagerUserId);
+
+            var employees = await _employeeRepository.GetAll(x =>
+                x.CompanyId == companyId && x.Status && !x.IsDeleted
+            );
+            foreach (var employee in employees.Where(x => x.UserId != exit.EmployeeUserId))
+            {
+                if (await IsHrExitActor(companyId, employee.UserId))
+                    recipients.Add(employee.UserId);
+            }
+
+            var employeeUser = await _employeeRepository.FirstOrDefault(x =>
+                x.CompanyId == companyId && x.UserId == exit.EmployeeUserId && !x.IsDeleted
+            );
+            var employeeName = employeeUser is null
+                ? "An employee"
+                : string.Join(
+                    " ",
+                    new[] { employeeUser.FirstName, employeeUser.LastName }.Where(x =>
+                        !string.IsNullOrWhiteSpace(x)
+                    )
+                );
+
+            var title = accepted
+                ? "Notice adjustment offer accepted"
+                : "Notice adjustment offer declined";
+            var body = accepted
+                ? $"{employeeName} accepted the notice offer ({adjustment.Type}). Confirmed last working date: {exit.LastWorkingDate:yyyy-MM-dd}."
+                : $"{employeeName} declined the notice offer ({adjustment.Type}). Original last working date {exit.LastWorkingDate:yyyy-MM-dd} is retained.";
+
+            foreach (var recipientUserId in recipients.Distinct())
+            {
+                await _employeeExitOutboxRepository.AddOne(
+                    new EmployeeExitOutbox
+                    {
+                        CompanyId = companyId,
+                        CreatedBy = actorUserId,
+                        EmployeeExitId = exit.EmployeeExitId,
+                        EventType = accepted
+                            ? "EmployeeExitNoticeOfferAccepted"
+                            : "EmployeeExitNoticeOfferDeclined",
+                        RecipientUserId = recipientUserId,
+                        Title = title,
+                        Body = body,
+                        TargetId = $"employee-exit-{exit.EmployeeUserId}",
+                    }
+                );
+            }
+        }
+
         private async Task<bool> CanCompleteExitClearance(
             string companyId,
             string actorUserId,
@@ -3499,7 +3609,7 @@ namespace Codeji.CMS.Services.Employees
                 exit is null
                 || exit.Version != request.Version
                 || exit.Status
-                    is not ("PendingManagerApproval" or "PendingHrApproval" or "NoticePeriod")
+                    is not ("PendingManagerApproval" or "PendingHrApproval" or "NoticePeriod" or "AwaitingEmployeeNoticeOffer")
             )
                 return new Result { Success = false, Message = "EXIT_DATE_CHANGE_NOT_ALLOWED" };
             var employee = await _employeeRepository.FirstOrDefault(x =>
@@ -3619,7 +3729,7 @@ namespace Codeji.CMS.Services.Employees
                 exit is null
                 || exit.Version != request.Version
                 || exit.Status
-                    is not ("PendingManagerApproval" or "PendingHrApproval" or "NoticePeriod")
+                    is not ("PendingManagerApproval" or "PendingHrApproval" or "NoticePeriod" or "AwaitingEmployeeNoticeOffer")
             )
                 return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             if (exit.EmployeeUserId != actorUserId && !await IsHrExitActor(companyId, actorUserId))
@@ -3873,7 +3983,7 @@ namespace Codeji.CMS.Services.Employees
                             $"{decisionType}; recovery={recoveryAmount}; expires={adjustment.ExpiresAtUtc:yyyy-MM-dd HH:mm:ss}",
                     }
                 );
-                return await _employeeExitRepository.Update(
+                var updated = await _employeeExitRepository.Update(
                     Builders<EmployeeExit>.Filter.Where(x =>
                         x.CompanyId == companyId
                         && x.EmployeeExitId == exit.EmployeeExitId
@@ -3882,6 +3992,24 @@ namespace Codeji.CMS.Services.Employees
                     ),
                     exit
                 );
+                if (updated.Success && _employeeExitOutboxRepository is not null)
+                {
+                    await _employeeExitOutboxRepository.AddOne(
+                        new EmployeeExitOutbox
+                        {
+                            CompanyId = companyId,
+                            CreatedBy = actorUserId,
+                            EmployeeExitId = exit.EmployeeExitId,
+                            EventType = "EmployeeExitNoticeOfferCreated",
+                            RecipientUserId = exit.EmployeeUserId,
+                            Title = "Notice offer awaiting your decision",
+                            Body =
+                                $"HR has reviewed your notice adjustment request and prepared an offer ({decisionType}). Please review and submit your decision.",
+                            TargetId = $"employee-exit-{exit.EmployeeUserId}",
+                        }
+                    );
+                }
+                return updated;
             }
             adjustment.Status = request.Approve ? "Approved" : "Declined";
             adjustment.DecisionByUserId = actorUserId;
@@ -3961,6 +4089,28 @@ namespace Codeji.CMS.Services.Employees
                 ),
                 exit
             );
+            if (saved.Success && _employeeExitOutboxRepository is not null)
+            {
+                await _employeeExitOutboxRepository.AddOne(
+                    new EmployeeExitOutbox
+                    {
+                        CompanyId = companyId,
+                        CreatedBy = actorUserId,
+                        EmployeeExitId = exit.EmployeeExitId,
+                        EventType = request.Approve
+                            ? "EmployeeExitNoticeAdjustmentApproved"
+                            : "EmployeeExitNoticeAdjustmentDeclined",
+                        RecipientUserId = exit.EmployeeUserId,
+                        Title = request.Approve
+                            ? "Notice adjustment approved"
+                            : "Notice adjustment declined",
+                        Body = request.Approve
+                            ? $"HR approved your notice change ({decisionType}). Confirmed last working date: {exit.LastWorkingDate:yyyy-MM-dd}."
+                            : $"HR declined your notice change request. Original last working date {exit.LastWorkingDate:yyyy-MM-dd} is retained. {(string.IsNullOrWhiteSpace(request.Reason) ? "" : $"Reason: {request.Reason.Trim()}")}",
+                        TargetId = $"employee-exit-{exit.EmployeeUserId}",
+                    }
+                );
+            }
             if (!saved.Success || !request.Approve)
                 return saved;
             var employee = await _employeeRepository.FirstOrDefault(x =>
@@ -4066,6 +4216,16 @@ namespace Codeji.CMS.Services.Employees
                 ),
                 exit
             );
+            if (saved.Success)
+            {
+                await QueueNoticeOfferDecisionNotifications(
+                    companyId,
+                    actorUserId,
+                    exit,
+                    request.Accept,
+                    adjustment
+                );
+            }
             if (!saved.Success || !request.Accept)
                 return saved;
             var employee = await _employeeRepository.FirstOrDefault(x =>
@@ -4177,6 +4337,8 @@ namespace Codeji.CMS.Services.Employees
         public async Task<Result> UpsertEmployeeExitPolicy(UpsertEmployeeExitPolicyRequest request)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (
                 request?.Features is not null
@@ -4440,6 +4602,8 @@ namespace Codeji.CMS.Services.Employees
         public async Task<Result<EmployeeExitPolicy>> GetEmployeeExitPolicy(string policyId)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result<EmployeeExitPolicy> { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (_employeeExitPolicyRepository is null || string.IsNullOrWhiteSpace(policyId))
                 return new Result<EmployeeExitPolicy>
@@ -4519,6 +4683,8 @@ namespace Codeji.CMS.Services.Employees
         public async Task<Result<EmployeeExitPolicy>> GetEmployeeExitPolicies()
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result<EmployeeExitPolicy> { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (
                 !await CanManageExitOperation(
@@ -4545,6 +4711,8 @@ namespace Codeji.CMS.Services.Employees
         public async Task<Result<EmployeeExitClearanceTemplate>> GetEmployeeExitClearanceTemplates()
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result<EmployeeExitClearanceTemplate> { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (
                 !await CanManageExitOperation(
@@ -7071,6 +7239,8 @@ namespace Codeji.CMS.Services.Employees
         public async Task<Result<EmployeeExitCaseDto>> GetEmployeeExitCase(string employeeUserId)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result<EmployeeExitCaseDto> { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (string.IsNullOrWhiteSpace(employeeUserId))
                 return new Result<EmployeeExitCaseDto>
@@ -7353,7 +7523,7 @@ namespace Codeji.CMS.Services.Employees
                 {
                     "PendingManagerApproval" or "PendingHrApproval" => ["Withdraw"],
                     "DiscussionRequested" => ["RespondDiscussion", "Withdraw"],
-                    "NoticePeriod" => ["Withdraw"],
+                    "NoticePeriod" or "AwaitingEmployeeNoticeOffer" => ["Withdraw"],
                     _ => [],
                 },
                 PendingHandoverCount = exit.HandoverTasks.Count(x =>
@@ -7373,7 +7543,7 @@ namespace Codeji.CMS.Services.Employees
                 ),
             };
             if (
-                exit.Status == "NoticePeriod"
+                (exit.Status is "NoticePeriod" or "AwaitingEmployeeNoticeOffer")
                 && exit.HandoverTasks.Any(x =>
                     x.AssigneeUserId == actorUserId
                     && x.Status is not ("Submitted" or "Approve" or "Approved" or "Waived")
@@ -8141,14 +8311,14 @@ namespace Codeji.CMS.Services.Employees
                 await _employeeExitRepository.FirstOrDefault(x =>
                     x.CompanyId == companyId
                     && x.EmployeeExitId == request.EmployeeExitId
-                    && x.Status == "NoticePeriod"
+                    && (x.Status == "NoticePeriod" || x.Status == "AwaitingEmployeeNoticeOffer")
                     && x.IsActive
                     && !x.IsDeleted
                 )
                 ?? await _employeeExitRepository.FirstOrDefault(x =>
                     x.CompanyId == companyId
                     && x.EmployeeUserId == request.EmployeeUserId
-                    && x.Status == "NoticePeriod"
+                    && (x.Status == "NoticePeriod" || x.Status == "AwaitingEmployeeNoticeOffer")
                     && x.IsActive
                     && !x.IsDeleted
                 );
@@ -8310,12 +8480,12 @@ namespace Codeji.CMS.Services.Employees
                     Success = false,
                     Message = "NOTICE_ADJUSTMENT_AWAITING_EMPLOYEE_DECISION",
                 };
-            // ISSUE #2: Block completion if there are unresolved declined notice adjustments
-            if (exit.NoticeAdjustments.Any(x => x.Status == "Declined"))
+            // Block completion if an adjustment request is still unreviewed by HR
+            if (exit.NoticeAdjustments.Any(x => x.Status == "Pending"))
                 return new Result
                 {
                     Success = false,
-                    Message = "DECLINED_NOTICE_ADJUSTMENT_UNRESOLVED",
+                    Message = "NOTICE_ADJUSTMENT_PENDING_HR_DECISION",
                 };
             // A final-month payroll cannot be published while that calendar month is still
             // in progress. Blocking employment completion on it therefore makes a same-day
@@ -8685,6 +8855,14 @@ namespace Codeji.CMS.Services.Employees
                 x.CompanyId == companyId && x.UserId == exit.EmployeeUserId && x.IsProcessed
             );
             var payroll = payrolls.OrderByDescending(x => x.PayMonth).FirstOrDefault();
+            if (payroll is null)
+            {
+                // Fall back to active compensation structure if no processed monthly payroll run exists yet
+                var fallbackPayrolls = await _employeePayrollRepository.GetAll(x =>
+                    x.CompanyId == companyId && x.UserId == exit.EmployeeUserId
+                );
+                payroll = fallbackPayrolls.OrderByDescending(x => x.CreatedAt).FirstOrDefault();
+            }
             if (payroll is null)
                 return (false, 0, 0);
 
@@ -10077,15 +10255,16 @@ namespace Codeji.CMS.Services.Employees
             string userId
         )
         {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
             var now = DateTime.UtcNow;
             Expression<Func<UserNotifications, bool>> allCondition = x =>
-                x.UserId == userId
+                x.CompanyId == companyId && x.UserId == userId
                 && x.IsDismissed != true
                 && !(x.SnoozedUntilUtc > now);
 
             int userNotificationsCount = await _userNotificationRepository.Count(allCondition);
             int unReadNotificationCount = await _userNotificationRepository.Count(x =>
-                x.UserId == userId
+                x.CompanyId == companyId && x.UserId == userId
                 && x.IsRead != true
                 && x.IsDismissed != true
                 && !(x.SnoozedUntilUtc > now)
@@ -10121,7 +10300,7 @@ namespace Codeji.CMS.Services.Employees
 
             string[] notificationsId = userNotifications.Select(x => x.NotificationId).Distinct().ToArray();
             IEnumerable<Notifications> notifications = await _notificationsRepository.GetAll(x =>
-                notificationsId.Contains(x.NotificationId)
+                x.CompanyId == companyId && notificationsId.Contains(x.NotificationId)
             );
             var notifDict = notifications.ToDictionary(x => x.NotificationId);
 
@@ -10154,15 +10333,16 @@ namespace Codeji.CMS.Services.Employees
 
         public async Task<Result> MarkNotificationAsRead(string userId, string userNotificationId)
         {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
             bool isExist = await _userNotificationRepository.Exist(x =>
-                x.UserNotificationId == userNotificationId
+                x.CompanyId == companyId && x.UserId == userId && x.UserNotificationId == userNotificationId
             );
             if (!isExist)
             {
                 return new Result();
             }
             Expression<Func<UserNotifications, bool>> whereCondition = x =>
-                x.UserId == userId && x.UserNotificationId == userNotificationId;
+                x.CompanyId == companyId && x.UserId == userId && x.UserNotificationId == userNotificationId;
             return await _userNotificationRepository.UpdateMany(
                 whereCondition,
                 Builders<UserNotifications>.Update.Set(x => x.IsRead, true)
@@ -10173,30 +10353,39 @@ namespace Codeji.CMS.Services.Employees
             string userId,
             string userNotificationId,
             DateTime untilUtc
-        ) =>
+        )
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            return
             _userNotificationRepository.UpdateMany(
                 Builders<UserNotifications>.Filter.Where(x =>
-                    x.UserId == userId && x.UserNotificationId == userNotificationId
+                    x.CompanyId == companyId && x.UserId == userId && x.UserNotificationId == userNotificationId
                 ),
                 Builders<UserNotifications>
                     .Update.Set(x => x.SnoozedUntilUtc, untilUtc)
                     .Set(x => x.IsRead, true)
             );
+        }
 
-        public Task<Result> DismissNotification(string userId, string userNotificationId) =>
+        public Task<Result> DismissNotification(string userId, string userNotificationId)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            return
             _userNotificationRepository.UpdateMany(
                 Builders<UserNotifications>.Filter.Where(x =>
-                    x.UserId == userId && x.UserNotificationId == userNotificationId
+                    x.CompanyId == companyId && x.UserId == userId && x.UserNotificationId == userNotificationId
                 ),
                 Builders<UserNotifications>
                     .Update.Set(x => x.IsDismissed, true)
                     .Set(x => x.IsRead, true)
             );
+        }
 
         public async Task<Result> MarkAllNotificationAsRead(string userId)
         {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
             Expression<Func<UserNotifications, bool>> whereCondition = x =>
-                x.UserId == userId && !x.IsRead;
+                x.CompanyId == companyId && x.UserId == userId && !x.IsRead;
             return await _userNotificationRepository.UpdateMany(
                 whereCondition,
                 Builders<UserNotifications>.Update.Set(x => x.IsRead, true)
@@ -10300,6 +10489,7 @@ namespace Codeji.CMS.Services.Employees
                     Notifications notification = new()
                     {
                         NotificationId = Guid.NewGuid().ToString(),
+                        CompanyId = employee.CompanyId,
                         CreatedDateTime = DateTime.UtcNow,
                         NotificationType = EnumsHelper.NotificationTypes.BirthDay,
                         Body = $"{employee.FirstName} {employee.LastName}",
@@ -10310,6 +10500,7 @@ namespace Codeji.CMS.Services.Employees
                         UserNotifications userNotification = new()
                         {
                             UserNotificationId = Guid.NewGuid().ToString(),
+                            CompanyId = emp.CompanyId,
                             UserId = emp.UserId,
                             NotificationId = notification.NotificationId,
                             IsRead = false,
@@ -10363,6 +10554,7 @@ namespace Codeji.CMS.Services.Employees
                     Notifications notification = new()
                     {
                         NotificationId = Guid.NewGuid().ToString(),
+                        CompanyId = employee.CompanyId,
                         CreatedDateTime = DateTime.UtcNow,
                         NotificationType = EnumsHelper.NotificationTypes.WorkAnniversary,
                         Body = $"{employee.FirstName} {employee.LastName}",
@@ -10373,6 +10565,7 @@ namespace Codeji.CMS.Services.Employees
                         UserNotifications userNotification = new()
                         {
                             UserNotificationId = Guid.NewGuid().ToString(),
+                            CompanyId = emp.CompanyId,
                             UserId = emp.UserId,
                             NotificationId = notification.NotificationId,
                             IsRead = false,
@@ -10834,6 +11027,196 @@ namespace Codeji.CMS.Services.Employees
                     Format = FormatEmployeeId(sequence.Prefix, 1),
                 },
             };
+
+        private async Task CascadeEmployeeIdUpdateAsync(
+            string companyId,
+            string userId,
+            string oldEmployeeId,
+            string newEmployeeId
+        )
+        {
+            var database = _employeeRepository.GetCollection().Database;
+
+            // 1. EmployeeSalaryStructure
+            try
+            {
+                var salaryCol = database.GetCollection<BsonDocument>("EmployeeSalaryStructure");
+                var filter = Builders<BsonDocument>.Filter.And(
+                    Builders<BsonDocument>.Filter.Eq("CompanyId", companyId),
+                    Builders<BsonDocument>.Filter.Or(
+                        Builders<BsonDocument>.Filter.Eq("UserId", userId),
+                        Builders<BsonDocument>.Filter.Eq("EmployeeId", oldEmployeeId)
+                    )
+                );
+                await salaryCol.UpdateManyAsync(
+                    filter,
+                    Builders<BsonDocument>.Update.Set("EmployeeId", newEmployeeId)
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cascade EmployeeId update to EmployeeSalaryStructure for user {UserId}", userId);
+            }
+
+            // 2. EmployeePayrollAssignment
+            try
+            {
+                var assignmentCol = database.GetCollection<BsonDocument>("EmployeePayrollAssignment");
+                var filter = Builders<BsonDocument>.Filter.And(
+                    Builders<BsonDocument>.Filter.Eq("CompanyId", companyId),
+                    Builders<BsonDocument>.Filter.Eq("EmployeeId", oldEmployeeId)
+                );
+                await assignmentCol.UpdateManyAsync(
+                    filter,
+                    Builders<BsonDocument>.Update.Set("EmployeeId", newEmployeeId)
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cascade EmployeeId update to EmployeePayrollAssignment for user {UserId}", userId);
+            }
+
+            // 3. Attendance (collection named "Attendance")
+            try
+            {
+                var attCol = database.GetCollection<BsonDocument>("Attendance");
+                var filter = Builders<BsonDocument>.Filter.And(
+                    Builders<BsonDocument>.Filter.Eq("CompanyId", companyId),
+                    Builders<BsonDocument>.Filter.Eq("UserId", userId)
+                );
+                await attCol.UpdateManyAsync(
+                    filter,
+                    Builders<BsonDocument>.Update.Set("EmployeeId", newEmployeeId)
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cascade EmployeeId update to Attendance for user {UserId}", userId);
+            }
+
+            // 4. AttendanceDaySegment
+            try
+            {
+                var segCol = database.GetCollection<BsonDocument>("AttendanceDaySegment");
+                var filter = Builders<BsonDocument>.Filter.And(
+                    Builders<BsonDocument>.Filter.Eq("CompanyId", companyId),
+                    Builders<BsonDocument>.Filter.Eq("UserId", userId)
+                );
+                await segCol.UpdateManyAsync(
+                    filter,
+                    Builders<BsonDocument>.Update.Set("EmployeeId", newEmployeeId)
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cascade EmployeeId update to AttendanceDaySegment for user {UserId}", userId);
+            }
+
+            // 5. MonthlyAttendanceSummary
+            try
+            {
+                var sumCol = database.GetCollection<BsonDocument>("MonthlyAttendanceSummary");
+                var filter = Builders<BsonDocument>.Filter.And(
+                    Builders<BsonDocument>.Filter.Eq("CompanyId", companyId),
+                    Builders<BsonDocument>.Filter.Eq("UserId", userId)
+                );
+                await sumCol.UpdateManyAsync(
+                    filter,
+                    Builders<BsonDocument>.Update.Set("EmployeeId", newEmployeeId)
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cascade EmployeeId update to MonthlyAttendanceSummary for user {UserId}", userId);
+            }
+
+            // 6. WorkFromHomeRequest
+            try
+            {
+                if (_workFromHomeRequestRepository != null)
+                {
+                    await _workFromHomeRequestRepository.GetCollection().UpdateManyAsync(
+                        Builders<WorkFromHomeRequest>.Filter.Where(x => x.CompanyId == companyId && x.UserId == userId),
+                        Builders<WorkFromHomeRequest>.Update.Set(x => x.EmployeeId, newEmployeeId)
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cascade EmployeeId update to WorkFromHomeRequest for user {UserId}", userId);
+            }
+
+            // 7. AttendancePayrollException
+            try
+            {
+                var excCol = database.GetCollection<BsonDocument>("AttendancePayrollException");
+                var filter = Builders<BsonDocument>.Filter.And(
+                    Builders<BsonDocument>.Filter.Eq("CompanyId", companyId),
+                    Builders<BsonDocument>.Filter.Eq("UserId", userId)
+                );
+                await excCol.UpdateManyAsync(
+                    filter,
+                    Builders<BsonDocument>.Update.Set("EmployeeId", newEmployeeId)
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cascade EmployeeId update to AttendancePayrollException for user {UserId}", userId);
+            }
+
+            // 8. EmpPayRoll
+            try
+            {
+                if (_employeePayrollRepository != null)
+                {
+                    await _employeePayrollRepository.GetCollection().UpdateManyAsync(
+                        Builders<EmpPayRoll>.Filter.Where(x => x.CompanyId == companyId && (x.UserId == userId || (!string.IsNullOrEmpty(oldEmployeeId) && x.EmployeeId == oldEmployeeId))),
+                        Builders<EmpPayRoll>.Update.Set(x => x.EmployeeId, newEmployeeId)
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cascade EmployeeId update to EmpPayRoll for user {UserId}", userId);
+            }
+
+            // 9. PayrollRunEmployee
+            try
+            {
+                if (_payrollRunEmployeesRepository != null && !string.IsNullOrEmpty(oldEmployeeId))
+                {
+                    await _payrollRunEmployeesRepository.GetCollection().UpdateManyAsync(
+                        Builders<PayrollRunEmployee>.Filter.Where(x => x.CompanyId == companyId && x.EmployeeId == oldEmployeeId),
+                        Builders<PayrollRunEmployee>.Update.Set(x => x.EmployeeId, newEmployeeId)
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cascade EmployeeId update to PayrollRunEmployee for user {UserId}", userId);
+            }
+
+            // 10. Sync EmployeeIdSequence
+            try
+            {
+                var sequence = await EnsureEmployeeIdSequence(companyId);
+                if (newEmployeeId.StartsWith(sequence.Prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    var numPart = newEmployeeId[sequence.Prefix.Length..];
+                    if (int.TryParse(numPart, out int num) && num >= sequence.NextNumber)
+                    {
+                        await _employeeIdSequenceRepository.GetCollection().UpdateOneAsync(
+                            Builders<EmployeeIdSequence>.Filter.Eq(x => x.SequenceId, sequence.SequenceId),
+                            Builders<EmployeeIdSequence>.Update.Set(x => x.NextNumber, num + 1).Set(x => x.UpdatedDate, DateTime.UtcNow)
+                        );
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to sync EmployeeIdSequence for CompanyId {CompanyId} after updating to {NewEmployeeId}", companyId, newEmployeeId);
+            }
+        }
 
         public async Task<Result> ResendInviteLink(string userId, string currentUserId)
         {

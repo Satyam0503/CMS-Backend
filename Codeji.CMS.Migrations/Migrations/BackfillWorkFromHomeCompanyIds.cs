@@ -10,7 +10,7 @@ namespace Codeji.CMS.Migrations.Migrations;
 /// assigned only from an unambiguous related document; ambiguous rows are left
 /// untouched rather than risking a cross-company data disclosure.
 /// </summary>
-public sealed class BackfillWorkFromHomeCompanyIds : IMigration
+public sealed class BackfillWorkFromHomeCompanyIds : IDataBackfillMigration
 {
     public string Id => $"2026-08-10-{nameof(BackfillWorkFromHomeCompanyIds)}";
 

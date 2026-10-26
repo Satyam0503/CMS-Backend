@@ -253,7 +253,7 @@ public class UserController : BaseApiController
 
     [Route("InitiateEmployeeExit")]
     [HttpPost]
-    [ModulePermission(AppModule.Employees, Permission.Edit)]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> InitiateEmployeeExit([FromBody] InitiateEmployeeExitRequest request) =>
         _employeeService.InitiateEmployeeExit(request);
 

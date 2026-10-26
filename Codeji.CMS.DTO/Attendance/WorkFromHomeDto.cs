@@ -2,13 +2,14 @@ using System.ComponentModel.DataAnnotations;
 
 public class WorkFromHomeRequestDto
 {
-    public DateTime FromDate { get; set; }
-    public DateTime ToDate { get; set; }
+    // WFH requests are business dates, not instants. DateOnly prevents timezone
+    // offsets from shifting a requested day before policy validation.
+    public DateOnly FromDate { get; set; }
+    public DateOnly ToDate { get; set; }
     public string DurationType { get; set; } = "FullDay";
     public string ReasonCode { get; set; } = "OTHER";
     public string? ReasonText { get; set; }
 }
-
 public class WorkFromHomeDecisionDto
 {
     public string RemarksCode { get; set; } = "REVIEWED";
@@ -38,6 +39,7 @@ public class AttendanceRemarkOptionDto
 public class WorkFromHomeTimingDto
 {
     public bool IsApprovedForToday { get; set; }
+    public string TimeZoneId { get; set; } = "UTC";
     public DateTime? CheckInTime { get; set; }
     public DateTime? CheckOutTime { get; set; }
     public decimal? TotalHours { get; set; }
@@ -69,6 +71,15 @@ public class WorkFromHomeRegularizeAttendanceDto
     [Required, MinLength(3)] public string Remarks { get; set; } = string.Empty;
 }
 
+public class WorkFromHomeOfficeConversionDto
+{
+    [Required] public DateTime AttendanceDate { get; set; }
+    [Required] public TimeSpan OfficeCheckInTime { get; set; }
+    [Required] public TimeSpan OfficeCheckOutTime { get; set; }
+    [Required, MinLength(3)] public string Remarks { get; set; } = string.Empty;
+    [Range(1, int.MaxValue)] public int Version { get; set; }
+}
+
 /// <summary>HR/Admin correction for a WFH-owned attendance row.</summary>
 public class WorkFromHomeHoursCorrectionDto
 {
@@ -98,6 +109,9 @@ public class EmployeeWfhContextDto
     public bool ManagerApprovalRequired { get; set; }
     public int MinimumAdvanceNoticeHours { get; set; }
     public DateTime BusinessDate { get; set; }
+    public string TimeZoneId { get; set; } = "UTC";
+    public WorkFromHomeResponseDto? TodayApprovedRequest { get; set; }
+    public string? TodayRequestIssueCode { get; set; }
     public bool IsSameDayRequestCutoffPassed { get; set; }
     public TimeSpan? EffectiveOfficeStartTime { get; set; }
     public TimeSpan? EffectiveCutoffTime { get; set; }
@@ -181,15 +195,35 @@ public class WorkFromHomeResponseDto : WorkFromHomeRequestDto
     public string? ReviewedByUserId { get; set; }
     public DateTime? ReviewedAt { get; set; }
     public bool IsLateSubmission { get; set; }
+    public List<DateTime> OfficeConvertedDates { get; set; } = [];
 }
 
 public class WorkFromHomeRequestFilterDto
 {
     [Range(1, int.MaxValue)] public int PageNo { get; set; } = 1;
     [Range(1, 100)] public int PageSize { get; set; } = 25;
-    public string? EmployeeSearch { get; set; }
-    public string? Department { get; set; }
+    [StringLength(100)] public string? EmployeeSearch { get; set; }
+    [StringLength(100)] public string? Department { get; set; }
     public string? Status { get; set; }
-    public DateTime? FromDate { get; set; }
-    public DateTime? ToDate { get; set; }
+    public DateOnly? FromDate { get; set; }
+    public DateOnly? ToDate { get; set; }
+}
+
+public sealed class WorkFromHomeDeadLetterDto
+{
+    public string EventId { get; set; } = string.Empty;
+    public string RequestId { get; set; } = string.Empty;
+    public string EventType { get; set; } = string.Empty;
+    public DateTime? CreatedDate { get; set; }
+    public DateTime AvailableAtUtc { get; set; }
+    public int AttemptCount { get; set; }
+    public int ReplayCount { get; set; }
+    public DateTime? ReplayedAtUtc { get; set; }
+    public string? ReplayedByUserId { get; set; }
+}
+
+public sealed class WorkFromHomeDeadLetterReplayDto
+{
+    [Required, StringLength(500, MinimumLength = 3)]
+    public string Reason { get; set; } = string.Empty;
 }

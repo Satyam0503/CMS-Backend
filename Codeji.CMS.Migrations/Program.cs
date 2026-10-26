@@ -262,8 +262,21 @@ if (args.Contains("inspect-tenant-role-attendance-data", StringComparer.OrdinalI
     return;
 }
 
+// Deployments must identify their slot explicitly. ASPNETCORE_ENVIRONMENT is
+// not sufficient because both Dev and UAT run the API as Development.
+var targetArguments = args.Select((value, index) => (value, index))
+    .Where(item => item.value.Equals("--deployment-target", StringComparison.OrdinalIgnoreCase))
+    .ToArray();
+var validTargetNames = Enum.GetNames<MigrationTarget>();
+if (targetArguments.Length != 1 || targetArguments[0].index + 1 >= args.Length ||
+    !validTargetNames.Contains(args[targetArguments[0].index + 1], StringComparer.OrdinalIgnoreCase) ||
+    !Enum.TryParse<MigrationTarget>(args[targetArguments[0].index + 1], true, out var migrationTarget))
+{
+    throw new InvalidOperationException("Specify --deployment-target Development, Uat, or Production. Dev/UAT targets withhold data backfills.");
+}
+
 // Load migrations dynamically
 var migrations = MigrationLoader.LoadMigrations();
 
-var runner = new MigrationRunner(migrations, db);
+var runner = new MigrationRunner(migrations, db, migrationTarget);
 await runner.RunAsync();
