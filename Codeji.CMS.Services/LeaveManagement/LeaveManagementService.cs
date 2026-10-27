@@ -2085,6 +2085,7 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
                 TotalAllocated = empLeaveBalance.TotalAllocated,
                 Taken = empLeaveBalance.Taken,
                 Remaining = empLeaveBalance.Remaining,
+                MaxBalance = leavePolicy.MaxBalance,
                 Version = empLeaveBalance.Version,
                 Name = leavePolicy.Name,
                 Code = leavePolicy.Code,
