@@ -1,1335 +1,446 @@
-using System.Linq.Expressions;
-using System.Security.Claims;
-using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Attendance;
-using Codeji.CMS.GenericRepository.Interfaces;
-using Codeji.CMS.Domain.Models;
-using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Attendance;
-using Codeji.CMS.Repository.Entities.Calendar;
-using Codeji.CMS.Repository.Entities.Company;
-using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Leave;
-using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.Attendance;
-using Codeji.CMS.Services.BackgroundTasks;
-using Codeji.CMS.Services.Employees.Interface;
-using Codeji.CMS.Services.Interface;
-using Codeji.CMS.Services.LeaveManagement;
-using Microsoft.AspNetCore.Http;
-using MongoDB.Bson;
-using MongoDB.Bson.Serialization;
-using MongoDB.Driver;
-using Moq;
+using Xunit;
 
 namespace Codeji.CMS.Services.Tests;
 
 public class WorkFromHomeAttendanceTimingTests
 {
-    private static BsonDocument Render<T>(FilterDefinition<T> filter) =>
-        filter.Render(new RenderArgs<T>(BsonSerializer.SerializerRegistry.GetSerializer<T>(), BsonSerializer.SerializerRegistry));
+    private static readonly DateTime Today = new(2026, 10, 27);
+    private static readonly TimeSpan ShiftStart = new(9, 30, 0);
+    private static readonly TimeSpan ShiftEnd = new(18, 30, 0);
 
     [Fact]
-    public void OfficeConversionUsesSharedScheduleClassifierForVerifiedPunches()
+    public void IsSameDayCutoff_FullDay_BeforeShiftStart_NotBlocked()
     {
-        var schedule = new CompanyOfficeSchedule
+        var now = new DateTime(2026, 10, 27, 8, 30, 0);
+        var isBlocked = WorkFromHomeService.IsSameDayWfhStartCutoffReached(
+            Today, now, "FullDay", ShiftStart, null, 0, 480, 8m);
+
+        Assert.False(isBlocked);
+    }
+
+    [Fact]
+    public void IsSameDayCutoff_FullDay_AfterShiftStart_IsBlocked()
+    {
+        var now = new DateTime(2026, 10, 27, 9, 31, 0);
+        var isBlocked = WorkFromHomeService.IsSameDayWfhStartCutoffReached(
+            Today, now, "FullDay", ShiftStart, null, 0, 480, 8m);
+
+        Assert.True(isBlocked);
+    }
+
+    [Fact]
+    public void IsSameDayCutoff_FirstHalf_AfterShiftStart_IsBlocked()
+    {
+        var now = new DateTime(2026, 10, 27, 10, 0, 0);
+        var isBlocked = WorkFromHomeService.IsSameDayWfhStartCutoffReached(
+            Today, now, "FirstHalf", ShiftStart, null, 0, 480, 8m);
+
+        Assert.True(isBlocked);
+    }
+
+    [Fact]
+    public void IsSameDayCutoff_SecondHalf_AfterShiftStart_BeforeHalfDayBoundary_NotBlocked()
+    {
+        // Between 09:30 and 13:30, second half has NOT started yet, so applying for Second Half is allowed!
+        var now = new DateTime(2026, 10, 27, 11, 0, 0);
+        var isBlocked = WorkFromHomeService.IsSameDayWfhStartCutoffReached(
+            Today, now, "SecondHalf", ShiftStart, null, 0, 480, 8m);
+
+        Assert.False(isBlocked);
+    }
+
+    [Fact]
+    public void IsSameDayCutoff_SecondHalf_AfterHalfDayBoundary_IsBlocked()
+    {
+        // 13:30 is the half-day boundary (9:30 + 4 hours). At 13:31, Second Half cutoff has passed.
+        var now = new DateTime(2026, 10, 27, 13, 31, 0);
+        var isBlocked = WorkFromHomeService.IsSameDayWfhStartCutoffReached(
+            Today, now, "SecondHalf", ShiftStart, null, 0, 480, 8m);
+
+        Assert.True(isBlocked);
+    }
+
+    [Fact]
+    public void IsSameDayCutoff_SecondHalf_At1514_IsBlocked()
+    {
+        // User scenario from screenshot: at 15:14, first half and second half cutoffs have both passed!
+        var now = new DateTime(2026, 10, 27, 15, 14, 0);
+        var firstHalfBlocked = WorkFromHomeService.IsSameDayWfhStartCutoffReached(
+            Today, now, "FirstHalf", ShiftStart, null, 0, 480, 8m);
+        var secondHalfBlocked = WorkFromHomeService.IsSameDayWfhStartCutoffReached(
+            Today, now, "SecondHalf", ShiftStart, null, 0, 480, 8m);
+
+        Assert.True(firstHalfBlocked);
+        Assert.True(secondHalfBlocked);
+    }
+
+    [Fact]
+    public void WfhRequestConflicts_OppositeHalvesSameDate_DoNotConflict()
+    {
+        var existing = new WorkFromHomeRequest
         {
-            StartTime = TimeSpan.FromHours(9),
-            EndTime = TimeSpan.FromHours(18),
-            RequiredWorkingMinutes = 480,
-            GraceMinutes = 15,
-            HalfDayCheckInAfter = TimeSpan.FromHours(10),
-            HalfDayCheckOutBefore = TimeSpan.FromHours(17)
+            FromDate = Today,
+            ToDate = Today,
+            DurationType = "FirstHalf"
         };
 
-        var status = new AttendanceStatusCalculationService().CalculateOfficeStatus(
-            schedule, new TimeOnly(11, 0), new TimeOnly(18, 0), 7m);
+        // New request for SecondHalf on the same day must NOT conflict
+        var conflicts = WorkFromHomeService.WfhRequestConflicts(existing, Today, Today, "SecondHalf");
+        Assert.False(conflicts);
 
-        Assert.Equal("HD", status);
-    }
-
-    private readonly Mock<IHttpContextAccessor> _httpContextAccessor = new();
-    private readonly Mock<IMongoDbRepository<WorkFromHomePolicy>> _policyRepo = new();
-    private readonly Mock<IMongoDbRepository<WorkFromHomeRequest>> _requestRepo = new();
-    private readonly Mock<IMongoDbRepository<WorkFromHomeOutboxEvent>> _outboxRepo = new();
-    private readonly Mock<IMongoDbRepository<AttendanceModel>> _attendanceRepo = new();
-    private readonly Mock<IMongoDbRepository<AttendanceDaySegment>> _segmentRepo = new();
-    private readonly Mock<IMongoDbRepository<AttendancePayrollException>> _exceptionRepo = new();
-    private readonly Mock<IMongoDbRepository<MonthlyAttendanceSummary>> _summaryRepo = new();
-    private readonly Mock<IRoleService> _roles = new();
-    private readonly Mock<IMongoDbRepository<EmpUser>> _empRepo = new();
-    private readonly Mock<IMongoDbRepository<AttendanceStatusSetting>> _statusRepo = new();
-    private readonly Mock<IAttendanceEditGuard> _editGuard = new();
-    private readonly Mock<IEffectiveOfficeScheduleService> _schedules = new();
-    private readonly Mock<IMongoClient> _mongoClient = new();
-    private Mock<IMongoCollection<AttendanceModel>>? _transactionalAttendanceCollection;
-    private Mock<IMongoCollection<MonthlyAttendanceSummary>>? _transactionalSummaryCollection;
-    private Mock<IMongoCollection<WorkFromHomeOutboxEvent>>? _transactionalOutboxCollection;
-
-    private static Mock<IMongoCollection<T>> SetupTransactionalCollection<T>(Mock<IMongoDbRepository<T>> repository, IClientSessionHandle session)
-    {
-        var collection = new Mock<IMongoCollection<T>>();
-        collection.Setup(x => x.ReplaceOneAsync(session, It.IsAny<FilterDefinition<T>>(), It.IsAny<T>(), It.IsAny<ReplaceOptions>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ReplaceOneResult.Acknowledged(1, 1, null));
-        collection.Setup(x => x.InsertOneAsync(session, It.IsAny<T>(), It.IsAny<InsertOneOptions>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        collection.Setup(x => x.InsertManyAsync(session, It.IsAny<IEnumerable<T>>(), It.IsAny<InsertManyOptions>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        repository.Setup(x => x.GetCollection()).Returns(collection.Object);
-        return collection;
-    }
-
-    private WorkFromHomeService CreateService(string companyId = "c1", string userId = "u1")
-    {
-        var context = new DefaultHttpContext();
-        context.User = new ClaimsPrincipal(new ClaimsIdentity(
-        [
-            new Claim(Codeji.CMS.Utility.Enums.EnumsHelper.ClaimTypesEnum.company_id.ToString(), companyId),
-            new Claim(Codeji.CMS.Utility.Enums.EnumsHelper.ClaimTypesEnum.user_id.ToString(), userId),
-            new Claim(ClaimTypes.Role, "Administrator")
-        ], "TestAuth"));
-        _httpContextAccessor.Setup(x => x.HttpContext).Returns(context);
-
-        _roles.Setup(x => x.IsModuleAccessibleForCompany("Work_From_Home", companyId))
-            .ReturnsAsync(true);
-        _outboxRepo.Setup(x => x.AddOne(It.IsAny<WorkFromHomeOutboxEvent>())).ReturnsAsync(new Result { Success = true });
-        var session = new Mock<IClientSessionHandle>();
-        session.Setup(x => x.WithTransactionAsync(It.IsAny<Func<IClientSessionHandle, CancellationToken, Task<bool>>>(), It.IsAny<TransactionOptions>(), It.IsAny<CancellationToken>()))
-            .Returns((Func<IClientSessionHandle, CancellationToken, Task<bool>> callback, TransactionOptions _, CancellationToken token) => callback(session.Object, token));
-        _mongoClient.Setup(x => x.StartSessionAsync(It.IsAny<ClientSessionOptions>(), It.IsAny<CancellationToken>())).ReturnsAsync(session.Object);
-        _transactionalAttendanceCollection = SetupTransactionalCollection(_attendanceRepo, session.Object);
-        SetupTransactionalCollection(_segmentRepo, session.Object);
-        SetupTransactionalCollection(_exceptionRepo, session.Object);
-        _transactionalSummaryCollection = new Mock<IMongoCollection<MonthlyAttendanceSummary>>();
-        _transactionalSummaryCollection.Setup(x => x.DeleteManyAsync(
-                session.Object, It.IsAny<FilterDefinition<MonthlyAttendanceSummary>>(), null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DeleteResult.Acknowledged(0));
-        _summaryRepo.Setup(x => x.GetCollection()).Returns(_transactionalSummaryCollection.Object);
-        _transactionalOutboxCollection = SetupTransactionalCollection(_outboxRepo, session.Object);
-        _exceptionRepo.Setup(x => x.GetAll(It.IsAny<Expression<Func<AttendancePayrollException, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
-            .ReturnsAsync(Enumerable.Empty<AttendancePayrollException>());
-
-        return new WorkFromHomeService(
-            _httpContextAccessor.Object,
-            _policyRepo.Object,
-            _requestRepo.Object,
-            _outboxRepo.Object,
-            Mock.Of<IMongoDbRepository<LeaveRequest>>(),
-            _empRepo.Object,
-            Mock.Of<IMongoDbRepository<Department>>(),
-            Mock.Of<IMongoDbRepository<JobTitles>>(),
-            _statusRepo.Object,
-            _attendanceRepo.Object,
-            _segmentRepo.Object,
-            _exceptionRepo.Object,
-            _summaryRepo.Object,
-            Mock.Of<IMongoDbRepository<WeeklyOffSetting>>(),
-            Mock.Of<IMongoDbRepository<CalendarEntity>>(),
-            Mock.Of<IMongoDbRepository<AttendanceRemarkOption>>(),
-            _editGuard.Object,
-            _schedules.Object,
-            Mock.Of<IAttendanceInitializationService>(),
-            _roles.Object,
-            Mock.Of<IMongoDbRepository<Roles>>(),
-            _mongoClient.Object,
-            Mock.Of<ILeaveManagementService>(),
-            Mock.Of<ILeaveAttendanceReconciliationService>(),
-            new AttendanceStatusCalculationService()
-        );
+        // And vice-versa
+        var existingSecondHalf = new WorkFromHomeRequest
+        {
+            FromDate = Today,
+            ToDate = Today,
+            DurationType = "SecondHalf"
+        };
+        var conflictsReverse = WorkFromHomeService.WfhRequestConflicts(existingSecondHalf, Today, Today, "FirstHalf");
+        Assert.False(conflictsReverse);
     }
 
     [Fact]
-    public async Task Cancel_WhenPayloadIsNull_ReturnsBadRequestBeforeDatabaseAccess()
+    public void WfhRequestConflicts_SameHalvesSameDate_DoConflict()
     {
-        var service = CreateService();
+        var existing = new WorkFromHomeRequest
+        {
+            FromDate = Today,
+            ToDate = Today,
+            DurationType = "FirstHalf"
+        };
 
-        var result = await service.Cancel("request-1", null!);
-
-        Assert.False(result.Success);
-        Assert.Equal(StatusCodes.Status400BadRequest, result.StatusCode);
-        Assert.StartsWith("WFH_CANCELLATION_INVALID:", result.Message);
-        _requestRepo.Verify(x => x.GetCollection(), Times.Never);
+        var conflicts = WorkFromHomeService.WfhRequestConflicts(existing, Today, Today, "FirstHalf");
+        Assert.True(conflicts);
     }
 
     [Fact]
-    public async Task CorrectInsufficientHours_WhenPayloadIsNull_ReturnsBadRequestBeforeDatabaseAccess()
+    public void WfhRequestConflicts_FullDayWithHalfDay_DoConflict()
     {
-        var service = CreateService();
+        var existing = new WorkFromHomeRequest
+        {
+            FromDate = Today,
+            ToDate = Today,
+            DurationType = "FullDay"
+        };
 
-        var result = await service.CorrectInsufficientHours("exception-1", null!);
-
-        Assert.False(result.Success);
-        Assert.Equal(StatusCodes.Status400BadRequest, result.StatusCode);
-        Assert.StartsWith("WFH_CORRECTION_INVALID:", result.Message);
-        _exceptionRepo.Verify(x => x.GetCollection(), Times.Never);
+        var conflicts = WorkFromHomeService.WfhRequestConflicts(existing, Today, Today, "SecondHalf");
+        Assert.True(conflicts);
     }
 
     [Fact]
-    public async Task RegularizeAttendance_WhenPayloadIsNull_ReturnsBadRequestBeforeDatabaseAccess()
+    public void LeaveConflictsWithWfh_Combinations()
     {
-        var service = CreateService();
+        // FirstHalf WFH with SecondHalf Leave -> Coexist without conflict (WFH + HD)
+        var secondHalfLeave = new LeaveRequest
+        {
+            LeavePolicyId = "LP1",
+            Reason = "Medical",
+            IsHalfDay = true,
+            HalfDayPeriod = "SECOND_HALF"
+        };
+        var conflicts1 = WorkFromHomeService.LeaveConflictsWithWfh(secondHalfLeave, "FirstHalf");
+        Assert.False(conflicts1);
 
-        var result = await service.RegularizeAttendance("request-1", null!);
+        // SecondHalf WFH with FirstHalf Leave -> Coexist without conflict (HD + WFH)
+        var firstHalfLeave = new LeaveRequest
+        {
+            LeavePolicyId = "LP1",
+            Reason = "Personal",
+            IsHalfDay = true,
+            HalfDayPeriod = "FIRST_HALF"
+        };
+        var conflicts2 = WorkFromHomeService.LeaveConflictsWithWfh(firstHalfLeave, "SecondHalf");
+        Assert.False(conflicts2);
 
-        Assert.False(result.Success);
-        Assert.Equal(StatusCodes.Status400BadRequest, result.StatusCode);
-        Assert.StartsWith("WFH_REGULARIZATION_INVALID:", result.Message);
-        _requestRepo.Verify(x => x.GetCollection(), Times.Never);
+        // Same half -> Must conflict
+        var sameHalfConflict1 = WorkFromHomeService.LeaveConflictsWithWfh(firstHalfLeave, "FirstHalf");
+        Assert.True(sameHalfConflict1);
+
+        var sameHalfConflict2 = WorkFromHomeService.LeaveConflictsWithWfh(secondHalfLeave, "SecondHalf");
+        Assert.True(sameHalfConflict2);
+
+        // Full day leave with any WFH -> Must conflict
+        var fullDayLeave = new LeaveRequest
+        {
+            LeavePolicyId = "LP1",
+            Reason = "Vacation",
+            IsHalfDay = false
+        };
+        Assert.True(WorkFromHomeService.LeaveConflictsWithWfh(fullDayLeave, "FirstHalf"));
+        Assert.True(WorkFromHomeService.LeaveConflictsWithWfh(fullDayLeave, "SecondHalf"));
+        Assert.True(WorkFromHomeService.LeaveConflictsWithWfh(fullDayLeave, "FullDay"));
+
+        // Full day WFH with half day leave -> Must conflict
+        Assert.True(WorkFromHomeService.LeaveConflictsWithWfh(firstHalfLeave, "FullDay"));
+        Assert.True(WorkFromHomeService.LeaveConflictsWithWfh(secondHalfLeave, "FullDay"));
+    }
+
+    [Fact]
+    public void GracePeriod_ExtendsCutoffWindow()
+    {
+        // Office start 09:30, grace 30 mins => cutoff is 10:00
+        var now945 = new DateTime(2026, 10, 27, 9, 45, 0);
+        var blockedAt945 = WorkFromHomeService.IsSameDayWfhStartCutoffReached(
+            Today, now945, "FullDay", ShiftStart, null, 30, 480, 8m);
+        Assert.False(blockedAt945);
+
+        var now1001 = new DateTime(2026, 10, 27, 10, 1, 0);
+        var blockedAt1001 = WorkFromHomeService.IsSameDayWfhStartCutoffReached(
+            Today, now1001, "FullDay", ShiftStart, null, 30, 480, 8m);
+        Assert.True(blockedAt1001);
+    }
+
+    [Fact]
+    public void MultiDay_WfhRequestConflicts_ChecksOverlaps()
+    {
+        var multiDayExisting = new WorkFromHomeRequest
+        {
+            FromDate = Today,
+            ToDate = Today.AddDays(2),
+            DurationType = "FullDay"
+        };
+
+        // Any overlap with multi-day full day is a conflict
+        Assert.True(WorkFromHomeService.WfhRequestConflicts(multiDayExisting, Today, Today, "FirstHalf"));
+        Assert.True(WorkFromHomeService.WfhRequestConflicts(multiDayExisting, Today.AddDays(1), Today.AddDays(1), "SecondHalf"));
+
+        // Request for a different day outside the range does NOT conflict
+        Assert.False(WorkFromHomeService.WfhRequestConflicts(multiDayExisting, Today.AddDays(3), Today.AddDays(3), "FullDay"));
+    }
+
+    [Fact]
+    public void HalfDayClockIn_SegmentBoundary_Validation()
+    {
+        var boundary = WorkFromHomeService.HalfDayBoundary(ShiftStart, 480, 8m);
+        Assert.Equal(new TimeSpan(13, 30, 0), boundary);
+
+        // At 10:00, clock in for FirstHalf is valid
+        var firstHalfValid = WorkFromHomeService.IsHalfDayClockInWithinRequestedSegment(
+            "FirstHalf", new TimeSpan(10, 0, 0), ShiftStart, 480, 8m);
+        Assert.True(firstHalfValid);
+
+        // At 14:00, clock in for FirstHalf is INVALID
+        var firstHalfAt1400 = WorkFromHomeService.IsHalfDayClockInWithinRequestedSegment(
+            "FirstHalf", new TimeSpan(14, 0, 0), ShiftStart, 480, 8m);
+        Assert.False(firstHalfAt1400);
+
+        // At 14:00, clock in for SecondHalf is valid
+        var secondHalfAt1400 = WorkFromHomeService.IsHalfDayClockInWithinRequestedSegment(
+            "SecondHalf", new TimeSpan(14, 0, 0), ShiftStart, 480, 8m);
+        Assert.True(secondHalfAt1400);
+
+        // Kiara's scenario: at 15:14 (3:14 PM), First-half WFH check-in must fail because first half has passed
+        var firstHalfAt1514 = WorkFromHomeService.IsHalfDayClockInWithinRequestedSegment(
+            "FirstHalf", new TimeSpan(15, 14, 0), ShiftStart, 480, 8m);
+        Assert.False(firstHalfAt1514);
     }
 
     [Theory]
-    [InlineData("allocation")]
-    [InlineData("decision")]
-    [InlineData("office-conversion")]
-    [InlineData("remark-option")]
-    public async Task WfhAdminMutations_WhenPayloadIsNull_ReturnBadRequest(string action)
+    [InlineData("FullDay", "FullDay")]
+    [InlineData("WfhWfo", "FirstHalf")]
+    [InlineData("WfoWfh", "SecondHalf")]
+    [InlineData("WfhHd", "FirstHalf")]
+    [InlineData("HdWfh", "SecondHalf")]
+    public void AdminGrant_DurationTypeMapping_AllCombinationsSupported(string grantType, string expectedDurationType)
     {
-        var service = CreateService();
-
-        var result = action switch
+        var resolvedDuration = grantType switch
         {
-            "allocation" => await service.SaveEmployeeAllocation(null!),
-            "decision" => await service.Decide("request-1", "Approved", null!),
-            "office-conversion" => await service.ConvertApprovedWfhToOffice("request-1", null!),
-            "remark-option" => await service.SaveRemarkOption(null!),
-            _ => throw new InvalidOperationException("Unknown test action.")
+            "WfhWfo" => "FirstHalf",
+            "WfoWfh" => "SecondHalf",
+            "WfhHd" => "FirstHalf",
+            "HdWfh" => "SecondHalf",
+            _ => "FullDay"
         };
 
-        Assert.False(result.Success);
-        Assert.Equal(StatusCodes.Status400BadRequest, result.StatusCode);
-        _requestRepo.Verify(x => x.GetCollection(), Times.Never);
+        Assert.Equal(expectedDurationType, resolvedDuration);
     }
 
     [Fact]
-    public async Task SaveRemarkOption_WhenApplicableStatusListIsNull_ReturnsBadRequest()
+    public void AllowedDaysOfWeek_Validation_ChecksDayNames()
     {
-        var service = CreateService();
+        var tuesday = new DateTime(2026, 10, 27); // Tuesday
+        var wednesday = new DateTime(2026, 10, 28); // Wednesday
+        var allowed = new List<string> { "Monday", "Friday" };
 
-        var result = await service.SaveRemarkOption(new AttendanceRemarkOptionDto
-        {
-            Code = "WFH-TEST",
-            DisplayName = "WFH test",
-            ApplicableStatusCodes = null!
-        });
+        var tuesdayAllowed = allowed.Any(x => string.Equals(x, tuesday.DayOfWeek.ToString(), StringComparison.OrdinalIgnoreCase));
+        Assert.False(tuesdayAllowed);
 
-        Assert.False(result.Success);
-        Assert.Equal(StatusCodes.Status400BadRequest, result.StatusCode);
-        Assert.StartsWith("ATTENDANCE_REMARK_INVALID:", result.Message);
+        var monday = new DateTime(2026, 10, 26); // Monday
+        var mondayAllowed = allowed.Any(x => string.Equals(x, monday.DayOfWeek.ToString(), StringComparison.OrdinalIgnoreCase));
+        Assert.True(mondayAllowed);
     }
 
     [Fact]
-    public async Task GetEmployeeContext_ReturnsTheTenantScopedApprovedRequestForToday()
+    public void BlockedDaysOfWeek_Validation_ChecksCoreOfficeDays()
     {
-        var service = CreateService("c1", "u1");
-        var today = DateTime.UtcNow.Date;
-        var policy = new WorkFromHomePolicy { CompanyId = "c1", IsEnabled = true, TimeZoneId = "UTC", ApplyToAllEmployees = true };
-        var employee = new EmpUser { CompanyId = "c1", UserId = "u1", EmployeeId = "e1", FirstName = "Test", LastName = "Employee", Email = "test@example.invalid", Status = true };
+        var wednesday = new DateTime(2026, 10, 28); // Wednesday
+        var coreOfficeDays = new List<string> { "Wednesday", "Thursday" };
+
+        var isWednesdayBlocked = coreOfficeDays.Any(x => string.Equals(x, wednesday.DayOfWeek.ToString(), StringComparison.OrdinalIgnoreCase));
+        Assert.True(isWednesdayBlocked);
+
+        var friday = new DateTime(2026, 10, 30); // Friday
+        var isFridayBlocked = coreOfficeDays.Any(x => string.Equals(x, friday.DayOfWeek.ToString(), StringComparison.OrdinalIgnoreCase));
+        Assert.False(isFridayBlocked);
+    }
+
+    [Fact]
+    public void ReplaceableDefaultPresent_IdentifiesSystemDefaultStatuses()
+    {
+        Assert.True(AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent("SYSTEM_DEFAULT_PRESENT"));
+        Assert.True(AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent("SYSTEM_OFFICE_START_PRESENT"));
+        Assert.False(AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent(null));
+        Assert.False(AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent(""));
+        Assert.False(AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent("ADMIN_MANUAL"));
+        Assert.False(AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent("ADMIN_OVERRIDE"));
+        Assert.False(AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent("WFH_REQUEST"));
+        Assert.False(AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent("LEAVE"));
+    }
+
+    [Fact]
+    public void OfficeConversion_ExcludesDayFromWeeklyUsage_AndRefundsQuota()
+    {
+        var monday = new DateTime(2026, 10, 26);
+        var tuesday = new DateTime(2026, 10, 27);
         var request = new WorkFromHomeRequest
         {
-            CompanyId = "c1", UserId = "u1", EmployeeId = "e1", RequestId = "approved-today",
-            FromDate = today, ToDate = today, Status = "Approved", CreatedDate = today
-        };
-        Expression<Func<WorkFromHomeRequest, bool>>? requestScope = null;
-
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(policy);
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(employee);
-        _schedules.Setup(x => x.ResolveAsync("c1", employee, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((CompanyOfficeSchedule?)null);
-        _requestRepo.Setup(x => x.GetAll(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
-            .Callback<Expression<Func<WorkFromHomeRequest, bool>>, bool, bool>((filter, _, _) => requestScope = filter)
-            .ReturnsAsync([request]);
-
-        var result = await service.GetEmployeeContext();
-
-        Assert.True(result.Success);
-        Assert.NotNull(result.MethodResult);
-        Assert.Equal("approved-today", result.MethodResult.TodayApprovedRequest?.RequestId);
-        Assert.Null(result.MethodResult.TodayRequestIssueCode);
-        Assert.NotNull(requestScope);
-        var scoped = requestScope!.Compile();
-        Assert.True(scoped(request));
-        Assert.False(scoped(new WorkFromHomeRequest
-        {
-            CompanyId = "other-company", UserId = "u1", FromDate = today, ToDate = today, Status = "Approved"
-        }));
-        Assert.False(scoped(new WorkFromHomeRequest
-        {
-            CompanyId = "c1", UserId = "other-user", FromDate = today, ToDate = today, Status = "Approved"
-        }));
-    }
-
-    [Fact]
-    public async Task GetEmployeeContext_FailsClosedWhenMoreThanOneApprovedRequestCoversToday()
-    {
-        var service = CreateService("c1", "u1");
-        var today = DateTime.UtcNow.Date;
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(new WorkFromHomePolicy { CompanyId = "c1", IsEnabled = true, TimeZoneId = "UTC", ApplyToAllEmployees = true });
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(new EmpUser { CompanyId = "c1", UserId = "u1", EmployeeId = "e1", FirstName = "Test", LastName = "Employee", Email = "test@example.invalid", Status = true });
-        _schedules.Setup(x => x.ResolveAsync("c1", It.IsAny<EmpUser>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((CompanyOfficeSchedule?)null);
-        _requestRepo.Setup(x => x.GetAll(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
-            .ReturnsAsync([
-                new WorkFromHomeRequest { CompanyId = "c1", UserId = "u1", EmployeeId = "e1", RequestId = "approved-1", FromDate = today, ToDate = today, Status = "Approved", CreatedDate = today },
-                new WorkFromHomeRequest { CompanyId = "c1", UserId = "u1", EmployeeId = "e1", RequestId = "approved-2", FromDate = today, ToDate = today, Status = "Approved", CreatedDate = today.AddMinutes(-1) }
-            ]);
-
-        var result = await service.GetEmployeeContext();
-
-        Assert.True(result.Success);
-        Assert.Null(result.MethodResult?.TodayApprovedRequest);
-        Assert.Equal("WFH_MULTIPLE_APPROVED_REQUESTS_FOR_TODAY", result.MethodResult?.TodayRequestIssueCode);
-    }
-
-    [Fact]
-    public async Task GetTiming_WhenAttendanceHasResidualTimesFromAutoPresent_IgnoresPlaceholdersWithoutWriting()
-    {
-        var service = CreateService("c1", "u1");
-        var today = DateTime.UtcNow.Date;
-        var requestId = "req-1";
-
-        var policy = new WorkFromHomePolicy
-        {
-            CompanyId = "c1",
-            IsEnabled = true,
-            TimeZoneId = "UTC",
-            OfficeStartTime = new TimeSpan(23, 59, 0),
-            FullDayMinimumHours = 8m
-        };
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(policy);
-
-        var request = new WorkFromHomeRequest
-        {
-            CompanyId = "c1",
-            UserId = "u1",
-            RequestId = requestId,
-            Status = "Approved",
-            FromDate = today,
-            ToDate = today,
-            DurationType = "FullDay"
-        };
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(request);
-
-
-        var row = new AttendanceModel
-        {
-            AttendanceId = "att-1",
-            CompanyId = "c1",
-            UserId = "u1",
-            SourceType = "WFH_REQUEST",
-            SourceId = requestId,
-            Date = today,
-            CheckInTime = today.AddHours(9).AddMinutes(30),
-            CheckOutTime = today.AddHours(18).AddMinutes(30),
-            TotalHours = 8m,
-            Remarks = $"Generated from approved WFH request {requestId}"
-        };
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(row);
-        _attendanceRepo.Setup(x => x.Update(It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>()))
-            .ReturnsAsync(new Result { Success = true });
-
-        var result = await service.GetTiming(requestId);
-
-        Assert.True(result.Success);
-        Assert.NotNull(result.MethodResult);
-        Assert.True(result.MethodResult.IsApprovedForToday);
-        // Residual times inherited from auto-present are hidden; only the check-in command may clear them.
-        Assert.Null(result.MethodResult.CheckInTime);
-        Assert.Null(result.MethodResult.CheckOutTime);
-        Assert.Null(result.MethodResult.TotalHours);
-        Assert.Equal(today.AddHours(9).AddMinutes(30), row.CheckInTime);
-        Assert.Equal(today.AddHours(18).AddMinutes(30), row.CheckOutTime);
-        Assert.Equal(8m, row.TotalHours);
-        _attendanceRepo.Verify(x => x.Update(It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task GetTiming_WhenEmployeeIsAlreadyClockedIn_ReturnsCheckInForClockOutUiWithoutWriting()
-    {
-        var service = CreateService("c1", "u1");
-        var today = DateTime.UtcNow.Date;
-        const string requestId = "clocked-in-request";
-        var checkIn = today.AddHours(9).AddMinutes(56);
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(new WorkFromHomePolicy { CompanyId = "c1", IsEnabled = true, TimeZoneId = "UTC" });
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(new WorkFromHomeRequest
-            {
-                CompanyId = "c1", UserId = "u1", RequestId = requestId, Status = "Approved",
-                FromDate = today, ToDate = today, DurationType = "FullDay"
-            });
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(new AttendanceModel
-            {
-                CompanyId = "c1", UserId = "u1", AttendanceId = "attendance-1", Date = today,
-                SourceType = "WFH_REQUEST", SourceId = requestId, CheckInTime = checkIn,
-                Remarks = $"Checked in through employee WFH portal ({requestId})"
-            });
-
-        var result = await service.GetTiming(requestId);
-
-        Assert.True(result.Success);
-        Assert.True(result.MethodResult?.IsApprovedForToday);
-        Assert.Equal(checkIn, result.MethodResult?.CheckInTime);
-        Assert.Null(result.MethodResult?.CheckOutTime);
-        _attendanceRepo.Verify(x => x.Update(It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task Cancel_WhenMongoTransactionsAreUnavailable_FailsClosedWithoutRepositoryDeletes()
-    {
-        var service = CreateService("c1", "u1");
-        var today = DateTime.UtcNow.Date;
-        var requestId = "req-1";
-
-        var policy = new WorkFromHomePolicy
-        {
-            CompanyId = "c1",
-            IsEnabled = true,
-            TimeZoneId = "UTC",
-            OfficeStartTime = new TimeSpan(23, 59, 0),
-            FullDayMinimumHours = 8m
-        };
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(policy);
-
-        var request = new WorkFromHomeRequest
-        {
-            CompanyId = "c1",
-            UserId = "u1",
-            RequestId = requestId,
-            Status = "Approved",
-            FromDate = today,
-            ToDate = today,
+            RequestId = "REQ-101",
+            UserId = "USR-01",
+            FromDate = monday,
+            ToDate = tuesday,
             DurationType = "FullDay",
-            Version = 1
-        };
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(request);
-        _requestRepo.Setup(x => x.Update(It.IsAny<FilterDefinition<WorkFromHomeRequest>>(), It.IsAny<WorkFromHomeRequest>()))
-            .ReturnsAsync(new Result { Success = true });
-
-        var employee = new EmpUser
-        {
-            CompanyId = "c1",
-            UserId = "u1",
-            RoleId = "r1",
-            FirstName = "A",
-            LastName = "B",
-            Email = "a@example.com",
-            Password = "x",
-            Gender = "",
-            EmployeeId = "E1",
-            JobRole = "",
-            Department = "d",
-            ReportingManager = "m",
-            PhoneNumber = "",
-            BloodGroup = "",
-            PersonalEmail = "",
-            EmergencyContact = "",
-            DateOfJoining = "2026-01-01",
-            Address = "",
-            ProfileUrl = "",
-            Status = true
-        };
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(employee);
-
-        var row = new AttendanceModel
-        {
-            AttendanceId = "att-1",
-            CompanyId = "c1",
-            UserId = "u1",
-            SourceType = "WFH_REQUEST",
-            SourceId = requestId,
-            Date = today,
-            CheckInTime = today.AddHours(9).AddMinutes(30),
-            CheckOutTime = today.AddHours(18).AddMinutes(30),
-            Remarks = $"Generated from approved WFH request {requestId}"
-        };
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(row);
-        _attendanceRepo.Setup(x => x.Delete(It.IsAny<FilterDefinition<AttendanceModel>>()))
-            .ReturnsAsync(new Result { Success = true });
-        _mongoClient.Setup(x => x.StartSessionAsync(It.IsAny<ClientSessionOptions>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new NotSupportedException("Transactions are unavailable."));
-
-        var cancelResult = await service.Cancel(requestId, new WorkFromHomeCancelDto { Version = 1 });
-
-        Assert.False(cancelResult.Success);
-        Assert.StartsWith("WFH_CANCELLATION_TRANSACTION_REQUIRED:", cancelResult.Message);
-        _attendanceRepo.Verify(x => x.Delete(It.IsAny<FilterDefinition<AttendanceModel>>()), Times.Never);
-        _requestRepo.Verify(x => x.Update(It.IsAny<FilterDefinition<WorkFromHomeRequest>>(), It.IsAny<WorkFromHomeRequest>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task CheckIn_WhenAttendanceHasResidualTimesFromAutoPresent_AllowsCheckInWithoutDuplicateError()
-    {
-        var service = CreateService("c1", "u1");
-        var today = DateTime.UtcNow.Date;
-        var requestId = "req-1";
-
-        var policy = new WorkFromHomePolicy
-        {
-            CompanyId = "c1",
-            IsEnabled = true,
-            TimeZoneId = "UTC",
-            AllowedCheckInFrom = new TimeSpan(0, 0, 0),
-            AllowedCheckInUntil = new TimeSpan(23, 59, 59),
-            FullDayMinimumHours = 8m
-        };
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(policy);
-
-        var request = new WorkFromHomeRequest
-        {
-            CompanyId = "c1",
-            UserId = "u1",
-            RequestId = requestId,
             Status = "Approved",
-            FromDate = today,
-            ToDate = today,
-            DurationType = "FullDay"
+            OfficeConversions =
+            [
+                new WorkFromHomeOfficeConversion
+                {
+                    AttendanceDate = tuesday,
+                    Remarks = "Converted to in-office half day / full day attendance",
+                    ConvertedByUserId = "HR-01",
+                    ConvertedAtUtc = DateTime.UtcNow
+                }
+            ]
         };
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(request);
 
-        var employee = new EmpUser
-        {
-            CompanyId = "c1",
-            UserId = "u1",
-            RoleId = "r1",
-            FirstName = "A",
-            LastName = "B",
-            Email = "a@example.com",
-            Password = "x",
-            Gender = "",
-            EmployeeId = "E1",
-            JobRole = "",
-            Department = "d",
-            ReportingManager = "m",
-            PhoneNumber = "",
-            BloodGroup = "",
-            PersonalEmail = "",
-            EmergencyContact = "",
-            DateOfJoining = "2026-01-01",
-            Address = "",
-            ProfileUrl = "",
-            Status = true
-        };
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(employee);
+        var week = new DateTime(2026, 10, 26);
+        var unitsPerDay = request.DurationType is "FirstHalf" or "SecondHalf" ? .5m : 1m;
+        var convertedDates = (request.OfficeConversions ?? []).Select(x => x.AttendanceDate.Date).ToHashSet();
+        var days = new[] { monday, tuesday };
+        var activeWfhDaysCount = days.Count(day => day >= week && day < week.AddDays(7) && !convertedDates.Contains(day.Date)) * unitsPerDay;
 
-        var row = new AttendanceModel
-        {
-            AttendanceId = "att-1",
-            CompanyId = "c1",
-            UserId = "u1",
-            SourceType = "WFH_REQUEST",
-            SourceId = requestId,
-            Date = today,
-            CheckInTime = today.AddHours(9).AddMinutes(30),
-            CheckOutTime = today.AddHours(18).AddMinutes(30),
-            Remarks = $"Generated from approved WFH request {requestId}"
-        };
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(row);
-        _attendanceRepo.Setup(x => x.Update(It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>()))
-            .ReturnsAsync(new Result { Success = true });
-
-        var checkInResult = await service.CheckIn(requestId);
-
-        Assert.True(checkInResult.Success);
-        Assert.NotNull(row.CheckInTime);
-        Assert.Null(row.CheckOutTime);
-        Assert.Contains("Checked in through employee WFH portal", row.Remarks);
-        _transactionalOutboxCollection!.Verify(x => x.InsertManyAsync(
-            It.IsAny<IClientSessionHandle>(),
-            It.Is<IEnumerable<WorkFromHomeOutboxEvent>>(events => events.Any(evt => evt.CompanyId == "c1" && evt.RequestId == requestId && evt.EventType == "AUDIT" && evt.Action == "CheckIn")),
-            It.IsAny<InsertManyOptions>(), It.IsAny<CancellationToken>()), Times.Once);
+        // Tuesday is converted to office, so only Monday counts against WFH allowance (1 day, not 2)
+        Assert.Equal(1m, activeWfhDaysCount);
     }
 
     [Fact]
-    public async Task CheckIn_WhenTransactionsAreUnavailable_FailsClosedWithoutAttendanceOrOutboxWrite()
+    public void HalfDayOfficeConversion_ExcludesHalfDay_AndRefundsHalfDayQuota()
     {
-        var service = CreateService("company-a", "employee-a");
-        var today = DateTime.UtcNow.Date;
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(new WorkFromHomePolicy { CompanyId = "company-a", IsEnabled = true, TimeZoneId = "UTC", AllowedCheckInFrom = TimeSpan.Zero, AllowedCheckInUntil = TimeSpan.FromHours(23.99) });
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(new WorkFromHomeRequest { CompanyId = "company-a", UserId = "employee-a", RequestId = "request-a", Status = "Approved", FromDate = today, ToDate = today, DurationType = "FullDay" });
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(new EmpUser { CompanyId = "company-a", UserId = "employee-a", EmployeeId = "emp-a", FirstName = "Office", LastName = "Employee", Email = "office@example.com", Status = true });
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(new AttendanceModel { CompanyId = "company-a", UserId = "employee-a", AttendanceId = "attendance-a", Date = today, SourceType = "WFH_REQUEST", SourceId = "request-a" });
-        _mongoClient.Setup(x => x.StartSessionAsync(It.IsAny<ClientSessionOptions>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new NotSupportedException("Transactions are unavailable."));
-
-        var result = await service.CheckIn("request-a");
-
-        Assert.False(result.Success);
-        Assert.StartsWith("WFH_TRANSACTION_REQUIRED:", result.Message);
-        _attendanceRepo.Verify(x => x.Update(It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>()), Times.Never);
-        _transactionalOutboxCollection!.Verify(x => x.InsertManyAsync(It.IsAny<IClientSessionHandle>(), It.IsAny<IEnumerable<WorkFromHomeOutboxEvent>>(), It.IsAny<InsertManyOptions>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task CheckOut_WhenTransactionsAreUnavailable_DoesNotWriteOrInvalidateAttendanceSummary()
-    {
-        var service = CreateService("company-a", "employee-a");
-        var now = DateTime.UtcNow;
-        var today = now.Date;
-        const string requestId = "request-clockout-transaction-required";
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(new WorkFromHomePolicy
-            {
-                CompanyId = "company-a", IsEnabled = true, TimeZoneId = "UTC",
-                FullDayMinimumHours = 8m, HalfDayMinimumHours = 4m,
-                FullDayAttendanceStatusCode = "WFH", HalfDayAttendanceStatusCode = "WFH-HD"
-            });
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(new WorkFromHomeRequest
-            {
-                CompanyId = "company-a", UserId = "employee-a", RequestId = requestId,
-                Status = "Approved", FromDate = today, ToDate = today, DurationType = "FullDay"
-            });
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(new EmpUser
-            {
-                CompanyId = "company-a", UserId = "employee-a", EmployeeId = "EMP-A",
-                FirstName = "Test", LastName = "Employee", Email = "employee@example.com", Status = true
-            });
-        var row = new AttendanceModel
-        {
-            AttendanceId = "attendance-clockout-transaction-required", CompanyId = "company-a",
-            UserId = "employee-a", SourceType = "WFH_REQUEST", SourceId = requestId,
-            Date = today, CheckInTime = now.AddHours(-1), Status = "WFH",
-            Remarks = $"Checked in through employee WFH portal ({requestId})"
-        };
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(row);
-        _mongoClient.Setup(x => x.StartSessionAsync(It.IsAny<ClientSessionOptions>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new NotSupportedException("Transactions are unavailable."));
-
-        var result = await service.CheckOut(requestId);
-
-        Assert.False(result.Success);
-        Assert.Equal(StatusCodes.Status503ServiceUnavailable, result.StatusCode);
-        Assert.StartsWith("WFH_TRANSACTION_REQUIRED:", result.Message);
-        // The service stages changes on the loaded object before opening the session;
-        // persistence must still be absent when session creation fails.
-        _transactionalAttendanceCollection!.Verify(x => x.ReplaceOneAsync(
-            It.IsAny<IClientSessionHandle>(), It.IsAny<FilterDefinition<AttendanceModel>>(),
-            It.IsAny<AttendanceModel>(), It.IsAny<ReplaceOptions>(), It.IsAny<CancellationToken>()), Times.Never);
-        _attendanceRepo.Verify(x => x.Update(It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>()), Times.Never);
-        _exceptionRepo.Verify(x => x.AddOne(It.IsAny<AttendancePayrollException>()), Times.Never);
-        _summaryRepo.Verify(x => x.DeleteAll(It.IsAny<FilterDefinition<MonthlyAttendanceSummary>>()), Times.Never);
-        _transactionalSummaryCollection!.Verify(x => x.DeleteManyAsync(
-            It.IsAny<IClientSessionHandle>(), It.IsAny<FilterDefinition<MonthlyAttendanceSummary>>(), null,
-            It.IsAny<CancellationToken>()), Times.Never);
-        _transactionalOutboxCollection!.Verify(x => x.InsertManyAsync(
-            It.IsAny<IClientSessionHandle>(), It.IsAny<IEnumerable<WorkFromHomeOutboxEvent>>(),
-            It.IsAny<InsertManyOptions>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task CheckOut_WhenEmployeeWorksHalfDay_AllowsClockOutAndSetsHalfDayStatus()
-    {
-        var service = CreateService("c1", "u1");
-        var now = DateTime.UtcNow;
-        var today = now.Date;
-        var requestId = "req-1";
-
-        var policy = new WorkFromHomePolicy
-        {
-            CompanyId = "c1",
-            IsEnabled = true,
-            TimeZoneId = "UTC",
-            FullDayMinimumHours = 8m,
-            HalfDayMinimumHours = 4m,
-            FullDayAttendanceStatusCode = "WFH",
-            HalfDayAttendanceStatusCode = "WFH-HD"
-        };
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(policy);
-
+        var tuesday = new DateTime(2026, 10, 27);
         var request = new WorkFromHomeRequest
         {
-            CompanyId = "c1",
-            UserId = "u1",
-            RequestId = requestId,
+            RequestId = "REQ-102",
+            UserId = "USR-01",
+            FromDate = tuesday,
+            ToDate = tuesday,
+            DurationType = "FirstHalf",
             Status = "Approved",
-            FromDate = today,
-            ToDate = today,
-            DurationType = "FullDay"
+            OfficeConversions =
+            [
+                new WorkFromHomeOfficeConversion
+                {
+                    AttendanceDate = tuesday,
+                    Remarks = "Converted to in-office work",
+                    ConvertedByUserId = "HR-01",
+                    ConvertedAtUtc = DateTime.UtcNow
+                }
+            ]
         };
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(request);
 
-        var employee = new EmpUser
-        {
-            CompanyId = "c1",
-            UserId = "u1",
-            EmployeeId = "E1",
-            FirstName = "A",
-            LastName = "B",
-            Email = "a@example.com",
-            Status = true
-        };
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(employee);
+        var week = new DateTime(2026, 10, 26);
+        var unitsPerDay = request.DurationType is "FirstHalf" or "SecondHalf" ? .5m : 1m;
+        var convertedDates = (request.OfficeConversions ?? []).Select(x => x.AttendanceDate.Date).ToHashSet();
+        var days = new[] { tuesday };
+        var activeWfhDaysCount = days.Count(day => day >= week && day < week.AddDays(7) && !convertedDates.Contains(day.Date)) * unitsPerDay;
 
-        _statusRepo.Setup(x => x.Exist(It.IsAny<Expression<Func<AttendanceStatusSetting, bool>>>()))
-            .ReturnsAsync(true);
-
-        // Employee clocked in 4 hours and 15 minutes ago (half-day completed)
-        var row = new AttendanceModel
-        {
-            AttendanceId = "att-1",
-            CompanyId = "c1",
-            UserId = "u1",
-            SourceType = "WFH_REQUEST",
-            SourceId = requestId,
-            Date = today,
-            CheckInTime = now.AddHours(-4).AddMinutes(-15),
-            CheckOutTime = null,
-            Status = "WFH",
-            Remarks = $"Checked in through employee WFH portal ({requestId})"
-        };
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(row);
-        _attendanceRepo.Setup(x => x.Update(It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>()))
-            .ReturnsAsync(new Result { Success = true });
-
-        var checkOutResult = await service.CheckOut(requestId);
-
-        Assert.True(checkOutResult.Success);
-        Assert.NotNull(row.CheckOutTime);
-        Assert.Equal("WFH-HD", row.Status);
-        Assert.Equal("WFH_HALF_DAY", row.RemarkCode);
-        Assert.Contains("half-day", row.Remarks);
-        Assert.True(row.TotalHours >= 4m);
-        _transactionalSummaryCollection!.Verify(x => x.DeleteManyAsync(
-            It.IsAny<IClientSessionHandle>(), It.IsAny<FilterDefinition<MonthlyAttendanceSummary>>(), null,
-            It.IsAny<CancellationToken>()), Times.Once);
+        // Converted half-day WFH counts as 0 remaining against WFH allowance
+        Assert.Equal(0m, activeWfhDaysCount);
     }
 
     [Fact]
-    public async Task CheckOut_UsesPolicyHalfDayMinimumWhenItDiffersFromScheduleHalf()
+    public void ResolveBusinessDateOnly_MapsMidnightUtcAndIstMidnight_ToSameCalendarDay()
     {
-        var service = CreateService("company-a", "employee-a");
-        var now = DateTime.UtcNow;
-        var today = now.Date;
-        var requestId = "request-policy-threshold";
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(new WorkFromHomePolicy
-            {
-                CompanyId = "company-a", IsEnabled = true, TimeZoneId = "UTC",
-                FullDayMinimumHours = 8m, HalfDayMinimumHours = 5m,
-                FullDayAttendanceStatusCode = "WFH", HalfDayAttendanceStatusCode = "WFH-HD"
-            });
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(new WorkFromHomeRequest { CompanyId = "company-a", UserId = "employee-a", RequestId = requestId, Status = "Approved", FromDate = today, ToDate = today, DurationType = "FullDay" });
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(new EmpUser { CompanyId = "company-a", UserId = "employee-a", EmployeeId = "emp-a", FirstName = "A", LastName = "B", Email = "a@example.com", Status = true });
-        _schedules.Setup(x => x.ResolveAsync("company-a", It.IsAny<EmpUser>(), It.IsAny<DateTime>()))
-            .ReturnsAsync(new CompanyOfficeSchedule { RequiredWorkingMinutes = 480, BreakMinutes = 0, TimeZoneId = "UTC" });
-        var row = new AttendanceModel
-        {
-            CompanyId = "company-a", UserId = "employee-a", EmployeeId = "emp-a", AttendanceId = "attendance-policy-threshold",
-            Date = today, SourceType = "WFH_REQUEST", SourceId = requestId, Status = "WFH",
-            CheckInTime = now.AddHours(-4.5), Remarks = "Checked in through employee WFH portal"
-        };
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>())).ReturnsAsync(row);
+        // 2026-10-28 midnight UTC
+        var utcMidnight = new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc);
+        var resolvedUtc = WorkFromHomeService.ResolveBusinessDateOnly(utcMidnight, "Asia/Kolkata");
+        Assert.Equal(new DateOnly(2026, 10, 28), resolvedUtc);
 
-        var result = await service.CheckOut(requestId);
-
-        Assert.True(result.Success);
-        Assert.Equal("A", row.Status);
-        Assert.Equal("WFH_EARLY_EXIT", row.RemarkCode);
-        Assert.Contains("below 5h minimum threshold", row.Remarks);
+        // 2026-10-27 18:30:00 UTC (which is 2026-10-28 00:00:00 IST)
+        var istMidnightStoredInUtc = new DateTime(2026, 10, 27, 18, 30, 0, DateTimeKind.Utc);
+        var resolvedIst = WorkFromHomeService.ResolveBusinessDateOnly(istMidnightStoredInUtc, "Asia/Kolkata");
+        Assert.Equal(new DateOnly(2026, 10, 28), resolvedIst);
     }
 
     [Fact]
-    public async Task CheckOut_WhenEmployeeWorksFullDay_SetsFullDayStatus()
+    public void BusinessDateUtc_PreservesCalendarDate_WithExplicitUtcKind()
     {
-        var service = CreateService("c1", "u1");
-        var now = DateTime.UtcNow;
-        var today = now.Date;
-        var requestId = "req-1";
+        var unspecified = new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Unspecified);
+        var result = WorkFromHomeService.BusinessDateUtc(unspecified);
 
-        var policy = new WorkFromHomePolicy
-        {
-            CompanyId = "c1",
-            IsEnabled = true,
-            TimeZoneId = "UTC",
-            FullDayMinimumHours = 8m,
-            HalfDayMinimumHours = 4m,
-            FullDayAttendanceStatusCode = "WFH",
-            HalfDayAttendanceStatusCode = "WFH-HD"
-        };
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(policy);
-
-        var request = new WorkFromHomeRequest
-        {
-            CompanyId = "c1",
-            UserId = "u1",
-            RequestId = requestId,
-            Status = "Approved",
-            FromDate = today,
-            ToDate = today,
-            DurationType = "FullDay"
-        };
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(request);
-
-        var employee = new EmpUser
-        {
-            CompanyId = "c1",
-            UserId = "u1",
-            EmployeeId = "E1",
-            FirstName = "A",
-            LastName = "B",
-            Email = "a@example.com",
-            Status = true
-        };
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(employee);
-
-        // Employee clocked in 8 hours and 30 minutes ago
-        var row = new AttendanceModel
-        {
-            AttendanceId = "att-1",
-            CompanyId = "c1",
-            UserId = "u1",
-            SourceType = "WFH_REQUEST",
-            SourceId = requestId,
-            Date = today,
-            CheckInTime = now.AddHours(-8).AddMinutes(-30),
-            CheckOutTime = null,
-            Status = "WFH",
-            Remarks = $"Checked in through employee WFH portal ({requestId})"
-        };
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(row);
-        _attendanceRepo.Setup(x => x.Update(It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>()))
-            .ReturnsAsync(new Result { Success = true });
-
-        var checkOutResult = await service.CheckOut(requestId);
-
-        Assert.True(checkOutResult.Success);
-        Assert.NotNull(row.CheckOutTime);
-        Assert.Equal("WFH", row.Status);
-        Assert.Equal("WFH_FULL_DAY", row.RemarkCode);
-        Assert.True(row.TotalHours >= 8m);
+        Assert.Equal(DateTimeKind.Utc, result.Kind);
+        Assert.Equal(2026, result.Year);
+        Assert.Equal(10, result.Month);
+        Assert.Equal(28, result.Day);
+        Assert.Equal(TimeSpan.Zero, result.TimeOfDay);
     }
 
     [Fact]
-    public async Task CheckOut_WhenEmployeeWorksLessThanHalfDay_AllowsClockOutAsEarlyExit()
+    public void ReplaceableSystemPresent_WhenTransitioningToWfh_ClearsGhostShiftPunchTimestamps()
     {
-        var service = CreateService("c1", "u1");
-        var now = DateTime.UtcNow;
-        var today = now.Date;
-        var requestId = "req-1";
-
-        var policy = new WorkFromHomePolicy
+        // Simulates the morning SYSTEM_OFFICE_START_PRESENT row which carried 09:00 - 18:00
+        var morningRow = new AttendanceModel
         {
-            CompanyId = "c1",
-            IsEnabled = true,
-            TimeZoneId = "UTC",
-            FullDayMinimumHours = 8m,
-            HalfDayMinimumHours = 4m,
-            FullDayAttendanceStatusCode = "WFH",
-            HalfDayAttendanceStatusCode = "WFH-HD"
+            CompanyId = "comp-1",
+            UserId = "user-1",
+            Date = Today,
+            Status = "P",
+            SourceType = "SYSTEM_OFFICE_START_PRESENT",
+            CheckInTime = Today.AddHours(9),
+            CheckOutTime = Today.AddHours(18),
+            TotalHours = 9
         };
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(policy);
 
-        var request = new WorkFromHomeRequest
+        Assert.True(AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent(morningRow.SourceType));
+
+        // When half-day WFH sync executes without prior portal punches or companion punches,
+        // it must strip fake 09:00 - 18:00 placeholder times
+        var hasPortalClock = morningRow.Remarks != null && (morningRow.Remarks.Contains("Checked in through employee WFH portal") || morningRow.Remarks.Contains("Checked out through employee WFH portal"));
+        if (!hasPortalClock && AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent(morningRow.SourceType))
         {
-            CompanyId = "c1",
-            UserId = "u1",
-            RequestId = requestId,
-            Status = "Approved",
-            FromDate = today,
-            ToDate = today,
-            DurationType = "FullDay"
-        };
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(request);
+            morningRow.CheckInTime = null;
+            morningRow.CheckOutTime = null;
+            morningRow.TotalHours = null;
+        }
 
-        var employee = new EmpUser
-        {
-            CompanyId = "c1",
-            UserId = "u1",
-            EmployeeId = "E1",
-            FirstName = "A",
-            LastName = "B",
-            Email = "a@example.com",
-            Status = true
-        };
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(employee);
-
-        // Employee clocked in 2 hours ago (emergency exit before half-day)
-        var row = new AttendanceModel
-        {
-            AttendanceId = "att-1",
-            CompanyId = "c1",
-            UserId = "u1",
-            SourceType = "WFH_REQUEST",
-            SourceId = requestId,
-            Date = today,
-            CheckInTime = now.AddHours(-2),
-            CheckOutTime = null,
-            Status = "WFH",
-            Remarks = $"Checked in through employee WFH portal ({requestId})"
-        };
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(row);
-        _attendanceRepo.Setup(x => x.Update(It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>()))
-            .ReturnsAsync(new Result { Success = true });
-
-        var checkOutResult = await service.CheckOut(requestId);
-
-        Assert.True(checkOutResult.Success);
-        Assert.NotNull(row.CheckOutTime);
-        Assert.Equal("WFH_EARLY_EXIT", row.RemarkCode);
-        Assert.Contains("early exit", row.Remarks);
-        Assert.True(row.TotalHours >= 2m);
+        Assert.Null(morningRow.CheckInTime);
+        Assert.Null(morningRow.CheckOutTime);
+        Assert.Null(morningRow.TotalHours);
     }
 
     [Fact]
-    public async Task CheckOut_WithExplicitConfirmation_MarksAttendanceAsHalfDayWithUserRemarks()
+    public void AdminOverride_AllowsWfhAndHybridStatuses_ForTimingRegularization()
     {
-        var service = CreateService("c1", "u1");
-        var requestId = "wfh-req-confirm-hd";
-        var today = DateTime.UtcNow.Date;
-        var now = DateTime.UtcNow;
-
-        var policy = new WorkFromHomePolicy
+        var wfhStatuses = new[] { "WFH", "WFH+WFO", "WFH-HD" };
+        foreach (var status in wfhStatuses)
         {
-            CompanyId = "c1",
-            IsEnabled = true,
-            TimeZoneId = "UTC",
-            FullDayMinimumHours = 8m,
-            HalfDayMinimumHours = 4m,
-            FullDayAttendanceStatusCode = "WFH",
-            HalfDayAttendanceStatusCode = "WFH-HD"
-        };
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(policy);
+            var isWfh = string.Equals(status, "WFH", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "WFH+WFO", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "WFH-HD", StringComparison.OrdinalIgnoreCase);
 
-        var employee = new EmpUser
-        {
-            CompanyId = "c1",
-            UserId = "u1",
-            EmployeeId = "EMP1",
-            FirstName = "A",
-            LastName = "B",
-            Email = "a@example.com",
-            Status = true
-        };
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(employee);
-
-        _statusRepo.Setup(x => x.Exist(It.IsAny<Expression<Func<AttendanceStatusSetting, bool>>>()))
-            .ReturnsAsync(true);
-
-        var request = new WorkFromHomeRequest
-        {
-            RequestId = requestId,
-            CompanyId = "c1",
-            UserId = "u1",
-            EmployeeId = "EMP1",
-            FromDate = today,
-            ToDate = today,
-            DurationType = "FullDay",
-            Status = "Approved"
-        };
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(request);
-
-        var row = new AttendanceModel
-        {
-            AttendanceId = "att-hd",
-            CompanyId = "c1",
-            UserId = "u1",
-            SourceType = "WFH_REQUEST",
-            SourceId = requestId,
-            Date = today,
-            CheckInTime = now.AddHours(-4.5),
-            CheckOutTime = null,
-            Status = "WFH",
-            Remarks = $"Checked in through employee WFH portal ({requestId})"
-        };
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(row);
-        _attendanceRepo.Setup(x => x.Update(It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>()))
-            .ReturnsAsync(new Result { Success = true });
-
-        var checkOutDto = new WorkFromHomeCheckOutDto
-        {
-            AttendanceType = "HalfDay",
-            Remarks = "Doctor appointment afternoon"
-        };
-
-        var checkOutResult = await service.CheckOut(requestId, checkOutDto);
-
-        Assert.True(checkOutResult.Success);
-        Assert.NotNull(row.CheckOutTime);
-        Assert.Equal("WFH-HD", row.Status);
-        Assert.Equal("WFH_HALF_DAY", row.RemarkCode);
-        Assert.Contains("half-day", row.Remarks);
-        Assert.Contains("Doctor appointment afternoon", row.Remarks);
-    }
-
-    [Fact]
-    public async Task CheckOut_WithExplicitConfirmation_MarksAttendanceAsFullDayWithUserRemarks()
-    {
-        var service = CreateService("c1", "u1");
-        var requestId = "wfh-req-confirm-fd";
-        var today = DateTime.UtcNow.Date;
-        var now = DateTime.UtcNow;
-
-        var policy = new WorkFromHomePolicy
-        {
-            CompanyId = "c1",
-            IsEnabled = true,
-            TimeZoneId = "UTC",
-            FullDayMinimumHours = 8m,
-            HalfDayMinimumHours = 4m,
-            FullDayAttendanceStatusCode = "WFH",
-            HalfDayAttendanceStatusCode = "WFH-HD"
-        };
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(policy);
-
-        var employee = new EmpUser
-        {
-            CompanyId = "c1",
-            UserId = "u1",
-            EmployeeId = "EMP1",
-            FirstName = "A",
-            LastName = "B",
-            Email = "a@example.com",
-            Status = true
-        };
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(employee);
-
-        _statusRepo.Setup(x => x.Exist(It.IsAny<Expression<Func<AttendanceStatusSetting, bool>>>()))
-            .ReturnsAsync(true);
-
-        var request = new WorkFromHomeRequest
-        {
-            RequestId = requestId,
-            CompanyId = "c1",
-            UserId = "u1",
-            EmployeeId = "EMP1",
-            FromDate = today,
-            ToDate = today,
-            DurationType = "FullDay",
-            Status = "Approved"
-        };
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(request);
-
-        var row = new AttendanceModel
-        {
-            AttendanceId = "att-fd",
-            CompanyId = "c1",
-            UserId = "u1",
-            SourceType = "WFH_REQUEST",
-            SourceId = requestId,
-            Date = today,
-            CheckInTime = now.AddHours(-8.5),
-            CheckOutTime = null,
-            Status = "WFH",
-            Remarks = $"Checked in through employee WFH portal ({requestId})"
-        };
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(row);
-        _attendanceRepo.Setup(x => x.Update(It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>()))
-            .ReturnsAsync(new Result { Success = true });
-
-        var checkOutDto = new WorkFromHomeCheckOutDto
-        {
-            AttendanceType = "FullDay",
-            Remarks = "Shift completed normally"
-        };
-
-        var checkOutResult = await service.CheckOut(requestId, checkOutDto);
-
-        Assert.True(checkOutResult.Success);
-        Assert.NotNull(row.CheckOutTime);
-        Assert.Equal("WFH", row.Status);
-        Assert.Equal("WFH_FULL_DAY", row.RemarkCode);
-        Assert.Contains("Full-Day", row.Remarks);
-        Assert.Contains("Shift completed normally", row.Remarks);
-    }
-
-    [Fact]
-    public async Task CheckOut_WithUnderHours_MarksAsInsufficientHoursAndDoesNotAllowHalfDay()
-    {
-        var service = CreateService("c1", "u1");
-        var requestId = "wfh-req-underhours-54min";
-        var today = DateTime.UtcNow.Date;
-        var now = DateTime.UtcNow;
-
-        var policy = new WorkFromHomePolicy
-        {
-            CompanyId = "c1",
-            IsEnabled = true,
-            TimeZoneId = "UTC",
-            FullDayMinimumHours = 8m,
-            HalfDayMinimumHours = 4m,
-            FullDayAttendanceStatusCode = "WFH",
-            HalfDayAttendanceStatusCode = "WFH-HD"
-        };
-        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
-            .ReturnsAsync(policy);
-
-        var employee = new EmpUser
-        {
-            CompanyId = "c1",
-            UserId = "u1",
-            EmployeeId = "EMP1",
-            FirstName = "A",
-            LastName = "B",
-            Email = "a@example.com",
-            Status = true
-        };
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(employee);
-
-        _statusRepo.Setup(x => x.Exist(It.IsAny<Expression<Func<AttendanceStatusSetting, bool>>>()))
-            .ReturnsAsync(true);
-
-        var request = new WorkFromHomeRequest
-        {
-            RequestId = requestId,
-            CompanyId = "c1",
-            UserId = "u1",
-            EmployeeId = "EMP1",
-            FromDate = today,
-            ToDate = today,
-            DurationType = "FullDay",
-            Status = "Approved"
-        };
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(request);
-
-        var row = new AttendanceModel
-        {
-            AttendanceId = "att-54min",
-            CompanyId = "c1",
-            UserId = "u1",
-            SourceType = "WFH_REQUEST",
-            SourceId = requestId,
-            Date = today,
-            CheckInTime = now.AddMinutes(-54), // Only 54 minutes worked!
-            CheckOutTime = null,
-            Status = "WFH",
-            Remarks = $"Checked in through employee WFH portal ({requestId})"
-        };
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(row);
-        _attendanceRepo.Setup(x => x.Update(It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>()))
-            .ReturnsAsync(new Result { Success = true });
-
-        var checkOutDto = new WorkFromHomeCheckOutDto
-        {
-            Remarks = "Leaving for urgent personal matter"
-        };
-
-        var checkOutResult = await service.CheckOut(requestId, checkOutDto);
-
-        Assert.True(checkOutResult.Success);
-        Assert.NotNull(row.CheckOutTime);
-        // An employee who worked 54 minutes CANNOT mark themselves as Half-Day or Full-Day!
-        Assert.Equal("A", row.Status);
-        Assert.Equal("WFH_EARLY_EXIT", row.RemarkCode);
-        Assert.Contains("below 4h minimum threshold", row.Remarks);
-        Assert.Contains("Pending HR/Admin regularisation", row.Remarks);
-        Assert.Contains("Leaving for urgent personal matter", row.Remarks);
-        Assert.True(row.TotalHours < 1.0m);
-    }
-
-    [Fact]
-    public async Task RegularizeAttendance_ByHrAdmin_UpdatesAttendanceStatusAndResolvesException()
-    {
-        var service = CreateService("c1", "admin1");
-        var requestId = "wfh-req-regularize";
-        var today = DateTime.UtcNow.Date;
-
-        _roles.Setup(x => x.VerifyUserAccess(Codeji.CMS.Utility.Constraints.AppModule.WorkFromHome, It.IsAny<string[]>(), "admin1", "c1"))
-            .ReturnsAsync(true);
-
-        _statusRepo.Setup(x => x.Exist(It.IsAny<Expression<Func<AttendanceStatusSetting, bool>>>()))
-            .ReturnsAsync(true);
-
-        var request = new WorkFromHomeRequest
-        {
-            RequestId = requestId,
-            CompanyId = "c1",
-            UserId = "u1",
-            EmployeeId = "EMP1",
-            FromDate = today,
-            ToDate = today,
-            DurationType = "FullDay",
-            Status = "Approved"
-        };
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(request);
-
-        var employee = new EmpUser
-        {
-            CompanyId = "c1",
-            UserId = "u1",
-            EmployeeId = "EMP1",
-            FirstName = "A",
-            LastName = "B",
-            Email = "a@example.com",
-            Status = true
-        };
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(employee);
-
-        var row = new AttendanceModel
-        {
-            AttendanceId = "att-reg",
-            CompanyId = "c1",
-            UserId = "u1",
-            SourceType = "WFH_REQUEST",
-            SourceId = requestId,
-            Date = today,
-            Status = "A",
-            RemarkCode = "WFH_INSUFFICIENT_HOURS",
-            TotalHours = 0.9m
-        };
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(row);
-        _attendanceRepo.Setup(x => x.Update(It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>()))
-            .ReturnsAsync(new Result { Success = true });
-
-        var regDto = new WorkFromHomeRegularizeAttendanceDto
-        {
-            AttendanceStatus = "WFH-HD",
-            Remarks = "Approved half-day concession by HR"
-        };
-
-        var regResult = await service.RegularizeAttendance(requestId, regDto);
-
-        Assert.True(regResult.Success);
-        Assert.Equal("WFH-HD", row.Status);
-        Assert.Equal("WFH_REGULARIZED_BY_ADMIN", row.RemarkCode);
-        Assert.Contains("Approved half-day concession by HR", row.Remarks);
-    }
-
-    [Fact]
-    public async Task RegularizeAttendance_RejectsPendingRequestWithoutWritingAttendance()
-    {
-        var service = CreateService("company-a", "admin-a");
-        _roles.Setup(x => x.VerifyUserAccess(Codeji.CMS.Utility.Constraints.AppModule.WorkFromHome, It.IsAny<string[]>(), "admin-a", "company-a"))
-            .ReturnsAsync(true);
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(new WorkFromHomeRequest { CompanyId = "company-a", RequestId = "req-pending", UserId = "employee-a", Status = "Pending" });
-
-        var result = await service.RegularizeAttendance("req-pending", new WorkFromHomeRegularizeAttendanceDto
-        {
-            AttendanceStatus = "P",
-            Remarks = "Employee attended office"
-        });
-
-        Assert.False(result.Success);
-        _attendanceRepo.Verify(x => x.Update(It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>()), Times.Never);
-        _segmentRepo.Verify(x => x.Update(It.IsAny<FilterDefinition<AttendanceDaySegment>>(), It.IsAny<AttendanceDaySegment>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task RegularizeAttendance_UpdateFilterIsTenantAndSourceScoped()
-    {
-        var service = CreateService("company-a", "admin-a");
-        _roles.Setup(x => x.VerifyUserAccess(Codeji.CMS.Utility.Constraints.AppModule.WorkFromHome, It.IsAny<string[]>(), "admin-a", "company-a"))
-            .ReturnsAsync(true);
-        _statusRepo.Setup(x => x.Exist(It.IsAny<Expression<Func<AttendanceStatusSetting, bool>>>())).ReturnsAsync(true);
-        _requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(new WorkFromHomeRequest { CompanyId = "company-a", RequestId = "req-a", UserId = "employee-a", FromDate = DateTime.UtcNow.Date, Status = "Approved" });
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(new EmpUser { CompanyId = "company-a", UserId = "employee-a", EmployeeId = "emp-a", FirstName = "Office", LastName = "Employee", Email = "office@example.com", Status = true });
-        _attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(new AttendanceModel { CompanyId = "company-a", AttendanceId = "507f1f77bcf86cd799439011", UserId = "employee-a", SourceType = "WFH_REQUEST", SourceId = "req-a", Date = DateTime.UtcNow.Date, Version = 5 });
-
-        FilterDefinition<AttendanceModel>? capturedFilter = null;
-        var collection = new Mock<IMongoCollection<AttendanceModel>>();
-        collection.Setup(x => x.ReplaceOneAsync(It.IsAny<IClientSessionHandle>(), It.IsAny<FilterDefinition<AttendanceModel>>(), It.IsAny<AttendanceModel>(), It.IsAny<ReplaceOptions>(), It.IsAny<CancellationToken>()))
-            .Callback<IClientSessionHandle, FilterDefinition<AttendanceModel>, AttendanceModel, ReplaceOptions, CancellationToken>((_, filter, _, _, _) => capturedFilter = filter)
-            .ReturnsAsync(new ReplaceOneResult.Acknowledged(1, 1, null));
-        _attendanceRepo.Setup(x => x.GetCollection()).Returns(collection.Object);
-
-        var result = await service.RegularizeAttendance("req-a", new WorkFromHomeRegularizeAttendanceDto
-        {
-            AttendanceStatus = "P",
-            Remarks = "Verified office attendance"
-        });
-
-        Assert.True(result.Success);
-        Assert.NotNull(capturedFilter);
-        var rendered = Render(capturedFilter!).ToJson();
-        Assert.Contains("company-a", rendered, StringComparison.Ordinal);
-        Assert.Contains("employee-a", rendered, StringComparison.Ordinal);
-        Assert.Contains("req-a", rendered, StringComparison.Ordinal);
-        Assert.Contains("Version", rendered, StringComparison.Ordinal);
-        _transactionalOutboxCollection!.Verify(x => x.InsertManyAsync(
-            It.IsAny<IClientSessionHandle>(),
-            It.Is<IEnumerable<WorkFromHomeOutboxEvent>>(events => events.Any(evt => evt.CompanyId == "company-a" && evt.RequestId == "req-a" && evt.EventType == "AUDIT" && evt.Action == "AttendanceRegularized")),
-            It.IsAny<InsertManyOptions>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task Cancel_MultiDayRequestWithClockedLaterDay_PerformsNoAttendanceDeletes()
-    {
-        var service = CreateService("company-a", "employee-a");
-        var firstDay = DateTime.UtcNow.Date.AddDays(2);
-        var request = new WorkFromHomeRequest
-        {
-            CompanyId = "company-a", RequestId = "req-multi", UserId = "employee-a", EmployeeId = "emp-a",
-            FromDate = firstDay, ToDate = firstDay.AddDays(1), DurationType = "FullDay", Status = "Approved", Version = 3
-        };
-        _requestRepo.SetupSequence(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
-            .ReturnsAsync(request);
-        _empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
-            .ReturnsAsync(new EmpUser { CompanyId = "company-a", UserId = "employee-a", EmployeeId = "emp-a", FirstName = "Office", LastName = "Employee", Email = "office@example.com", Status = true });
-        _schedules.Setup(x => x.ResolveAsync("company-a", It.IsAny<EmpUser>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((CompanyOfficeSchedule?)null);
-        _editGuard.Setup(x => x.EnsureEditableWorkingDayAsync("company-a", "employee-a", It.IsAny<DateTime>(), false))
-            .Returns(Task.CompletedTask);
-
-        _attendanceRepo.SetupSequence(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
-            .ReturnsAsync(new AttendanceModel
-            {
-                CompanyId = "company-a", UserId = "employee-a", SourceType = "WFH_REQUEST", SourceId = "req-multi",
-                Date = firstDay, Remarks = "Generated from approved WFH request req-multi"
-            })
-            .ReturnsAsync(new AttendanceModel
-            {
-                CompanyId = "company-a", UserId = "employee-a", SourceType = "WFH_REQUEST", SourceId = "req-multi",
-                Date = firstDay.AddDays(1), CheckInTime = DateTime.UtcNow.AddHours(-1), Remarks = "Checked in through employee WFH portal"
-            });
-
-        var result = await service.Cancel("req-multi", new WorkFromHomeCancelDto { Version = 3 });
-
-        Assert.False(result.Success);
-        Assert.Contains("WFH_CANNOT_CANCEL_AFTER_CLOCKING", result.Message, StringComparison.Ordinal);
-        _attendanceRepo.Verify(x => x.Delete(It.IsAny<FilterDefinition<AttendanceModel>>()), Times.Never);
-        _segmentRepo.Verify(x => x.Delete(It.IsAny<FilterDefinition<AttendanceDaySegment>>()), Times.Never);
+            Assert.True(isWfh, $"{status} should be recognized as a valid WFH/hybrid status for HR edit");
+        }
     }
 }

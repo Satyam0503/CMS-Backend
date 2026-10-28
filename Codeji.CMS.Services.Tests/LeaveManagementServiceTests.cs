@@ -1,13 +1,229 @@
 using Codeji.CMS.DTO.Leave.LeaveRequest;
+using Codeji.CMS.Domain.Models;
+using Codeji.CMS.GenericRepository.Interfaces;
+using Codeji.CMS.Repository.Entities;
+using Codeji.CMS.Repository.Entities.Attendance;
+using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Leave;
+using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.RolePermissions;
 using Codeji.CMS.Services.LeaveManagement;
 using Codeji.CMS.Services.Attendance;
+using Codeji.CMS.Services.Employees.Interface;
+using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.Enums;
+using Codeji.CMS.Utility.middlewares;
+using MapsterMapper;
+using Microsoft.AspNetCore.Http;
+using MongoDB.Driver;
+using System.Linq.Expressions;
+using System.Security.Claims;
+using Moq;
 
 namespace Codeji.CMS.Services.Tests;
 
 public class LeaveManagementServiceTests
 {
+    [Fact]
+    public async Task CreateLeaveRequest_RejectsIdentityWithoutActiveEmployeeRecordAndDoesNotPersist()
+    {
+        var employeeRepository = new Mock<IMongoDbRepository<EmpUser>>();
+        employeeRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>(), false, true))
+            .ReturnsAsync((EmpUser?)null);
+        var policyRepository = new Mock<IMongoDbRepository<LeavePolicy>>();
+        policyRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<LeavePolicy, bool>>>(), false, true))
+            .ReturnsAsync(new LeavePolicy { Id = "policy-1", Name = "Annual Leave", Code = "AL", Status = true });
+        var leaveRepository = new Mock<IMongoDbRepository<LeaveRequest>>();
+        var context = new DefaultHttpContext();
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim("user_id", "non-employee-user"),
+            new Claim("company_id", "company-1"),
+        ], "test"));
+
+        var service = new LeaveManagementService(
+            employeeRepository.Object,
+            leaveRepository.Object,
+            new HttpContextAccessor { HttpContext = context },
+            Mock.Of<IMapper>(),
+            Mock.Of<INotificationService>(),
+            Mock.Of<IMongoDbRepository<Notifications>>(),
+            Mock.Of<IMongoDbRepository<UserNotifications>>(),
+            Mock.Of<IMongoDbRepository<Roles>>(),
+            Mock.Of<IMongoDbRepository<JobTitles>>(),
+            Mock.Of<IEmployeeService>(),
+            Mock.Of<IMiddlewareService>(),
+            policyRepository.Object,
+            Mock.Of<IMongoDbRepository<EmployeeLeaveBalance>>(),
+            Mock.Of<ICompanyWorkingCalendarService>(),
+            Mock.Of<IMongoDbRepository<AttendanceStatusSetting>>(),
+            Mock.Of<ILeaveAttendanceReconciliationService>(),
+            Mock.Of<IMongoDbRepository<WorkFromHomePolicy>>(),
+            Mock.Of<IMongoDbRepository<WorkFromHomeRequest>>(),
+            Mock.Of<IMongoClient>());
+
+        var result = await service.CreateLeaveRequest(new LeaveRequestDto
+        {
+            UserId = "non-employee-user",
+            LeavePolicyId = "policy-1",
+            StartDate = DateTime.UtcNow.Date.AddDays(5),
+            EndDate = DateTime.UtcNow.Date.AddDays(5),
+            Reason = "Personal leave",
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal("Employee does not belong to the authenticated company.", result.Message);
+        leaveRepository.Verify(x => x.AddOne(It.IsAny<LeaveRequest>()), Times.Never);
+        leaveRepository.Verify(x => x.GetCollection(), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task PaidLeaveApproval_UsesStandaloneFallbackAndRechecksWfhOverlap(
+        bool overlapAppearsBeforeFallbackRecheck, bool expectedSuccess)
+    {
+        var now = DateTime.UtcNow.Date;
+        var request = new LeaveRequest
+        {
+            CompanyId = "company-1",
+            LeaveRequestId = "request-1",
+            EmployeeId = "employee-1",
+            LeavePolicyId = "policy-1",
+            StartDate = now.AddDays(5),
+            EndDate = now.AddDays(5),
+            TotalDays = 1,
+            Reason = "Personal leave",
+            Status = EnumsHelper.LeaveRequestStatus.Pending,
+            Version = 1,
+        };
+        var policy = new LeavePolicy
+        {
+            Id = "policy-1",
+            Name = "Annual Leave",
+            Code = "AL",
+            PolicyType = EnumsHelper.LeavePolicyType.Leave,
+            FullDayAttendanceStatusCode = "PL",
+            Status = true,
+            Paid = true,
+        };
+
+        var leaveCollection = new Mock<IMongoCollection<LeaveRequest>>();
+        var updateResult = new Mock<UpdateResult>();
+        updateResult.SetupGet(x => x.IsAcknowledged).Returns(true);
+        updateResult.SetupGet(x => x.ModifiedCount).Returns(1);
+        leaveCollection
+            .Setup(x => x.UpdateOneAsync(It.IsAny<FilterDefinition<LeaveRequest>>(),
+                It.IsAny<UpdateDefinition<LeaveRequest>>(), It.IsAny<UpdateOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(updateResult.Object);
+        var leaveRepository = new Mock<IMongoDbRepository<LeaveRequest>>();
+        leaveRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<LeaveRequest, bool>>>(), false, true))
+            .ReturnsAsync(request);
+        leaveRepository.Setup(x => x.GetCollection()).Returns(leaveCollection.Object);
+        var balanceCollection = new Mock<IMongoCollection<EmployeeLeaveBalance>>();
+        balanceCollection
+            .Setup(x => x.UpdateOneAsync(It.IsAny<FilterDefinition<EmployeeLeaveBalance>>(),
+                It.IsAny<UpdateDefinition<EmployeeLeaveBalance>>(), It.IsAny<UpdateOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(updateResult.Object);
+        var balanceRepository = new Mock<IMongoDbRepository<EmployeeLeaveBalance>>();
+        balanceRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmployeeLeaveBalance, bool>>>(), false, true))
+            .ReturnsAsync(new EmployeeLeaveBalance
+            {
+                Id = "balance-1", CompanyId = "company-1", UserId = "employee-1",
+                LeavePolicyId = "policy-1", TotalAllocated = 10, Taken = 2, Remaining = 8,
+            });
+        balanceRepository.Setup(x => x.GetCollection()).Returns(balanceCollection.Object);
+        var policyRepository = new Mock<IMongoDbRepository<LeavePolicy>>();
+        policyRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<LeavePolicy, bool>>>(), false, true))
+            .ReturnsAsync(policy);
+        var wfhRepository = new Mock<IMongoDbRepository<WorkFromHomeRequest>>();
+        var wfhChecks = 0;
+        var conflictingWfhRequest = new WorkFromHomeRequest
+        {
+            CompanyId = "company-1",
+            UserId = "employee-1",
+            FromDate = request.StartDate,
+            ToDate = request.EndDate,
+            Status = "Approved",
+            DurationType = "FullDay",
+        };
+        wfhRepository
+            .Setup(x => x.GetAll(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>(), false, true))
+            .ReturnsAsync(() =>
+            {
+                wfhChecks++;
+                return overlapAppearsBeforeFallbackRecheck && wfhChecks > 1
+                    ? [conflictingWfhRequest]
+                    : Array.Empty<WorkFromHomeRequest>();
+            });
+        var session = new Mock<IClientSessionHandle>();
+        session.Setup(x => x.StartTransaction(It.IsAny<TransactionOptions>()))
+            .Throws(new NotSupportedException("Transactions are unavailable on standalone MongoDB."));
+        var mongoClient = new Mock<IMongoClient>();
+        mongoClient
+            .Setup(x => x.StartSessionAsync(It.IsAny<ClientSessionOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(session.Object);
+        var reconciliation = new Mock<ILeaveAttendanceReconciliationService>();
+        reconciliation
+            .Setup(x => x.ReconcileAcceptedLeaveAsync("company-1", "request-1", "reviewer-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Result { Success = true });
+        var attendanceStatuses = new Mock<IMongoDbRepository<AttendanceStatusSetting>>();
+        attendanceStatuses
+            .Setup(x => x.Exist(It.IsAny<Expression<Func<AttendanceStatusSetting, bool>>>(), false))
+            .ReturnsAsync(true);
+        var context = new DefaultHttpContext();
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim("user_id", "reviewer-1"),
+            new Claim("company_id", "company-1"),
+        ], "test"));
+
+        var service = new LeaveManagementService(
+            Mock.Of<IMongoDbRepository<EmpUser>>(), leaveRepository.Object,
+            new HttpContextAccessor { HttpContext = context }, Mock.Of<IMapper>(),
+            Mock.Of<INotificationService>(), Mock.Of<IMongoDbRepository<Notifications>>(),
+            Mock.Of<IMongoDbRepository<UserNotifications>>(), Mock.Of<IMongoDbRepository<Roles>>(),
+            Mock.Of<IMongoDbRepository<JobTitles>>(), Mock.Of<IEmployeeService>(),
+            Mock.Of<IMiddlewareService>(), policyRepository.Object,
+            balanceRepository.Object, Mock.Of<ICompanyWorkingCalendarService>(),
+            attendanceStatuses.Object, reconciliation.Object,
+            Mock.Of<IMongoDbRepository<WorkFromHomePolicy>>(), wfhRepository.Object, mongoClient.Object);
+
+        var result = await service.UpdateLeaveRequestStatus("request-1", new LeaveRequestUpdateDto
+        {
+            Status = EnumsHelper.LeaveRequestStatus.Accepted,
+            Comment = "Approved",
+            ExpectedVersion = 1,
+        });
+
+        Assert.Equal(expectedSuccess, result.Success);
+        if (expectedSuccess)
+        {
+            Assert.Equal(EnumsHelper.LeaveRequestStatus.Accepted, request.Status);
+            balanceCollection.Verify(x => x.UpdateOneAsync(It.IsAny<FilterDefinition<EmployeeLeaveBalance>>(),
+                It.IsAny<UpdateDefinition<EmployeeLeaveBalance>>(), It.IsAny<UpdateOptions>(), It.IsAny<CancellationToken>()), Times.Once);
+            leaveCollection.Verify(x => x.UpdateOneAsync(It.IsAny<FilterDefinition<LeaveRequest>>(),
+                It.IsAny<UpdateDefinition<LeaveRequest>>(), It.IsAny<UpdateOptions>(), It.IsAny<CancellationToken>()), Times.Once);
+            reconciliation.Verify(x => x.ReconcileAcceptedLeaveAsync("company-1", "request-1", "reviewer-1", It.IsAny<CancellationToken>()), Times.Once);
+        }
+        else
+        {
+            Assert.Equal(StatusCodes.Status409Conflict, result.StatusCode);
+            Assert.Equal("LEAVE_WFH_OVERLAP", result.ErrorCode);
+            Assert.Equal(EnumsHelper.LeaveRequestStatus.Pending, request.Status);
+            balanceCollection.Verify(x => x.UpdateOneAsync(It.IsAny<FilterDefinition<EmployeeLeaveBalance>>(),
+                It.IsAny<UpdateDefinition<EmployeeLeaveBalance>>(), It.IsAny<UpdateOptions>(), It.IsAny<CancellationToken>()), Times.Never);
+            leaveCollection.Verify(x => x.UpdateOneAsync(It.IsAny<FilterDefinition<LeaveRequest>>(),
+                It.IsAny<UpdateDefinition<LeaveRequest>>(), It.IsAny<UpdateOptions>(), It.IsAny<CancellationToken>()), Times.Never);
+            reconciliation.Verify(x => x.ReconcileAcceptedLeaveAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+    }
+
     [Theory]
     [InlineData("2026-08-11T08:59:59", false)]
     [InlineData("2026-08-11T09:00:00", true)]

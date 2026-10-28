@@ -72,5 +72,17 @@ public sealed class ModuleLifecycleSecurityContractTests
         Assert.NotNull(attr);
         Assert.Equal(AppModule.Offboarding, attr.Module);
     }
-}
 
+    [Theory]
+    [InlineData(nameof(CareerProfileController.Get))]
+    [InlineData(nameof(CareerProfileController.Save))]
+    [InlineData(nameof(CareerProfileController.UpdateTheme))]
+    public void CareerProfile_endpoints_have_career_profile_module_permission(string methodName)
+    {
+        var method = typeof(CareerProfileController).GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public);
+        Assert.NotNull(method);
+        var attr = method!.GetCustomAttribute<ModulePermissionAttribute>();
+        Assert.NotNull(attr);
+        Assert.Equal(AppModule.CareerProfile, attr.Module);
+    }
+}

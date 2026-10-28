@@ -506,6 +506,35 @@ public sealed class PayrollConfigurationServiceTests
     }
 
     [Fact]
+    public async Task EndAssignment_ReturnsConflict_WhenAssignmentChangedConcurrently()
+    {
+        var assignment = new EmployeePayrollAssignment { Id = "assign-1", CompanyId = "company-1", EmployeeId = "emp-1", EffectiveFrom = new DateTime(2026, 1, 1), Version = 1 };
+        var assignments = Repository(new[] { assignment });
+        assignments.Setup(x => x.Update(It.IsAny<FilterDefinition<EmployeePayrollAssignment>>(), It.IsAny<EmployeePayrollAssignment>()))
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = false, StatusCode = 400 });
+        var service = new PayrollConfigurationService(Repository(Array.Empty<PayrollPayGroup>()).Object, assignments.Object, Repository(Array.Empty<SalaryTemplate>()).Object, Repository(Array.Empty<PayrollPolicyProfile>()).Object);
+
+        var result = await service.EndAssignment("company-1", "admin", "emp-1", new DateTime(2026, 1, 1), new DateTime(2026, 10, 31));
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Contains("changed while being updated", result.Message);
+    }
+
+    [Fact]
+    public async Task DeleteAssignment_RejectsDeletingApprovedAssignment()
+    {
+        var assignment = new EmployeePayrollAssignment { Id = "assign-1", CompanyId = "company-1", EmployeeId = "emp-1", EffectiveFrom = new DateTime(2026, 1, 1), IsApproved = true };
+        var assignments = Repository(new[] { assignment });
+        var service = new PayrollConfigurationService(Repository(Array.Empty<PayrollPayGroup>()).Object, assignments.Object, Repository(Array.Empty<SalaryTemplate>()).Object, Repository(Array.Empty<PayrollPolicyProfile>()).Object);
+
+        var result = await service.DeleteAssignment("company-1", "admin", "emp-1", new DateTime(2026, 1, 1));
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Contains("approved payroll assignment cannot be deleted", result.Message);
+        assignments.Verify(x => x.Delete(It.IsAny<FilterDefinition<EmployeePayrollAssignment>>()), Times.Never);
+    }
+
+    [Fact]
     public async Task DeleteAssignment_DeletesAssignment()
     {
         var assignment = new EmployeePayrollAssignment { Id = "assign-1", CompanyId = "company-1", EmployeeId = "emp-1", EffectiveFrom = new DateTime(2026, 1, 1) };

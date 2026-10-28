@@ -12,8 +12,15 @@ public sealed class PayrollConfigurationController(
     IPayrollTemplateService templates,
     IEmployeeSalaryStructureService salaries,
     IEmployeeSalaryImportService salaryImports,
+    IPayrollReadinessService readiness,
     IHttpContextAccessor context) : ControllerBase
 {
+    [HttpGet("readiness"), ModulePermission(AppModule.PayrollSettings, Permission.View)]
+    public Task<PayrollReadinessReportDto> GetPayrollReadiness([FromQuery] DateTime? targetMonth = null) =>
+        readiness.ValidateCompanyPayrollReadiness(
+            CurrentContext.CompanyId(context),
+            targetMonth ?? DateTime.UtcNow);
+
     [HttpGet("components"), ModulePermission(AppModule.PayrollSettings, Permission.View)]
     public Task<List<PayrollSalaryComponentDto>> GetComponents() =>
         templates.GetComponents(CurrentContext.CompanyId(context));
@@ -104,6 +111,10 @@ public sealed class PayrollConfigurationController(
     [HttpPost("policies/approve"), Authorize(Policy = "AdminOnly"), ModulePermission(AppModule.PayrollSettings, Permission.Approve)]
     public Task<Codeji.CMS.Domain.Models.Result> ApprovePolicy([FromQuery] string policyId, [FromQuery] int version) =>
         templates.ApprovePolicy(CurrentContext.CompanyId(context), CurrentContext.UserId(context), policyId, version, isCompanyAdministrator: true);
+
+    [HttpPost("salary-templates/preview"), ModulePermission(AppModule.PayrollSettings, Permission.View)]
+    public Task<Codeji.CMS.Domain.Models.Result<SalaryTemplatePreviewDto>> PreviewTemplate(SalaryTemplateDto dto) =>
+        templates.PreviewTemplate(CurrentContext.CompanyId(context), dto);
 
     [HttpPost("salary-templates"), ModulePermission(AppModule.PayrollSettings, Permission.Edit)]
     public Task<Codeji.CMS.Domain.Models.Result> SaveTemplate(SalaryTemplateDto dto) =>

@@ -34,6 +34,7 @@ public sealed class AttendanceMutationRequest
     public bool PreserveRequestedStatus { get; init; }
     public ExistingAttendancePolicy ExistingRecordPolicy { get; init; } = ExistingAttendancePolicy.UpdateManualOnly;
     public long? ExpectedAttendanceVersion { get; init; }
+    public bool AllowSourceOverride { get; init; }
 }
 
 public sealed class PreparedAttendanceMutation
@@ -42,6 +43,10 @@ public sealed class PreparedAttendanceMutation
     public required AttendanceModel Attendance { get; init; }
     public AttendanceModel? Existing { get; init; }
     public bool ShouldWrite { get; init; }
+    public bool RequiresLeaveReversal { get; init; }
+    public string? LeaveRequestIdToReverse { get; init; }
+    public bool RequiresWfhConversion { get; init; }
+    public string? WfhRequestIdToConvert { get; init; }
 }
 
 public interface IAttendanceMutationValidator
@@ -105,16 +110,19 @@ public sealed class AttendanceMutationValidator(
         }
         catch (InvalidOperationException ex) { return Fail(result, ex.Message); }
 
+        if (request.AllowSourceOverride && (string.IsNullOrWhiteSpace(request.OperatorRemark) || request.OperatorRemark.Trim().Length < 10))
+            return Fail(result, "ATTENDANCE_OVERRIDE_REASON_REQUIRED");
+
         var code = request.StatusCode.Trim().ToUpperInvariant();
         var status = (await statuses.GetAll(x => x.CompanyId == request.CompanyId && x.Code == code && x.IsActive, withDefaultFilter: false)).FirstOrDefault();
         if (status is null) return Fail(result, "ATTENDANCE_STATUS_INVALID");
-        if ((string.IsNullOrWhiteSpace(request.SourceType) || string.Equals(request.SourceType, "ADMIN_MANUAL", StringComparison.OrdinalIgnoreCase)) &&
+        if (!request.AllowSourceOverride && (string.IsNullOrWhiteSpace(request.SourceType) || string.Equals(request.SourceType, "ADMIN_MANUAL", StringComparison.OrdinalIgnoreCase)) &&
             WorkflowOwnedStatusCodes.Contains(code))
             return Fail(result, "ATTENDANCE_WORKFLOW_STATUS_REQUIRES_LEAVE_OR_WFH_REQUEST");
 
         DateTime? checkIn = null, checkOut = null;
         CompanyOfficeSchedule? schedule = null;
-        if (status.RequiresTime)
+        if (status.RequiresTime || code == "HD" || (request.TimingMode == AttendanceTimingMode.Custom && (request.CheckInTime != null || request.CheckOutTime != null)))
         {
             schedule = await schedules.ResolveAsync(request.CompanyId, employee, date, cancellationToken);
             schedule ??= new CompanyOfficeSchedule
@@ -215,43 +223,105 @@ public sealed class AttendanceMutationValidator(
                 x.Date >= date &&
                 x.Date < date.AddDays(1))).ToList();
         var sourceOwnedSegments = existingSegments.Where(x => x.SourceType is "LEAVE" or "WFH_REQUEST").ToList();
+        var requiresLeaveReversal = false;
+        string? leaveRequestIdToReverse = null;
+        var requiresWfhConversion = false;
+        string? wfhRequestIdToConvert = null;
+        var isWfhTargetStatus = string.Equals(code, "WFH", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(code, "WFH+WFO", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(code, "WFH-HD", StringComparison.OrdinalIgnoreCase);
+
         if (sourceOwnedSegments.Count >= 2)
         {
             var firstSource = sourceOwnedSegments[0];
-            return Fail(result, string.Equals(firstSource.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase)
-                ? "ATTENDANCE_SOURCE_OWNED_LEAVE"
-                : "ATTENDANCE_SOURCE_OWNED_WFH");
+            if (!request.AllowSourceOverride)
+            {
+                return Fail(result, string.Equals(firstSource.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase)
+                    ? "ATTENDANCE_SOURCE_OWNED_LEAVE"
+                    : "ATTENDANCE_SOURCE_OWNED_WFH");
+            }
+            if (string.Equals(firstSource.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase))
+            {
+                requiresLeaveReversal = true;
+                leaveRequestIdToReverse = firstSource.SourceId;
+            }
+            else if (string.Equals(firstSource.SourceType, "WFH_REQUEST", StringComparison.OrdinalIgnoreCase) && !isWfhTargetStatus)
+            {
+                requiresWfhConversion = true;
+                wfhRequestIdToConvert = firstSource.SourceId;
+            }
         }
         else if (sourceOwnedSegments.Count == 1)
         {
             var owned = sourceOwnedSegments[0];
-            var complement = owned.Segment == "FIRST_HALF" ? "SECOND_HALF" : "FIRST_HALF";
-            var existingComp = existingSegments.FirstOrDefault(x => x.Segment == complement);
-            var compEntity = existingComp ?? new AttendanceDaySegment
+            // System automatic present (such as shift start trigger or default present initialization)
+            // must NEVER fabricate punches or overwrite employees who are on approved Work From Home or Leave.
+            if (AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent(request.SourceType))
             {
-                CompanyId = request.CompanyId,
-                UserId = employee.UserId,
-                EmployeeId = employee.EmployeeId,
-                Date = DateTime.SpecifyKind(date.Date, DateTimeKind.Utc),
-                Segment = complement
-            };
-            compEntity.Status = code;
-            compEntity.SourceType = string.IsNullOrWhiteSpace(request.SourceType) ? "ADMIN_MANUAL" : request.SourceType.Trim();
-            compEntity.CheckInTime = checkIn;
-            compEntity.CheckOutTime = checkOut;
-            compEntity.TotalHours = checkIn.HasValue && checkOut.HasValue ? Math.Max((decimal)(checkOut.Value - checkIn.Value).TotalHours, 0) : null;
-            compEntity.Remarks = request.OperatorRemark ?? $"Worked segment complement to {owned.Segment} {owned.SourceType}";
-            compEntity.UpdatedAtUtc = DateTime.UtcNow;
+                result.Success = true;
+                result.MethodResult = new PreparedAttendanceMutation { Employee = employee, Attendance = existing, Existing = existing, ShouldWrite = false };
+                return result;
+            }
 
-            if (string.IsNullOrEmpty(compEntity.AttendanceDaySegmentId))
-                await attendanceSegments.AddOne(compEntity);
+            if (request.AllowSourceOverride)
+            {
+                if (string.Equals(owned.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase))
+                {
+                    requiresLeaveReversal = true;
+                    leaveRequestIdToReverse = owned.SourceId;
+                }
+                else if (string.Equals(owned.SourceType, "WFH_REQUEST", StringComparison.OrdinalIgnoreCase) && !isWfhTargetStatus)
+                {
+                    requiresWfhConversion = true;
+                    wfhRequestIdToConvert = owned.SourceId;
+                }
+            }
             else
-                await attendanceSegments.Update(Builders<AttendanceDaySegment>.Filter.Eq(x => x.AttendanceDaySegmentId, compEntity.AttendanceDaySegmentId), compEntity);
+            {
+                var complement = owned.Segment == "FIRST_HALF" ? "SECOND_HALF" : "FIRST_HALF";
+                var existingComp = existingSegments.FirstOrDefault(x => x.Segment == complement);
+                var compEntity = existingComp ?? new AttendanceDaySegment
+                {
+                    CompanyId = request.CompanyId,
+                    UserId = employee.UserId,
+                    EmployeeId = employee.EmployeeId,
+                    Date = DateTime.SpecifyKind(date.Date, DateTimeKind.Utc),
+                    Segment = complement
+                };
+                compEntity.Status = code;
+                compEntity.SourceType = string.IsNullOrWhiteSpace(request.SourceType) ? "ADMIN_MANUAL" : request.SourceType.Trim();
+                compEntity.CheckInTime = checkIn;
+                compEntity.CheckOutTime = checkOut;
+                compEntity.TotalHours = checkIn.HasValue && checkOut.HasValue ? Math.Max((decimal)(checkOut.Value - checkIn.Value).TotalHours, 0) : null;
+                compEntity.Remarks = request.OperatorRemark ?? $"Worked segment complement to {owned.Segment} {owned.SourceType}";
+                compEntity.UpdatedAtUtc = DateTime.UtcNow;
+
+                if (string.IsNullOrEmpty(compEntity.AttendanceDaySegmentId))
+                    await attendanceSegments.AddOne(compEntity);
+                else
+                    await attendanceSegments.Update(Builders<AttendanceDaySegment>.Filter.Eq(x => x.AttendanceDaySegmentId, compEntity.AttendanceDaySegmentId), compEntity);
+            }
         }
         if (existing is not null)
         {
-            if (string.Equals(existing.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase)) return Fail(result, "ATTENDANCE_SOURCE_OWNED_LEAVE");
-            if (string.Equals(existing.SourceType, "WFH_REQUEST", StringComparison.OrdinalIgnoreCase)) return Fail(result, "ATTENDANCE_SOURCE_OWNED_WFH");
+            if (!request.AllowSourceOverride)
+            {
+                if (string.Equals(existing.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase)) return Fail(result, "ATTENDANCE_SOURCE_OWNED_LEAVE");
+                if (string.Equals(existing.SourceType, "WFH_REQUEST", StringComparison.OrdinalIgnoreCase)) return Fail(result, "ATTENDANCE_SOURCE_OWNED_WFH");
+            }
+            else
+            {
+                if (string.Equals(existing.SourceType, "LEAVE", StringComparison.OrdinalIgnoreCase))
+                {
+                    requiresLeaveReversal = true;
+                    leaveRequestIdToReverse = existing.SourceId;
+                }
+                else if (string.Equals(existing.SourceType, "WFH_REQUEST", StringComparison.OrdinalIgnoreCase) && !isWfhTargetStatus)
+                {
+                    requiresWfhConversion = true;
+                    wfhRequestIdToConvert = existing.SourceId;
+                }
+            }
             if (request.ExpectedAttendanceVersion.HasValue && existing.Version != request.ExpectedAttendanceVersion.Value) return Fail(result, "ATTENDANCE_VERSION_CONFLICT");
             if (request.ExistingRecordPolicy is ExistingAttendancePolicy.CreateMissingOnly or ExistingAttendancePolicy.SkipExisting)
             {
@@ -261,8 +331,19 @@ public sealed class AttendanceMutationValidator(
             }
         }
 
+        if (sourceOwnedSegments.Any() && AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent(request.SourceType))
+        {
+            result.Success = true;
+            result.MethodResult = new PreparedAttendanceMutation { Employee = employee, Attendance = existing, Existing = existing, ShouldWrite = false };
+            return result;
+        }
+
         var row = existing ?? new AttendanceModel { CompanyId = request.CompanyId, UserId = employee.UserId, EmployeeId = employee.EmployeeId, Date = DateTime.SpecifyKind(date.Date, DateTimeKind.Utc) };
-        row.Status = code; row.SourceType = string.IsNullOrWhiteSpace(request.SourceType) ? "ADMIN_MANUAL" : request.SourceType.Trim(); row.SourceId = null; row.SourceVersion = 0;
+        row.Status = code;
+        row.SourceType = request.AllowSourceOverride
+            ? "ADMIN_OVERRIDE"
+            : (string.IsNullOrWhiteSpace(request.SourceType) ? "ADMIN_MANUAL" : request.SourceType.Trim());
+        row.SourceId = null; row.SourceVersion = 0;
         row.CheckInTime = checkIn; row.CheckOutTime = checkOut; row.BreakMinutes = schedule?.BreakMinutes ?? 0;
         row.TotalHours = checkIn.HasValue && checkOut.HasValue ? Math.Max((decimal)(checkOut.Value - checkIn.Value).TotalHours - (row.BreakMinutes / 60m), 0) : 0;
         row.LateCount = (code is "LHD" or "LC" or "LHD+ED") ? 1 : 0;
@@ -352,7 +433,18 @@ public sealed class AttendanceMutationValidator(
             row.MarkedByUserId = request.ActorUserId; row.MarkedAtUtc = row.ModifiedAtUtc; row.Version = 1;
         }
         else row.Version++;
-        result.Success = true; result.MethodResult = new PreparedAttendanceMutation { Employee = employee, Attendance = row, Existing = existing, ShouldWrite = true };
+        result.Success = true;
+        result.MethodResult = new PreparedAttendanceMutation
+        {
+            Employee = employee,
+            Attendance = row,
+            Existing = existing,
+            ShouldWrite = true,
+            RequiresLeaveReversal = requiresLeaveReversal,
+            LeaveRequestIdToReverse = leaveRequestIdToReverse,
+            RequiresWfhConversion = requiresWfhConversion,
+            WfhRequestIdToConvert = wfhRequestIdToConvert
+        };
         return result;
     }
 
@@ -372,6 +464,7 @@ public sealed class AttendanceMutationValidator(
             "ATTENDANCE_VERSION_CONFLICT" => "Attendance was updated by another user. Refresh and try again.",
             "ATTENDANCE_SOURCE_OWNED_LEAVE" => "This attendance is managed by an approved leave request.",
             "ATTENDANCE_SOURCE_OWNED_WFH" => "This date includes attendance managed by an approved work-from-home request. Recalculate the monthly exceptions, then use Edit on the WFH hours exception to correct only the WFH half; the generic correction cannot overwrite source-owned time.",
+            "ATTENDANCE_OVERRIDE_REASON_REQUIRED" => "An override requires an explanatory justification of at least 10 characters.",
             _ => message
         };
         return result;

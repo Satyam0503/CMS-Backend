@@ -16,6 +16,7 @@ public sealed class AttendanceDaySegment
     public string CompanyId { get; set; } = string.Empty;
     public string UserId { get; set; } = string.Empty;
     public string EmployeeId { get; set; } = string.Empty;
+    [BsonDateTimeOptions(Kind = DateTimeKind.Utc)]
     public DateTime Date { get; set; }
     // FIRST_HALF or SECOND_HALF. The database unique index enforces one owner.
     public string Segment { get; set; } = string.Empty;

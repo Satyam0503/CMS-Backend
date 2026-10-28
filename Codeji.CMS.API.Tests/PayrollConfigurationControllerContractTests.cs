@@ -17,6 +17,8 @@ public sealed class PayrollConfigurationControllerContractTests
     [InlineData("GetAssignments")]
     [InlineData("GetEmployeeSalaryImportBatch")]
     [InlineData("GetPendingEmployeeSalaries")]
+    [InlineData("PreviewTemplate")]
+    [InlineData("GetPayrollReadiness")]
     public void Configuration_reads_require_payroll_settings_view(string methodName)
     {
         var method = typeof(PayrollConfigurationController).GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public);

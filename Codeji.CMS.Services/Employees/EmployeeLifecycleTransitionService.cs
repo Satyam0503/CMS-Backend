@@ -84,7 +84,7 @@ public static class EmployeeLifecycleTransitionService
         if (!IsAllowedAvailability(availability)) { error = "LIFECYCLE_AVAILABILITY_INVALID"; return false; }
         if (availability == EmployeeLifecycleStatuses.Sabbatical && !expectedReturnDate.HasValue)
         { error = "SABBATICAL_RETURN_DATE_REQUIRED"; return false; }
-        if (expectedReturnDate.HasValue && expectedReturnDate.Value.Date < effectiveFromUtc.Date)
+        if (expectedReturnDate.HasValue && expectedReturnDate.Value.Date < effectiveFromUtc.Date.AddDays(-1))
         { error = "LIFECYCLE_RETURN_DATE_INVALID"; return false; }
         if (state.IsFormerEmployee()) { error = "FORMER_EMPLOYEE_LIFECYCLE_LOCKED"; return false; }
         if (state.AvailabilityStatus == EmployeeLifecycleStatuses.AbscondingUnderReview && availability == EmployeeLifecycleStatuses.Working && string.IsNullOrWhiteSpace(reason))
@@ -93,7 +93,7 @@ public static class EmployeeLifecycleTransitionService
         var previous = state.AvailabilityStatus;
         state.AvailabilityStatus = availability;
         state.AvailabilityEffectiveFrom = effectiveFromUtc;
-        state.AvailabilityExpectedReturnDate = expectedReturnDate?.Date;
+        state.AvailabilityExpectedReturnDate = availability == EmployeeLifecycleStatuses.Working ? null : expectedReturnDate?.Date;
         state.AvailabilityReasonCode = reasonCode;
         state.Version++;
         state.History.Add(new EmployeeLifecycleStatusHistory

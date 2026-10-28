@@ -26,5 +26,6 @@ public class GetAllEmployeeResponseModel
     public string OffboardingStatus { get; set; } = "None";
     public string FormerPortalStatus { get; set; } = "NotEligible";
     public string AlumniStatus { get; set; } = "NotMember";
+    public DateTime? AvailabilityExpectedReturnDate { get; set; }
     public int LifecycleVersion { get; set; }
 }

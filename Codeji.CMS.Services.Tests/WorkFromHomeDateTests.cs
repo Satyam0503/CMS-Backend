@@ -92,10 +92,23 @@ public class WorkFromHomeDateTests
     }
 
     [Fact]
-    public void SameDayCutoff_WithoutCustomCutoff_NeverBlocksSameDay()
+    public void SameDayCutoff_WithoutCustomCutoff_FallsBackToOfficeStart_AndBlocksAfterShiftStart()
     {
         var date = new DateTime(2026, 10, 23);
         var companyNow = new DateTime(2026, 10, 23, 10, 25, 0);
+        var officeStart = new TimeSpan(9, 30, 0);
+
+        var isBlocked = WorkFromHomeService.IsSameDayWfhStartCutoffReached(
+            date, companyNow, "FullDay", officeStart, null, 0, 480, 8m);
+
+        Assert.True(isBlocked);
+    }
+
+    [Fact]
+    public void SameDayCutoff_WithoutCustomCutoff_BeforeShiftStart_IsNotBlocked()
+    {
+        var date = new DateTime(2026, 10, 23);
+        var companyNow = new DateTime(2026, 10, 23, 9, 15, 0);
         var officeStart = new TimeSpan(9, 30, 0);
 
         var isBlocked = WorkFromHomeService.IsSameDayWfhStartCutoffReached(

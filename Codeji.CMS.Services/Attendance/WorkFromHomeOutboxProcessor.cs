@@ -22,7 +22,8 @@ public sealed class WorkFromHomeOutboxProcessor(
     IMongoDbRepository<UserNotifications> userNotifications,
     INotificationService notifications,
     IMiddlewareService mail,
-    ILogger<WorkFromHomeOutboxProcessor> logger) : IWorkFromHomeOutboxProcessor
+    ILogger<WorkFromHomeOutboxProcessor> logger,
+    IMongoDbRepository<WorkFromHomeRequest>? requests = null) : IWorkFromHomeOutboxProcessor
 {
     public async Task<bool> ProcessNextAsync(CancellationToken cancellationToken = default)
     {
@@ -44,8 +45,45 @@ public sealed class WorkFromHomeOutboxProcessor(
 
         try
         {
-            if (string.IsNullOrWhiteSpace(item.CompanyId) || string.IsNullOrWhiteSpace(item.RequestId) || string.IsNullOrWhiteSpace(item.EventId))
-                throw new InvalidOperationException("WFH outbox event is missing tenant or request identity.");
+            if (string.IsNullOrWhiteSpace(item.CompanyId) || string.IsNullOrWhiteSpace(item.EventId))
+                throw new InvalidOperationException("WFH outbox event is missing tenant identity.");
+
+            if (string.IsNullOrWhiteSpace(item.RequestId))
+            {
+                var dedupeParts = item.DedupeKey?.Split(':');
+                if (dedupeParts?.Length >= 2 && !string.IsNullOrWhiteSpace(dedupeParts[1]))
+                {
+                    item.RequestId = dedupeParts[1];
+                }
+                else if (requests is not null && item.CreatedDate.HasValue)
+                {
+                    var windowStart = item.CreatedDate.Value.AddMinutes(-10);
+                    var windowEnd = item.CreatedDate.Value.AddMinutes(10);
+                    var matchingReq = await requests.FirstOrDefault(
+                        x => x.CompanyId == item.CompanyId &&
+                             (x.CreatedBy == item.ActorUserId || x.UserId == item.ActorUserId) &&
+                             x.CreatedDate >= windowStart && x.CreatedDate <= windowEnd);
+                    if (matchingReq is not null && !string.IsNullOrWhiteSpace(matchingReq.RequestId))
+                    {
+                        item.RequestId = matchingReq.RequestId;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(item.RequestId))
+                {
+                    await UpdateAsync(item, Builders<WorkFromHomeOutboxEvent>.Update.Set(x => x.RequestId, item.RequestId), cancellationToken);
+                }
+                else
+                {
+                    logger.LogWarning("WFH outbox event {EventId} for company {CompanyId} has unrecoverable missing request identity. Marking as DeadLetter.", item.EventId, item.CompanyId);
+                    await UpdateAsync(item, Builders<WorkFromHomeOutboxEvent>.Update
+                        .Set(x => x.Status, "DeadLetter")
+                        .Set(x => x.CompletedAtUtc, DateTime.UtcNow)
+                        .Set(x => x.LastError, "Missing tenant or request identity"), cancellationToken);
+                    return true;
+                }
+            }
+
             if (item.EventType == "AUDIT") await PersistAuditAsync(item, cancellationToken);
             else if (item.EventType == "NOTIFICATION") await PersistNotificationAsync(item, now, cancellationToken);
             else throw new InvalidOperationException("WFH outbox event type is not supported.");

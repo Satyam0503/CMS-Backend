@@ -4,9 +4,12 @@ using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.Leave;
 using Codeji.CMS.Services.Employees;
+using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using MapsterMapper;
+using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Attendance
 {
@@ -70,6 +73,11 @@ namespace Codeji.CMS.Services.Attendance
         private readonly IAttendanceInitializationService? _initializationService;
         private readonly IMongoDbRepository<AttendancePenaltyPolicy>? _penaltyPolicies;
         private readonly IShiftAttendanceReconciliationService? _shiftReconciliation;
+        private readonly IMongoDbRepository<LeaveRequest>? _leaves;
+        private readonly IMongoDbRepository<EmployeeLeaveBalance>? _leaveBalances;
+        private readonly IMongoDbRepository<MonthlyAttendanceSummary>? _summaries;
+        private readonly IMongoDbRepository<AttendancePayrollException>? _exceptions;
+        private readonly IMongoDbRepository<WorkFromHomeRequest>? _wfhRequests;
 
         public AdminAttendanceService(
             IAttendanceRepository attendanceRepository,
@@ -85,7 +93,12 @@ namespace Codeji.CMS.Services.Attendance
             IMongoDbRepository<Department>? departments = null,
             IAttendanceInitializationService? initializationService = null,
             IMongoDbRepository<AttendancePenaltyPolicy>? penaltyPolicies = null,
-            IShiftAttendanceReconciliationService? shiftReconciliation = null
+            IShiftAttendanceReconciliationService? shiftReconciliation = null,
+            IMongoDbRepository<LeaveRequest>? leaves = null,
+            IMongoDbRepository<EmployeeLeaveBalance>? leaveBalances = null,
+            IMongoDbRepository<MonthlyAttendanceSummary>? summaries = null,
+            IMongoDbRepository<AttendancePayrollException>? exceptions = null,
+            IMongoDbRepository<WorkFromHomeRequest>? wfhRequests = null
         )
         {
             _attendanceRepository = attendanceRepository;
@@ -102,6 +115,11 @@ namespace Codeji.CMS.Services.Attendance
             _initializationService = initializationService;
             _penaltyPolicies = penaltyPolicies;
             _shiftReconciliation = shiftReconciliation;
+            _leaves = leaves;
+            _leaveBalances = leaveBalances;
+            _summaries = summaries;
+            _exceptions = exceptions;
+            _wfhRequests = wfhRequests;
         }
 
         public async Task<AttendanceResponseDto> AddManualAttendance(
@@ -114,6 +132,11 @@ namespace Codeji.CMS.Services.Attendance
                 throw new ArgumentNullException(nameof(dto));
 
             var normalizedDate = DateTime.SpecifyKind(dto.Date.Date, DateTimeKind.Utc);
+            var existing = await _attendanceRepository.GetByUserAndDateAsync(
+                companyId,
+                dto.UserId,
+                normalizedDate
+            );
             var prepared = await Prepare(
                 companyId,
                 actorUserId,
@@ -122,7 +145,9 @@ namespace Codeji.CMS.Services.Attendance
                 dto.Status,
                 dto.CheckInTime,
                 dto.CheckOutTime,
-                dto.Remarks
+                dto.Remarks,
+                existing?.Version,
+                dto.AllowSourceOverride
             );
             if (
                 !string.IsNullOrWhiteSpace(dto.EmployeeId)
@@ -131,13 +156,150 @@ namespace Codeji.CMS.Services.Attendance
                 throw new InvalidOperationException(
                     "Employee identity does not match the selected user."
                 );
+
+            if (prepared.RequiresLeaveReversal && !string.IsNullOrEmpty(prepared.LeaveRequestIdToReverse) && _leaves != null)
+            {
+                var leaveRequest = await _leaves.FirstOrDefault(x => x.CompanyId == companyId && x.LeaveRequestId == prepared.LeaveRequestIdToReverse);
+                if (leaveRequest != null && leaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted)
+                {
+                    if (_leaveBalances != null)
+                    {
+                        var balance = await _leaveBalances.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == dto.UserId && x.LeavePolicyId == leaveRequest.LeavePolicyId);
+                        if (balance != null)
+                        {
+                            var balanceUpdate = Builders<EmployeeLeaveBalance>.Update
+                                .Inc(x => x.Remaining, leaveRequest.TotalDays)
+                                .Inc(x => x.Taken, -leaveRequest.TotalDays)
+                                .Inc(x => x.Version, 1)
+                                .Set(x => x.UpdatedDate, DateTime.UtcNow);
+                            await _leaveBalances.UpdateMany(Builders<EmployeeLeaveBalance>.Filter.Eq(x => x.Id, balance.Id), balanceUpdate);
+                        }
+                    }
+                    var leaveUpdate = Builders<LeaveRequest>.Update
+                        .Set(x => x.Status, EnumsHelper.LeaveRequestStatus.WithDrawn)
+                        .Set(x => x.ReviewedBy, actorUserId)
+                        .Set(x => x.Comment, $"Attendance overridden to {dto.Status} by HR: {dto.Remarks?.Trim()}")
+                        .Set(x => x.ReviewedAt, DateTime.UtcNow)
+                        .Set(x => x.UpdatedDate, DateTime.UtcNow)
+                        .Set(x => x.ReconciliationStatus, "Reversed")
+                        .Set(x => x.ReconciliationErrorCode, null)
+                        .Set(x => x.ReconciliationErrorMessage, null)
+                        .Inc(x => x.Version, 1);
+                    await _leaves.UpdateMany(Builders<LeaveRequest>.Filter.Eq(x => x.LeaveRequestId, leaveRequest.LeaveRequestId), leaveUpdate);
+                }
+            }
+
+            if (_wfhRequests != null)
+            {
+                var candidateRequests = new List<WorkFromHomeRequest>();
+                if (prepared.RequiresWfhConversion && !string.IsNullOrEmpty(prepared.WfhRequestIdToConvert))
+                {
+                    var specific = await _wfhRequests.FirstOrDefault(x => x.CompanyId == companyId && x.RequestId == prepared.WfhRequestIdToConvert);
+                    if (specific != null) candidateRequests.Add(specific);
+                }
+
+                if (dto.AllowSourceOverride || existing?.SourceType == "WFH_REQUEST")
+                {
+                    var overlapping = await _wfhRequests.GetAll(x =>
+                        x.CompanyId == companyId &&
+                        x.UserId == dto.UserId &&
+                        x.Status == "Approved" &&
+                        x.FromDate <= normalizedDate &&
+                        x.ToDate >= normalizedDate);
+                    foreach (var req in overlapping)
+                    {
+                        if (candidateRequests.All(c => c.RequestId != req.RequestId))
+                            candidateRequests.Add(req);
+                    }
+                }
+
+                foreach (var wfhReq in candidateRequests)
+                {
+                    wfhReq.OfficeConversions ??= [];
+                    if (!wfhReq.OfficeConversions.Any(c => c.AttendanceDate.Date == normalizedDate.Date))
+                    {
+                        var conversion = new WorkFromHomeOfficeConversion
+                        {
+                            AttendanceDate = normalizedDate,
+                            OfficeCheckInTime = prepared.Attendance.CheckInTime ?? DateTime.UtcNow,
+                            OfficeCheckOutTime = prepared.Attendance.CheckOutTime ?? DateTime.UtcNow,
+                            PreviousAttendanceStatus = existing?.Status ?? "WFH",
+                            PreviousCheckInTime = existing?.CheckInTime,
+                            PreviousCheckOutTime = existing?.CheckOutTime,
+                            PreviousTotalHours = existing?.TotalHours,
+                            PreviousRemarks = existing?.Remarks,
+                            Remarks = dto.Remarks ?? "Overridden to office attendance by HR",
+                            ConvertedByUserId = actorUserId,
+                            ConvertedAtUtc = DateTime.UtcNow
+                        };
+                        wfhReq.OfficeConversions.Add(conversion);
+                        wfhReq.Version++;
+                        wfhReq.UpdatedBy = actorUserId;
+                        wfhReq.UpdatedDate = DateTime.UtcNow;
+                        await _wfhRequests.Update(Builders<WorkFromHomeRequest>.Filter.Eq(x => x.RequestId, wfhReq.RequestId), wfhReq);
+                    }
+                }
+            }
+
+            if (dto.AllowSourceOverride)
+            {
+                var isWfhStatus = string.Equals(dto.Status, "WFH", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(dto.Status, "WFH+WFO", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(dto.Status, "WFH-HD", StringComparison.OrdinalIgnoreCase);
+
+                if (!isWfhStatus)
+                {
+                    await _attendanceSegments.DeleteAll(Builders<AttendanceDaySegment>.Filter.Where(x =>
+                        x.CompanyId == companyId && x.UserId == dto.UserId && x.Date >= normalizedDate && x.Date < normalizedDate.AddDays(1) &&
+                        (x.SourceType == "LEAVE" || x.SourceType == "WFH_REQUEST")));
+                }
+                else
+                {
+                    var segments = await _attendanceSegments.GetAll(x =>
+                        x.CompanyId == companyId && x.UserId == dto.UserId && x.Date >= normalizedDate && x.Date < normalizedDate.AddDays(1));
+                    foreach (var seg in segments)
+                    {
+                        if (prepared.Attendance.CheckInTime.HasValue) seg.CheckInTime = prepared.Attendance.CheckInTime;
+                        if (prepared.Attendance.CheckOutTime.HasValue) seg.CheckOutTime = prepared.Attendance.CheckOutTime;
+                        if (prepared.Attendance.TotalHours.HasValue) seg.TotalHours = prepared.Attendance.TotalHours;
+                        seg.Remarks = $"Punch timings regularized by HR: {dto.Remarks?.Trim()}";
+                        seg.UpdatedAtUtc = DateTime.UtcNow;
+                        seg.Version++;
+                        await _attendanceSegments.Update(Builders<AttendanceDaySegment>.Filter.Eq(x => x.AttendanceDaySegmentId, seg.AttendanceDaySegmentId), seg);
+                    }
+                }
+            }
+
             var result = prepared.Existing is null
                 ? await _attendanceRepository.AddAsync(prepared.Attendance)
                 : await PersistUpdate(companyId, dto.UserId, normalizedDate, prepared.Attendance);
+
+            if (_summaries != null)
+            {
+                var monthStart = new DateTime(dto.Date.Year, dto.Date.Month, 1);
+                await _summaries.DeleteAll(Builders<MonthlyAttendanceSummary>.Filter.Where(x =>
+                    x.CompanyId == companyId && x.UserId == dto.UserId && x.PayrollMonth == monthStart && !x.IsLocked));
+            }
+
+            if (dto.AllowSourceOverride && _exceptions != null)
+            {
+                await _exceptions.UpdateMany(
+                    Builders<AttendancePayrollException>.Filter.Where(x =>
+                        x.CompanyId == companyId && x.UserId == dto.UserId &&
+                        (x.AttendanceDate == normalizedDate || x.AffectedDates.Contains(normalizedDate)) &&
+                        x.Status == "PENDING_REVIEW"),
+                    Builders<AttendancePayrollException>.Update
+                        .Set(x => x.Status, "RESOLVED")
+                        .Set(x => x.Resolution, $"Resolved via attendance override to {dto.Status}: {dto.Remarks}")
+                        .Set(x => x.ReviewedBy, actorUserId)
+                        .Set(x => x.ReviewedAt, DateTime.UtcNow)
+                );
+            }
+
             await _auditWriter.WriteMutationAsync(
                 companyId,
                 actorUserId,
-                prepared.Existing is null ? "CREATED" : "UPDATED",
+                dto.AllowSourceOverride ? "ADMIN_SOURCE_OVERRIDE" : (prepared.Existing is null ? "CREATED" : "UPDATED"),
                 result
             );
             return _mapper.Map<AttendanceResponseDto>(result);
@@ -171,13 +333,105 @@ namespace Codeji.CMS.Services.Attendance
                 dto.CheckInTime,
                 dto.CheckOutTime,
                 dto.Remarks,
-                existing.Version
+                existing.Version,
+                dto.AllowSourceOverride
             );
+
+            if (prepared.RequiresLeaveReversal && !string.IsNullOrEmpty(prepared.LeaveRequestIdToReverse) && _leaves != null)
+            {
+                var leaveRequest = await _leaves.FirstOrDefault(x => x.CompanyId == companyId && x.LeaveRequestId == prepared.LeaveRequestIdToReverse);
+                if (leaveRequest != null && leaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted)
+                {
+                    if (_leaveBalances != null)
+                    {
+                        var balance = await _leaveBalances.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == userId && x.LeavePolicyId == leaveRequest.LeavePolicyId);
+                        if (balance != null)
+                        {
+                            var balanceUpdate = Builders<EmployeeLeaveBalance>.Update
+                                .Inc(x => x.Remaining, leaveRequest.TotalDays)
+                                .Inc(x => x.Taken, -leaveRequest.TotalDays)
+                                .Inc(x => x.Version, 1)
+                                .Set(x => x.UpdatedDate, DateTime.UtcNow);
+                            await _leaveBalances.UpdateMany(Builders<EmployeeLeaveBalance>.Filter.Eq(x => x.Id, balance.Id), balanceUpdate);
+                        }
+                    }
+                    var leaveUpdate = Builders<LeaveRequest>.Update
+                        .Set(x => x.Status, EnumsHelper.LeaveRequestStatus.WithDrawn)
+                        .Set(x => x.ReviewedBy, actorUserId)
+                        .Set(x => x.Comment, $"Attendance overridden to {dto.Status} by HR: {dto.Remarks?.Trim()}")
+                        .Set(x => x.ReviewedAt, DateTime.UtcNow)
+                        .Set(x => x.UpdatedDate, DateTime.UtcNow)
+                        .Set(x => x.ReconciliationStatus, "Reversed")
+                        .Set(x => x.ReconciliationErrorCode, null)
+                        .Set(x => x.ReconciliationErrorMessage, null)
+                        .Inc(x => x.Version, 1);
+                    await _leaves.UpdateMany(Builders<LeaveRequest>.Filter.Eq(x => x.LeaveRequestId, leaveRequest.LeaveRequestId), leaveUpdate);
+                }
+            }
+
+            if (prepared.RequiresWfhConversion && !string.IsNullOrEmpty(prepared.WfhRequestIdToConvert) && _wfhRequests != null)
+            {
+                var wfhReq = await _wfhRequests.FirstOrDefault(x => x.CompanyId == companyId && x.RequestId == prepared.WfhRequestIdToConvert);
+                if (wfhReq != null)
+                {
+                    var conversion = new WorkFromHomeOfficeConversion
+                    {
+                        AttendanceDate = normalizedDate,
+                        OfficeCheckInTime = prepared.Attendance.CheckInTime ?? DateTime.UtcNow,
+                        OfficeCheckOutTime = prepared.Attendance.CheckOutTime ?? DateTime.UtcNow,
+                        PreviousAttendanceStatus = existing.Status,
+                        PreviousCheckInTime = existing.CheckInTime,
+                        PreviousCheckOutTime = existing.CheckOutTime,
+                        PreviousTotalHours = existing.TotalHours,
+                        PreviousRemarks = existing.Remarks,
+                        Remarks = dto.Remarks ?? "Overridden to office attendance by HR",
+                        ConvertedByUserId = actorUserId,
+                        ConvertedAtUtc = DateTime.UtcNow
+                    };
+                    wfhReq.OfficeConversions ??= [];
+                    wfhReq.OfficeConversions.Add(conversion);
+                    wfhReq.Version++;
+                    wfhReq.UpdatedBy = actorUserId;
+                    wfhReq.UpdatedDate = DateTime.UtcNow;
+                    await _wfhRequests.Update(Builders<WorkFromHomeRequest>.Filter.Eq(x => x.RequestId, wfhReq.RequestId), wfhReq);
+                }
+            }
+
+            if (dto.AllowSourceOverride)
+            {
+                await _attendanceSegments.DeleteAll(Builders<AttendanceDaySegment>.Filter.Where(x =>
+                    x.CompanyId == companyId && x.UserId == userId && x.Date >= normalizedDate && x.Date < normalizedDate.AddDays(1) &&
+                    (x.SourceType == "LEAVE" || x.SourceType == "WFH_REQUEST")));
+            }
+
             await PersistUpdate(companyId, userId, date.Date, prepared.Attendance);
+
+            if (_summaries != null)
+            {
+                var monthStart = new DateTime(date.Year, date.Month, 1);
+                await _summaries.DeleteAll(Builders<MonthlyAttendanceSummary>.Filter.Where(x =>
+                    x.CompanyId == companyId && x.UserId == userId && x.PayrollMonth == monthStart && !x.IsLocked));
+            }
+
+            if (dto.AllowSourceOverride && _exceptions != null)
+            {
+                await _exceptions.UpdateMany(
+                    Builders<AttendancePayrollException>.Filter.Where(x =>
+                        x.CompanyId == companyId && x.UserId == userId &&
+                        (x.AttendanceDate == normalizedDate || x.AffectedDates.Contains(normalizedDate)) &&
+                        x.Status == "PENDING_REVIEW"),
+                    Builders<AttendancePayrollException>.Update
+                        .Set(x => x.Status, "RESOLVED")
+                        .Set(x => x.Resolution, $"Resolved via attendance override to {dto.Status}: {dto.Remarks}")
+                        .Set(x => x.ReviewedBy, actorUserId)
+                        .Set(x => x.ReviewedAt, DateTime.UtcNow)
+                );
+            }
+
             await _auditWriter.WriteMutationAsync(
                 companyId,
                 actorUserId,
-                "UPDATED",
+                dto.AllowSourceOverride ? "ADMIN_SOURCE_OVERRIDE" : "UPDATED",
                 prepared.Attendance
             );
             return true;
@@ -192,7 +446,8 @@ namespace Codeji.CMS.Services.Attendance
             string? checkIn,
             string? checkOut,
             string? remarks,
-            long? expectedVersion = null
+            long? expectedVersion = null,
+            bool allowSourceOverride = false
         )
         {
             var hasTimes =
@@ -227,7 +482,9 @@ namespace Codeji.CMS.Services.Attendance
                 if (outTime == null && inTime != null)
                     outTime = string.Equals(status, "ED", StringComparison.OrdinalIgnoreCase)
                         ? new TimeOnly(14, 0)
-                        : new TimeOnly(18, 0);
+                        : string.Equals(status, "HD", StringComparison.OrdinalIgnoreCase)
+                            ? new TimeOnly(13, 30)
+                            : new TimeOnly(18, 0);
             }
             var validation = await _mutationValidator.PrepareAsync(
                 new AttendanceMutationRequest
@@ -243,6 +500,7 @@ namespace Codeji.CMS.Services.Attendance
                     OperatorRemark = remarks,
                     ExpectedAttendanceVersion = expectedVersion,
                     PreserveRequestedStatus = true,
+                    AllowSourceOverride = allowSourceOverride,
                 }
             );
             if (!validation.Success || validation.MethodResult is null)

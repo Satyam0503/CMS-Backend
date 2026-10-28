@@ -15,6 +15,52 @@ namespace Codeji.CMS.Services.Tests;
 
 public sealed class AutoPayrollSalarySourceTests
 {
+    [Theory]
+    [InlineData("2025-26", "tax year")]
+    [InlineData("2025-26-expired", "no approved TDS policy")]
+    public async Task GeneratePayroll_BlocksWhenPaymentDateHasNoMatchingApprovedTaxYearPolicy(string configuredYear, string expectedMessage)
+    {
+        var employee = new EmpUser
+        {
+            CompanyId = "company-1", UserId = "user-1", EmployeeId = "employee-1", FirstName = "Test",
+            LastName = "Employee", Email = "test@example.com", DateOfJoining = "2026-01-01", Status = true
+        };
+        var profile = new PayrollPolicyProfile
+        {
+            Id = "tax-policy", CompanyId = "company-1", Name = "Tax policy", Scope = "COMPANY_DEFAULT",
+            IsActive = true, ApprovalStatus = "APPROVED", TdsMode = "AUTO_NEW_REGIME",
+            StatutoryJurisdiction = "IN-KA", FinancialYear = configuredYear.Replace("-expired", ""),
+            StatutoryRuleVersion = "reviewed-tax-rules",
+            EffectiveFrom = configuredYear.EndsWith("-expired", StringComparison.Ordinal)
+                ? new DateTime(2025, 4, 1) : new DateTime(2026, 4, 1),
+            EffectiveTo = configuredYear.EndsWith("-expired", StringComparison.Ordinal)
+                ? new DateTime(2026, 3, 31) : null
+        };
+        var payrollRows = Repository<EmpPayRoll>();
+        payrollRows.Setup(x => x.Exist(It.IsAny<Expression<Func<EmpPayRoll, bool>>>(), It.IsAny<bool>())).ReturnsAsync(false);
+        var divisor = new Mock<IPayrollDivisorPolicyService>();
+        divisor.Setup(x => x.GetEffective("company-1", new DateTime(2026, 3, 1)))
+            .ReturnsAsync(new PayrollDivisorPolicyDto { RequireAttendanceLock = false, TdsMode = "AUTO_NEW_REGIME" });
+        var payrollService = new Mock<IPayRollServices>();
+        var service = new AutoPayrollServices(
+            payrollService.Object, Repository(employee).Object, payrollRows.Object,
+            Repository<AttendanceModel>().Object, Repository<AttendanceDaySegment>().Object, Repository<SalaryModel>().Object,
+            Repository<AttendanceStatusSetting>().Object, Repository<MonthlyAttendanceSummary>().Object,
+            Repository<AttendancePayrollException>().Object, divisor.Object, new Mock<ICompanyWorkingCalendarService>().Object,
+            Repository<EmployeePayrollAssignment>().Object, Repository(profile).Object,
+            Repository<PayrollPayGroup>().Object, Repository<SalaryTemplate>().Object,
+            Repository<EmployeeSalaryStructure>().Object);
+
+        var result = await service.GeneratePayrollForMonthAsync(
+            "company-1", new DateTime(2026, 3, 1), plannedPaymentDate: new DateTime(2026, 4, 1));
+
+        Assert.False(result.Success);
+        Assert.Equal("PAYROLL_VALIDATION_BLOCKED", result.ErrorCode);
+        Assert.Contains(result.Errors, error => error.Message.Contains(expectedMessage, StringComparison.OrdinalIgnoreCase));
+        payrollRows.Verify(x => x.AddOne(It.IsAny<EmpPayRoll>()), Times.Never);
+        payrollService.Verify(x => x.AddUpdatePayRoll(It.IsAny<AddUpdatePayRollRequestDto>(), It.IsAny<string>()), Times.Never);
+    }
+
     [Fact]
     public async Task GeneratePayroll_BlocksUnsupportedTdsModeBeforeChangingAnyPayrollRows()
     {
@@ -105,13 +151,13 @@ public sealed class AutoPayrollSalarySourceTests
         var salary = new EmployeeSalaryStructure
         {
             Id = "55555555-5555-5555-5555-555555555555", CompanyId = "company-1", EmployeeId = "employee-1",
-            Version = 1, EffectiveFrom = new DateTime(2026, 10, 1), Status = "ACTIVE", ApprovalStatus = "APPROVED",
+            Version = 1, EffectiveFrom = new DateTime(2026, 3, 1), Status = "ACTIVE", ApprovalStatus = "APPROVED",
             Components = [new() { ComponentCode = "BASIC", ComponentName = "Basic", Value = 50000m, IsTaxable = true }]
         };
         var existingPayroll = new EmpPayRoll
         {
             Id = "payroll-1", CompanyId = "company-1", UserId = "user-1", EmployeeId = "employee-1",
-            PayMonth = new DateTime(2026, 10, 1), PaidDate = new DateTime(2026, 10, 31), BasicPay = 50000m,
+            PayMonth = new DateTime(2026, 3, 1), PaidDate = new DateTime(2026, 4, 1), BasicPay = 50000m,
             PaidDays = 31, CreatedAt = DateTime.UtcNow,
             Deduction = new Deduction { IncomeTax = 1234m },
             CalculationSnapshot = new PayrollCalculationSnapshot { TdsMode = "MANUAL_ONLY" }
@@ -123,10 +169,9 @@ public sealed class AutoPayrollSalarySourceTests
             .Callback<AddUpdatePayRollRequestDto, string>((request, _) => generatedPayroll = request)
             .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
         var divisor = new Mock<IPayrollDivisorPolicyService>();
-        divisor.Setup(x => x.GetEffective("company-1", new DateTime(2026, 10, 1)))
+        divisor.Setup(x => x.GetEffective("company-1", new DateTime(2026, 3, 1)))
             .ReturnsAsync(new PayrollDivisorPolicyDto { RequireAttendanceLock = false, TdsMode = "MANUAL_ONLY" });
         var workingCalendar = new Mock<ICompanyWorkingCalendarService>();
-        workingCalendar.Setup(x => x.CountWorkingDaysAsync("company-1", new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31), It.IsAny<CancellationToken>())).ReturnsAsync(22);
         var service = new AutoPayrollServices(
             payrollService.Object, Repository(employee).Object, payrollRows.Object,
             Repository<AttendanceModel>().Object, Repository<AttendanceDaySegment>().Object, Repository<SalaryModel>().Object,
@@ -136,11 +181,16 @@ public sealed class AutoPayrollSalarySourceTests
             Repository<PayrollPayGroup>().Object, Repository<SalaryTemplate>().Object,
             Repository(salary).Object);
 
-        var result = await service.GeneratePayrollForMonthAsync("company-1", new DateTime(2026, 10, 1));
+        var result = await service.GeneratePayrollForMonthAsync(
+            "company-1", new DateTime(2026, 3, 1), plannedPaymentDate: new DateTime(2026, 4, 1));
 
         Assert.True(result.Success, result.Message);
         Assert.Equal(1234m, generatedPayroll?.IncomeTax);
         Assert.Equal("payroll-1", generatedPayroll?.PayRollId);
+        Assert.Equal(new DateTime(2026, 4, 1), generatedPayroll?.CalculationSnapshot?.TdsPaymentDate);
+        Assert.Equal("2026-27", generatedPayroll?.CalculationSnapshot?.TdsFinancialYear);
+        Assert.Equal("INCOME_TAX_ACT_2025", generatedPayroll?.CalculationSnapshot?.TdsIncomeTaxAct);
+        Assert.Equal("392(1)", generatedPayroll?.CalculationSnapshot?.TdsSection);
     }
 
     [Fact]
@@ -362,6 +412,17 @@ public sealed class AutoPayrollSalarySourceTests
         Assert.Equal(50000m, capturedDto.BasicPay);
         Assert.Equal(10000m, capturedDto.OtherAllowance);
         Assert.Equal(31, capturedDto.PaidDays);
+        Assert.Equal("INCOMPLETE_SALARY_ONLY_ESTIMATE", capturedDto.CalculationSnapshot?.TdsEstimateStatus);
+        Assert.Equal(60000m, capturedDto.CalculationSnapshot?.TdsCurrentMonthlyTaxableSalaryBasis);
+        // This mid-year joiner has no prior payroll row; projection is current month plus remaining months.
+        // The snapshot must call out the excluded pre-current-month salary instead of implying complete YTD.
+        Assert.Equal(360000m, capturedDto.CalculationSnapshot?.TdsProjectedAnnualTaxableSalary);
+        Assert.Equal(0m, capturedDto.CalculationSnapshot?.TdsPreviousEmployerSalary);
+        Assert.Equal(0m, capturedDto.CalculationSnapshot?.TdsEligibleDeductionsDeclared);
+        Assert.Equal(6, capturedDto.CalculationSnapshot?.TdsRemainingPayments);
+        Assert.Contains(capturedDto.CalculationSnapshot!.TdsEstimateLimitations, item => item.Contains("Previous-employer salary"));
+        Assert.Contains(capturedDto.CalculationSnapshot.TdsEstimateLimitations, item => item.Contains("salary already earned before the current payroll month"));
+        Assert.Contains(capturedDto.CalculationSnapshot.TdsEstimateLimitations, item => item.Contains("declarations"));
     }
 
     [Fact]
@@ -445,6 +506,72 @@ public sealed class AutoPayrollSalarySourceTests
         Assert.Equal("emp-1", capturedDto.EmployeeId);
         Assert.Equal(29000m, capturedDto.BasicPay);
         Assert.Equal(30, capturedDto.PaidDays);
+    }
+
+    [Fact]
+    public async Task GeneratePayroll_AppliesApprovedTaxDeclaration_AndSetsApprovedEstimateStatus()
+    {
+        var employee = new EmpUser
+        {
+            CompanyId = "company-1", UserId = "user-1", EmployeeId = "emp-decl", FirstName = "Tax",
+            LastName = "Payer", Email = "tax@example.com", DateOfJoining = "2026-04-01", Status = true
+        };
+        var empSalary = new EmployeeSalaryStructure
+        {
+            Id = Guid.NewGuid().ToString(),
+            CompanyId = "company-1", EmployeeId = "emp-decl", EffectiveFrom = new DateTime(2026, 4, 1),
+            Status = "ACTIVE", ApprovalStatus = "APPROVED", Version = 1,
+            Components =
+            [
+                new EmployeeSalaryComponentValue { ComponentCode = "BASIC", ComponentName = "Basic", Value = 100000m, Kind = "EARNING", IsRecurring = true, IsTaxable = true }
+            ]
+        };
+        var profile = new PayrollPolicyProfile
+        {
+            Id = "tax-pol", CompanyId = "company-1", Name = "Default Policy", Scope = "COMPANY_DEFAULT",
+            IsActive = true, ApprovalStatus = "APPROVED", TdsMode = "AUTO_NEW_REGIME",
+            RequireAttendanceLock = false,
+            StatutoryJurisdiction = "IN-DL", FinancialYear = "2026-27", StatutoryRuleVersion = "v1",
+            EffectiveFrom = new DateTime(2026, 4, 1)
+        };
+        var declaration = new EmployeeTaxDeclaration
+        {
+            CompanyId = "company-1", EmployeeId = "emp-decl", FinancialYear = "2026-27",
+            Regime = "OLD_REGIME", Status = "APPROVED", Version = 1,
+            ApprovedSection80C = 150000m, ApprovedSection80D = 25000m,
+            PreviousEmployerGrossSalary = 200000m, PreviousEmployerTds = 10000m
+        };
+
+        AddUpdatePayRollRequestDto? capturedDto = null;
+        var payrollService = new Mock<IPayRollServices>();
+        payrollService.Setup(x => x.AddUpdatePayRoll(It.IsAny<AddUpdatePayRollRequestDto>(), "company-1"))
+            .Callback<AddUpdatePayRollRequestDto, string>((dto, _) => capturedDto = dto)
+            .ReturnsAsync(new Result { Success = true });
+
+        var payrollRows = Repository<EmpPayRoll>();
+        payrollRows.Setup(x => x.Exist(It.IsAny<Expression<Func<EmpPayRoll, bool>>>(), It.IsAny<bool>())).ReturnsAsync(false);
+        var divisor = new Mock<IPayrollDivisorPolicyService>();
+        divisor.Setup(x => x.GetEffective("company-1", new DateTime(2026, 4, 1)))
+            .ReturnsAsync(new PayrollDivisorPolicyDto { RequireAttendanceLock = false, TdsMode = "AUTO_NEW_REGIME" });
+
+        var service = new AutoPayrollServices(
+            payrollService.Object, Repository(employee).Object, payrollRows.Object,
+            Repository<AttendanceModel>().Object, Repository<AttendanceDaySegment>().Object, Repository<SalaryModel>().Object,
+            Repository<AttendanceStatusSetting>().Object, Repository<MonthlyAttendanceSummary>().Object,
+            Repository<AttendancePayrollException>().Object, divisor.Object, new Mock<ICompanyWorkingCalendarService>().Object,
+            Repository<EmployeePayrollAssignment>().Object, Repository(profile).Object,
+            Repository<PayrollPayGroup>().Object, Repository<SalaryTemplate>().Object,
+            Repository(empSalary).Object,
+            taxDeclarations: Repository(declaration).Object);
+
+        var result = await service.GeneratePayrollForMonthAsync("company-1", new DateTime(2026, 4, 1), plannedPaymentDate: new DateTime(2026, 4, 30));
+
+        Assert.True(result.Success, result.Message);
+        Assert.NotNull(capturedDto);
+        Assert.Equal("APPROVED_DECLARATION_PROJECTION", capturedDto.CalculationSnapshot.TdsEstimateStatus);
+        Assert.Equal(175000m, capturedDto.CalculationSnapshot.TdsEligibleDeductionsDeclared);
+        Assert.Equal(200000m, capturedDto.CalculationSnapshot.TdsPreviousEmployerSalary);
+        Assert.True(capturedDto.IncomeTax > 0m);
     }
 
     private static Mock<IMongoDbRepository<TEntity>> Repository<TEntity>(params TEntity[] items)

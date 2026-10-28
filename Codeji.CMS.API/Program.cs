@@ -295,6 +295,17 @@ builder.Services.AddScoped<IMongoDbRepository<PayrollRun>, MongoRepository<Payro
 builder.Services.AddScoped<IMongoDbRepository<PayrollRunEmployee>, MongoRepository<PayrollRunEmployee>>();
 builder.Services.AddScoped<IMongoDbRepository<PayrollPaymentBatch>, MongoRepository<PayrollPaymentBatch>>();
 builder.Services.AddScoped<IMongoDbRepository<PayrollAdjustment>, MongoRepository<PayrollAdjustment>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeTaxDeclaration>, MongoRepository<EmployeeTaxDeclaration>>();
+builder.Services.AddScoped<IMongoDbRepository<PayrollPolicyProfile>, MongoRepository<PayrollPolicyProfile>>();
+builder.Services.AddScoped<IMongoDbRepository<SalaryTemplate>, MongoRepository<SalaryTemplate>>();
+builder.Services.AddScoped<IMongoDbRepository<PayrollPayGroup>, MongoRepository<PayrollPayGroup>>();
+builder.Services.AddScoped<IMongoDbRepository<PayrollSalaryComponentDefinition>, MongoRepository<PayrollSalaryComponentDefinition>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeePayrollAssignment>, MongoRepository<EmployeePayrollAssignment>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeSalaryStructure>, MongoRepository<EmployeeSalaryStructure>>();
+builder.Services.AddScoped<IMongoDbRepository<EmployeeSalaryImportBatch>, MongoRepository<EmployeeSalaryImportBatch>>();
+builder.Services.AddScoped<IMongoDbRepository<PayrollDivisorPolicy>, MongoRepository<PayrollDivisorPolicy>>();
+builder.Services.AddScoped<IMongoDbRepository<MonthlyAttendanceSummary>, MongoRepository<MonthlyAttendanceSummary>>();
+builder.Services.AddScoped<IMongoDbRepository<Codeji.CMS.Repository.Entities.Company.Company>, MongoRepository<Codeji.CMS.Repository.Entities.Company.Company>>();
 
 builder.Services.AddScoped<IMongoDbRepository<RefreshToken>, MongoRepository<RefreshToken>>();
 builder.Services.AddScoped<IMongoDbRepository<EmployeeExit>, MongoRepository<EmployeeExit>>();
@@ -316,6 +327,17 @@ builder.Services.AddScoped<ISalaryService, SalaryService>();
 
 // Payroll Services
 builder.Services.AddScoped<IPayRollServices, PayRollServices>();
+builder.Services.AddSingleton<IProfessionalTaxResolver, ProfessionalTaxResolver>();
+builder.Services.AddScoped<ITaxDeclarationService, TaxDeclarationService>();
+builder.Services.AddScoped<IPayrollReadinessService, PayrollReadinessService>();
+builder.Services.AddScoped<IPayrollTemplateService, PayrollTemplateService>();
+builder.Services.AddScoped<IPayrollConfigurationService, PayrollConfigurationService>();
+builder.Services.AddScoped<IEmployeeSalaryStructureService, EmployeeSalaryStructureService>();
+builder.Services.AddScoped<IEmployeeSalaryImportService, EmployeeSalaryImportService>();
+builder.Services.AddScoped<IPayrollRunService, PayrollRunService>();
+builder.Services.AddScoped<IPayrollRunWorkflowService, PayrollRunWorkflowService>();
+builder.Services.AddScoped<IPayrollRunCalculationService, PayrollRunCalculationService>();
+builder.Services.AddScoped<IPayrollRunReviewService, PayrollRunReviewService>();
 
 //attendance 
 // builder.Services.AddScoped<IAttendanceService, IAttendanceService>();

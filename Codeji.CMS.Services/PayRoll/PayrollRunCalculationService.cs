@@ -55,7 +55,7 @@ public sealed class PayrollRunCalculationService(
 
         if (autoPayRollServices is not null && members.Any(m => m.Status != "SKIPPED" && !rows.ContainsKey(m.EmployeeId)))
         {
-            var genResult = await autoPayRollServices.GeneratePayrollForMonthAsync(companyId, month);
+            var genResult = await autoPayRollServices.GeneratePayrollForMonthAsync(companyId, month, plannedPaymentDate: run.PayDate);
             if (genResult.Success)
             {
                 rows = (await payrolls.GetAll(x => x.CompanyId == companyId && x.PayMonth == month))
@@ -169,6 +169,20 @@ public sealed class PayrollRunCalculationService(
                     if (await SaveLine(companyId, member) is { } saveError) return saveError;
                     continue;
                 }
+
+                // For a single salary revision covering a complete, unprorated month,
+                // the frozen component engine and generated row must agree on recurring
+                // earnings. This is a safe reconciliation boundary: partial months,
+                // LOP, one-time bonus, and mid-month revisions need their own frozen
+                // calculation inputs and are deliberately not inferred here.
+                var canonicalMismatch = ValidateFullMonthCanonicalEarnings(run, member, row);
+                if (canonicalMismatch is not null)
+                {
+                    Block(member, "PAYROLL_CANONICAL_COMPONENT_TOTAL_MISMATCH", canonicalMismatch);
+                    missing++;
+                    if (await SaveLine(companyId, member) is { } canonicalSaveError) return canonicalSaveError;
+                    continue;
+                }
             }
 
             var calculatedSnapshot = row.CalculationSnapshot;
@@ -267,6 +281,7 @@ public sealed class PayrollRunCalculationService(
             member.NetAmount = PayrollCalculationRules.RoundMoney(member.GrossAmount - member.DeductionAmount);
 
             member.StatutorySnapshot = BuildStatutorySnapshot(member, componentResult, row);
+            member.AttendanceSnapshot = BuildAttendanceSnapshot(lockedAttendance.GetValueOrDefault(member.EmployeeId), row);
             if (await SaveLine(companyId, member) is { } calculatedSaveError) return calculatedSaveError;
             gross += member.GrossAmount;
             deductions += member.DeductionAmount;
@@ -355,14 +370,78 @@ public sealed class PayrollRunCalculationService(
             legacyRow.CalculationSnapshot?.EsicWageCeiling ?? 21000m,
             legacyRow.CalculationSnapshot?.EsicEmployerRatePercent ?? 3.25m);
         snapshot.IncomeTax = PayrollCalculationRules.RoundMoney(Math.Max(0m, legacyRow.Deduction.IncomeTax));
-        snapshot.ProfessionalTax = componentResult is null ? 0m : StatutoryComponent(componentResult.Values, "PT", "PROFESSIONAL_TAX");
-        return snapshot;    }
+        snapshot.ProfessionalTax = legacyRow.Deduction.ProfessionalTax > 0m
+            ? legacyRow.Deduction.ProfessionalTax
+            : (componentResult is null ? 0m : StatutoryComponent(componentResult.Values, "PT", "PROFESSIONAL_TAX"));
+        return snapshot;
+    }
+
+    private static PayrollAttendanceSnapshot BuildAttendanceSnapshot(
+        MonthlyAttendanceSummary? summary,
+        EmpPayRoll legacyRow)
+    {
+        var calc = legacyRow.CalculationSnapshot;
+        return new PayrollAttendanceSnapshot
+        {
+            SummaryId = summary?.Id ?? calc?.AttendanceSummaryId,
+            SummaryVersion = summary?.Version ?? calc?.AttendanceSummaryVersion ?? 0,
+            IsApproved = summary?.IsApproved ?? (calc?.AttendanceSummaryVersion > 0),
+            IsLocked = summary?.IsLocked ?? (calc?.AttendanceSummaryVersion > 0),
+            ApprovedBy = summary?.ApprovedBy,
+            ApprovedAt = summary?.ApprovedAt,
+            LockedAt = summary?.LockedAt,
+            LockedBy = summary?.LockedBy,
+            ExpectedWorkingDays = summary?.ExpectedWorkingDays ?? calc?.ExpectedWorkingDays ?? 0,
+            EligibleWorkingDays = summary?.EligibleWorkingDays ?? calc?.EligibleWorkingDays ?? 0,
+            PresentDays = summary?.PresentDays ?? calc?.PresentDays ?? 0m,
+            WfhDays = summary?.WfhDays ?? calc?.WfhDays ?? 0m,
+            PaidLeaveDays = summary?.PaidLeaveDays ?? calc?.PaidLeaveDays ?? 0m,
+            UnpaidLeaveDays = summary?.UnpaidLeaveDays ?? calc?.UnpaidLeaveDays ?? 0m,
+            HalfDays = summary?.HalfDays ?? calc?.HalfDays ?? 0m,
+            AbsentDays = summary?.AbsentDays ?? calc?.AbsentDays ?? 0m,
+            PaidDays = (decimal)legacyRow.PaidDays,
+            UnpaidDays = summary?.UnpaidDays ?? calc?.UnpaidDays ?? 0m,
+            LhdCount = summary?.LhdCount ?? calc?.LhdCount ?? 0,
+            EdCount = summary?.EdCount ?? calc?.EdCount ?? 0,
+            CombinedLhdEdCount = summary?.CombinedLhdEdCount ?? calc?.CombinedCount ?? 0,
+            LossOfPayDays = (decimal)legacyRow.Deduction.LossOfPayDays,
+            LossOfPayAmount = legacyRow.Deduction.LossOfPay,
+            Divisor = calc?.Divisor ?? 0m,
+            DivisorPolicy = calc?.DivisorPolicy ?? "CALENDAR_DAYS"
+        };
+    }
 
     private static decimal StatutoryComponent(IReadOnlyDictionary<string, decimal> values, params string[] codes)
     {
         foreach (var code in codes)
             if (values.TryGetValue(code, out var amount)) return PayrollCalculationRules.RoundMoney(Math.Max(0m, amount));
         return 0m;
+    }
+
+    private static string? ValidateFullMonthCanonicalEarnings(PayrollRun run, PayrollRunEmployee member, EmpPayRoll row)
+    {
+        var snapshot = row.CalculationSnapshot;
+        var revisions = member.InputSnapshot.SalaryStructures;
+        if (snapshot is null || revisions.Count != 1 || run.PeriodStart.Day != 1 ||
+            run.PeriodEnd.Date != new DateTime(run.PeriodStart.Year, run.PeriodStart.Month,
+                DateTime.DaysInMonth(run.PeriodStart.Year, run.PeriodStart.Month)).Date ||
+            snapshot.EligibleFrom.Date > run.PeriodStart.Date || snapshot.EligibleTo.Date < run.PeriodEnd.Date ||
+            snapshot.ExitDateUsed.HasValue || row.PaidDays != DateTime.DaysInMonth(run.PeriodStart.Year, run.PeriodStart.Month) ||
+            row.Bonus != 0m || row.Deduction.LossOfPay != 0m || row.Deduction.LossOfPayDays != 0f)
+            return null;
+
+        var revision = revisions[0];
+        if (revision.EffectiveFrom.Date > run.PeriodStart.Date ||
+            revision.EffectiveTo.HasValue && revision.EffectiveTo.Value.Date < run.PeriodEnd.Date)
+            return null;
+
+        var outcome = PayrollComponentCalculationEngine.Calculate(revision.Components);
+        if (!outcome.Success) return null; // Formula validation reports the specific error separately.
+        var rowEarnings = PayrollCalculationRules.RoundMoney(row.BasicPay + row.Allowance.HRA +
+            row.Allowance.LTA + row.Allowance.OtherAllowance);
+        if (outcome.Gross == rowEarnings) return null;
+
+        return $"Frozen recurring salary components calculate to {outcome.Gross:F2}, but the generated payroll row contains {rowEarnings:F2} of earnings for this full, unprorated month. Reconcile the salary source before calculating this run.";
     }
 
     private static bool SalaryStructuresMatch(

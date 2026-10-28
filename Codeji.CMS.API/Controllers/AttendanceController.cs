@@ -9,6 +9,7 @@ using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.Employees.Interface;
 
 namespace Codeji.CMS.API.Controllers;
 
@@ -28,10 +29,24 @@ public class AdminAttendanceController : ControllerBase
 
     [HttpPost]
     [ModulePermission(AppModule.Attendance, Permission.CreateForEmployee)]
-    public async Task<IActionResult> Add([FromBody] AdminAttendanceCreateDto dto)
+    public async Task<IActionResult> Add(
+        [FromBody] AdminAttendanceCreateDto dto,
+        [FromServices] IRoleService roleService)
     {
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
+
+        if (dto.AllowSourceOverride)
+        {
+            var hasAccess = await roleService.VerifyUserAccess(
+                AppModule.Attendance,
+                [Permission.Override, Permission.Edit],
+                CurrentContext.UserId(_context),
+                CurrentContext.CompanyId(_context)
+            );
+            if (!hasAccess)
+                return Forbid();
+        }
 
         try
         {

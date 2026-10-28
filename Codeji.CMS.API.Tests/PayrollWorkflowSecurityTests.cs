@@ -11,6 +11,19 @@ namespace Codeji.CMS.API.Tests;
 public sealed class PayrollWorkflowSecurityTests
 {
     [Theory]
+    [InlineData("Reopen")]
+    [InlineData("CreateCorrectionRun")]
+    [InlineData("Approve")]
+    public void Payroll_run_critical_workflow_action_requires_company_admin_policy(string action)
+    {
+        var method = typeof(PayrollRunWorkflowController).GetMethod(action, BindingFlags.Instance | BindingFlags.Public);
+        Assert.NotNull(method);
+        var authorization = method!.GetCustomAttribute<AuthorizeAttribute>();
+        Assert.NotNull(authorization);
+        Assert.Equal("AdminOnly", authorization!.Policy);
+    }
+
+    [Theory]
     [InlineData(typeof(PayrollAdjustmentController), "GetAll", Permission.View)]
     [InlineData(typeof(PayrollAdjustmentController), "GetComponents", Permission.View)]
     [InlineData(typeof(PayrollAdjustmentController), "Create", Permission.Edit)]
@@ -20,7 +33,10 @@ public sealed class PayrollWorkflowSecurityTests
     [InlineData(typeof(PayrollRunReviewController), "Get", Permission.View)]
     [InlineData(typeof(PayrollRunReviewController), "Record", Permission.Edit)]
     [InlineData(typeof(PayrollRunWorkflowController), "Cancel", Permission.Edit)]
+    [InlineData(typeof(PayrollRunWorkflowController), "ExcludeEmployee", Permission.Edit)]
+    [InlineData(typeof(PayrollRunWorkflowController), "IncludeEmployee", Permission.Edit)]
     [InlineData(typeof(PayrollRunWorkflowController), "Approve", Permission.Approve)]
+    [InlineData(typeof(PayrollRunWorkflowController), "Process", Permission.Approve)]
     [InlineData(typeof(PayrollPaymentBatchController), "Get", Permission.View)]
     [InlineData(typeof(PayrollPaymentBatchController), "Create", Permission.Edit)]
     [InlineData(typeof(PayrollPaymentBatchController), "Submit", Permission.Edit)]

@@ -26,6 +26,14 @@ public class WorkFromHomeController(IWorkFromHomeService service) : ControllerBa
     [HttpPost("requests/{id}/check-out"), ModulePermission(AppModule.WorkFromHome, [Permission.CreateOwn, Permission.EditOwn])] public Task<Result> CheckOut(string id, [FromBody] WorkFromHomeCheckOutDto? dto = null) => service.CheckOut(id, dto);
     [HttpPost("requests/{id}/regularize"), ModulePermission(AppModule.WorkFromHome, Permission.ApproveTeam)] public Task<Result> Regularize(string id, [FromBody] WorkFromHomeRegularizeAttendanceDto dto) => service.RegularizeAttendance(id, dto);
     [HttpPost("requests/{id}/convert-to-office"), ModulePermission(AppModule.WorkFromHome, Permission.ApproveTeam)] public Task<Result> ConvertToOffice(string id, [FromBody] WorkFromHomeOfficeConversionDto dto) => service.ConvertApprovedWfhToOffice(id, dto);
+    [HttpPost("admin-grant")]
+    [ModulePermission(AppModule.WorkFromHome, [Permission.PolicyEdit, Permission.ApproveTeam])]
+    [ModulePermission(AppModule.Attendance, [Permission.Edit, Permission.Override])]
+    public async Task<IActionResult> AdminGrant([FromBody] WorkFromHomeAdminGrantDto dto)
+    {
+        var result = await service.AdminGrantAsync(dto);
+        return result.Success ? Ok(result) : StatusCode(result.StatusCode, result);
+    }
     [HttpGet("requests/{id}/timing"), ModulePermission(AppModule.WorkFromHome, [Permission.View, Permission.ViewOwn])] public Task<Result<WorkFromHomeTimingDto>> Timing(string id) => service.GetTiming(id);
     [HttpPatch("attendance-exceptions/{id}/hours"), ModulePermission(AppModule.Attendance, Permission.Edit)]
     public async Task<IActionResult> CorrectHours(string id, WorkFromHomeHoursCorrectionDto dto)

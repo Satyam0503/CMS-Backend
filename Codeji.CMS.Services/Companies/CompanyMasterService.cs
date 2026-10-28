@@ -117,10 +117,10 @@ public class CompanyMasterService : ICompanyMasterService
         var result = await _departmentRepository.Update(whereCondition, department);
         return result.Success;
     }
-    public async Task<Result<string[]>> UpdateModuleAccess(string moduleId)
+    public async Task<Result<string[]>> UpdateModuleAccess(string moduleId, bool? isAccessible = null)
     {
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-        Module? module = await _moduleRepository.FirstOrDefault(x => x._id == moduleId);
+        Module? module = await _moduleRepository.FirstOrDefault(x => x._id == moduleId || x.ModuleId.ToString() == moduleId);
         if (module is null)
         {
             return new Result<string[]>()
@@ -128,20 +128,80 @@ public class CompanyMasterService : ICompanyMasterService
                 Success = false,
             };
         }
-        List<ModulePermission> modulesPermission = (await _modulePermissionRepository.GetAll(x => x.ModuleId == module.ModuleId)).ToList();
-        int[] modulePermissionId = modulesPermission.Select(x => x.ModulePermissionId).ToArray();
-        Expression<Func<RolePermission, bool>> whereCondition = x => x.CompanyId == companyId && modulePermissionId.Contains(x.ModulePermissionId);
+
+        // Determine all module IDs to update (including dependent modules if suite module)
+        var allModules = (await _moduleRepository.GetAll()).ToList();
+        var targetModules = new List<Module> { module };
+
+        // If toggling Jobs, cascade to Applications, Process_Log, and Career_Profile
+        if (string.Equals(module.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.Jobs, StringComparison.OrdinalIgnoreCase))
+        {
+            var related = allModules.Where(m =>
+                string.Equals(m.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.Applications, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.ProcessLog, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.CareerProfile, StringComparison.OrdinalIgnoreCase));
+            targetModules.AddRange(related);
+        }
+        // If toggling PayRoll, cascade to Payroll_Settings, Leave_Management, and Attendance
+        else if (string.Equals(module.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.PayRoll, StringComparison.OrdinalIgnoreCase))
+        {
+            var related = allModules.Where(m =>
+                string.Equals(m.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.PayrollSettings, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.LeaveManagement, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.Attendance, StringComparison.OrdinalIgnoreCase));
+            targetModules.AddRange(related);
+        }
+
+        var targetModuleIds = targetModules.Select(m => m.ModuleId).Distinct().ToList();
+        var allModulePermissions = (await _modulePermissionRepository.GetAll()).ToList();
+        var targetPermissionIds = allModulePermissions
+            .Where(mp => targetModuleIds.Contains(mp.ModuleId))
+            .Select(mp => mp.ModulePermissionId)
+            .ToArray();
+
+        Expression<Func<RolePermission, bool>> whereCondition = x => x.CompanyId == companyId && targetPermissionIds.Contains(x.ModulePermissionId);
         IEnumerable<RolePermission> rolePermissions = await _rolePermissionRepository.GetAll(whereCondition);
         if (!rolePermissions.Any())
         {
-            return new Result<string[]>()
+            var companyRoles = (await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId))
+                .Select(x => x.RoleId)
+                .Distinct()
+                .ToList();
+
+            if (companyRoles.Count == 0)
             {
-                Success = false,
-            };
+                return new Result<string[]>
+                {
+                    Success = false,
+                };
+            }
+
+            bool fallbackTarget = isAccessible.GetValueOrDefault(true);
+            var seeded = new List<RolePermission>();
+            foreach (var rId in companyRoles)
+            {
+                foreach (var permId in targetPermissionIds)
+                {
+                    seeded.Add(new RolePermission
+                    {
+                        CompanyId = companyId,
+                        RoleId = rId,
+                        ModulePermissionId = permId,
+                        HasAccess = true,
+                        IsAccessible = fallbackTarget,
+                        CreatedDate = DateTime.UtcNow
+                    });
+                }
+            }
+            await _rolePermissionRepository.AddMany(seeded);
+            rolePermissions = seeded;
         }
+
         string roleId = CurrentContext.UserRoleId(_httpContextAccessor);
-        bool hasAccess = rolePermissions.Take(1).ToList()[0].IsAccessible;
-        Result result = await _rolePermissionRepository.UpdateMany(whereCondition, Builders<RolePermission>.Update.Set(x => x.IsAccessible, !hasAccess));
+        bool currentAccessible = rolePermissions.Any(x => x.IsAccessible);
+        bool targetAccessible = isAccessible.HasValue ? isAccessible.Value : !currentAccessible;
+
+        await _rolePermissionRepository.UpdateMany(whereCondition, Builders<RolePermission>.Update.Set(x => x.IsAccessible, targetAccessible));
         string[] updatedPermissions = await _roleService.GetRolePermissionOfuser(roleId, companyId);
         return new Result<string[]>()
         {
@@ -151,24 +211,54 @@ public class CompanyMasterService : ICompanyMasterService
     }
     public async Task<List<AllModuleDetailsResponseModel>> GetAllModulesDetails(string companyId)
     {
-        var allModules = await _moduleRepository.GetAll();
-        var allModulePermissions = await _modulePermissionRepository.GetAll();
-        var allRolePermission = await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId);
+        var allModules = (await _moduleRepository.GetAll()).OrderBy(m => m.SortOrder).ToList();
+        var allModulePermissions = (await _modulePermissionRepository.GetAll()).ToList();
+        var allRolePermission = (await _rolePermissionRepository.GetAll(x => x.CompanyId == companyId)).ToList();
 
-        var queryResult = from module in allModules
-                            join modulePermission in allModulePermissions on module.ModuleId equals modulePermission.ModuleId into modulePermissionGroup
-                            from modulePermission in modulePermissionGroup.Take(1)
-                            join rolePermission in allRolePermission on modulePermission.ModulePermissionId equals rolePermission.ModulePermissionId into roleGroup
-                            from rolePermission in roleGroup.Take(1)
-                            select new AllModuleDetailsResponseModel
-                            {
-                                ModuleId = module._id,
-                                ModuleName = module.ModuleName,
-                                ModuleConstant = module.ModuleConstant,
-                                IsAccessible = rolePermission.IsAccessible,
-                            };
+        var resultList = new List<AllModuleDetailsResponseModel>();
+        foreach (var module in allModules)
+        {
+            var modulePermIds = allModulePermissions
+                .Where(mp => mp.ModuleId == module.ModuleId)
+                .Select(mp => mp.ModulePermissionId)
+                .ToHashSet();
 
-        return queryResult.ToList();
+            bool isAccessible = allRolePermission.Any(rp => modulePermIds.Contains(rp.ModulePermissionId) && rp.IsAccessible);
+
+            resultList.Add(new AllModuleDetailsResponseModel
+            {
+                ModuleId = module._id,
+                ModuleName = module.ModuleName,
+                ModuleConstant = module.ModuleConstant,
+                IsAccessible = isAccessible,
+            });
+        }
+
+        bool isJobsAccessible = resultList.Any(x => string.Equals(x.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.Jobs, StringComparison.OrdinalIgnoreCase) && x.IsAccessible);
+        if (!isJobsAccessible)
+        {
+            foreach (var item in resultList.Where(x =>
+                string.Equals(x.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.CareerProfile, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(x.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.Applications, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(x.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.ProcessLog, StringComparison.OrdinalIgnoreCase)))
+            {
+                item.IsAccessible = false;
+            }
+        }
+
+        bool isPayrollAccessible = resultList.Any(x => string.Equals(x.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.PayRoll, StringComparison.OrdinalIgnoreCase) && x.IsAccessible);
+        if (!isPayrollAccessible)
+        {
+            foreach (var item in resultList.Where(x =>
+                string.Equals(x.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.PayrollSettings, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(x.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.LeaveManagement, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(x.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.Attendance, StringComparison.OrdinalIgnoreCase)))
+            {
+                item.IsAccessible = false;
+            }
+        }
+
+        return resultList;
     }
 
     // Company Job Titles Services

@@ -272,6 +272,54 @@ public class AccountAuthTests
     }
 
     [Fact]
+    public async Task RefreshToken_WithinGracePeriod_AllowsConcurrentRefreshAndReturnsNewTokens()
+    {
+        var fixture = new AccountFixture();
+        const string currentRefreshToken = "current-refresh-token";
+        var user = CreateUser();
+        var role = CreateRole(hasAppAccess: true);
+        var storedToken = new RefreshToken
+        {
+            Id = "refresh-1",
+            UserId = user.UserId,
+            Token = TokenHelper.ComputeSha256Hash(currentRefreshToken),
+            ExpireAt = DateTime.UtcNow.AddDays(1),
+            IsRevoked = true,
+            RevokedAt = DateTime.UtcNow.AddSeconds(-5),
+            ReplacedByToken = "some-replacement-hash"
+        };
+        RefreshToken? replacement = null;
+
+        fixture.RefreshTokenRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RefreshToken, bool>>>(), false))
+            .ReturnsAsync(storedToken);
+        fixture.EmployeeRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>(), false))
+            .ReturnsAsync(user);
+        fixture.RoleRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Roles, bool>>>(), false))
+            .ReturnsAsync(role);
+        fixture.RefreshTokenRepository
+            .Setup(x => x.AddOne(It.IsAny<RefreshToken>()))
+            .Callback<RefreshToken>(token => replacement = token)
+            .ReturnsAsync(new Result { Success = true });
+        fixture.RefreshTokenRepository
+            .Setup(x => x.Update(It.IsAny<FilterDefinition<RefreshToken>>(), storedToken))
+            .ReturnsAsync(new Result { Success = true });
+
+        var result = await fixture.Service.RefreshToken(new RefreshTokenRequestDto
+        {
+            RefreshToken = currentRefreshToken
+        });
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.MethodResult);
+        Assert.False(string.IsNullOrWhiteSpace(result.MethodResult.Token));
+        Assert.False(string.IsNullOrWhiteSpace(result.MethodResult.RefreshToken));
+        Assert.NotNull(replacement);
+    }
+
+    [Fact]
     public async Task Logout_ValidRefreshToken_RevokesStoredTokenForCurrentUser()
     {
         var fixture = new AccountFixture();

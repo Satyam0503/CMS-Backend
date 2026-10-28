@@ -1,37 +1,42 @@
+using System.Text.Json;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
 var configPath = @"d:\CMS\CMS-Backend-Core\Codeji.CMS.API\appsettings.json";
-using var config = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(configPath));
+using var config = JsonDocument.Parse(await File.ReadAllTextAsync(configPath));
 var connection = config.RootElement.GetProperty("ConnectionStrings").GetProperty("mongodb").GetString();
 var db = new MongoClient(connection).GetDatabase(MongoUrl.Create(connection).DatabaseName);
 
-var applicants = db.GetCollection<BsonDocument>("Applicant");
-var vacancies = db.GetCollection<BsonDocument>("JobVacancy");
+var companyId = "b125eefc-153e-48d8-8b68-5501770e3ff2";
+var aaravUserId = "0e94eb40-53ee-42ea-8598-f3c8edf02863";
 
-var app = await applicants.Find(new BsonDocument("_id", "4c5adde3-7ba3-499d-91f2-9c850fa083e0")).FirstOrDefaultAsync();
-if (app != null)
+var dateUtc = new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc);
+
+var wfhCol = db.GetCollection<BsonDocument>("WorkFromHomeRequest");
+var attCol = db.GetCollection<BsonDocument>("Attendance");
+var segCol = db.GetCollection<BsonDocument>("AttendanceDaySegment");
+
+var wfhs = await wfhCol.Find(new BsonDocument { { "CompanyId", companyId }, { "UserId", aaravUserId }, { "FromDate", dateUtc } }).ToListAsync();
+Console.WriteLine($"WFH count on 2026-10-28: {wfhs.Count}");
+foreach (var w in wfhs)
 {
-    var fn = app.Contains("FirstName") ? app["FirstName"].AsString : "";
-    var ln = app.Contains("LastName") ? app["LastName"].AsString : "";
-    var vacId = app.Contains("VacancyId") ? app["VacancyId"].AsString : "";
-    Console.WriteLine($"Applicant: {fn} {ln}, VacancyId: {vacId}");
-
-    var vac = await vacancies.Find(new BsonDocument { { "$or", new BsonArray { new BsonDocument("_id", vacId), new BsonDocument("JobId", vacId), new BsonDocument("PublicJobId", vacId) } } }).FirstOrDefaultAsync();
-    if (vac != null)
+    Console.WriteLine($"WFH: Id={w["_id"]}, Duration={w.GetValue("DurationType", "")}, Status={w.GetValue("Status", "")}");
+    if (w.Contains("OfficeConversions"))
     {
-        var title = vac.Contains("Title") ? vac["Title"].AsString : "";
-        var jid = vac.Contains("JobId") ? vac["JobId"].ToString() : (vac.Contains("_id") ? vac["_id"].ToString() : "");
-        var passScore = vac.Contains("ScreeningPassScore") ? vac["ScreeningPassScore"].ToString() : "NOT PRESENT";
-        var criteria = vac.Contains("ScreeningCriteria") ? vac["ScreeningCriteria"].ToString() : "NOT PRESENT";
-        Console.WriteLine($"Vacancy found: Title={title}, Id={jid}, ScreeningPassScore={passScore}, ScreeningCriteria={criteria}");
-    }
-    else
-    {
-        Console.WriteLine($"Vacancy NOT found for id: {vacId}");
+        Console.WriteLine($"  OfficeConversions: {w["OfficeConversions"].AsBsonArray.Count}");
     }
 }
-else
+
+var atts = await attCol.Find(new BsonDocument { { "CompanyId", companyId }, { "UserId", aaravUserId }, { "Date", dateUtc } }).ToListAsync();
+Console.WriteLine($"Attendance count on 2026-10-28: {atts.Count}");
+foreach (var a in atts)
 {
-    Console.WriteLine("Applicant 4c5adde3-7ba3-499d-91f2-9c850fa083e0 not found by _id!");
+    Console.WriteLine($"Att: Status={a.GetValue("Status", "")}, SourceType={a.GetValue("SourceType", "")}, CheckIn={a.GetValue("CheckInTime", BsonNull.Value)}, CheckOut={a.GetValue("CheckOutTime", BsonNull.Value)}");
+}
+
+var segs = await segCol.Find(new BsonDocument { { "CompanyId", companyId }, { "UserId", aaravUserId }, { "Date", dateUtc } }).ToListAsync();
+Console.WriteLine($"Segments count on 2026-10-28: {segs.Count}");
+foreach (var s in segs)
+{
+    Console.WriteLine($"Seg: Segment={s.GetValue("Segment", "")}, Status={s.GetValue("Status", "")}, SourceType={s.GetValue("SourceType", "")}, CheckIn={s.GetValue("CheckInTime", BsonNull.Value)}, CheckOut={s.GetValue("CheckOutTime", BsonNull.Value)}");
 }

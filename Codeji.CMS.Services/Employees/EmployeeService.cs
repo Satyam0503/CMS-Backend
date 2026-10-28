@@ -2219,6 +2219,8 @@ namespace Codeji.CMS.Services.Employees
         )
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             var exitType = EmployeeLifecycleStatuses.NormalizeCompletedEmploymentStatus(
                 request?.ExitType
@@ -2599,6 +2601,8 @@ namespace Codeji.CMS.Services.Employees
         public async Task<Result> ReviewEmployeeExit(ReviewEmployeeExitRequest request)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (
                 request is null
@@ -3054,6 +3058,8 @@ namespace Codeji.CMS.Services.Employees
         )
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId))
                 return new Result { Success = false, Message = "EXIT_CANCEL_INVALID" };
@@ -7558,6 +7564,8 @@ namespace Codeji.CMS.Services.Employees
         )
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result<List<EmployeeExitHistoryDto>> { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (string.IsNullOrWhiteSpace(employeeUserId))
                 return new Result<List<EmployeeExitHistoryDto>>
@@ -7708,6 +7716,8 @@ namespace Codeji.CMS.Services.Employees
         )
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result<EmployeeExitCaseDto> { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             // Employees can have earlier withdrawn records as well as one active resignation.
             // Always surface the active workflow to a manager/HR first; history is read-only
@@ -8201,6 +8211,8 @@ namespace Codeji.CMS.Services.Employees
         )
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result<List<EmployeeExitQueueItemDto>> { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             var isHr = await IsHrExitActor(companyId, actorUserId);
             var activeCases = (
@@ -8296,6 +8308,8 @@ namespace Codeji.CMS.Services.Employees
         public async Task<Result> CompleteEmployeeExit(CompleteEmployeeExitRequest request)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (!await IsHrExitActor(companyId, actorUserId))
                 return new Result { Success = false, Message = "EXIT_COMPLETION_FORBIDDEN" };

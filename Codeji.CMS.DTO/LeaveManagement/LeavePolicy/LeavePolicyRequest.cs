@@ -85,5 +85,6 @@ public class WorkFromHomePolicySettingsRequest
     public TimeSpan? SameDayCutoffTime { get; set; }
     public int SameDayGraceMinutes { get; set; }
     public bool AllowLateApplicationWithApproval { get; set; } = true;
+    public List<string> AllowedDaysOfWeek { get; set; } = [];
+    public List<string> BlockedDaysOfWeek { get; set; } = [];
 }
-

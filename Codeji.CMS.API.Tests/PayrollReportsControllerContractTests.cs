@@ -13,6 +13,8 @@ public sealed class PayrollReportsControllerContractTests
     [InlineData(nameof(PayrollReportsController.RegisterCsv))]
     [InlineData(nameof(PayrollReportsController.StatutoryRegister))]
     [InlineData(nameof(PayrollReportsController.StatutoryRegisterCsv))]
+    [InlineData(nameof(PayrollReportsController.EpfoEcrText))]
+    [InlineData(nameof(PayrollReportsController.EsicReturnCsv))]
     public void Reports_require_payroll_view_permission(string methodName)
     {
         var method = typeof(PayrollReportsController).GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public);

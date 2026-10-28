@@ -12,6 +12,7 @@ public sealed class PayrollRun
     public required DateTime PeriodEnd { get; set; }
     public required DateTime PayDate { get; set; }
     public string RunType { get; set; } = "REGULAR";
+    public string? ParentRunId { get; set; }
     public string Status { get; set; } = "DRAFT";
     public bool IsActive { get; set; } = true;
     public string PopulationType { get; set; } = "ALL_ELIGIBLE";
@@ -36,6 +37,7 @@ public sealed class PayrollRun
     public string? ApprovedBy { get; set; }
     public DateTime? ApprovedAtUtc { get; set; }
     public DateTime? ProcessedAtUtc { get; set; }
+    public DateTime? LegacyPayrollRowsSynchronizedAtUtc { get; set; }
     public DateTime? ClosedAtUtc { get; set; }
     public List<PayrollRunAuditEvent> AuditHistory { get; set; } = [];
 }
@@ -81,6 +83,37 @@ public sealed class PayrollRunEmployee
     public decimal NetAmount { get; set; }
     public PayrollEmployeeInputSnapshot InputSnapshot { get; set; } = new();
     public PayrollStatutorySnapshot StatutorySnapshot { get; set; } = new();
+    public PayrollAttendanceSnapshot AttendanceSnapshot { get; set; } = new();
+}
+
+[BsonIgnoreExtraElements]
+public sealed class PayrollAttendanceSnapshot
+{
+    public string? SummaryId { get; set; }
+    public int SummaryVersion { get; set; }
+    public bool IsApproved { get; set; }
+    public bool IsLocked { get; set; }
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+    public DateTime? LockedAt { get; set; }
+    public string? LockedBy { get; set; }
+    public int ExpectedWorkingDays { get; set; }
+    public int EligibleWorkingDays { get; set; }
+    public decimal PresentDays { get; set; }
+    public decimal WfhDays { get; set; }
+    public decimal PaidLeaveDays { get; set; }
+    public decimal UnpaidLeaveDays { get; set; }
+    public decimal HalfDays { get; set; }
+    public decimal AbsentDays { get; set; }
+    public decimal PaidDays { get; set; }
+    public decimal UnpaidDays { get; set; }
+    public int LhdCount { get; set; }
+    public int EdCount { get; set; }
+    public int CombinedLhdEdCount { get; set; }
+    public decimal LossOfPayDays { get; set; }
+    public decimal LossOfPayAmount { get; set; }
+    public decimal Divisor { get; set; }
+    public string DivisorPolicy { get; set; } = "CALENDAR_DAYS";
 }
 
 [BsonIgnoreExtraElements]
@@ -133,6 +166,13 @@ public sealed class PayrollComponentSnapshot
     public bool IsRecurring { get; set; } = true;
     public bool IsStatutory { get; set; }
     public bool IsEmployerContribution { get; set; }
+    public decimal? Percentage { get; set; }
+    public string? TaxExemptionSection { get; set; }
+    public string ProrationBasis { get; set; } = "ATTENDANCE";
+    public string? GlAccountCode { get; set; }
+    public bool IncludeInPfWage { get; set; }
+    public bool IncludeInEsiWage { get; set; }
+    public bool IncludeInPtWage { get; set; }
     public int SortOrder { get; set; }
 }
 

@@ -39,6 +39,22 @@ public sealed class PayrollReportsController(
         if (!result.Success) return BadRequest(result);
         return File(result.MethodResult, "text/csv; charset=utf-8", "payroll-register.csv");
     }
+
+    [HttpGet("statutory/epfo-ecr.txt"), ModulePermission(AppModule.PayRoll, Permission.View)]
+    public async Task<IActionResult> EpfoEcrText([FromQuery] PayrollReportQueryDto query)
+    {
+        var result = await service.ExportEpfoEcrText(CurrentContext.CompanyId(context), query);
+        if (!result.Success) return BadRequest(result);
+        return File(result.MethodResult, "text/plain; charset=utf-8", "epfo-ecr.txt");
+    }
+
+    [HttpGet("statutory/esic-return.csv"), ModulePermission(AppModule.PayRoll, Permission.View)]
+    public async Task<IActionResult> EsicReturnCsv([FromQuery] PayrollReportQueryDto query)
+    {
+        var result = await service.ExportEsicReturnCsv(CurrentContext.CompanyId(context), query);
+        if (!result.Success) return BadRequest(result);
+        return File(result.MethodResult, "text/csv; charset=utf-8", "esic-monthly-return.csv");
+    }
 }
 
 

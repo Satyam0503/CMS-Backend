@@ -33,6 +33,7 @@ public class AttendanceImportService : IAttendanceImportService
     private readonly IAttendanceRepository _attendanceRepository;
     private readonly IAttendanceStatusService _statusService;
     private readonly IAttendancePenaltyService _penaltyService;
+    private readonly IMongoDbRepository<AttendancePayrollException>? _exceptions;
 
     public AttendanceImportService(
         IMongoDbRepository<EmpUser> employees,
@@ -45,7 +46,8 @@ public class AttendanceImportService : IAttendanceImportService
         IMongoDbRepository<Department> departments,
         IAttendanceRepository attendanceRepository,
         IAttendanceStatusService statusService,
-        IAttendancePenaltyService penaltyService
+        IAttendancePenaltyService penaltyService,
+        IMongoDbRepository<AttendancePayrollException>? exceptions = null
     )
     {
         _employees = employees;
@@ -59,6 +61,7 @@ public class AttendanceImportService : IAttendanceImportService
         _attendanceRepository = attendanceRepository;
         _statusService = statusService;
         _penaltyService = penaltyService;
+        _exceptions = exceptions;
     }
 
     private static DateTime UtcMidnight(DateTime date) =>
@@ -1099,12 +1102,70 @@ public class AttendanceImportService : IAttendanceImportService
                         )
                     )
                     {
+                        if (_exceptions != null && parsed.HasExplicitTimes)
+                        {
+                            var payrollMonth = new DateTime(cellDate.Year, cellDate.Month, 1);
+                            var dateUtc = UtcMidnight(cellDate);
+                            var existingException = await _exceptions.FirstOrDefault(x =>
+                                x.CompanyId == companyId && x.UserId == employee.UserId &&
+                                x.PayrollMonth == payrollMonth && x.AttendanceDate == dateUtc &&
+                                x.ExceptionType == "PUNCH_ON_APPROVED_LEAVE");
+                            if (existingException == null)
+                            {
+                                await _exceptions.AddOne(new AttendancePayrollException
+                                {
+                                    CompanyId = companyId,
+                                    UserId = employee.UserId,
+                                    EmployeeId = employee.EmployeeId,
+                                    PayrollMonth = payrollMonth,
+                                    AttendanceDate = dateUtc,
+                                    AffectedDates = [dateUtc],
+                                    ExceptionType = "PUNCH_ON_APPROVED_LEAVE",
+                                    Severity = "WARNING",
+                                    Status = "PENDING_REVIEW",
+                                    LeaveRequestId = existingRow?.SourceId,
+                                    ExistingAttendanceId = existingRow?.AttendanceId,
+                                    ExistingStatus = existingRow?.Status ?? "CL",
+                                    RequestedLeaveStatus = "P",
+                                    Reason = $"Employee has approved leave but import record contains punches ({parsed.CheckInTime:HH:mm} - {parsed.CheckOutTime:HH:mm}). Review to convert to office present or keep leave.",
+                                    CreatedBy = actorUserId
+                                });
+                            }
+                        }
                         preservedLeaves++;
                         continue;
                     }
                 }
                 else if (preserveApprovedLeaves && hasExistingLeave)
                 {
+                    if (_exceptions != null && parsed.HasExplicitTimes)
+                    {
+                        var payrollMonth = new DateTime(cellDate.Year, cellDate.Month, 1);
+                        var dateUtc = UtcMidnight(cellDate);
+                        var existingException = await _exceptions.FirstOrDefault(x =>
+                            x.CompanyId == companyId && x.UserId == employee.UserId &&
+                            x.PayrollMonth == payrollMonth && x.AttendanceDate == dateUtc &&
+                            x.ExceptionType == "PUNCH_ON_APPROVED_LEAVE");
+                        if (existingException == null)
+                        {
+                            await _exceptions.AddOne(new AttendancePayrollException
+                            {
+                                CompanyId = companyId,
+                                UserId = employee.UserId,
+                                EmployeeId = employee.EmployeeId,
+                                PayrollMonth = payrollMonth,
+                                AttendanceDate = dateUtc,
+                                AffectedDates = [dateUtc],
+                                ExceptionType = "PUNCH_ON_APPROVED_LEAVE",
+                                Severity = "WARNING",
+                                Status = "PENDING_REVIEW",
+                                ExistingStatus = "CL",
+                                RequestedLeaveStatus = "P",
+                                Reason = $"Employee has approved leave but import record contains punches ({parsed.CheckInTime:HH:mm} - {parsed.CheckOutTime:HH:mm}). Review to convert to office present or keep leave.",
+                                CreatedBy = actorUserId
+                            });
+                        }
+                    }
                     preservedLeaves++;
                     continue;
                 }

@@ -262,6 +262,39 @@ public sealed class AttendanceManualAndImportIntegrationTests
     }
 
     [Fact]
+    public async Task AddManualAttendance_WithHalfDayAndTimes_PreservesPunchTimesAndRemarks()
+    {
+        var date = new DateTime(2026, 5, 18, 0, 0, 0, DateTimeKind.Utc);
+        _attendanceRepo.Setup(r => r.GetByUserAndDateAsync(TestCompanyId, TestUserId, date))
+            .ReturnsAsync((AttendanceModel?)null);
+
+        AttendanceModel? savedRow = null;
+        _attendanceRepo.Setup(r => r.AddAsync(It.IsAny<AttendanceModel>()))
+            .Callback<AttendanceModel>(r => savedRow = r)
+            .ReturnsAsync((AttendanceModel r) => r);
+
+        var dto = new AdminAttendanceCreateDto
+        {
+            UserId = TestUserId,
+            EmployeeId = TestEmpId,
+            Date = date,
+            Status = "HD",
+            CheckInTime = "09:30",
+            CheckOutTime = "13:30",
+            Remarks = "First half doctor appointment"
+        };
+
+        var result = await _manualAttendanceService.AddManualAttendance(TestCompanyId, ActorUserId, dto);
+
+        Assert.NotNull(result);
+        Assert.NotNull(savedRow);
+        Assert.Equal("HD", savedRow.Status);
+        Assert.NotNull(savedRow.CheckInTime);
+        Assert.NotNull(savedRow.CheckOutTime);
+        Assert.Equal("First half doctor appointment", savedRow.Remarks);
+    }
+
+    [Fact]
     public async Task AddManualAttendance_WithOnlyCheckOutForED_AutomaticallyPairsShiftStartWithoutThrowing()
     {
         // Arrange: User provides only checkout 14:00 for ED (e.g. if punch in was previously left blank)
@@ -441,6 +474,71 @@ public sealed class AttendanceManualAndImportIntegrationTests
         Assert.NotNull(savedRow);
         Assert.Equal("LHD", savedRow.Status);
         Assert.Equal(1, savedRow.LateCount);
+    }
+
+    [Fact]
+    public async Task AddManualAttendance_WithHD_AutoMode_PopulatesHalfDayTimesAndPreservesRemarks()
+    {
+        var date = new DateTime(2026, 10, 27, 0, 0, 0, DateTimeKind.Utc);
+        _attendanceRepo.Setup(r => r.GetByUserAndDateAsync(TestCompanyId, TestUserId, date))
+            .ReturnsAsync((AttendanceModel?)null);
+
+        AttendanceModel? savedRow = null;
+        _attendanceRepo.Setup(r => r.AddAsync(It.IsAny<AttendanceModel>()))
+            .Callback<AttendanceModel>(r => savedRow = r)
+            .ReturnsAsync((AttendanceModel r) => r);
+
+        var dto = new AdminAttendanceCreateDto
+        {
+            UserId = TestUserId,
+            EmployeeId = TestEmpId,
+            Date = date,
+            Status = "HD",
+            Remarks = "First half half-day attendance"
+        };
+
+        var result = await _manualAttendanceService.AddManualAttendance(TestCompanyId, ActorUserId, dto);
+
+        Assert.NotNull(result);
+        Assert.NotNull(savedRow);
+        Assert.Equal("HD", savedRow.Status);
+        Assert.NotNull(savedRow.CheckInTime);
+        Assert.NotNull(savedRow.CheckOutTime);
+        Assert.True(savedRow.CheckOutTime > savedRow.CheckInTime);
+        Assert.Equal("First half half-day attendance", savedRow.Remarks);
+    }
+
+    [Fact]
+    public async Task AddManualAttendance_WithHD_CustomTimes_PreservesTimesAndRemarks()
+    {
+        var date = new DateTime(2026, 10, 27, 0, 0, 0, DateTimeKind.Utc);
+        _attendanceRepo.Setup(r => r.GetByUserAndDateAsync(TestCompanyId, TestUserId, date))
+            .ReturnsAsync((AttendanceModel?)null);
+
+        AttendanceModel? savedRow = null;
+        _attendanceRepo.Setup(r => r.AddAsync(It.IsAny<AttendanceModel>()))
+            .Callback<AttendanceModel>(r => savedRow = r)
+            .ReturnsAsync((AttendanceModel r) => r);
+
+        var dto = new AdminAttendanceCreateDto
+        {
+            UserId = TestUserId,
+            EmployeeId = TestEmpId,
+            Date = date,
+            Status = "HD",
+            CheckInTime = "09:30",
+            CheckOutTime = "13:30",
+            Remarks = "etretyretretrelt"
+        };
+
+        var result = await _manualAttendanceService.AddManualAttendance(TestCompanyId, ActorUserId, dto);
+
+        Assert.NotNull(result);
+        Assert.NotNull(savedRow);
+        Assert.Equal("HD", savedRow.Status);
+        Assert.NotNull(savedRow.CheckInTime);
+        Assert.NotNull(savedRow.CheckOutTime);
+        Assert.Equal("etretyretretrelt", savedRow.Remarks);
     }
 
     // =========================================================================

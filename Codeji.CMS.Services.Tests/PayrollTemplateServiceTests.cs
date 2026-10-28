@@ -653,6 +653,149 @@ public sealed class PayrollTemplateServiceTests
         Assert.Equal(3, approved.Version);
     }
 
+
+    [Fact]
+    public async Task PreviewTemplate_CalculatesCtcGrossDeductionsAndNet_WithExplanationNote()
+    {
+        var policies = Repository<PayrollPolicyProfile>();
+        var templates = Repository<SalaryTemplate>();
+        var groups = Repository<PayrollPayGroup>();
+        var components = Repository<PayrollSalaryComponentDefinition>();
+
+        components.Setup(x => x.GetAll(It.IsAny<Expression<Func<PayrollSalaryComponentDefinition, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(new List<PayrollSalaryComponentDefinition>
+            {
+                new() { Id = "c-pf", CompanyId = "company-1", Code = "ER_PF", Name = "Employer PF", Kind = "EARNING", CalculationType = "FIXED", IsEmployerContribution = true, IsRecurring = true, EffectiveFrom = new DateTime(2026, 1, 1), IsActive = true, Version = 1 }
+            });
+
+        var service = new PayrollTemplateService(policies.Object, templates.Object, groups.Object, components.Object);
+
+        var preview = await service.PreviewTemplate("company-1", new SalaryTemplateDto
+        {
+            Name = "Software Engineer",
+            EffectiveFrom = new DateTime(2026, 4, 1),
+            BasicPay = 50000m,
+            Hra = 20000m,
+            Components =
+            [
+                new PayrollSalaryTemplateComponentDto
+                {
+                    ComponentId = "c-pf",
+                    Code = "ER_PF",
+                    Name = "Employer PF",
+                    Kind = "EARNING",
+                    CalculationType = "FIXED",
+                    Value = 6000m,
+                    IsEmployerContribution = true,
+                    IsRecurring = true
+                }
+            ]
+        });
+
+        Assert.True(preview.Success);
+        Assert.NotNull(preview.Data);
+        Assert.Equal(70000m, preview.Data.MonthlyGross);
+        Assert.Equal(840000m, preview.Data.AnnualGross);
+        Assert.Equal(6000m, preview.Data.MonthlyEmployerContributions);
+        Assert.Equal(72000m, preview.Data.AnnualEmployerContributions);
+        Assert.Equal(76000m, preview.Data.MonthlyTotalCtc);
+        Assert.Equal(912000m, preview.Data.AnnualTotalCtc);
+        Assert.Equal(70000m, preview.Data.IndicativeMonthlyTakeHome);
+        Assert.Contains("Indicative take-home", preview.Data.ExplanatoryNote);
+    }
+
+    [Fact]
+    public async Task SaveTemplate_RejectsConflictingLegacyAndComponentValues_With409Conflict()
+    {
+        var policies = Repository<PayrollPolicyProfile>();
+        var templates = Repository<SalaryTemplate>();
+        var groups = Repository<PayrollPayGroup>();
+        var components = Repository<PayrollSalaryComponentDefinition>();
+
+        components.Setup(x => x.GetAll(It.IsAny<Expression<Func<PayrollSalaryComponentDefinition, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(new List<PayrollSalaryComponentDefinition>
+            {
+                new() { Id = "c-basic", CompanyId = "company-1", Code = "BASIC", Name = "Basic Pay", Kind = "EARNING", CalculationType = "FIXED", EffectiveFrom = new DateTime(2026, 1, 1), IsActive = true, Version = 1 }
+            });
+
+        var service = new PayrollTemplateService(policies.Object, templates.Object, groups.Object, components.Object);
+
+        var result = await service.SaveTemplate("company-1", "admin", new SalaryTemplateDto
+        {
+            Name = "Conflicting Template",
+            EffectiveFrom = new DateTime(2026, 4, 1),
+            BasicPay = 50000m,
+            Components =
+            [
+                new PayrollSalaryTemplateComponentDto
+                {
+                    ComponentId = "c-basic",
+                    Code = "BASIC",
+                    Name = "Basic Pay",
+                    Kind = "EARNING",
+                    CalculationType = "FIXED",
+                    Value = 60000m // Conflicting with BasicPay = 50000m
+                }
+            ]
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Contains("conflicting amounts", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PreviewTemplate_RejectsNegativeAmounts_With400BadRequest()
+    {
+        var service = new PayrollTemplateService(Repository<PayrollPolicyProfile>().Object, Repository<SalaryTemplate>().Object, Repository<PayrollPayGroup>().Object);
+        var result = await service.PreviewTemplate("company-1", new SalaryTemplateDto
+        {
+            Name = "Negative Template",
+            BasicPay = -5000m,
+            EffectiveFrom = new DateTime(2026, 4, 1)
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal(400, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task SeedStandardComponents_PopulatesStatutoryTaxAndProrationClassifications()
+    {
+        var componentsRepo = Repository<PayrollSalaryComponentDefinition>();
+        componentsRepo.Setup(x => x.GetAll(It.IsAny<Expression<Func<PayrollSalaryComponentDefinition, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(new List<PayrollSalaryComponentDefinition>());
+
+        var seededList = new List<PayrollSalaryComponentDefinition>();
+        componentsRepo.Setup(x => x.AddOne(It.IsAny<PayrollSalaryComponentDefinition>()))
+            .Callback<PayrollSalaryComponentDefinition>(seededList.Add)
+            .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
+
+        var service = new PayrollTemplateService(
+            Repository<PayrollPolicyProfile>().Object,
+            Repository<SalaryTemplate>().Object,
+            Repository<PayrollPayGroup>().Object,
+            componentsRepo.Object);
+
+        var result = await service.SeedStandardComponents("company-1", "admin");
+        Assert.True(result.Success);
+        Assert.Equal(5, seededList.Count);
+
+        var hra = seededList.First(x => x.Code == "HRA");
+        Assert.Equal("10(13A)", hra.TaxExemptionSection);
+        Assert.Equal("ATTENDANCE", hra.ProrationBasis);
+        Assert.True(hra.IncludeInPtWage);
+        Assert.False(hra.IncludeInPfWage);
+
+        var bonus = seededList.First(x => x.Code == "BONUS");
+        Assert.Equal("NOT_PRORATED", bonus.ProrationBasis);
+        Assert.True(bonus.IsRecurring);
+        Assert.True(bonus.IncludeInEsiWage);
+
+        var health = seededList.First(x => x.Code == "HEALTH_INSURANCE");
+        Assert.Equal("80D", health.TaxExemptionSection);
+        Assert.Equal("DEDUCTION", health.Kind);
+    }
     private static Mock<IMongoDbRepository<TEntity>> Repository<TEntity>()
     {
         var repository = new Mock<IMongoDbRepository<TEntity>>();

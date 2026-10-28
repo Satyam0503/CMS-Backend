@@ -117,6 +117,91 @@ public sealed class PayrollReportsServiceTests
         Assert.Equal(400, result.StatusCode);
     }
 
+    [Fact]
+    public async Task ExportEpfoEcrText_GeneratesValidEcrFormatWithCustomUanAndCalculatedSplit()
+    {
+        var runs = Repository(new PayrollRun
+        {
+            Id = "run-1", CompanyId = "company-1", PeriodStart = new DateTime(2026, 9, 1),
+            PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 1),
+            Status = "CALCULATED", RunType = "REGULAR"
+        });
+
+        var employees = Repository(
+            new PayrollRunEmployee
+            {
+                Id = "line-1", CompanyId = "company-1", PayrollRunId = "run-1", EmployeeId = "EMP001",
+                Status = "CALCULATED", GrossAmount = 25000m,
+                InputSnapshot = new PayrollEmployeeInputSnapshot { EpfWageCeiling = 15000m },
+                StatutorySnapshot = new PayrollStatutorySnapshot
+                {
+                    PolicyProfileId = "epf-policy",
+                    EmployeeEpf = 1800m,
+                    EmployerEpf = 1800m
+                }
+            });
+
+        var users = Repository(
+            new EmpUser
+            {
+                CompanyId = "company-1", UserId = "user-1", EmployeeId = "EMP001",
+                FirstName = "Rajesh", LastName = "Kumar", Email = "rajesh@example.com",
+                CustomAttributeList = [new() { CustomAttributeId = "UAN", CustomAttributeValueId = "100987654321" }]
+            });
+
+        var service = new PayrollReportsService(runs.Object, employees.Object, users.Object);
+
+        var result = await service.ExportEpfoEcrText("company-1", new PayrollReportQueryDto());
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.TotalRecords);
+        var text = System.Text.Encoding.UTF8.GetString(result.MethodResult).Trim();
+        Assert.Equal("100987654321#~#RAJESH KUMAR#~#25000#~#15000#~#15000#~#15000#~#1800#~#1250#~#550#~#0#~#0", text);
+    }
+
+    [Fact]
+    public async Task ExportEsicReturnCsv_GeneratesValidCsvWithIpNumberAndContributions()
+    {
+        var runs = Repository(new PayrollRun
+        {
+            Id = "run-1", CompanyId = "company-1", PeriodStart = new DateTime(2026, 9, 1),
+            PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 1),
+            Status = "CALCULATED", RunType = "REGULAR"
+        });
+
+        var employees = Repository(
+            new PayrollRunEmployee
+            {
+                Id = "line-1", CompanyId = "company-1", PayrollRunId = "run-1", EmployeeId = "EMP002",
+                Status = "CALCULATED", GrossAmount = 18000m,
+                InputSnapshot = new PayrollEmployeeInputSnapshot { EsicWageCeiling = 21000m },
+                StatutorySnapshot = new PayrollStatutorySnapshot
+                {
+                    EmployeeEsic = 135m,
+                    EmployerEsic = 585m
+                }
+            });
+
+        var users = Repository(
+            new EmpUser
+            {
+                CompanyId = "company-1", UserId = "user-2", EmployeeId = "EMP002",
+                FirstName = "Anita", LastName = "Sharma", Email = "anita@example.com",
+                CustomAttributeList = [new() { CustomAttributeId = "IPNumber", CustomAttributeValueId = "31000554433" }]
+            });
+
+        var service = new PayrollReportsService(runs.Object, employees.Object, users.Object);
+
+        var result = await service.ExportEsicReturnCsv("company-1", new PayrollReportQueryDto());
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.TotalRecords);
+        var csv = System.Text.Encoding.UTF8.GetString(result.MethodResult);
+
+        Assert.Contains("IPNumber,IPName,NoOfDaysWorked,TotalMonthlyWages,IPContribution,ReasonForZeroWorkingDays", csv);
+        Assert.Contains("31000554433,Anita Sharma,30,18000.00,135.00", csv);
+    }
+
     private static Mock<IMongoDbRepository<TEntity>> Repository<TEntity>(params TEntity[] items)
     {
         var repository = new Mock<IMongoDbRepository<TEntity>>();

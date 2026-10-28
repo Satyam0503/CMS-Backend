@@ -7,7 +7,9 @@ public class WorkFromHomeRequest : BaseClass
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))] public string RequestId { get; set; } = string.Empty;
     public string UserId { get; set; } = string.Empty;
     public string EmployeeId { get; set; } = string.Empty;
+    [BsonDateTimeOptions(Kind = DateTimeKind.Utc)]
     public DateTime FromDate { get; set; }
+    [BsonDateTimeOptions(Kind = DateTimeKind.Utc)]
     public DateTime ToDate { get; set; }
     public string DurationType { get; set; } = "FullDay";
     public string ReasonCode { get; set; } = "OTHER";
@@ -34,6 +36,7 @@ public class WorkFromHomeRequest : BaseClass
 /// <summary>Auditable, date-specific conversion from approved WFH to verified office work.</summary>
 public sealed class WorkFromHomeOfficeConversion
 {
+    [BsonDateTimeOptions(Kind = DateTimeKind.Utc)]
     public DateTime AttendanceDate { get; set; }
     public DateTime OfficeCheckInTime { get; set; }
     public DateTime OfficeCheckOutTime { get; set; }
@@ -104,6 +107,8 @@ public class WorkFromHomePolicy : BaseClass
     public int SameDayGraceMinutes { get; set; }
     [MongoDB.Bson.Serialization.Attributes.BsonDefaultValue(true)]
     public bool AllowLateApplicationWithApproval { get; set; } = true;
+    public List<string> AllowedDaysOfWeek { get; set; } = [];
+    public List<string> BlockedDaysOfWeek { get; set; } = [];
 }
 
 public class WorkFromHomeEmployeeAllocation

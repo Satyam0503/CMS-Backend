@@ -56,6 +56,8 @@ public class WorkFromHomeTimingDto
     public bool IsUnderHours { get; set; }
     public string? Remarks { get; set; }
     public string? RemarkCode { get; set; }
+    public bool IsCheckInOpen { get; set; } = true;
+    public string? CheckInNotice { get; set; }
 }
 
 public class WorkFromHomeCheckOutDto
@@ -113,6 +115,10 @@ public class EmployeeWfhContextDto
     public WorkFromHomeResponseDto? TodayApprovedRequest { get; set; }
     public string? TodayRequestIssueCode { get; set; }
     public bool IsSameDayRequestCutoffPassed { get; set; }
+    public bool IsShiftStartedToday { get; set; }
+    public bool IsFirstHalfPassedToday { get; set; }
+    public bool IsSecondHalfPassedToday { get; set; }
+    public List<string> AllowedTodayDurations { get; set; } = [];
     public TimeSpan? EffectiveOfficeStartTime { get; set; }
     public TimeSpan? EffectiveCutoffTime { get; set; }
     public TimeSpan? SecondHalfCutoffTime { get; set; }
@@ -125,6 +131,8 @@ public class EmployeeWfhContextDto
     public TimeSpan? CheckInAvailableUntil { get; set; }
     public TimeSpan? CheckOutAvailableFrom { get; set; }
     public TimeSpan? CheckOutAvailableUntil { get; set; }
+    public List<string> AllowedDaysOfWeek { get; set; } = [];
+    public List<string> BlockedDaysOfWeek { get; set; } = [];
 }
 
 public class WorkFromHomePolicyDto
@@ -168,6 +176,20 @@ public class WorkFromHomePolicyDto
     public TimeSpan? SameDayCutoffTime { get; set; }
     public int SameDayGraceMinutes { get; set; }
     public bool AllowLateApplicationWithApproval { get; set; } = true;
+    public List<string> AllowedDaysOfWeek { get; set; } = [];
+    public List<string> BlockedDaysOfWeek { get; set; } = [];
+}
+
+/// <summary>Administrative payload for direct WFH grant and combinations from the Attendance Grid.</summary>
+public class WorkFromHomeAdminGrantDto
+{
+    [Required] public string TargetUserId { get; set; } = string.Empty;
+    [Required] public DateTime AttendanceDate { get; set; }
+    /// <summary>FullDay, WfhWfo (FH WFH + SH Office), WfoWfh (FH Office + SH WFH), WfhHd (FH WFH + SH Leave)</summary>
+    [Required] public string GrantType { get; set; } = "FullDay";
+    [Required, MinLength(3)] public string Remarks { get; set; } = string.Empty;
+    public TimeSpan? OfficeCheckInTime { get; set; }
+    public TimeSpan? OfficeCheckOutTime { get; set; }
 }
 
 public class WorkFromHomeEmployeeAllocationDto

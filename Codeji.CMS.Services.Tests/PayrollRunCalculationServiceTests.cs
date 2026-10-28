@@ -50,7 +50,7 @@ public sealed class PayrollRunCalculationServiceTests
     }
 
     [Fact]
-    public async Task SyncCalculatedRows_ValidatesComponentSnapshotButUsesActualPayrollRowTotals()
+    public async Task SyncCalculatedRows_BlocksFullMonthWhenCanonicalSalaryEarningsDifferFromGeneratedRow()
     {
         var run = new PayrollRun
         {
@@ -67,6 +67,20 @@ public sealed class PayrollRunCalculationServiceTests
                     new() { Code = "BASIC", Name = "Basic", Kind = "EARNING", Value = 1000.005m, SortOrder = 10 },
                     new() { Code = "HRA", Name = "HRA", Kind = "EARNING", CalculationType = "PERCENT_OF_COMPONENT", BaseComponentCode = "BASIC", Value = 50, SortOrder = 20 },
                     new() { Code = "PF", Name = "PF", Kind = "DEDUCTION", CalculationType = "PERCENT_OF_GROSS", Value = 10, SortOrder = 30 }
+                ],
+                SalaryStructures =
+                [
+                    new()
+                    {
+                        SalaryStructureId = "salary-1", Version = 1,
+                        EffectiveFrom = new DateTime(2026, 9, 1),
+                        Components =
+                        [
+                            new() { Code = "BASIC", Name = "Basic", Kind = "EARNING", Value = 1000.005m, SortOrder = 10 },
+                            new() { Code = "HRA", Name = "HRA", Kind = "EARNING", CalculationType = "PERCENT_OF_COMPONENT", BaseComponentCode = "BASIC", Value = 50, SortOrder = 20 },
+                            new() { Code = "PF", Name = "PF", Kind = "DEDUCTION", CalculationType = "PERCENT_OF_GROSS", Value = 10, IsStatutory = true, SortOrder = 30 }
+                        ]
+                    }
                 ]
             }
         };
@@ -74,14 +88,26 @@ public sealed class PayrollRunCalculationServiceTests
         {
             Id = "legacy-row", CompanyId = "company-1", UserId = "user-1", EmployeeId = "employee-1",
             PayMonth = new DateTime(2026, 9, 1), PaidDate = new DateTime(2026, 10, 1),
-            BasicPay = 2000m, Bonus = 100m, PaidDays = 30,
+            BasicPay = 2000m, Bonus = 0m, PaidDays = 30,
             Allowance = new Allowance { HRA = 400m, LTA = 0m, OtherAllowance = 500m },
-            Deduction = new Deduction { LossOfPay = 100m, IncomeTax = 50m, HealthInsurance = 20m, EPF = 30m, ESIC = 5m },
+            Deduction = new Deduction { LossOfPay = 0m, IncomeTax = 50m, HealthInsurance = 20m, EPF = 30m, ESIC = 5m },
             DeductionLines =
             [
-                new() { Code = "LHD_ED_POLICY", Description = "LOP audit duplicate", Amount = 100m },
                 new() { Code = "SALARY_LOAN_REPAYMENT", Description = "Loan repayment", Amount = 40m }
-            ]
+            ],
+            CalculationSnapshot = new PayrollCalculationSnapshot
+            {
+                EligibleFrom = new DateTime(2026, 9, 1), EligibleTo = new DateTime(2026, 9, 30),
+                SalaryRevisions = [new() { SalaryStructureId = "salary-1", Version = 1 }],
+                SalaryStructures =
+                [
+                    new()
+                    {
+                        SalaryStructureId = "salary-1", Version = 1, EffectiveFrom = new DateTime(2026, 9, 1),
+                        Components = member.InputSnapshot.SalaryStructures[0].Components
+                    }
+                ]
+            }
         };
         var runs = Repository(run);
         var lines = Repository(member);
@@ -90,17 +116,65 @@ public sealed class PayrollRunCalculationServiceTests
 
         var result = await service.SyncCalculatedRows("company-1", "run-1", "actor-1");
 
-        Assert.True(result.Success);
-        Assert.Equal("CALCULATED", member.Status);
-        Assert.Equal(3000m, member.GrossAmount);
-        Assert.Equal(245m, member.DeductionAmount);
-        Assert.Equal(2755m, member.NetAmount);
-        Assert.Equal(3000m, run.GrossTotal);
-        Assert.Equal(245m, run.DeductionTotal);
-        Assert.Equal(2755m, run.NetTotal);
-        Assert.Equal("CALCULATED", run.Status);
+        Assert.False(result.Success);
+        Assert.Equal("BLOCKED", member.Status);
+        Assert.Equal("PAYROLL_CANONICAL_COMPONENT_TOTAL_MISMATCH", member.ErrorCode);
+        Assert.Contains("Frozen recurring salary components", member.ErrorMessage);
+        Assert.Equal(0m, member.GrossAmount);
+        Assert.Equal(0m, run.GrossTotal);
+        Assert.Equal("BLOCKED", run.Status);
         lines.Verify(x => x.Update(It.IsAny<FilterDefinition<PayrollRunEmployee>>(), member), Times.Once);
         runs.Verify(x => x.Update(It.IsAny<FilterDefinition<PayrollRun>>(), run), Times.Once);
+    }
+
+    [Fact]
+    public async Task SyncCalculatedRows_AcceptsFullMonthWhenCanonicalSalaryEarningsMatchGeneratedRow()
+    {
+        var run = new PayrollRun
+        {
+            Id = "run-match", CompanyId = "company-1", PeriodStart = new DateTime(2026, 9, 1),
+            PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 1), Status = "DRAFT"
+        };
+        var components = new List<PayrollComponentSnapshot>
+        {
+            new() { Code = "BASIC", Name = "Basic", Kind = "EARNING", Value = 1000.005m, SortOrder = 10 },
+            new() { Code = "HRA", Name = "HRA", Kind = "EARNING", CalculationType = "PERCENT_OF_COMPONENT", BaseComponentCode = "BASIC", Value = 50, SortOrder = 20 },
+            new() { Code = "PF", Name = "PF", Kind = "DEDUCTION", CalculationType = "PERCENT_OF_GROSS", Value = 10, IsStatutory = true, SortOrder = 30 }
+        };
+        var member = new PayrollRunEmployee
+        {
+            Id = "line-match", CompanyId = run.CompanyId, PayrollRunId = run.Id, EmployeeId = "employee-1",
+            InputSnapshot = new PayrollEmployeeInputSnapshot
+            {
+                SalaryStructures =
+                [
+                    new() { SalaryStructureId = "salary-1", Version = 1, EffectiveFrom = run.PeriodStart, Components = components }
+                ]
+            }
+        };
+        var row = new EmpPayRoll
+        {
+            Id = "row-match", CompanyId = run.CompanyId, UserId = "user-1", EmployeeId = member.EmployeeId,
+            PayMonth = run.PeriodStart, PaidDate = run.PayDate, BasicPay = 1000.01m, PaidDays = 30,
+            Allowance = new Allowance { HRA = 500.01m },
+            CalculationSnapshot = new PayrollCalculationSnapshot
+            {
+                EligibleFrom = run.PeriodStart, EligibleTo = run.PeriodEnd,
+                SalaryRevisions = [new() { SalaryStructureId = "salary-1", Version = 1 }],
+                SalaryStructures =
+                [
+                    new() { SalaryStructureId = "salary-1", Version = 1, EffectiveFrom = run.PeriodStart, Components = components }
+                ]
+            }
+        };
+        var service = new PayrollRunCalculationService(Repository(run).Object, Repository(member).Object, Repository(row).Object);
+
+        var result = await service.SyncCalculatedRows(run.CompanyId, run.Id, "actor-1");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("CALCULATED", member.Status);
+        Assert.Equal(1500.02m, member.GrossAmount);
+        Assert.Equal("CALCULATED", run.Status);
     }
 
     [Fact]
@@ -515,6 +589,100 @@ public sealed class PayrollRunCalculationServiceTests
         Assert.Equal(409, result.StatusCode);
         lines.Verify(x => x.Update(It.IsAny<FilterDefinition<PayrollRunEmployee>>(), It.IsAny<PayrollRunEmployee>()), Times.Never);
         runs.Verify(x => x.Update(It.IsAny<FilterDefinition<PayrollRun>>(), It.IsAny<PayrollRun>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SyncCalculatedRows_FreezesDayLevelAttendanceAndLopSnapshot()
+    {
+        var run = new PayrollRun
+        {
+            Id = "run-1", CompanyId = "company-1", PeriodStart = new DateTime(2026, 9, 1),
+            PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 1), Status = "DRAFT"
+        };
+
+        var member = new PayrollRunEmployee
+        {
+            Id = "line-1", CompanyId = "company-1", PayrollRunId = "run-1", EmployeeId = "employee-1",
+            InputSnapshot = new PayrollEmployeeInputSnapshot
+            {
+                RequireAttendanceLock = true,
+                SalaryStructureId = "salary-1",
+                Components = [new() { Code = "BASIC", Name = "Basic", Kind = "EARNING", Value = 30000m, SortOrder = 1 }]
+            }
+        };
+
+        var attendanceSummary = new MonthlyAttendanceSummary
+        {
+            Id = "summary-101",
+            CompanyId = "company-1",
+            UserId = "user-1",
+            EmployeeId = "employee-1",
+            PayrollMonth = new DateTime(2026, 9, 1),
+            Version = 2,
+            IsApproved = true,
+            IsLocked = true,
+            ApprovedBy = "hr-manager",
+            ExpectedWorkingDays = 22,
+            EligibleWorkingDays = 22,
+            PresentDays = 18m,
+            WfhDays = 2m,
+            PaidLeaveDays = 1m,
+            UnpaidDays = 1m,
+            HalfDays = 0m,
+            AbsentDays = 1m,
+            PaidDays = 21m,
+            LhdCount = 1,
+            EdCount = 0,
+            CombinedLhdEdCount = 1
+        };
+
+        var row = new EmpPayRoll
+        {
+            Id = "legacy-row-1",
+            CompanyId = "company-1",
+            UserId = "user-1",
+            EmployeeId = "employee-1",
+            PayMonth = new DateTime(2026, 9, 1),
+            PaidDate = new DateTime(2026, 10, 1),
+            BasicPay = 29000m,
+            PaidDays = 29f,
+            Allowance = new Allowance { OtherAllowance = 0m },
+            Deduction = new Deduction { LossOfPay = 1000m, LossOfPayDays = 1f },
+            CalculationSnapshot = new PayrollCalculationSnapshot
+            {
+                AttendanceSummaryId = "summary-101",
+                AttendanceSummaryVersion = 2,
+                Divisor = 30m,
+                DivisorPolicy = "CALENDAR_DAYS",
+                LossOfPay = 1000m,
+                LossOfPayDays = 1m
+            }
+        };
+
+        var runs = Repository(run);
+        var lines = Repository(member);
+        var summaries = Repository(attendanceSummary);
+        var payrolls = Repository(row);
+
+        var service = new PayrollRunCalculationService(runs.Object, lines.Object, payrolls.Object, summaries.Object);
+
+        var result = await service.SyncCalculatedRows("company-1", "run-1", "actor-1");
+
+        Assert.True(result.Success);
+        Assert.Equal("CALCULATED", member.Status);
+        Assert.NotNull(member.AttendanceSnapshot);
+        Assert.Equal("summary-101", member.AttendanceSnapshot.SummaryId);
+        Assert.Equal(2, member.AttendanceSnapshot.SummaryVersion);
+        Assert.True(member.AttendanceSnapshot.IsApproved);
+        Assert.True(member.AttendanceSnapshot.IsLocked);
+        Assert.Equal("hr-manager", member.AttendanceSnapshot.ApprovedBy);
+        Assert.Equal(22, member.AttendanceSnapshot.ExpectedWorkingDays);
+        Assert.Equal(18m, member.AttendanceSnapshot.PresentDays);
+        Assert.Equal(2m, member.AttendanceSnapshot.WfhDays);
+        Assert.Equal(1m, member.AttendanceSnapshot.LossOfPayDays);
+        Assert.Equal(1000m, member.AttendanceSnapshot.LossOfPayAmount);
+        Assert.Equal(30m, member.AttendanceSnapshot.Divisor);
+        Assert.Equal("CALENDAR_DAYS", member.AttendanceSnapshot.DivisorPolicy);
     }
 
     private static Mock<IMongoDbRepository<TEntity>> Repository<TEntity>(params TEntity[] items)

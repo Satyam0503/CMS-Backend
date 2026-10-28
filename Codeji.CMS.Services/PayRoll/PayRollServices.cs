@@ -161,6 +161,7 @@ public class PayRollServices : IPayRollServices
             salarySlipModel.HealthInsurance = payRoll.Deduction.HealthInsurance;
             salarySlipModel.EPF = payRoll.Deduction.EPF;
             salarySlipModel.ESIC = payRoll.Deduction.ESIC;
+            salarySlipModel.ProfessionalTax = payRoll.Deduction.ProfessionalTax;
             salarySlipModel.EsicEmployeeLabel = PayrollPayslipEarningsHtml.GetEsicEmployeeLabel(
                 payRoll
             );
@@ -179,6 +180,7 @@ public class PayRollServices : IPayRollServices
                 + payRoll.Deduction.LossOfPay
                 + payRoll.Deduction.EPF
                 + payRoll.Deduction.ESIC
+                + payRoll.Deduction.ProfessionalTax
                 + salarySlipModel.OtherDeductions;
             salarySlipModel.NetSalary = salarySlipModel.GrossPay - salarySlipModel.TotalDeduction;
             salarySlipModel.NetSalaryInWords = IndianCurrencyWords.ToWords(
@@ -542,6 +544,7 @@ public class PayRollServices : IPayRollServices
                     HealthInsurance = RoundAmount(payItem.HealthInsurance),
                     EPF = RoundAmount(payItem.EPF),
                     ESIC = RoundAmount(payItem.ESIC),
+                    ProfessionalTax = RoundAmount(payItem.ProfessionalTax),
                 },
                 DeductionLines = MapDeductionLines(payItem.DeductionLines),
                 EarningLines = MapEarningLines(payItem.EarningLines),
@@ -751,6 +754,7 @@ public class PayRollServices : IPayRollServices
                     HealthInsurance = payRoll?.Deduction.HealthInsurance ?? null,
                     EPF = payRoll?.Deduction.EPF ?? null,
                     ESIC = payRoll?.Deduction.ESIC ?? null,
+                    ProfessionalTax = payRoll?.Deduction.ProfessionalTax ?? null,
                     DeductionLines =
                         payRoll
                             ?.DeductionLines.Select(x => new PayrollDeductionLineDto
@@ -1001,6 +1005,7 @@ public class PayRollServices : IPayRollServices
                     HealthInsurance = model.HealthInsurance ?? 0,
                     EPF = model.EPF ?? 0,
                     ESIC = model.ESIC ?? 0,
+                    ProfessionalTax = model.ProfessionalTax ?? 0,
                 },
                 DeductionLines = MapDeductionLines(model.DeductionLines),
                 EarningLines = MapEarningLines(model.EarningLines),
@@ -1084,6 +1089,7 @@ public class PayRollServices : IPayRollServices
             payRoll.Deduction.HealthInsurance = model.HealthInsurance ?? 0;
             payRoll.Deduction.EPF = model.EPF ?? 0;
             payRoll.Deduction.ESIC = model.ESIC ?? 0;
+            payRoll.Deduction.ProfessionalTax = model.ProfessionalTax ?? 0;
             if (model.ReplaceDeductionLines || model.DeductionLines.Count > 0)
                 payRoll.DeductionLines = MapDeductionLines(model.DeductionLines);
             if (model.ReplaceEarningLines || model.EarningLines.Count > 0)
@@ -1286,6 +1292,7 @@ public class PayRollServices : IPayRollServices
             + (payroll.Deduction?.HealthInsurance ?? 0m)
             + (payroll.Deduction?.EPF ?? 0m)
             + (payroll.Deduction?.ESIC ?? 0m)
+            + (payroll.Deduction?.ProfessionalTax ?? 0m)
             + PayrollDeductionLineTotals.AdditionalAmount(payroll.DeductionLines);
         if (grossPay - totalDeductions <= 0m)
             return new Result
@@ -1559,6 +1566,26 @@ public class PayRollServices : IPayRollServices
             : new PayrollCalculationSnapshot
             {
                 PayrollMonth = x.PayrollMonth,
+                TdsPaymentDate = x.TdsPaymentDate,
+                TdsFinancialYear = x.TdsFinancialYear,
+                TdsIncomeTaxAct = x.TdsIncomeTaxAct,
+                TdsSection = x.TdsSection,
+                TdsJurisdiction = x.TdsJurisdiction,
+                TdsPolicyProfileId = x.TdsPolicyProfileId,
+                TdsPolicyProfileVersion = x.TdsPolicyProfileVersion,
+                TdsStatutoryRuleVersion = x.TdsStatutoryRuleVersion,
+                TdsCalculationEngineVersion = x.TdsCalculationEngineVersion,
+                TdsEstimateStatus = x.TdsEstimateStatus,
+                TdsCurrentYearTaxableSalaryYtd = x.TdsCurrentYearTaxableSalaryYtd,
+                TdsCurrentMonthlyTaxableSalaryBasis = x.TdsCurrentMonthlyTaxableSalaryBasis,
+                TdsProjectedAnnualTaxableSalary = x.TdsProjectedAnnualTaxableSalary,
+                TdsPreviousEmployerSalary = x.TdsPreviousEmployerSalary,
+                TdsOtherIncomeDeclared = x.TdsOtherIncomeDeclared,
+                TdsEligibleDeductionsDeclared = x.TdsEligibleDeductionsDeclared,
+                TdsYtdTaxDeducted = x.TdsYtdTaxDeducted,
+                TdsEstimatedAnnualTax = x.TdsEstimatedAnnualTax,
+                TdsRemainingPayments = x.TdsRemainingPayments,
+                TdsEstimateLimitations = (x.TdsEstimateLimitations ?? []).ToList(),
                 JoiningDateUsed = x.JoiningDateUsed,
                 ExitDateUsed = x.ExitDateUsed,
                 EligibleFrom = x.EligibleFrom,
@@ -1587,10 +1614,26 @@ public class PayRollServices : IPayRollServices
                 EsicEmployeeRatePercent = x.EsicEmployeeRatePercent,
                 EsicEmployerRatePercent = x.EsicEmployerRatePercent,
                 TdsMode = x.TdsMode,
+                ProfessionalTax = x.ProfessionalTax,
+                PtJurisdiction = x.PtJurisdiction,
+                PtMode = x.PtMode,
                 PenaltyAmount = x.PenaltyAmount,
                 PolicyId = x.PolicyId,
                 PolicyVersion = x.PolicyVersion,
                 AttendanceSummaryVersion = x.AttendanceSummaryVersion,
+                AttendanceSummaryId = x.AttendanceSummaryId,
+                ExpectedWorkingDays = x.ExpectedWorkingDays,
+                EligibleWorkingDays = x.EligibleWorkingDays,
+                PresentDays = x.PresentDays,
+                WfhDays = x.WfhDays,
+                PaidLeaveDays = x.PaidLeaveDays,
+                UnpaidLeaveDays = x.UnpaidLeaveDays,
+                HalfDays = x.HalfDays,
+                AbsentDays = x.AbsentDays,
+                PaidDays = x.PaidDays,
+                UnpaidDays = x.UnpaidDays,
+                LossOfPayDays = x.LossOfPayDays,
+                LossOfPay = x.LossOfPay,
                 PayrollAssignmentVersion = x.PayrollAssignmentVersion,
                 PayGroupVersion = x.PayGroupVersion,
                 SalaryTemplateVersion = x.SalaryTemplateVersion,

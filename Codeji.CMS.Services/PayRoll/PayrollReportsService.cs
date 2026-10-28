@@ -14,11 +14,14 @@ public interface IPayrollReportsService
     Task<Result<byte[]>> ExportRegister(string companyId, PayrollReportQueryDto query);
     Task<Result<List<PayrollStatutoryRegisterRowDto>>> GetStatutoryRegister(string companyId, PayrollReportQueryDto query);
     Task<Result<byte[]>> ExportStatutoryRegister(string companyId, PayrollReportQueryDto query);
+    Task<Result<byte[]>> ExportEpfoEcrText(string companyId, PayrollReportQueryDto query);
+    Task<Result<byte[]>> ExportEsicReturnCsv(string companyId, PayrollReportQueryDto query);
 }
 
 public sealed class PayrollReportsService(
     IMongoDbRepository<PayrollRun> runs,
-    IMongoDbRepository<PayrollRunEmployee> employees) : IPayrollReportsService
+    IMongoDbRepository<PayrollRunEmployee> employees,
+    IMongoDbRepository<EmpUser>? userRepo = null) : IPayrollReportsService
 {
     public async Task<Result<PayrollReportSummaryDto>> GetSummary(string companyId, PayrollReportQueryDto query)
     {
@@ -174,6 +177,110 @@ public sealed class PayrollReportsService(
         }
 
         return new Result<byte[]> { Success = true, MethodResult = Encoding.UTF8.GetBytes(builder.ToString()), TotalRecords = result.TotalRecords };
+    }
+
+    public async Task<Result<byte[]>> ExportEpfoEcrText(string companyId, PayrollReportQueryDto query)
+    {
+        var validation = Validate(query);
+        if (!validation.Success) return new Result<byte[]> { Success = false, StatusCode = validation.StatusCode, Message = validation.Message };
+
+        var selectedRuns = await LoadRuns(companyId, query);
+        var runIds = selectedRuns.Select(x => x.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var runEmployees = (await employees.GetAll(x => x.CompanyId == companyId && runIds.Contains(x.PayrollRunId)))
+            .Where(x => string.IsNullOrWhiteSpace(query.EmployeeId) || string.Equals(x.EmployeeId, query.EmployeeId.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(x => x.Status == "CALCULATED")
+            .ToList();
+
+        var users = userRepo is null ? [] : (await userRepo.GetAll(x => x.CompanyId == companyId)).ToDictionary(x => x.EmployeeId, StringComparer.OrdinalIgnoreCase);
+
+        var builder = new StringBuilder();
+        foreach (var member in runEmployees)
+        {
+            var statutory = member.StatutorySnapshot;
+            var eeShare = Round(statutory?.EmployeeEpf ?? 0m);
+            if (eeShare <= 0m && (statutory?.EmployerEpf ?? 0m) <= 0m)
+                continue;
+
+            users.TryGetValue(member.EmployeeId, out var user);
+            var memberName = user is not null
+                ? $"{user.FirstName} {user.LastName}".Trim().ToUpperInvariant()
+                : member.EmployeeId.ToUpperInvariant();
+
+            var uan = user?.CustomAttributeList?.FirstOrDefault(x => string.Equals(x.CustomAttributeId, "UAN", StringComparison.OrdinalIgnoreCase))?.CustomAttributeValueId
+                      ?? member.EmployeeId;
+
+            var grossWages = Round(member.GrossAmount);
+            var ceiling = member.InputSnapshot?.EpfWageCeiling is > 0m ? member.InputSnapshot.EpfWageCeiling : 15000m;
+            var epfWages = Round(Math.Min(grossWages, ceiling));
+            var epsWages = epfWages;
+            var edliWages = epfWages;
+
+            var (_, employerEpsRaw, _, _) = PayrollCalculationRules.CalculateEmployerMonthlyEpf(
+                statutory?.PolicyProfileId,
+                epfWages,
+                ceiling);
+
+            var eeShareInt = Math.Round(eeShare, 0, MidpointRounding.AwayFromZero);
+            var employerEpsInt = Math.Round(employerEpsRaw, 0, MidpointRounding.AwayFromZero);
+            var employerEpfInt = Math.Max(0m, eeShareInt - employerEpsInt);
+
+            builder.AppendLine($"{uan}#~#{memberName}#~#{grossWages:F0}#~#{epfWages:F0}#~#{epsWages:F0}#~#{edliWages:F0}#~#{eeShareInt:F0}#~#{employerEpsInt:F0}#~#{employerEpfInt:F0}#~#0#~#0");
+        }
+
+        return new Result<byte[]>
+        {
+            Success = true,
+            MethodResult = Encoding.UTF8.GetBytes(builder.ToString()),
+            TotalRecords = runEmployees.Count
+        };
+    }
+
+    public async Task<Result<byte[]>> ExportEsicReturnCsv(string companyId, PayrollReportQueryDto query)
+    {
+        var validation = Validate(query);
+        if (!validation.Success) return new Result<byte[]> { Success = false, StatusCode = validation.StatusCode, Message = validation.Message };
+
+        var selectedRuns = await LoadRuns(companyId, query);
+        var runIds = selectedRuns.Select(x => x.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var runEmployees = (await employees.GetAll(x => x.CompanyId == companyId && runIds.Contains(x.PayrollRunId)))
+            .Where(x => string.IsNullOrWhiteSpace(query.EmployeeId) || string.Equals(x.EmployeeId, query.EmployeeId.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(x => x.Status == "CALCULATED")
+            .ToList();
+
+        var users = userRepo is null ? [] : (await userRepo.GetAll(x => x.CompanyId == companyId)).ToDictionary(x => x.EmployeeId, StringComparer.OrdinalIgnoreCase);
+
+        var builder = new StringBuilder();
+        builder.AppendLine("IPNumber,IPName,NoOfDaysWorked,TotalMonthlyWages,IPContribution,ReasonForZeroWorkingDays");
+
+        foreach (var member in runEmployees)
+        {
+            var statutory = member.StatutorySnapshot;
+            var eeShare = Round(statutory?.EmployeeEsic ?? 0m);
+            var esicCeiling = member.InputSnapshot?.EsicWageCeiling is > 0m ? member.InputSnapshot.EsicWageCeiling : 21000m;
+            if (eeShare <= 0m && member.GrossAmount > esicCeiling)
+                continue;
+
+            users.TryGetValue(member.EmployeeId, out var user);
+            var memberName = user is not null
+                ? $"{user.FirstName} {user.LastName}".Trim()
+                : member.EmployeeId;
+
+            var esicIpNumber = user?.CustomAttributeList?.FirstOrDefault(x => string.Equals(x.CustomAttributeId, "ESIC", StringComparison.OrdinalIgnoreCase) || string.Equals(x.CustomAttributeId, "IPNumber", StringComparison.OrdinalIgnoreCase))?.CustomAttributeValueId
+                               ?? member.EmployeeId;
+
+            var grossWages = Round(member.GrossAmount);
+            var daysWorked = 30;
+            var reasonCode = daysWorked == 0 ? "LEAVE_WITHOUT_PAY" : "";
+
+            builder.AppendLine($"{Csv(esicIpNumber)},{Csv(memberName)},{daysWorked},{grossWages.ToString("0.00", CultureInfo.InvariantCulture)},{eeShare.ToString("0.00", CultureInfo.InvariantCulture)},{Csv(reasonCode)}");
+        }
+
+        return new Result<byte[]>
+        {
+            Success = true,
+            MethodResult = Encoding.UTF8.GetBytes(builder.ToString()),
+            TotalRecords = runEmployees.Count
+        };
     }
 
     private async Task<List<PayrollRun>> LoadRuns(string companyId, PayrollReportQueryDto query)

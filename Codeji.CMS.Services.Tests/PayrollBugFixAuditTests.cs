@@ -562,9 +562,23 @@ public class PayrollBugFixAuditTests
         runEmployeesRepo.Setup(x => x.GetAll(It.IsAny<Expression<Func<PayrollRunEmployee, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
             .ReturnsAsync(new List<PayrollRunEmployee> { runEmployee });
 
+        var payrollRow = new EmpPayRoll
+        {
+            Id = "payroll-1", CompanyId = "comp-1", UserId = "user-1", EmployeeId = "EMP001",
+            PayMonth = new DateTime(2026, 10, 1), PaidDate = new DateTime(2026, 10, 31), BasicPay = 1000m, PaidDays = 31
+        };
+        payrollsRepo.Setup(x => x.GetAll(It.IsAny<Expression<Func<EmpPayRoll, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .Returns((Expression<Func<EmpPayRoll, bool>> predicate, bool _, bool _) =>
+                Task.FromResult<IEnumerable<EmpPayRoll>>(new[] { payrollRow }.Where(predicate.Compile()).ToArray()));
+
         FilterDefinition<EmpPayRoll>? capturedFilter = null;
         payrollsRepo.Setup(x => x.UpdateMany(It.IsAny<FilterDefinition<EmpPayRoll>>(), It.IsAny<UpdateDefinition<EmpPayRoll>>(), It.IsAny<bool>()))
-            .Callback<FilterDefinition<EmpPayRoll>, UpdateDefinition<EmpPayRoll>, bool>((f, u, d) => capturedFilter = f)
+            .Callback<FilterDefinition<EmpPayRoll>, UpdateDefinition<EmpPayRoll>, bool>((f, u, d) =>
+            {
+                capturedFilter = f;
+                payrollRow.IsProcessed = true;
+                payrollRow.WorkflowStatus = "PROCESSED";
+            })
             .ReturnsAsync(new Result { Success = true });
 
         var workflowService = new PayrollRunWorkflowService(runsRepo.Object, runEmployeesRepo.Object, payrollsRepo.Object);

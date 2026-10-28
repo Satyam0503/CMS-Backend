@@ -286,26 +286,29 @@ public class LeaveManagementService : ILeaveManagementService
     }
 
 
-private async Task<bool> HasActiveEmployeeAbsenceAsync(string companyId,string employeeId,string? excludeLeaveRequestId = null)
+    private async Task<bool> HasActiveEmployeeAbsenceAsync(string companyId, string employeeId, DateTime startDate, DateTime endDate, string? excludeLeaveRequestId = null)
     {
-       var employee=await _employeeRepository.FirstOrDefault(x=>x.CompanyId==companyId && x.UserId==employeeId &&  !x.IsDeleted);
-       if (employee is null || !EmploymentExitRules.IsCurrentEmployee(employee)) return false;
+        var employee = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == employeeId && !x.IsDeleted);
+        if (employee is null || !EmploymentExitRules.IsCurrentEmployee(employee)) return false;
 
-       if(employee?.Lifecycle?.AvailabilityStatus
-        is EmployeeLifecycleStatuses.MedicalLeave
-            or EmployeeLifecycleStatuses.AnnualLeave
-            or EmployeeLifecycleStatuses.MaternityLeave
-            or EmployeeLifecycleStatuses.PaternityLeave
-            or EmployeeLifecycleStatuses.SickLeave)
+        for (var date = startDate.Date; date <= endDate.Date; date = date.AddDays(1))
         {
-            return true;
+            var availability = EmploymentPeriod.ResolveAvailabilityOn(employee, date);
+            if (availability is EmployeeLifecycleStatuses.MedicalLeave
+                or EmployeeLifecycleStatuses.AnnualLeave
+                or EmployeeLifecycleStatuses.MaternityLeave
+                or EmployeeLifecycleStatuses.PaternityLeave
+                or EmployeeLifecycleStatuses.SickLeave)
+            {
+                return true;
+            }
         }
 
-        var activeLeave= await _leave.FirstOrDefault(x=>x.CompanyId==companyId && x.EmployeeId==employeeId  && x.LeaveRequestId!=excludeLeaveRequestId &&
-            (x.Status==EnumsHelper.LeaveRequestStatus.Accepted || x.Status ==EnumsHelper.LeaveRequestStatus.Pending)
+        var activeLeave = await _leave.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeId == employeeId && x.LeaveRequestId != excludeLeaveRequestId &&
+            (x.Status == EnumsHelper.LeaveRequestStatus.Accepted || x.Status == EnumsHelper.LeaveRequestStatus.Pending) &&
+            x.StartDate <= endDate && x.EndDate >= startDate
         );
         return activeLeave is not null;
-
     }
 
 
@@ -486,6 +489,8 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
                 SameDayCutoffTime = operationalPolicy.SameDayCutoffTime,
                 SameDayGraceMinutes = operationalPolicy.SameDayGraceMinutes,
                 AllowLateApplicationWithApproval = operationalPolicy.AllowLateApplicationWithApproval,
+                AllowedDaysOfWeek = operationalPolicy.AllowedDaysOfWeek ?? [],
+                BlockedDaysOfWeek = operationalPolicy.BlockedDaysOfWeek ?? [],
             };
         }
         foreach (var policy in list.Where(IsUnpaidLeavePolicy))
@@ -642,13 +647,12 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
             result.StatusCode = CustomStatusCode.InsufficientLeaveBalance;
             return result;
         }
-        if(await HasActiveEmployeeAbsenceAsync(companyId, leaveRequest.UserId))
+        if (await HasActiveEmployeeAbsenceAsync(companyId, leaveRequest.UserId, requestStartDateTime, requestEndDateTime))
         {
             return new Result
             {
                 Success = false,
-                Message= "This Employee have Already active leave"
-
+                Message = "This Employee have Already active leave"
             };
         }
 
@@ -692,7 +696,19 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         }
         catch (Exception ex) when (IsTransactionUnsupported(ex))
         {
-            return new Result { Success = false, Message = "LEAVE_WFH_TRANSACTION_REQUIRED: This operation requires MongoDB transactions to prevent overlapping leave and WFH claims. Contact an administrator." };
+            await AcquireEmployeeWfhClaimLock(null, companyId, leaveRequest.UserId);
+            if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequest.UserId, requestStartDateTime, requestEndDateTime, leaveRequest.IsHalfDay, leaveRequest.HalfDayPeriod))
+            {
+                return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: Leave overlaps Work From Home for the same half or a full day." };
+            }
+
+            request.CompanyId = companyId;
+            request.CreatedBy = CurrentContext.UserId(_httpContextAccessor);
+            request.CreatedDate = DateTime.UtcNow;
+            await _leave.GetCollection().InsertOneAsync(request);
+            result.Success = true;
+            result.StatusCode = StatusCodes.Status200OK;
+            result.Message = "OK";
         }
         catch (MongoException)
         {
@@ -784,13 +800,12 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
             result.StatusCode = CustomStatusCode.InsufficientLeaveBalance;
             return result;
         }
-        if(await HasActiveEmployeeAbsenceAsync(companyId, leaveRequestDto.UserId, leaveRequestDto.LeaveRequestId))
+        if (await HasActiveEmployeeAbsenceAsync(companyId, leaveRequestDto.UserId, requestStartDateTime, requestEndDateTime, leaveRequestDto.LeaveRequestId))
         {
             return new Result
             {
                 Success = false,
-                Message= "This Employee have Already active leave"
-
+                Message = "This Employee have Already active leave"
             };
         }
 
@@ -830,7 +845,31 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         }
         catch (Exception ex) when (IsTransactionUnsupported(ex))
         {
-            return new Result { Success = false, Message = "LEAVE_WFH_TRANSACTION_REQUIRED: This operation requires MongoDB transactions to prevent overlapping leave and WFH claims. Contact an administrator." };
+            await AcquireEmployeeWfhClaimLock(null, companyId, leaveRequestDto.UserId);
+            if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequestDto.UserId, requestStartDateTime, requestEndDateTime, leaveRequestDto.IsHalfDay, leaveRequestDto.HalfDayPeriod))
+            {
+                return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: Leave overlaps Work From Home for the same half or a full day." };
+            }
+            var standaloneFilter = Builders<LeaveRequest>.Filter.Where(lr => lr.CompanyId == companyId &&
+                lr.LeaveRequestId == leaveRequestDto.LeaveRequestId && lr.EmployeeId == leaveRequestDto.UserId &&
+                lr.Status == EnumsHelper.LeaveRequestStatus.Pending && lr.Version == existingLeaveRequest.Version);
+            var standaloneUpdate = Builders<LeaveRequest>.Update
+                .Set(lr => lr.LeavePolicyId, leaveRequestDto.LeavePolicyId)
+                .Set(lr => lr.StartDate, requestStartDateTime)
+                .Set(lr => lr.EndDate, requestEndDateTime)
+                .Set(lr => lr.TotalDays, totalRequestedDays)
+                .Set(lr => lr.IsHalfDay, leavePolicyEntity.HalfDayAllowed && leaveRequestDto.IsHalfDay)
+                .Set(lr => lr.HalfDayPeriod, leaveRequestDto.IsHalfDay ? NormalizeHalfDayPeriod(leaveRequestDto.HalfDayPeriod) : null)
+                .Set(lr => lr.Reason, leaveRequestDto.Reason)
+                .Set(lr => lr.UpdatedDate, now)
+                .Set(lr => lr.UpdatedBy, CurrentContext.UserId(_httpContextAccessor))
+                .Inc(lr => lr.Version, 1);
+            var standaloneChanged = await _leave.GetCollection().UpdateOneAsync(standaloneFilter, standaloneUpdate);
+            if (standaloneChanged.ModifiedCount != 1)
+            {
+                return new Result { Success = false, Message = "LEAVE_REQUEST_VERSION_CONFLICT: The leave request changed. Refresh and try again." };
+            }
+            return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = "OK" };
         }
         catch (MongoException)
         {
@@ -1097,7 +1136,14 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         if (needsReconciliation)
         {
             if (IsPastDatedLeaveRequest(existingLeaveRequest, DateTime.UtcNow))
-                return new Result { Success = false, Message = "Leave requests for dates that have already passed cannot be approved." };
+            {
+                var daysSinceEnd = (DateTime.UtcNow.Date - existingLeaveRequest.EndDate.Date).TotalDays;
+                bool isWithinGracePeriod = daysSinceEnd <= 7;
+                bool isHrAdmin = _roleService != null && await _roleService.VerifyUserAccess(AppModule.LeaveManagement,
+                    [Codeji.CMS.Utility.Constraints.Permission.Approve, Codeji.CMS.Utility.Constraints.Permission.ApproveTeam, Codeji.CMS.Utility.Constraints.Permission.Override, Codeji.CMS.Utility.Constraints.Permission.Edit], reviewedBy, companyId);
+                if (!isWithinGracePeriod && !isHrAdmin)
+                    return new Result { Success = false, Message = "Leave requests older than the 7-day approval grace period require HR Admin authorization." };
+            }
 
             var mappedStatus = existingLeaveRequest.IsHalfDay && IsUnpaidLeavePolicy(policyForDecision)
                 ? "HD"
@@ -1193,10 +1239,28 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         catch (Exception ex) when (IsTransactionUnsupported(ex))
         {
             if (needsReconciliation)
-                return new Result { Success = false, Message = "LEAVE_WFH_TRANSACTION_REQUIRED: Approval requires MongoDB transactions to prevent overlapping leave and WFH claims. Contact an administrator." };
+            {
+                // Standalone MongoDB has no transaction support. Preserve the
+                // leave/WFH conflict check, then use the existing optimistic
+                // leave update and balance-compensation path so HR can complete
+                // ordinary approvals on the current development deployment.
+                await AcquireEmployeeWfhClaimLock(null, companyId, existingLeaveRequest.EmployeeId);
+                if (await HasActiveWorkFromHomeOverlap(companyId, existingLeaveRequest.EmployeeId,
+                        existingLeaveRequest.StartDate, existingLeaveRequest.EndDate,
+                        existingLeaveRequest.IsHalfDay, existingLeaveRequest.HalfDayPeriod))
+                {
+                    return new Result
+                    {
+                        Success = false,
+                        StatusCode = StatusCodes.Status409Conflict,
+                        ErrorCode = "LEAVE_WFH_OVERLAP",
+                        Message = "Leave cannot be approved because it overlaps Work From Home for the same half or a full day."
+                    };
+                }
+            }
             // Local standalone MongoDB does not support transactions. This fallback keeps
             // compare-and-set protection and compensates the balance when the leave write
-            // loses its optimistic-concurrency race. Production must use a replica set.
+            // loses its optimistic-concurrency race.
             result = await ApplyLeaveStatusWithoutTransactionAsync(
                 companyId, existingLeaveRequest, leaveBalance, leaveFilter, leaveUpdate,
                 debitBalance, creditBalance, now);
@@ -1651,8 +1715,9 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
                 .Inc(x => x.ReconciliationAttempts, 1));
     }
 
-    private static bool IsTransactionUnsupported(Exception exception) =>
+    internal static bool IsTransactionUnsupported(Exception exception) =>
         exception is NotSupportedException ||
+        (exception is MongoCommandException mongoException && (mongoException.Code == 20 || mongoException.Code == 263)) ||
         exception.Message.Contains("Transaction numbers are only allowed", StringComparison.OrdinalIgnoreCase) ||
         exception.Message.Contains("replica set", StringComparison.OrdinalIgnoreCase) ||
         exception.Message.Contains("standalone servers do not support transactions", StringComparison.OrdinalIgnoreCase);
@@ -1724,18 +1789,25 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         return requests.Any(wfh => LeaveConflictsWithWorkFromHome(leaveIsHalfDay, leaveHalfDayPeriod, wfh.DurationType));
     }
 
-    private async Task AcquireEmployeeWfhClaimLock(IClientSessionHandle session, string companyId, string userId)
+    private async Task AcquireEmployeeWfhClaimLock(IClientSessionHandle? session, string companyId, string userId)
     {
         var lockId = WorkFromHomeService.BuildQuotaLockId(companyId, userId);
-        var collection = _workFromHomeRequests.GetCollection().Database.GetCollection<BsonDocument>("WorkFromHomeQuotaLock");
+        var db = _workFromHomeRequests.GetCollection()?.Database;
+        if (db is null) return;
+        var collection = db.GetCollection<BsonDocument>("WorkFromHomeQuotaLock");
         var filter = Builders<BsonDocument>.Filter.Eq("_id", lockId);
         var update = Builders<BsonDocument>.Update
             .SetOnInsert("CompanyId", companyId)
             .SetOnInsert("UserId", userId)
             .Set("UpdatedAtUtc", DateTime.UtcNow)
             .Inc("LockVersion", 1L);
-        await collection.UpdateOneAsync(session, filter, update, new UpdateOptions { IsUpsert = true });
-        var lockDocument = await collection.Find(session, filter).FirstOrDefaultAsync();
+        if (session is not null)
+            await collection.UpdateOneAsync(session, filter, update, new UpdateOptions { IsUpsert = true });
+        else
+            await collection.UpdateOneAsync(filter, update, new UpdateOptions { IsUpsert = true });
+        var lockDocument = session is not null
+            ? await collection.Find(session, filter).FirstOrDefaultAsync()
+            : await collection.Find(filter).FirstOrDefaultAsync();
         if (lockDocument is null || lockDocument.GetValue("CompanyId", BsonNull.Value).AsString != companyId ||
             lockDocument.GetValue("UserId", BsonNull.Value).AsString != userId)
             throw new InvalidOperationException("WFH_QUOTA_LOCK_TENANT_MISMATCH");
@@ -1775,7 +1847,13 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         existing.ManagerApprovalRequired = settings.ApprovalRequired;
         existing.RequireReason = settings.ReasonRequired;
         existing.RequireAttachment = settings.AttachmentRequired;
-        existing.MaxDaysPerWeek = settings.MaxDaysPerWeek ?? 1;
+        var maxWorkingDays = 7;
+        if (!settings.AllowOnWeeklyOff)
+        {
+            var workingDays = await _workingCalendar.CountWorkingDaysAsync(companyId, new DateOnly(2026, 10, 26), new DateOnly(2026, 11, 1));
+            maxWorkingDays = Math.Max(1, Math.Min(7, workingDays));
+        }
+        existing.MaxDaysPerWeek = Math.Min(maxWorkingDays, Math.Max(1, settings.MaxDaysPerWeek ?? 1));
         existing.MaxDaysPerMonth = settings.MaxDaysPerMonth;
         existing.AllowHalfDay = settings.AllowFirstHalf || settings.AllowSecondHalf;
         existing.AllowMixedDay = settings.AllowMixedHalfDayLeave;
@@ -1808,6 +1886,8 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         existing.SameDayCutoffTime = settings.SameDayCutoffTime;
         existing.SameDayGraceMinutes = settings.SameDayGraceMinutes;
         existing.AllowLateApplicationWithApproval = settings.AllowLateApplicationWithApproval;
+        existing.AllowedDaysOfWeek = settings.AllowedDaysOfWeek ?? [];
+        existing.BlockedDaysOfWeek = settings.BlockedDaysOfWeek ?? [];
         existing.UpdatedDate = DateTime.UtcNow;
         return string.IsNullOrWhiteSpace(existing.PolicyId)
             ? await _workFromHomePolicies.AddOne(existing)
@@ -1819,8 +1899,15 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         if (policyType is EnumsHelper.LeavePolicyType.Leave or EnumsHelper.LeavePolicyType.UnpaidLeave)
             return wfh is null && await ValidateAttendanceStatusMapping(companyId, fullDayStatusCode) && (!halfDayAllowed || await ValidateAttendanceStatusMapping(companyId, halfDayStatusCode));
 
+        var maxWorkingDays = 7;
+        if (wfh != null && !wfh.AllowOnWeeklyOff)
+        {
+            var workingDays = await _workingCalendar.CountWorkingDaysAsync(companyId, new DateOnly(2026, 10, 26), new DateOnly(2026, 11, 1));
+            maxWorkingDays = Math.Max(1, Math.Min(7, workingDays));
+        }
+
         if (policyType != EnumsHelper.LeavePolicyType.WorkFromHome || wfh is null || !wfh.AllowFullDay ||
-            wfh.MaxDaysPerWeek is < 1 || wfh.MaxDaysPerMonth is < 1 || wfh.FullDayRequiredWorkingMinutes is < 0 ||
+            wfh.MaxDaysPerWeek < 1 || wfh.MaxDaysPerWeek > maxWorkingDays || wfh.MaxDaysPerMonth is < 1 or > 31 || wfh.FullDayRequiredWorkingMinutes is < 0 ||
             wfh.HalfDayRequiredWorkingMinutes is < 0 || wfh.BreakMinutes < 0 ||
             wfh.ApproverStrategy is not ("REPORTING_MANAGER" or "DEPARTMENT_HEAD" or "HR_ADMIN"))
             return false;

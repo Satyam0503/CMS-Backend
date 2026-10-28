@@ -251,9 +251,12 @@ public class LeaveManagementController : BaseApiController
     [Route("LeaveRequest/{leaveRequestId}/Status")]
     [HttpPatch]
     [ModulePermission(AppModule.LeaveManagement, Permission.Edit)]
-    public async Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, [FromBody] LeaveRequestUpdateDto model)
+    public async Task<IActionResult> UpdateLeaveRequestStatus(string leaveRequestId, [FromBody] LeaveRequestUpdateDto model)
     {
-        return await _leaveManagementService.UpdateLeaveRequestStatus(leaveRequestId, model);
+        var result = await _leaveManagementService.UpdateLeaveRequestStatus(leaveRequestId, model);
+        return result.ErrorCode == "LEAVE_WFH_TRANSACTION_REQUIRED"
+            ? StatusCode(StatusCodes.Status503ServiceUnavailable, result)
+            : Ok(result);
     }
 
     [Route("GetLeaveRequestSummary")]
