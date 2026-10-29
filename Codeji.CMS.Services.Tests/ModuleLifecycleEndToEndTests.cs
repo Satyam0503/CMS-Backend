@@ -108,6 +108,21 @@ public sealed class ModuleLifecycleEndToEndTests
         Assert.Contains(permissions, p => p.StartsWith("Calendar."));
     }
 
+    [Fact]
+    public async Task GetRolePermissionOfuser_FiltersOutOffboardingPermissions_WhenOffboardingIsDisabled()
+    {
+        var roleService = BuildRoleServiceWithAccessibility(
+            isJobsAccessible: true,
+            isPayrollAccessible: true,
+            isOffboardingAccessible: false);
+
+        var permissions = await roleService.GetRolePermissionOfuser(AdminRoleId, TestCompanyId);
+
+        Assert.DoesNotContain(permissions, p => p.StartsWith("Offboarding."));
+        Assert.Contains(permissions, p => p.StartsWith("Employees."));
+        Assert.Contains(permissions, p => p.StartsWith("Jobs."));
+    }
+
     private static (CompanyMasterService Service, Mock<IMongoDbRepository<RolePermission>> RolePermRepo) BuildCompanyMasterServiceWithModules(bool jobsAccessible, bool payrollAccessible)
     {
         var modules = new List<Module>

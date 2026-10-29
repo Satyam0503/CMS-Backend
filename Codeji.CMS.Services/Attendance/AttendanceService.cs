@@ -78,6 +78,8 @@ namespace Codeji.CMS.Services.Attendance
         private readonly IMongoDbRepository<MonthlyAttendanceSummary>? _summaries;
         private readonly IMongoDbRepository<AttendancePayrollException>? _exceptions;
         private readonly IMongoDbRepository<WorkFromHomeRequest>? _wfhRequests;
+        private readonly IMongoDbRepository<JobTitles>? _jobTitles;
+        private readonly IMongoDbRepository<Codeji.CMS.Repository.Entities.Company.Company>? _companies;
 
         public AdminAttendanceService(
             IAttendanceRepository attendanceRepository,
@@ -98,7 +100,9 @@ namespace Codeji.CMS.Services.Attendance
             IMongoDbRepository<EmployeeLeaveBalance>? leaveBalances = null,
             IMongoDbRepository<MonthlyAttendanceSummary>? summaries = null,
             IMongoDbRepository<AttendancePayrollException>? exceptions = null,
-            IMongoDbRepository<WorkFromHomeRequest>? wfhRequests = null
+            IMongoDbRepository<WorkFromHomeRequest>? wfhRequests = null,
+            IMongoDbRepository<JobTitles>? jobTitles = null,
+            IMongoDbRepository<Codeji.CMS.Repository.Entities.Company.Company>? companies = null
         )
         {
             _attendanceRepository = attendanceRepository;
@@ -120,6 +124,8 @@ namespace Codeji.CMS.Services.Attendance
             _summaries = summaries;
             _exceptions = exceptions;
             _wfhRequests = wfhRequests;
+            _jobTitles = jobTitles;
+            _companies = companies;
         }
 
         public async Task<AttendanceResponseDto> AddManualAttendance(
@@ -834,6 +840,21 @@ namespace Codeji.CMS.Services.Attendance
                 .GroupBy(x => x.Code.Trim().ToUpperInvariant())
                 .ToDictionary(x => x.Key, x => x.First());
 
+            string companyName = "Codeji CMS";
+            if (_companies != null)
+            {
+                try
+                {
+                    var comp = await _companies.FirstOrDefault(x => x.CompanyId == companyId);
+                    if (!string.IsNullOrWhiteSpace(comp?.CompanyName))
+                        companyName = comp.CompanyName.Trim();
+                }
+                catch
+                {
+                    // Fallback to default
+                }
+            }
+
             Dictionary<string, string> departmentMap = [];
             if (_departments != null)
             {
@@ -848,12 +869,37 @@ namespace Codeji.CMS.Services.Attendance
                             d => d.DepartmentId,
                             d =>
                                 d.Titles?.FirstOrDefault(t => t.Language == "en")?.Label
+                                ?? d.Titles?.FirstOrDefault()?.Label
                                 ?? d.DepartmentId
                         );
                 }
                 catch
                 {
                     // Graceful fallback if department repository fails
+                }
+            }
+
+            Dictionary<string, string> jobTitleMap = [];
+            if (_jobTitles != null)
+            {
+                try
+                {
+                    var titles = await _jobTitles.GetAll(x =>
+                        x.CompanyId == companyId && !x.IsDeleted
+                    );
+                    jobTitleMap = titles
+                        .Where(t => !string.IsNullOrWhiteSpace(t.JobTitleId))
+                        .ToDictionary(
+                            t => t.JobTitleId,
+                            t =>
+                                t.Titles?.FirstOrDefault(l => l.Language == "en")?.Label
+                                ?? t.Titles?.FirstOrDefault()?.Label
+                                ?? t.JobTitleId
+                        );
+                }
+                catch
+                {
+                    // Graceful fallback if job titles repository fails
                 }
             }
 
@@ -881,7 +927,13 @@ namespace Codeji.CMS.Services.Attendance
             }
 
             using var workbook = new XLWorkbook();
+            workbook.Properties.Title = $"Monthly Attendance Report - {year}-{month:D2}";
+            workbook.Properties.Subject = $"Monthly Attendance Register ({monthStart:MMMM yyyy})";
+            workbook.Properties.Author = "Codeji CMS";
+            workbook.Properties.Company = companyName;
+
             var sheet = workbook.Worksheets.Add("Attendance report");
+            sheet.ShowGridLines = true;
             sheet.Cell(1, 1).Value = "Employee ID";
             sheet.Cell(1, 2).Value = "Employee Name";
             sheet.Cell(1, 3).Value = "Department";
@@ -902,16 +954,19 @@ namespace Codeji.CMS.Services.Attendance
             sheet.Cell(1, summaryStartCol + 4).Value = "Weekly Off\n(WO)";
             sheet.Cell(1, summaryStartCol + 5).Value = "Holiday\n(H)";
             sheet.Cell(1, summaryStartCol + 6).Value = "Total Paid\nDays";
+            sheet.Cell(1, summaryStartCol + 7).Value = "Total Worked\nHours";
+            sheet.Cell(1, summaryStartCol + 8).Value = "Late / Early\nMarks";
 
-            var lastColumn = daysInMonth + 11;
+            var lastColumn = daysInMonth + 13;
             var headerRange = sheet.Range(1, 1, 1, lastColumn);
             headerRange.Style.Font.Bold = true;
+            headerRange.Style.Font.FontSize = 10;
             headerRange.Style.Fill.BackgroundColor = XLColor.FromHtml("3F2A63");
             headerRange.Style.Font.FontColor = XLColor.White;
             headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             headerRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
             headerRange.Style.Alignment.WrapText = true;
-            sheet.Row(1).Height = 32;
+            sheet.Row(1).Height = 36;
 
             var summaryHeaderRange = sheet.Range(1, summaryStartCol, 1, lastColumn);
             summaryHeaderRange.Style.Fill.BackgroundColor = XLColor.FromHtml("2D1E47");
@@ -930,12 +985,19 @@ namespace Codeji.CMS.Services.Attendance
                         ? dName
                         : employee.Department ?? string.Empty;
                 sheet.Cell(row, 3).Value = deptName;
-                sheet.Cell(row, 4).Value = employee.JobRole ?? string.Empty;
+
+                var desigName =
+                    !string.IsNullOrWhiteSpace(employee.JobRole)
+                    && jobTitleMap.TryGetValue(employee.JobRole, out var jName)
+                        ? jName
+                        : employee.JobRole ?? string.Empty;
+                sheet.Cell(row, 4).Value = desigName;
 
                 sheet.Cell(row, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
                 sheet.Cell(row, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
                 sheet.Cell(row, 3).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
                 sheet.Cell(row, 4).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+                sheet.Range(row, 1, row, 4).Style.Font.FontSize = 10;
 
                 decimal presentCount = 0;
                 decimal halfDayCount = 0;
@@ -944,6 +1006,7 @@ namespace Codeji.CMS.Services.Attendance
                 decimal weeklyOffCount = 0;
                 decimal holidayCount = 0;
                 decimal paidDays = 0;
+                decimal totalWorkedHours = 0;
 
                 var allowedLimit = policyMap.TryGetValue(employee.UserId, out var empPolicy)
                     ? empPolicy.CombinedLhdEdMonthlyLimit
@@ -967,6 +1030,32 @@ namespace Codeji.CMS.Services.Attendance
                 {
                     attendance.TryGetValue((employee.UserId, date.Date), out var daily);
                     segments.TryGetValue((employee.UserId, date.Date), out var daySegments);
+
+                    // Track worked hours
+                    if (daily != null)
+                    {
+                        if (daily.TotalHours.HasValue && daily.TotalHours.Value > 0)
+                            totalWorkedHours += (decimal)daily.TotalHours.Value;
+                        else if (daily.CheckInTime.HasValue && daily.CheckOutTime.HasValue)
+                        {
+                            var h = (daily.CheckOutTime.Value - daily.CheckInTime.Value).TotalHours;
+                            if (h < 0) h += 24;
+                            totalWorkedHours += (decimal)h;
+                        }
+                    }
+                    else if (daySegments != null && daySegments.Count > 0)
+                    {
+                        foreach (var seg in daySegments)
+                        {
+                            if (seg.CheckInTime.HasValue && seg.CheckOutTime.HasValue)
+                            {
+                                var h = (seg.CheckOutTime.Value - seg.CheckInTime.Value).TotalHours;
+                                if (h < 0) h += 24;
+                                totalWorkedHours += (decimal)h;
+                            }
+                        }
+                    }
+
                     var (cellValue, statusCode) = FormatAttendanceCell(
                         daily,
                         daySegments,
@@ -1031,6 +1120,15 @@ namespace Codeji.CMS.Services.Attendance
                 pdCell.Style.NumberFormat.Format = "0.#";
                 pdCell.Style.Font.Bold = true;
                 pdCell.Style.Fill.BackgroundColor = XLColor.FromHtml("E8F0FE");
+                pdCell.Style.Font.FontColor = XLColor.FromHtml("1A73E8");
+
+                var hrsCell = sheet.Cell(row, summaryStartCol + 7);
+                hrsCell.Value = Math.Round(totalWorkedHours, 1);
+                hrsCell.Style.NumberFormat.Format = "0.#";
+
+                var marksCell = sheet.Cell(row, summaryStartCol + 8);
+                marksCell.Value = empInfractions.Count;
+                marksCell.Style.NumberFormat.Format = "0";
 
                 for (var sc = summaryStartCol; sc <= lastColumn; sc++)
                 {
@@ -1050,13 +1148,13 @@ namespace Codeji.CMS.Services.Attendance
             var lastRow = Math.Max(row - 1, 1);
             sheet.Range(1, 1, lastRow, lastColumn).SetAutoFilter();
             sheet.Column(1).Width = 16;
-            sheet.Column(2).Width = 24;
-            sheet.Column(3).Width = 20;
-            sheet.Column(4).Width = 22;
+            sheet.Column(2).Width = 26;
+            sheet.Column(3).Width = 22;
+            sheet.Column(4).Width = 26;
             for (var column = 5; column < summaryStartCol; column++)
                 sheet.Column(column).Width = 18;
             for (var column = summaryStartCol; column <= lastColumn; column++)
-                sheet.Column(column).Width = 13;
+                sheet.Column(column).Width = 14;
 
             sheet.Range(1, 1, lastRow, lastColumn).Style.Alignment.Vertical =
                 XLAlignmentVerticalValues.Center;
@@ -1087,9 +1185,11 @@ namespace Codeji.CMS.Services.Attendance
             {
                 lines.Add(daily.Status);
                 if (daily.CheckInTime.HasValue || daily.CheckOutTime.HasValue)
-                    lines.Add(
-                        $"In {FormatAttendanceTime(daily.CheckInTime)} Â· Out {FormatAttendanceTime(daily.CheckOutTime)}"
-                    );
+                {
+                    var inTime = FormatAttendanceTime(daily.CheckInTime);
+                    var outTime = FormatAttendanceTime(daily.CheckOutTime);
+                    lines.Add($"In {inTime} - Out {outTime}");
+                }
                 return (
                     string.Join(Environment.NewLine, lines),
                     daily.Status?.Trim().ToUpperInvariant() ?? "P"
@@ -1106,9 +1206,11 @@ namespace Codeji.CMS.Services.Attendance
                         : segment.Segment;
                     lines.Add($"{label}: {segment.Status}");
                     if (segment.CheckInTime.HasValue || segment.CheckOutTime.HasValue)
-                        lines.Add(
-                            $"In {FormatAttendanceTime(segment.CheckInTime)} Â· Out {FormatAttendanceTime(segment.CheckOutTime)}"
-                        );
+                    {
+                        var inTime = FormatAttendanceTime(segment.CheckInTime);
+                        var outTime = FormatAttendanceTime(segment.CheckOutTime);
+                        lines.Add($"In {inTime} - Out {outTime}");
+                    }
                 }
                 return (
                     string.Join(Environment.NewLine, lines),
@@ -1123,11 +1225,11 @@ namespace Codeji.CMS.Services.Attendance
                 EmploymentPeriod.TryGetJoiningDate(employee, out var joiningDate)
                 && date.Date < joiningDate.Date
             )
-                return ("â€”", "NOT_ELIGIBLE");
+                return ("-", "NOT_ELIGIBLE");
 
             var lastWorkingDate = EmploymentPeriod.GetLastWorkingDate(employee);
             if (lastWorkingDate.HasValue && date.Date > lastWorkingDate.Value)
-                return ("â€”", "NOT_EMPLOYED");
+                return ("-", "NOT_EMPLOYED");
 
             if (!workingDates.Contains(DateOnly.FromDateTime(date)))
             {
@@ -1322,13 +1424,33 @@ namespace Codeji.CMS.Services.Attendance
                     "Weekly Off" or "Weekend" => "F5F5F5",
                     string s when s.StartsWith("Holiday", StringComparison.OrdinalIgnoreCase) =>
                         "EDE7F6",
-                    "â€”" or "Future" or "Not eligible" or "Not employed" => "FAFAFA",
+                    "-" or "â€”" or "Future" or "Not eligible" or "Not employed" => "FAFAFA",
                     _ when IsLeaveCode(normalizedStatus) => "E1F5FE",
                     _ => "FFFFFF",
                 };
             cell.Style.Fill.BackgroundColor = XLColor.FromHtml(color);
+            cell.Style.Font.FontColor = GetContrastingTextColor(color);
+            cell.Style.Font.FontSize = 9;
             cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-            cell.Style.Border.OutsideBorderColor = XLColor.FromHtml("E0E0E0");
+            cell.Style.Border.OutsideBorderColor = XLColor.FromHtml("D9DEE7");
+        }
+
+        private static XLColor GetContrastingTextColor(string hexColor)
+        {
+            if (string.IsNullOrWhiteSpace(hexColor))
+                return XLColor.FromHtml("212121");
+
+            var hex = hexColor.Trim().TrimStart('#');
+            if (hex.Length == 6
+                && int.TryParse(hex[..2], System.Globalization.NumberStyles.HexNumber, null, out var r)
+                && int.TryParse(hex.Substring(2, 2), System.Globalization.NumberStyles.HexNumber, null, out var g)
+                && int.TryParse(hex.Substring(4, 2), System.Globalization.NumberStyles.HexNumber, null, out var b))
+            {
+                var luminance = (0.299 * r) + (0.587 * g) + (0.114 * b);
+                return luminance < 140 ? XLColor.White : XLColor.FromHtml("1A1A1A");
+            }
+
+            return XLColor.FromHtml("212121");
         }
 
         private static bool IsHexColor(string? value) =>
@@ -1336,6 +1458,6 @@ namespace Codeji.CMS.Services.Attendance
             && System.Text.RegularExpressions.Regex.IsMatch(value, "^#[0-9A-Fa-f]{6}$");
 
         private static string FormatAttendanceTime(DateTime? time) =>
-            time.HasValue ? IndiaTime.ToIndiaTime(time.Value).ToString("HH:mm") : "â€“";
+            time.HasValue ? IndiaTime.ToIndiaTime(time.Value).ToString("HH:mm") : "--:--";
     }
 }

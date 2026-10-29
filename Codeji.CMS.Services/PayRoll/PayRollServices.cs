@@ -25,6 +25,7 @@ public class PayRollServices : IPayRollServices
     readonly PdfService _pdfService;
     readonly IAttendancePayrollReadinessService _attendanceReadiness;
     readonly IMongoDbRepository<PayrollRun>? _payrollRunsRepository;
+    readonly IMongoDbRepository<PayrollRunEmployee>? _payrollRunEmployeesRepository;
 
     public PayRollServices(
         IMongoDbRepository<EmpPayRoll> empPayRollRepository,
@@ -34,7 +35,8 @@ public class PayRollServices : IPayRollServices
         PdfService pdfService,
         IMiddlewareService middlewareService,
         IAttendancePayrollReadinessService attendanceReadiness,
-        IMongoDbRepository<PayrollRun>? payrollRunsRepository = null
+        IMongoDbRepository<PayrollRun>? payrollRunsRepository = null,
+        IMongoDbRepository<PayrollRunEmployee>? payrollRunEmployeesRepository = null
     )
     {
         _empPayRollRepository = empPayRollRepository;
@@ -45,6 +47,7 @@ public class PayRollServices : IPayRollServices
         _middlewareService = middlewareService;
         _attendanceReadiness = attendanceReadiness;
         _payrollRunsRepository = payrollRunsRepository;
+        _payrollRunEmployeesRepository = payrollRunEmployeesRepository;
     }
 
     private static decimal RoundAmount(decimal? value) =>
@@ -943,6 +946,27 @@ public class PayRollServices : IPayRollServices
                 StatusCode = StatusCodes.Status409Conflict,
                 Message = "This employee processed payroll cannot be changed.",
             };
+
+        if (_payrollRunsRepository != null)
+        {
+            var activeRun = await _payrollRunsRepository.FirstOrDefault(r =>
+                r.CompanyId == companyId
+                && r.PeriodStart == model.PayMonth
+                && r.RunType == "REGULAR"
+                && r.IsActive
+                
+                && r.Status != "CANCELLED");
+
+            if (activeRun != null && (activeRun.Status is "APPROVED" or "PROCESSED" or "PAID" or "CLOSED"))
+            {
+                return new Result
+                {
+                    Success = false,
+                    StatusCode = StatusCodes.Status409Conflict,
+                    Message = $"Payroll for {model.PayMonth:MMMM yyyy} is {activeRun.Status.ToLowerInvariant()} under Payroll Run {activeRun.Id}. Reopen or create a correction run to make changes."
+                };
+            }
+        }
         // The (CompanyId, EmployeeId, PayMonth) unique index is the real source of truth for
         // "does this employee already have a payroll row for this month" - UserId is not part
         // of that index and can drift (re-import, offboarding/reactivation), so it must never
@@ -1099,6 +1123,86 @@ public class PayRollServices : IPayRollServices
             payRoll.CalculationSnapshot = MapSnapshot(model.CalculationSnapshot);
             result = await _empPayRollRepository.Update(updateExpression, payRoll);
         }
+
+        if (result.Success && _payrollRunsRepository != null && _payrollRunEmployeesRepository != null)
+        {
+            try
+            {
+                var matchingRun = await _payrollRunsRepository.FirstOrDefault(r =>
+                    r.CompanyId == companyId
+                    && r.PeriodStart == model.PayMonth
+                    && r.RunType == "REGULAR"
+                    && r.IsActive
+                    
+                    && r.Status != "CANCELLED"
+                    && (r.Status == "DRAFT" || r.Status == "PENDING_APPROVAL"));
+
+                if (matchingRun != null)
+                {
+                    var runEmployee = await _payrollRunEmployeesRepository.FirstOrDefault(x =>
+                        x.CompanyId == companyId
+                        && x.PayrollRunId == matchingRun.Id
+                        && x.EmployeeId == empUser.EmployeeId);
+
+                    var gross = model.BasicPay + (model.Bonus ?? 0) + (model.HRA ?? 0) + (model.LTA ?? 0) + (model.OtherAllowance ?? 0);
+                    var deductions = (model.LossOfPay ?? 0) + (model.IncomeTax ?? 0) + (model.HealthInsurance ?? 0) + (model.EPF ?? 0) + (model.ESIC ?? 0) + (model.ProfessionalTax ?? 0);
+                    var net = gross - deductions;
+
+                    if (runEmployee != null)
+                    {
+                        runEmployee.GrossAmount = gross;
+                        runEmployee.DeductionAmount = deductions;
+                        runEmployee.NetAmount = net;
+                        await _payrollRunEmployeesRepository.Update(
+                            Builders<PayrollRunEmployee>.Filter.Eq(x => x.Id, runEmployee.Id),
+                            runEmployee);
+                    }
+                    else
+                    {
+                        var newRunEmp = new PayrollRunEmployee
+                        {
+                            CompanyId = companyId,
+                            PayrollRunId = matchingRun.Id,
+                            EmployeeId = empUser.EmployeeId,
+                            GrossAmount = gross,
+                            DeductionAmount = deductions,
+                            NetAmount = net,
+                            Status = "READY"
+                        };
+                        await _payrollRunEmployeesRepository.AddOne(newRunEmp);
+                    }
+
+                    // Recalculate Run Totals
+                    var allRunEmployees = await _payrollRunEmployeesRepository.GetAll(x =>
+                        x.CompanyId == companyId && x.PayrollRunId == matchingRun.Id);
+                    if (allRunEmployees != null)
+                    {
+                        var empList = allRunEmployees.ToList();
+                        matchingRun.GrossTotal = empList.Sum(x => x.GrossAmount);
+                        matchingRun.DeductionTotal = empList.Sum(x => x.DeductionAmount);
+                        matchingRun.NetTotal = empList.Sum(x => x.NetAmount);
+                        matchingRun.EmployeeCount = empList.Count;
+                        matchingRun.Version++;
+                        matchingRun.AuditHistory.Add(new PayrollRunAuditEvent
+                        {
+                            Action = "EmpPayRollSynchronized",
+                            ActorId = empUser.UserId,
+                            OccurredAtUtc = DateTime.UtcNow,
+                            Notes = "Run totals recalculated after individual employee payroll sync."
+                        });
+
+                        await _payrollRunsRepository.Update(
+                            Builders<PayrollRun>.Filter.Eq(r => r.Id, matchingRun.Id),
+                            matchingRun);
+                    }
+                }
+            }
+            catch
+            {
+                // Non-fatal synchronization
+            }
+        }
+
         return result;
     }
 

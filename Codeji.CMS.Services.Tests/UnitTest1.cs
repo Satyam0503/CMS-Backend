@@ -14,6 +14,7 @@ using Codeji.CMS.Services.Employees;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Utility.Helpers;
+using Codeji.CMS.Utility.Constraints;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
@@ -147,6 +148,27 @@ public class EmployeeServiceBulkImportTests
 
         Assert.False(result.Success);
         Assert.Equal("SELF_SUBMISSION_MUST_BE_RESIGNATION", result.Message);
+        fixture.EmployeeRepository.Verify(x => x.AddOne(It.IsAny<EmpUser>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitOwnResignation_WhenOffboardingModuleDisabled_IsRejectedWithModuleDisabledMessage()
+    {
+        var fixture = CreateFixture(dbDuplicateExists: false);
+        SetExitContext(fixture, "employee-1");
+        fixture.RoleService
+            .Setup(x => x.IsModuleAccessibleForCompany(AppModule.Offboarding, It.IsAny<string>()))
+            .ReturnsAsync(false);
+
+        var result = await fixture.Service.SubmitOwnResignation(new InitiateEmployeeExitRequest
+        {
+            EmployeeUserId = "employee-1",
+            ExitType = "Resigned",
+            LastWorkingDate = DateTime.UtcNow.Date.AddDays(30)
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal("EXIT_OFFBOARDING_MODULE_DISABLED", result.Message);
         fixture.EmployeeRepository.Verify(x => x.AddOne(It.IsAny<EmpUser>()), Times.Never);
     }
 
@@ -672,6 +694,10 @@ public class EmployeeServiceBulkImportTests
             ]);
         fixture.RolesRepository
             .Setup(x => x.Exist(It.IsAny<System.Linq.Expressions.Expression<Func<Roles, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(true);
+
+        fixture.RoleService
+            .Setup(x => x.IsModuleAccessibleForCompany(It.IsAny<string>(), It.IsAny<string>()))
             .ReturnsAsync(true);
 
         fixture.DepartmentRepository

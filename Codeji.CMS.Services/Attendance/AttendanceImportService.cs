@@ -1464,14 +1464,14 @@ public class AttendanceImportService : IAttendanceImportService
             {
                 var remaining = text.Remove(rangeMatch.Index, rangeMatch.Length);
                 remaining = Regex.Replace(remaining, @"[\(\)\[\]\{\}\|:]", " ").Trim();
-                var code = NormalizeStatusCode(remaining);
+                var explicitCode = NormalizeStatusCode(remaining);
+                var code = explicitCode;
 
                 if (string.IsNullOrWhiteSpace(code))
                 {
                     // No code explicitly given: derive status from duration
+                    // In .NET TimeOnly subtraction (outTime - inTime) already accounts for midnight wrap-around.
                     var duration = (outTime - inTime).TotalHours;
-                    if (outTime < inTime)
-                        duration += 24; // overnight
 
                     if (duration >= 7.5)
                         code = "P";
@@ -1485,16 +1485,23 @@ public class AttendanceImportService : IAttendanceImportService
                         code = "A";
                 }
 
+                string? parseError = null;
+                if (outTime == inTime && outTime != TimeOnly.MinValue)
+                {
+                    parseError = "Check-out time cannot equal check-in time.";
+                }
+                else if (outTime < inTime && explicitCode is "ED" or "LC" or "HD" or "LHD")
+                {
+                    parseError = "Check-out time must be later than check-in time.";
+                }
+
                 return new ParsedMusterEntry
                 {
                     RawValue = text,
                     StatusCode = code,
                     CheckInTime = inTime,
                     CheckOutTime = outTime,
-                    ParseError =
-                        (outTime <= inTime && outTime != TimeOnly.MinValue)
-                            ? "Check-out time must be later than check-in time."
-                            : null,
+                    ParseError = parseError,
                 };
             }
         }

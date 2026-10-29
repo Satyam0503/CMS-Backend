@@ -306,6 +306,8 @@ builder.Services.AddScoped<IMongoDbRepository<EmployeeSalaryImportBatch>, MongoR
 builder.Services.AddScoped<IMongoDbRepository<PayrollDivisorPolicy>, MongoRepository<PayrollDivisorPolicy>>();
 builder.Services.AddScoped<IMongoDbRepository<MonthlyAttendanceSummary>, MongoRepository<MonthlyAttendanceSummary>>();
 builder.Services.AddScoped<IMongoDbRepository<Codeji.CMS.Repository.Entities.Company.Company>, MongoRepository<Codeji.CMS.Repository.Entities.Company.Company>>();
+builder.Services.AddScoped<IMongoDbRepository<Codeji.CMS.Repository.Entities.Company.Department>, MongoRepository<Codeji.CMS.Repository.Entities.Company.Department>>();
+builder.Services.AddScoped<IMongoDbRepository<Codeji.CMS.Repository.Entities.Company.JobTitles>, MongoRepository<Codeji.CMS.Repository.Entities.Company.JobTitles>>();
 
 builder.Services.AddScoped<IMongoDbRepository<RefreshToken>, MongoRepository<RefreshToken>>();
 builder.Services.AddScoped<IMongoDbRepository<EmployeeExit>, MongoRepository<EmployeeExit>>();

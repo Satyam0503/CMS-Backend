@@ -12,8 +12,20 @@ public class WorkFromHomeController(IWorkFromHomeService service) : ControllerBa
     [HttpPut("policy"), ModulePermission(AppModule.WorkFromHome, Permission.PolicyEdit)] public Task<Result> SavePolicy(WorkFromHomePolicyDto dto) => service.SavePolicy(dto);
     // The React request helper uses POST for form mutations; retain PUT for REST clients.
     [HttpPost("policy"), ModulePermission(AppModule.WorkFromHome, Permission.PolicyEdit)] public Task<Result> SavePolicyPost(WorkFromHomePolicyDto dto) => service.SavePolicy(dto);
-    [HttpGet("allocations"), ModulePermission(AppModule.WorkFromHome, Permission.PolicyEdit)] public Task<Result<IEnumerable<WorkFromHomeEmployeeAllocationDto>>> Allocations() => service.GetEmployeeAllocations();
-    [HttpPut("allocations"), ModulePermission(AppModule.WorkFromHome, Permission.PolicyEdit)] public Task<Result> SaveAllocation(WorkFromHomeEmployeeAllocationDto dto) => service.SaveEmployeeAllocation(dto);
+    [HttpGet("allocations")]
+    [ModulePermission(AppModule.WorkFromHome, [Permission.PolicyEdit, Permission.Edit, Permission.View, Permission.ViewAll])]
+    [ModulePermission(AppModule.LeaveManagement, [Permission.View, Permission.Edit, Permission.Create])]
+    public Task<Result<IEnumerable<WorkFromHomeEmployeeAllocationDto>>> Allocations() => service.GetEmployeeAllocations();
+
+    [HttpPut("allocations")]
+    [ModulePermission(AppModule.WorkFromHome, [Permission.PolicyEdit, Permission.Edit])]
+    [ModulePermission(AppModule.LeaveManagement, [Permission.Edit, Permission.Create])]
+    public Task<Result> SaveAllocation(WorkFromHomeEmployeeAllocationDto dto) => service.SaveEmployeeAllocation(dto);
+
+    [HttpPost("allocations")]
+    [ModulePermission(AppModule.WorkFromHome, [Permission.PolicyEdit, Permission.Edit])]
+    [ModulePermission(AppModule.LeaveManagement, [Permission.Edit, Permission.Create])]
+    public Task<Result> SaveAllocationPost(WorkFromHomeEmployeeAllocationDto dto) => service.SaveEmployeeAllocation(dto);
     [HttpPost("requests"), ModulePermission(AppModule.WorkFromHome, Permission.CreateOwn)] public Task<Result<WorkFromHomeResponseDto>> Create(WorkFromHomeRequestDto dto, [FromHeader(Name = "Idempotency-Key")] string idempotencyKey) => service.Create(dto, idempotencyKey);
     [HttpGet("requests/my"), ModulePermission(AppModule.WorkFromHome, [Permission.View, Permission.ViewOwn])] public Task<Result<WorkFromHomeResponseDto>> Mine([FromQuery] WorkFromHomeRequestFilterDto filter) => service.GetMy(filter);
     [HttpGet("requests/team"), ModulePermission(AppModule.WorkFromHome, Permission.ViewTeam)] public Task<Result<WorkFromHomeResponseDto>> Team([FromQuery] WorkFromHomeRequestFilterDto filter) => service.GetTeam(filter);

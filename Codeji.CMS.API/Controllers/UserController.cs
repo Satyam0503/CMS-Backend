@@ -378,86 +378,109 @@ public class UserController : BaseApiController
     // intentionally separate from the Employees.Edit protected HR action.
     [Route("SubmitOwnResignation")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Submit, Permission.Edit, Permission.CaseManage])]
     public Task<Result> SubmitOwnResignation([FromBody] InitiateEmployeeExitRequest request) =>
         _employeeService.SubmitOwnResignation(request);
 
     [Route("EmployeeExit/{employeeUserId}")]
     [HttpGet]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.CaseManage])]
     public Task<Result<EmployeeExitCaseDto>> GetEmployeeExitCase(string employeeUserId) =>
         _employeeService.GetEmployeeExitCase(employeeUserId);
 
     [Route("EmployeeExitHistory/{employeeUserId}")]
     [HttpGet]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.CaseManage])]
     public Task<Result<List<EmployeeExitHistoryDto>>> GetOwnEmployeeExitHistory(string employeeUserId) =>
         _employeeService.GetOwnEmployeeExitHistory(employeeUserId);
 
     [Route("EmployeeExitManagement/{employeeUserId}")]
     [HttpGet]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.CaseManage])]
     public Task<Result<EmployeeExitCaseDto>> GetEmployeeExitCaseForManagement(string employeeUserId) =>
         _employeeService.GetEmployeeExitCaseForManagement(employeeUserId);
 
     [Route("EmployeeExitQueue")]
     [HttpGet]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.CaseManage])]
     public Task<Result<List<EmployeeExitQueueItemDto>>> GetEmployeeExitQueue([FromQuery] int page = 1, [FromQuery] int pageSize = 25, [FromQuery] string? search = null, [FromQuery] string? status = null) =>
         _employeeService.GetEmployeeExitQueue(page, pageSize, search, status);
 
     [Route("CompleteEmployeeExit")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage, Permission.Complete])]
     public Task<Result> CompleteEmployeeExit([FromBody] CompleteEmployeeExitRequest request) =>
         _employeeService.CompleteEmployeeExit(request);
 
     [Route("ReviewEmployeeExit")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage, Permission.Review])]
     public Task<Result> ReviewEmployeeExit([FromBody] ReviewEmployeeExitRequest request) =>
         _employeeService.ReviewEmployeeExit(request);
 
     [Route("RespondToEmployeeExitDiscussion")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.Submit, Permission.Edit, Permission.CaseManage])]
     public Task<Result> RespondToEmployeeExitDiscussion([FromBody] RespondToEmployeeExitDiscussionRequest request) =>
         _employeeService.RespondToEmployeeExitDiscussion(request);
 
     [Route("RespondToEmployeeExitJointDiscussion")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.Submit, Permission.Edit, Permission.CaseManage])]
     public Task<Result> RespondToEmployeeExitJointDiscussion([FromBody] RespondToEmployeeExitJointDiscussionRequest request) =>
         _employeeService.RespondToEmployeeExitJointDiscussion(request);
 
     [Route("WithdrawOwnEmployeeExit")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.Submit, Permission.Edit, Permission.CaseManage])]
     public Task<Result> WithdrawOwnEmployeeExit([FromBody] CancelEmployeeExitRequest request) =>
         _employeeService.WithdrawOwnEmployeeExit(request);
 
     [Route("DecideEmployeeExitWithdrawal")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> DecideEmployeeExitWithdrawal([FromBody] DecideEmployeeExitWithdrawalRequest request) =>
         _employeeService.DecideEmployeeExitWithdrawal(request);
 
     [Route("CancelEmployeeExit")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> CancelEmployeeExit([FromBody] CancelEmployeeExitRequest request) =>
         _employeeService.CancelEmployeeExit(request);
 
     [Route("UpdateEmployeeExitDate")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> UpdateEmployeeExitDate([FromBody] UpdateEmployeeExitDateRequest request) =>
         _employeeService.UpdateEmployeeExitDate(request);
 
     [Route("RequestEmployeeExitNoticeAdjustment")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.Submit, Permission.Edit, Permission.CaseManage])]
     public Task<Result> RequestEmployeeExitNoticeAdjustment([FromBody] RequestEmployeeExitNoticeAdjustmentRequest request) =>
         _employeeService.RequestEmployeeExitNoticeAdjustment(request);
 
     [Route("DecideEmployeeExitNoticeAdjustment")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> DecideEmployeeExitNoticeAdjustment([FromBody] DecideEmployeeExitNoticeAdjustmentRequest request) =>
         _employeeService.DecideEmployeeExitNoticeAdjustment(request);
 
     [Route("DecideOwnEmployeeExitNoticeOffer")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.Submit, Permission.Edit, Permission.CaseManage])]
     public Task<Result> DecideOwnEmployeeExitNoticeOffer([FromBody] DecideOwnEmployeeExitNoticeOfferRequest request) =>
         _employeeService.DecideOwnEmployeeExitNoticeOffer(request);
 
+    [Route("CancelEmployeeExitNoticeAdjustment")]
+    [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.Submit, Permission.Edit, Permission.CaseManage])]
+    public Task<Result> CancelEmployeeExitNoticeAdjustment([FromBody] CancelEmployeeExitNoticeAdjustmentRequest request) =>
+        _employeeService.CancelEmployeeExitNoticeAdjustment(request);
+
     [Route("EmployeeExitPolicy")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.PolicyManage])]
     public async Task<IActionResult> UpsertEmployeeExitPolicy([FromBody] UpsertEmployeeExitPolicyRequest request)
     {
         var result = await _employeeService.UpsertEmployeeExitPolicy(request);
@@ -466,6 +489,7 @@ public class UserController : BaseApiController
 
     [Route("EmployeeExitPolicy/{policyId}")]
     [HttpPut]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.PolicyManage])]
     public async Task<IActionResult> UpdateEmployeeExitPolicy(string policyId, [FromBody] UpsertEmployeeExitPolicyRequest request)
     {
         request ??= new UpsertEmployeeExitPolicyRequest();
@@ -476,125 +500,150 @@ public class UserController : BaseApiController
 
     [Route("EmployeeExitPolicy/{policyId}")]
     [HttpGet]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.PolicyManage])]
     public Task<Result<EmployeeExitPolicy>> GetEmployeeExitPolicy(string policyId) =>
         _employeeService.GetEmployeeExitPolicy(policyId);
 
     [Route("EmployeeExitClearanceTemplate/{templateId}")]
     [HttpGet]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.PolicyManage])]
     public Task<Result<EmployeeExitClearanceTemplate>> GetEmployeeExitClearanceTemplate(string templateId) =>
         _employeeService.GetEmployeeExitClearanceTemplate(templateId);
 
     [Route("EmployeeExitPolicies")]
     [HttpGet]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.PolicyManage])]
     public Task<Result<EmployeeExitPolicy>> GetEmployeeExitPolicies() =>
         _employeeService.GetEmployeeExitPolicies();
 
     [Route("EmployeeExitClearanceTemplates")]
     [HttpGet]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.PolicyManage])]
     public Task<Result<EmployeeExitClearanceTemplate>> GetEmployeeExitClearanceTemplates() =>
         _employeeService.GetEmployeeExitClearanceTemplates();
 
     [Route("EmployeeExitClearanceTemplate")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.PolicyManage])]
     public Task<Result> UpsertEmployeeExitClearanceTemplate([FromBody] UpsertEmployeeExitClearanceTemplateRequest request) =>
         _employeeService.UpsertEmployeeExitClearanceTemplate(request);
 
     [Route("EmployeeExitClearanceTemplate/{templateId}")]
     [HttpDelete]
+    [ModulePermission(AppModule.Offboarding, [Permission.Delete, Permission.PolicyManage])]
     public Task<Result> DeleteEmployeeExitClearanceTemplate(string templateId) =>
         _employeeService.DeleteEmployeeExitClearanceTemplate(templateId);
 
     [Route("ApproveEmployeeFinalSettlement")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.FinanceManage])]
     public Task<Result> ApproveEmployeeFinalSettlement([FromBody] ApproveEmployeeFinalSettlementRequest request) =>
         _employeeService.ApproveEmployeeFinalSettlement(request);
 
     [Route("UpdateEmployeeFinalSettlementPayment")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.FinanceManage])]
     public Task<Result> UpdateEmployeeFinalSettlementPayment([FromBody] UpdateEmployeeFinalSettlementPaymentRequest request) =>
         _employeeService.UpdateEmployeeFinalSettlementPayment(request);
     [Route("CalculateEmployeeFinalSettlement")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.FinanceManage])]
     public Task<Result> CalculateEmployeeFinalSettlement([FromBody] CalculateEmployeeFinalSettlementRequest request) =>
         _employeeService.CalculateEmployeeFinalSettlement(request);
 
     [Route("MarkEmployeeFinalSettlementPaid")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.FinanceManage])]
     public Task<Result> MarkEmployeeFinalSettlementPaid([FromBody] MarkEmployeeFinalSettlementPaidRequest request) =>
         _employeeService.MarkEmployeeFinalSettlementPaid(request);
 
     [Route("RecordEmployeeExitInterview")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> RecordEmployeeExitInterview([FromBody] RecordEmployeeExitInterviewRequest request) =>
         _employeeService.RecordEmployeeExitInterview(request);
 
     [Route("EmployeeExitReassignment")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> UpsertEmployeeExitReassignment([FromBody] UpsertEmployeeExitReassignmentRequest request) =>
         _employeeService.UpsertEmployeeExitReassignment(request);
 
     [Route("GenerateEmployeeExitDocument")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> GenerateEmployeeExitDocument([FromBody] GenerateEmployeeExitDocumentRequest request) =>
         _employeeService.GenerateEmployeeExitDocument(request);
 
     [Route("IssueEmployeeExitDocument")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> IssueEmployeeExitDocument([FromBody] IssueEmployeeExitDocumentRequest request) =>
         _employeeService.IssueEmployeeExitDocument(request);
 
     [Route("CompleteEmployeeExitClearance")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> CompleteEmployeeExitClearance([FromBody] CompleteEmployeeExitClearanceRequest request) =>
         _employeeService.CompleteEmployeeExitClearance(request, false);
 
     [Route("UpdateEmployeeExitClearanceStatus")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> UpdateEmployeeExitClearanceStatus([FromBody] UpdateEmployeeExitClearanceStatusRequest request) =>
         _employeeService.UpdateEmployeeExitClearanceStatus(request);
 
     [Route("WaiveEmployeeExitClearance")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> WaiveEmployeeExitClearance([FromBody] CompleteEmployeeExitClearanceRequest request) =>
         _employeeService.CompleteEmployeeExitClearance(request, true);
 
     [Route("EmployeeExitHandoverTask")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> UpsertEmployeeExitHandoverTask([FromBody] UpsertEmployeeExitHandoverTaskRequest request) =>
         _employeeService.UpsertEmployeeExitHandoverTask(request);
 
     [Route("ReviewEmployeeExitHandoverTask")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> ReviewEmployeeExitHandoverTask([FromBody] ReviewEmployeeExitHandoverTaskRequest request) =>
         _employeeService.ReviewEmployeeExitHandoverTask(request);
 
     [Route("EmployeeExitAsset")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.AssetManage])]
     public Task<Result> UpsertEmployeeExitAsset([FromBody] UpsertEmployeeExitAssetRequest request) =>
         _employeeService.UpsertEmployeeExitAsset(request);
 
     [Route("EmployeeExitAccessItem")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.AccessManage])]
     public Task<Result> UpsertEmployeeExitAccessItem([FromBody] UpsertEmployeeExitAccessItemRequest request) =>
         _employeeService.UpsertEmployeeExitAccessItem(request);
 
     [Route("EmployeeExitFinanceItem")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.FinanceManage])]
     public Task<Result> UpsertEmployeeExitFinanceItem([FromBody] UpsertEmployeeExitFinanceItemRequest request) =>
         _employeeService.UpsertEmployeeExitFinanceItem(request);
 
     [Route("EmployeeExitBenefitItem")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.BenefitsManage])]
     public Task<Result> UpsertEmployeeExitBenefitItem([FromBody] UpsertEmployeeExitBenefitItemRequest request) =>
         _employeeService.UpsertEmployeeExitBenefitItem(request);
 
     [Route("EmployeeExitEvidence")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.EvidenceManage])]
     public Task<Result> AddEmployeeExitEvidence([FromBody] AddEmployeeExitEvidenceRequest request) =>
         _employeeService.AddEmployeeExitEvidence(request);
 
     [Route("EmployeeExitEvidenceUpload")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.EvidenceManage])]
     public async Task<Result> UploadEmployeeExitEvidence([FromForm] string employeeExitId, [FromForm] string category, [FromForm] string visibility, [FromForm] IFormFile file, [FromForm] string? formerEmployeeRequestId = null)
     {
         var access = await _employeeService.GetEmployeeExitCaseForEvidence(employeeExitId);
@@ -617,6 +666,7 @@ public class UserController : BaseApiController
 
     [Route("EmployeeExitEvidence/{employeeExitId}/{evidenceId}/download")]
     [HttpGet]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.Download, Permission.EvidenceManage])]
     public async Task<IActionResult> DownloadEmployeeExitEvidence(string employeeExitId, string evidenceId)
     {
         var evidence = await _employeeService.GetEmployeeExitEvidence(employeeExitId, evidenceId);
@@ -628,46 +678,55 @@ public class UserController : BaseApiController
 
     [Route("VerifyEmployeeExitEvidence")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.EvidenceManage])]
     public Task<Result> VerifyEmployeeExitEvidence([FromBody] VerifyEmployeeExitEvidenceRequest request) =>
         _employeeService.VerifyEmployeeExitEvidence(request);
 
     [Route("SupersedeEmployeeExitEvidence")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.EvidenceManage])]
     public Task<Result> SupersedeEmployeeExitEvidence([FromBody] SupersedeEmployeeExitEvidenceRequest request) =>
         _employeeService.SupersedeEmployeeExitEvidence(request);
 
     [Route("EmployeeExitPostExitContact")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.Submit, Permission.Edit, Permission.CaseManage])]
     public Task<Result> UpdateEmployeeExitPostExitContact([FromBody] UpdateEmployeeExitPostExitContactRequest request) =>
         _employeeService.UpdateEmployeeExitPostExitContact(request);
 
     [Route("AcknowledgeEmployeeExit")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.Submit, Permission.Edit, Permission.CaseManage])]
     public Task<Result> AcknowledgeEmployeeExit([FromBody] AcknowledgeEmployeeExitRequest request) =>
         _employeeService.AcknowledgeEmployeeExit(request);
 
     [Route("EmployeeExitFormerEmployeeRequest")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.View, Permission.Submit, Permission.Edit, Permission.CaseManage])]
     public Task<Result> CreateEmployeeExitFormerEmployeeRequest([FromBody] CreateEmployeeExitFormerEmployeeRequest request) =>
         _employeeService.CreateEmployeeExitFormerEmployeeRequest(request);
 
     [Route("EmployeeExitFormerEmployeeRequestResolve")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> ResolveEmployeeExitFormerEmployeeRequest([FromBody] ResolveEmployeeExitFormerEmployeeRequest request) =>
         _employeeService.ResolveEmployeeExitFormerEmployeeRequest(request);
 
     [Route("EmployeeExitFormerEmployeePortalInvite")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.PortalManage])]
     public Task<Result<FormerEmployeePortalInviteDto>> CreateFormerEmployeePortalInvite([FromBody] CreateFormerEmployeePortalInviteRequest request) =>
         _formerEmployeePortalService.CreateInvite(request);
 
     [Route("EmployeeExitFormerEmployeePortalRevoke")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.PortalManage])]
     public Task<Result> RevokeFormerEmployeePortalAccess([FromBody] RevokeFormerEmployeePortalAccessRequest request) =>
         _formerEmployeePortalService.RevokeAccess(request);
 
     [Route("EmployeeExitFormerEmployeePortalAccess")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.PortalManage])]
     public Task<Result> SetFormerEmployeePortalAccess([FromBody] SetFormerEmployeePortalAccessRequest request) => _formerEmployeePortalService.SetAccess(request);
 
     [Route("CompanyFormerEmployeePortalAccess")]
@@ -677,11 +736,13 @@ public class UserController : BaseApiController
 
     [Route("RejoinEmployee")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage])]
     public Task<Result> RejoinEmployee([FromBody] RejoinEmployeeRequest request) =>
         _employeeService.RejoinEmployee(request);
 
     [Route("ExceptionalCompleteEmployeeExit")]
     [HttpPost]
+    [ModulePermission(AppModule.Offboarding, [Permission.Edit, Permission.CaseManage, Permission.Override])]
     public Task<Result> ExceptionalCompleteEmployeeExit([FromBody] ExceptionalCompleteEmployeeExitRequest request) =>
         _employeeService.ExceptionalCompleteEmployeeExit(request);
 

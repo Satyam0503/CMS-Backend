@@ -1,3 +1,5 @@
+using Codeji.CMS.GenericRepository.Interfaces;
+using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.PayRoll;
@@ -78,14 +80,36 @@ public class PayRollController : BaseApiController
     [HttpPost]
     [Route("GenerateEmployeePaySlip")]
     [ModulePermission(AppModule.PayRoll, Permission.View)]
-    public async Task<ActionResult> GetEmployeeSalarySlip(EmployeePayslipRequestDto model)
+    public async Task<ActionResult> GetEmployeeSalarySlip(
+        EmployeePayslipRequestDto model,
+        [FromServices] IMongoDbRepository<EmpUser> employeeRepo)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
         DateTime currentDate = DateTime.UtcNow;
         if (!PayrollPeriodRules.IsClosedPeriod(new DateTime(model.Year, model.Month, 1), currentDate)) return BadRequest(ModelState);
+
+        var currentUserId = CurrentContext.UserId(_httpContextAccessor);
+        var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+
+        // Verify whether the caller owns this EmployeeId
+        var currentEmployee = await employeeRepo.FirstOrDefault(x =>
+            x.CompanyId == companyId && x.UserId == currentUserId && !x.IsDeleted);
+
+        bool isSelfRequest = (currentEmployee != null &&
+            string.Equals(currentEmployee.EmployeeId, model.EmployeeId, StringComparison.OrdinalIgnoreCase))
+            || string.Equals(currentUserId, model.EmployeeId, StringComparison.OrdinalIgnoreCase);
+
+        if (!isSelfRequest)
+        {
+            // Accessing another employee's payslip requires administrative authorization (Edit or Export)
+            var hasAdminAccess = await _roleService.VerifyUserAccess(
+                AppModule.PayRoll, [Permission.Create, Permission.Edit], currentUserId, companyId);
+            if (!hasAdminAccess)
+                return Forbid();
+        }
+
         try
         {
-            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
             var (pdfByte, pdfName) = await _payRollServices.GenerateEmployeeSalarySlip(model, companyId);
             Response.Headers.Append("Access-Control-Expose-Headers", "Content-Disposition");
             return File(pdfByte, "application/pdf", pdfName);

@@ -1,3 +1,5 @@
+using Codeji.CMS.Repository.Entities.Company;
+using Codeji.CMS.DTO;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -469,5 +471,187 @@ public sealed class AttendanceExportReportTests
         Assert.Equal(1.5, presentVal);
         Assert.Equal(1.0, halfDayVal);
         Assert.Equal(1.5, paidDaysVal);
+    }
+
+    [Fact]
+    public async Task ExportMonthlyAttendance_ResolvesDesignationNameFromJobTitlesRepo_InsteadOfRawGuid()
+    {
+        var attendanceRepo = new Mock<IAttendanceRepository>();
+        var mapper = new Mock<IMapper>();
+        var mutationValidator = new Mock<IAttendanceMutationValidator>();
+        var auditWriter = new Mock<IAttendanceAuditWriter>();
+        var segmentRepo = new Mock<IMongoDbRepository<AttendanceDaySegment>>();
+        var empRepo = new Mock<IMongoDbRepository<EmpUser>>();
+        var workingCalendar = new Mock<ICompanyWorkingCalendarService>();
+        var weeklyOffs = new Mock<IMongoDbRepository<WeeklyOffSetting>>();
+        var calendar = new Mock<IMongoDbRepository<CalendarEntity>>();
+        var statuses = new Mock<IMongoDbRepository<AttendanceStatusSetting>>();
+        var jobTitlesRepo = new Mock<IMongoDbRepository<JobTitles>>();
+        var deptRepo = new Mock<IMongoDbRepository<Department>>();
+        var companyRepo = new Mock<IMongoDbRepository<Company>>();
+
+        var emp = new EmpUser
+        {
+            CompanyId = "c1",
+            UserId = "u1",
+            EmployeeId = "EMP1001",
+            FirstName = "Aarav",
+            LastName = "Sharma",
+            Department = "dept-hr-guid",
+            JobRole = "desig-guid-1234",
+            DateOfJoining = "2026-01-01",
+            Email = "aarav@example.com",
+            Status = true
+        };
+        empRepo.Setup(r => r.GetAll(It.IsAny<Expression<Func<EmpUser, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync([emp]);
+
+        deptRepo.Setup(d => d.GetAll(It.IsAny<Expression<Func<Department, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync([
+                new Department
+                {
+                    CompanyId = "c1",
+                    DepartmentId = "dept-hr-guid",
+                    Titles = [new MultilingualModel { Language = "en", Label = "Human Resources" }]
+                }
+            ]);
+
+        jobTitlesRepo.Setup(j => j.GetAll(It.IsAny<Expression<Func<JobTitles, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync([
+                new JobTitles
+                {
+                    CompanyId = "c1",
+                    JobTitleId = "desig-guid-1234",
+                    Titles = [new MultilingualModel { Language = "en", Label = "Senior HR Specialist" }]
+                }
+            ]);
+
+        companyRepo.Setup(c => c.FirstOrDefault(It.IsAny<Expression<Func<Company, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(new Company { CompanyId = "c1", CompanyName = "Acme Global Solutions", DefaultLanguage = "en" });
+
+        attendanceRepo.Setup(r => r.GetAllByDateRangeAsync("c1", It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<string[]>()))
+            .ReturnsAsync(new List<AttendanceModel>());
+        segmentRepo.Setup(r => r.GetAll(It.IsAny<Expression<Func<AttendanceDaySegment, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new List<AttendanceDaySegment>());
+        workingCalendar.Setup(w => w.GetWorkingDatesAsync("c1", It.IsAny<DateOnly>(), It.IsAny<DateOnly>(), default))
+            .ReturnsAsync(new List<DateOnly>());
+        weeklyOffs.Setup(w => w.FirstOrDefault(It.IsAny<Expression<Func<WeeklyOffSetting, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(new WeeklyOffSetting { CompanyId = "c1", OffDays = [0, 6] });
+        calendar.Setup(c => c.GetAll(It.IsAny<Expression<Func<CalendarEntity, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new List<CalendarEntity>());
+        statuses.Setup(s => s.GetAll(It.IsAny<Expression<Func<AttendanceStatusSetting, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new List<AttendanceStatusSetting>());
+
+        var service = new AdminAttendanceService(
+            attendanceRepo.Object, mapper.Object, mutationValidator.Object, auditWriter.Object,
+            segmentRepo.Object, empRepo.Object, workingCalendar.Object, weeklyOffs.Object, calendar.Object, statuses.Object,
+            departments: deptRepo.Object, initializationService: null, penaltyPolicies: null, shiftReconciliation: null,
+            leaves: null, leaveBalances: null, summaries: null, exceptions: null, wfhRequests: null,
+            jobTitles: jobTitlesRepo.Object, companies: companyRepo.Object);
+
+        var result = await service.ExportMonthlyAttendanceAsync("c1", 2026, 10);
+        using var memoryStream = new MemoryStream(result.Content);
+        using var workbook = new XLWorkbook(memoryStream);
+        var muster = workbook.Worksheet("Attendance report");
+
+        // Verify resolved Department and Designation names instead of raw GUIDs
+        Assert.Equal("Human Resources", muster.Cell(2, 3).GetString());
+        Assert.Equal("Senior HR Specialist", muster.Cell(2, 4).GetString());
+
+        // Verify workbook metadata
+        Assert.Equal("Acme Global Solutions", workbook.Properties.Company);
+        Assert.Contains("2026-10", workbook.Properties.Title);
+    }
+
+    [Fact]
+    public async Task ExportMonthlyAttendance_FormatsCleanPunchTimesAndIneligibleDays_WithoutMojibake()
+    {
+        var attendanceRepo = new Mock<IAttendanceRepository>();
+        var mapper = new Mock<IMapper>();
+        var mutationValidator = new Mock<IAttendanceMutationValidator>();
+        var auditWriter = new Mock<IAttendanceAuditWriter>();
+        var segmentRepo = new Mock<IMongoDbRepository<AttendanceDaySegment>>();
+        var empRepo = new Mock<IMongoDbRepository<EmpUser>>();
+        var workingCalendar = new Mock<ICompanyWorkingCalendarService>();
+        var weeklyOffs = new Mock<IMongoDbRepository<WeeklyOffSetting>>();
+        var calendar = new Mock<IMongoDbRepository<CalendarEntity>>();
+        var statuses = new Mock<IMongoDbRepository<AttendanceStatusSetting>>();
+
+        var empJoinedLate = new EmpUser
+        {
+            CompanyId = "c1",
+            UserId = "uLate",
+            EmployeeId = "CD-0140",
+            FirstName = "Gaurav",
+            LastName = "Negi",
+            Email = "gaurav@example.com",
+            DateOfJoining = "2026-10-15", // Joined midway through October
+            Status = true
+        };
+        empRepo.Setup(r => r.GetAll(It.IsAny<Expression<Func<EmpUser, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync([empJoinedLate]);
+
+        // A punch on Day 15 with CheckIn 09:00 and CheckOut 18:00
+        var punchDay15 = new AttendanceModel
+        {
+            CompanyId = "c1",
+            UserId = "uLate",
+            EmployeeId = "CD-0140",
+            Date = new DateTime(2026, 10, 15, 0, 0, 0, DateTimeKind.Utc),
+            Status = "P",
+            CheckInTime = new DateTime(2026, 10, 15, 3, 30, 0, DateTimeKind.Utc), // 09:00 IST
+            CheckOutTime = new DateTime(2026, 10, 15, 12, 30, 0, DateTimeKind.Utc), // 18:00 IST
+            TotalHours = 9.0m
+        };
+        attendanceRepo.Setup(r => r.GetAllByDateRangeAsync("c1", It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<string[]>()))
+            .ReturnsAsync([punchDay15]);
+        segmentRepo.Setup(r => r.GetAll(It.IsAny<Expression<Func<AttendanceDaySegment, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new List<AttendanceDaySegment>());
+
+        var allDates = Enumerable.Range(1, 31).Select(d => new DateOnly(2026, 10, d)).ToList();
+        workingCalendar.Setup(w => w.GetWorkingDatesAsync("c1", It.IsAny<DateOnly>(), It.IsAny<DateOnly>(), default))
+            .ReturnsAsync(allDates);
+        weeklyOffs.Setup(w => w.FirstOrDefault(It.IsAny<Expression<Func<WeeklyOffSetting, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync(new WeeklyOffSetting { CompanyId = "c1", OffDays = [] });
+        calendar.Setup(c => c.GetAll(It.IsAny<Expression<Func<CalendarEntity, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new List<CalendarEntity>());
+
+        statuses.Setup(s => s.GetAll(It.IsAny<Expression<Func<AttendanceStatusSetting, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync([
+                new AttendanceStatusSetting { CompanyId = "c1", Code = "P", Name = "Present", ColorHex = "#28A745", PaidDayFraction = 1m }
+            ]);
+
+        var service = new AdminAttendanceService(
+            attendanceRepo.Object, mapper.Object, mutationValidator.Object, auditWriter.Object,
+            segmentRepo.Object, empRepo.Object, workingCalendar.Object, weeklyOffs.Object, calendar.Object, statuses.Object);
+
+        var result = await service.ExportMonthlyAttendanceAsync("c1", 2026, 10);
+        using var memoryStream = new MemoryStream(result.Content);
+        using var workbook = new XLWorkbook(memoryStream);
+        var muster = workbook.Worksheet("Attendance report");
+
+        // Day 1 (before DOJ Oct 15) must be clean "-" without any mojibake
+        var day1Cell = muster.Cell(2, 5).GetString();
+        Assert.Equal("-", day1Cell);
+        Assert.DoesNotContain("â", day1Cell);
+
+        // Day 15 (punch) must format as "In 09:00 - Out 18:00" without "Â·"
+        var day15Cell = muster.Cell(2, 19).GetString();
+        Assert.Contains("P", day15Cell);
+        Assert.Contains("In 09:00 - Out 18:00", day15Cell);
+        Assert.DoesNotContain("Â·", day15Cell);
+
+        // Verify contrast: on dark green background #28A745, font color must be white
+        var day15XlCell = muster.Cell(2, 19);
+        Assert.Equal(XLColor.White, day15XlCell.Style.Font.FontColor);
+
+        // Verify new summary columns:
+        // Total Worked Hours in col 31 + 12 = 43
+        Assert.Equal("Total Worked\nHours", muster.Cell(1, 43).GetString());
+        Assert.Equal(9.0, muster.Cell(2, 43).GetDouble());
+
+        // Late / Early Marks in col 31 + 13 = 44
+        Assert.Equal("Late / Early\nMarks", muster.Cell(1, 44).GetString());
+        Assert.Equal(0.0, muster.Cell(2, 44).GetDouble());
     }
 }

@@ -10,6 +10,7 @@ using Codeji.CMS.DTO.LeaveManagement.LeavePolicy;
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
+using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Leave;
@@ -604,6 +605,24 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
             return result;
         }
 
+        var db = _workFromHomeRequests.GetCollection()?.Database;
+        if (db is not null)
+        {
+            var attendanceCol = db.GetCollection<AttendanceModel>("Attendance");
+            var hasHybrid = (await attendanceCol.Find(x =>
+                x.CompanyId == companyId && x.UserId == leaveRequest.UserId &&
+                x.Date >= requestStartDateTime.Date && x.Date < requestEndDateTime.Date.AddDays(1) &&
+                (x.Status == "WFH+WFO" || x.RemarkCode == "WFH_WFO_COMBINATION")).Limit(1).ToListAsync()).Any();
+            if (hasHybrid)
+            {
+                return new Result
+                {
+                    Success = false,
+                    Message = "LEAVE_HYBRID_CONFLICT: The selected date is already fully scheduled for hybrid work (WFH + In-Office). A single day cannot have both WFH+WFO and leave simultaneously."
+                };
+            }
+        }
+
         if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequest.UserId, requestStartDateTime, requestEndDateTime, leaveRequest.IsHalfDay, leaveRequest.HalfDayPeriod))
             return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: Leave overlaps Work From Home for the same half or a full day." };
 
@@ -641,10 +660,18 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
 
         if (totalRequestedDays <= 0)
             return new Result { Success = false, Message = "Leave duration must be greater than zero." };
-        if (!isUnpaidLeave && !isLifecycleLinked && (!IsValidBalance(employeeLeaveBalance!) || totalRequestedDays > employeeLeaveBalance!.Remaining))
+        var pendingLeaves = await _leave.GetAll(lr =>
+            lr.CompanyId == companyId && lr.EmployeeId == leaveRequest.UserId &&
+            lr.LeavePolicyId == leaveRequest.LeavePolicyId &&
+            lr.Status == EnumsHelper.LeaveRequestStatus.Pending &&
+            lr.LeaveRequestId != requestedLeaveRequestId);
+        var pendingDays = pendingLeaves.Sum(lr => lr.TotalDays);
+        var availableBalance = (employeeLeaveBalance?.Remaining ?? 0m) - pendingDays;
+        if (!isUnpaidLeave && !isLifecycleLinked && (!IsValidBalance(employeeLeaveBalance!) || totalRequestedDays > availableBalance))
         {
             result.Success = false;
             result.StatusCode = CustomStatusCode.InsufficientLeaveBalance;
+            result.Message = $"Insufficient leave balance. You have {employeeLeaveBalance?.Remaining ?? 0:0.#} remaining, with {pendingDays:0.#} day(s) pending approval.";
             return result;
         }
         if (await HasActiveEmployeeAbsenceAsync(companyId, leaveRequest.UserId, requestStartDateTime, requestEndDateTime))
@@ -677,6 +704,10 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         try
         {
             using var session = await _mongoClient.StartSessionAsync();
+            if (session is null)
+            {
+                throw new NotSupportedException("MongoDB session not available");
+            }
             session.StartTransaction();
             await AcquireEmployeeWfhClaimLock(session, companyId, leaveRequest.UserId);
             if (await HasActiveWorkFromHomeOverlap(companyId, leaveRequest.UserId, requestStartDateTime, requestEndDateTime, leaveRequest.IsHalfDay, leaveRequest.HalfDayPeriod))
@@ -1152,6 +1183,24 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
                     : policyForDecision.FullDayAttendanceStatusCode ?? policyForDecision.AttendanceStatusCode;
             if (string.IsNullOrWhiteSpace(mappedStatus) || !await ValidateAttendanceStatusMapping(companyId, mappedStatus))
                 return new Result { Success = false, Message = existingLeaveRequest.IsHalfDay ? "Select an active leave attendance status for half-day leave before approval." : "Select an active leave attendance status for full-day leave before approval." };
+        var db = _workFromHomeRequests.GetCollection()?.Database;
+        if (db is not null)
+        {
+            var attendanceCol = db.GetCollection<AttendanceModel>("Attendance");
+            var hasHybrid = (await attendanceCol.Find(x =>
+                x.CompanyId == companyId && x.UserId == existingLeaveRequest.EmployeeId &&
+                x.Date >= existingLeaveRequest.StartDate.Date && x.Date < existingLeaveRequest.EndDate.Date.AddDays(1) &&
+                (x.Status == "WFH+WFO" || x.RemarkCode == "WFH_WFO_COMBINATION")).Limit(1).ToListAsync()).Any();
+            if (hasHybrid)
+            {
+                return new Result
+                {
+                    Success = false,
+                    Message = "LEAVE_HYBRID_CONFLICT: The selected date is already fully scheduled for hybrid work (WFH + In-Office). A single day cannot have both WFH+WFO and leave simultaneously."
+                };
+            }
+        }
+
             if (await HasActiveWorkFromHomeOverlap(companyId, existingLeaveRequest.EmployeeId, existingLeaveRequest.StartDate, existingLeaveRequest.EndDate, existingLeaveRequest.IsHalfDay, existingLeaveRequest.HalfDayPeriod))
                 return new Result { Success = false, Message = "LEAVE_WFH_OVERLAP: Leave cannot be approved because it overlaps Work From Home for the same half or a full day." };
         }
@@ -1786,6 +1835,42 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
             request.CompanyId == companyId && request.UserId == userId &&
             (request.Status == "Pending" || request.Status == "Approved" || request.Status == "Returned") &&
             request.FromDate <= endDate && request.ToDate >= startDate);
+
+        var db = _workFromHomeRequests.GetCollection()?.Database;
+        if (db is not null)
+        {
+            var attendanceCol = db.GetCollection<AttendanceModel>("Attendance");
+            var segmentsCol = db.GetCollection<AttendanceDaySegment>("AttendanceDaySegment");
+
+            var startDay = startDate.Date;
+            var endDay = endDate.Date.AddDays(1);
+
+            var hybridDays = await attendanceCol.Find(x =>
+                x.CompanyId == companyId && x.UserId == userId &&
+                x.Date >= startDay && x.Date < endDay &&
+                (x.Status == "WFH+WFO" || x.RemarkCode == "WFH_WFO_COMBINATION")).ToListAsync();
+
+            if (hybridDays.Any())
+            {
+                return true;
+            }
+
+            if (leaveIsHalfDay && !string.IsNullOrWhiteSpace(leaveHalfDayPeriod))
+            {
+                var normPeriod = leaveHalfDayPeriod.Trim().ToUpperInvariant();
+                var occupiedSegments = await segmentsCol.Find(x =>
+                    x.CompanyId == companyId && x.UserId == userId &&
+                    x.Date >= startDay && x.Date < endDay &&
+                    x.Segment == normPeriod &&
+                    (x.Status == "P" || x.Status == "WFH" || x.Status == "HD")).ToListAsync();
+
+                if (occupiedSegments.Any())
+                {
+                    return true;
+                }
+            }
+        }
+
         return requests.Any(wfh => LeaveConflictsWithWorkFromHome(leaveIsHalfDay, leaveHalfDayPeriod, wfh.DurationType));
     }
 

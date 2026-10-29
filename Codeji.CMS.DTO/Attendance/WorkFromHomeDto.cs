@@ -190,6 +190,10 @@ public class WorkFromHomeAdminGrantDto
     [Required, MinLength(3)] public string Remarks { get; set; } = string.Empty;
     public TimeSpan? OfficeCheckInTime { get; set; }
     public TimeSpan? OfficeCheckOutTime { get; set; }
+    public TimeSpan? WfhCheckInTime { get; set; }
+    public TimeSpan? WfhCheckOutTime { get; set; }
+    public string? LeavePolicyId { get; set; }
+    public string? LeaveStatusCode { get; set; }
 }
 
 public class WorkFromHomeEmployeeAllocationDto

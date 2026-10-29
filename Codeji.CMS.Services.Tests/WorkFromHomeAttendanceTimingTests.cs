@@ -443,4 +443,100 @@ public class WorkFromHomeAttendanceTimingTests
             Assert.True(isWfh, $"{status} should be recognized as a valid WFH/hybrid status for HR edit");
         }
     }
+
+    [Fact]
+    public void AdminGrant_OfficePunchWindow_ConvertsLocalToUtcCorrectly()
+    {
+        var attendanceDate = new DateTime(2026, 10, 29, 0, 0, 0, DateTimeKind.Utc);
+        var localCheckIn = new TimeSpan(9, 0, 0); // 09:00 IST
+        var localCheckOut = new TimeSpan(14, 0, 0); // 14:00 IST
+        var tz = "Asia/Kolkata";
+
+        var utcIn = AttendanceMutationValidator.ToScheduleUtc(attendanceDate, localCheckIn, tz);
+        var utcOut = AttendanceMutationValidator.ToScheduleUtc(attendanceDate, localCheckOut, tz);
+
+        // 09:00 IST is 03:30 UTC
+        Assert.Equal(new DateTime(2026, 10, 29, 3, 30, 0, DateTimeKind.Utc), utcIn);
+        // 14:00 IST is 08:30 UTC
+        Assert.Equal(new DateTime(2026, 10, 29, 8, 30, 0, DateTimeKind.Utc), utcOut);
+
+        var totalHours = Math.Round((decimal)(utcOut - utcIn).TotalHours, 2);
+        Assert.Equal(5.00m, totalHours);
+    }
+
+    [Theory]
+    [InlineData("09:00", "18:00", "09:00", "13:30", "13:30", "18:00")]
+    [InlineData("09:30", "18:30", "09:30", "14:00", "14:00", "18:30")]
+    [InlineData("10:00", "19:00", "10:00", "14:30", "14:30", "19:00")]
+    public void ShiftMidpoint_DividesWorkingHoursEvenly(
+        string startStr, string endStr, string expectedFhIn, string expectedFhOut, string expectedShIn, string expectedShOut)
+    {
+        var start = TimeSpan.Parse(startStr);
+        var end = TimeSpan.Parse(endStr);
+        var totalMinutes = (end - start).TotalMinutes;
+        var midpoint = start.Add(TimeSpan.FromMinutes(totalMinutes / 2));
+
+        Assert.Equal(expectedFhIn, start.ToString(@"hh\:mm"));
+        Assert.Equal(expectedFhOut, midpoint.ToString(@"hh\:mm"));
+        Assert.Equal(expectedShIn, midpoint.ToString(@"hh\:mm"));
+        Assert.Equal(expectedShOut, end.ToString(@"hh\:mm"));
+    }
+
+    [Fact]
+    public void IsTransactionUnsupported_DetectsStandaloneAndWrappedExceptions()
+    {
+        var directNotSupported = new NotSupportedException("Transactions are not supported.");
+        Assert.True(WorkFromHomeService.IsTransactionUnsupported(directNotSupported));
+
+        var directMessage = new Exception("Transaction numbers are only allowed on a replica set member or mongos.");
+        Assert.True(WorkFromHomeService.IsTransactionUnsupported(directMessage));
+
+        var wrappedInMongoException = new Exception("Transaction failed", directMessage);
+        Assert.True(WorkFromHomeService.IsTransactionUnsupported(wrappedInMongoException));
+
+        var aggregateException = new AggregateException(new InvalidOperationException("Other"), directMessage);
+        Assert.True(WorkFromHomeService.IsTransactionUnsupported(aggregateException));
+
+        var unrelatedException = new InvalidOperationException("Some business rule violated.");
+        Assert.False(WorkFromHomeService.IsTransactionUnsupported(unrelatedException));
+    }
+
+    [Fact]
+    public void MergedDailyRow_CalculatesEarliestIn_LatestOut_AndCombinedHours()
+    {
+        var morningIn = new DateTime(2026, 10, 29, 3, 30, 0, DateTimeKind.Utc); // 09:00 IST
+        var morningOut = new DateTime(2026, 10, 29, 8, 0, 0, DateTimeKind.Utc);  // 13:30 IST
+        var afternoonIn = new DateTime(2026, 10, 29, 8, 0, 0, DateTimeKind.Utc); // 13:30 IST
+        var afternoonOut = new DateTime(2026, 10, 29, 12, 30, 0, DateTimeKind.Utc); // 18:00 IST
+
+        var wfhSegment = new AttendanceDaySegment
+        {
+            Segment = "FIRST_HALF",
+            CheckInTime = morningIn,
+            CheckOutTime = morningOut,
+            TotalHours = 4.5m
+        };
+
+        var officeSegment = new AttendanceDaySegment
+        {
+            Segment = "SECOND_HALF",
+            CheckInTime = afternoonIn,
+            CheckOutTime = afternoonOut,
+            TotalHours = 4.5m
+        };
+
+        var earliestIn = (wfhSegment.CheckInTime.HasValue && officeSegment.CheckInTime.HasValue)
+            ? (wfhSegment.CheckInTime.Value < officeSegment.CheckInTime.Value ? wfhSegment.CheckInTime : officeSegment.CheckInTime)
+            : (wfhSegment.CheckInTime ?? officeSegment.CheckInTime);
+
+        var latestOut = (wfhSegment.CheckOutTime.HasValue && officeSegment.CheckOutTime.HasValue)
+            ? (wfhSegment.CheckOutTime.Value > officeSegment.CheckOutTime.Value ? wfhSegment.CheckOutTime : officeSegment.CheckOutTime)
+            : (wfhSegment.CheckOutTime ?? officeSegment.CheckOutTime);
+
+        var combinedHours = Math.Round((wfhSegment.TotalHours ?? 0m) + (officeSegment.TotalHours ?? 0m), 2);
+
+        Assert.Equal(morningIn, earliestIn);
+        Assert.Equal(afternoonOut, latestOut);
+        Assert.Equal(9.00m, combinedHours);
+    }
 }

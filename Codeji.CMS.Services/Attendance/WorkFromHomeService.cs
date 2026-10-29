@@ -134,6 +134,22 @@ public sealed class WorkFromHomeService(
             .Where(request => request.Status == "Approved" && request.FromDate.Date <= today && request.ToDate.Date >= today)
             .OrderByDescending(request => request.CreatedDate)
             .ToList();
+        if (todayApprovedRequests.Count > 1)
+        {
+            var primary = todayApprovedRequests.First();
+            foreach (var duplicate in todayApprovedRequests.Skip(1))
+            {
+                duplicate.Status = "Cancelled";
+                duplicate.ReviewRemarksCode = "ADMIN_SUPERSEDED";
+                duplicate.ReviewRemarksText = $"Superseded by active grant {primary.RequestId}";
+                duplicate.CancelledAt = DateTime.UtcNow;
+                duplicate.Version++;
+                await requests.GetCollection().ReplaceOneAsync(
+                    Builders<WorkFromHomeRequest>.Filter.Where(x => x.CompanyId == CompanyId && x.RequestId == duplicate.RequestId),
+                    duplicate);
+            }
+            todayApprovedRequests = [primary];
+        }
         var maxWorkingDays = await GetMaxWorkingDaysPerWeekAsync(policy);
         var weeklyLimit = WeeklyLimitFor(policy, employee, maxWorkingDays);
         var remaining = Math.Max(0m, weeklyLimit - used);
@@ -483,12 +499,29 @@ public sealed class WorkFromHomeService(
     private Task<WorkFromHomeRequest?> FindIdempotentRequest(string idempotencyKey) =>
         requests.FirstOrDefault(BuildIdempotentRequestPredicate(CompanyId, UserId, idempotencyKey));
 
-    internal static bool IsTransactionUnsupported(Exception ex) =>
-        ex is NotSupportedException ||
-        (ex is MongoCommandException mongoException && (mongoException.Code == 20 || mongoException.Code == 263)) ||
-        ex.Message.Contains("Transaction numbers are only allowed", StringComparison.OrdinalIgnoreCase) ||
-        ex.Message.Contains("replica set", StringComparison.OrdinalIgnoreCase) ||
-        ex.Message.Contains("standalone servers do not support transactions", StringComparison.OrdinalIgnoreCase);
+    internal static bool IsTransactionUnsupported(Exception? ex)
+    {
+        while (ex is not null)
+        {
+            if (ex is NotSupportedException ||
+                (ex is MongoCommandException mongoException && (mongoException.Code == 20 || mongoException.Code == 263)) ||
+                ex.Message.Contains("Transaction numbers are only allowed", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("replica set", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("standalone servers do not support transactions", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("Transactions are not supported", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (ex is AggregateException agg)
+            {
+                if (agg.InnerExceptions.Any(IsTransactionUnsupported)) return true;
+            }
+
+            ex = ex.InnerException;
+        }
+        return false;
+    }
 
     private async Task<Result> CreatePendingRequestTransaction(WorkFromHomeRequest request, EmpUser employee, WorkFromHomePolicy policy, WorkFromHomeRequestDto dto, IReadOnlyCollection<WorkFromHomeOutboxEvent> transitionEvents)
     {
@@ -1191,7 +1224,7 @@ public sealed class WorkFromHomeService(
             {
                 return Fail("WFH_REQUEST_CHANGED", "Attendance or the request changed while cancelling. Refresh and try again.", StatusCodes.Status409Conflict);
             }
-            catch (Exception ex) when (ex is MongoCommandException mongoException && (mongoException.Code == 20 || mongoException.Code == 263))
+            catch (Exception ex) when (IsTransactionUnsupported(ex))
             {
                 foreach (var day in Days(request.FromDate, request.ToDate))
                 {
@@ -1273,10 +1306,7 @@ public sealed class WorkFromHomeService(
                 if (savedRequest.MatchedCount != 1) return Fail("WFH_REQUEST_CHANGED", "Attendance or the request changed while cancelling. Refresh and try again.", StatusCodes.Status409Conflict);
                 await InsertOutboxEventsAsync(null, cancelEvents, CancellationToken.None);
             }
-            catch (Exception ex) when (ex is NotSupportedException || ex is MongoCommandException mongoException && mongoException.Code == 20)
-            {
-                return Fail("WFH_CANCELLATION_TRANSACTION_REQUIRED", "Approved WFH cancellation requires a MongoDB deployment that supports transactions. No cancellation was applied.", StatusCodes.Status503ServiceUnavailable);
-            }
+
 
             foreach (var month in Days(request.FromDate, request.ToDate).Select(day => new DateTime(day.Year, day.Month, 1)).Distinct())
                 await attendanceInitialization.InitializeMonthAsync(CompanyId, UserId, month);
@@ -1311,7 +1341,7 @@ public sealed class WorkFromHomeService(
             {
                 return Fail("WFH_REQUEST_CHANGED", "The request was changed by another action.", StatusCodes.Status409Conflict);
             }
-            catch (Exception ex) when (ex is MongoCommandException mongoException && (mongoException.Code == 20 || mongoException.Code == 263))
+            catch (Exception ex) when (IsTransactionUnsupported(ex))
             {
                 var saved = await requests.GetCollection().ReplaceOneAsync(
                     Builders<WorkFromHomeRequest>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == UserId &&
@@ -1320,10 +1350,7 @@ public sealed class WorkFromHomeService(
                 if (saved.MatchedCount != 1) return Fail("WFH_REQUEST_CHANGED", "The request was changed by another action.", StatusCodes.Status409Conflict);
                 await InsertOutboxEventsAsync(null, cancelEvents, CancellationToken.None);
             }
-            catch (Exception ex) when (ex is NotSupportedException || ex is MongoCommandException mongoException && mongoException.Code == 20)
-            {
-                return Fail("WFH_CANCELLATION_TRANSACTION_REQUIRED", "WFH cancellation requires MongoDB transaction support. No cancellation was applied.", StatusCodes.Status503ServiceUnavailable);
-            }
+
             catch
             {
                 return Fail("WFH_CANCELLATION_FAILED", "The request could not be cancelled. No cancellation was applied.", StatusCodes.Status503ServiceUnavailable);
@@ -1389,7 +1416,12 @@ public sealed class WorkFromHomeService(
         var isCheckInOpen = true;
         string? checkInNotice = null;
 
-        if (!checkInTime.HasValue)
+        if (checkOutTime.HasValue)
+        {
+            isCheckInOpen = false;
+            checkInNotice = "WFH check-out completed for today.";
+        }
+        else if (!checkInTime.HasValue)
         {
             if (checkInFrom.HasValue && currentTime < checkInFrom.Value)
             {
@@ -1527,6 +1559,14 @@ public sealed class WorkFromHomeService(
         if (totalHours < minimum)
             return Fail("WFH_HOURS_STILL_INSUFFICIENT", $"Corrected WFH hours are {totalHours:0.##}; at least {minimum:0.##} hours are required.");
 
+        var inTime = CompanyTimeOfDay(dto.CheckInTime, timeZoneId);
+        var outTime = CompanyTimeOfDay(dto.CheckOutTime, timeZoneId);
+        var grace = schedule is null ? TimeSpan.FromMinutes(15) : TimeSpan.FromMinutes(Math.Max(schedule.GraceMinutes, 0));
+        var lateArrivalBoundary = schedule?.LateArrivalAfter ?? (schedule is null ? new TimeSpan(9, 15, 0) : schedule.StartTime.Add(grace));
+        var earlyDepartureBoundary = schedule?.EarlyDepartureBefore ?? (schedule is null ? new TimeSpan(17, 45, 0) : schedule.EndTime.Subtract(grace));
+        var isLate = inTime > lateArrivalBoundary;
+        var isEarly = outTime < earlyDepartureBoundary;
+
         if (segment is not null)
         {
             var originalSegmentVersion = segment.Version;
@@ -1544,7 +1584,8 @@ public sealed class WorkFromHomeService(
                 dailyRow.CheckInTime = dto.CheckInTime;
                 dailyRow.CheckOutTime = dto.CheckOutTime;
                 dailyRow.TotalHours = totalHours;
-                dailyRow.EarlyExitCount = 0;
+                dailyRow.LateCount = isLate ? 1 : 0;
+                dailyRow.EarlyExitCount = isEarly ? 1 : 0;
                 dailyRow.Remarks = $"HR/Admin corrected half-day WFH hours: {Clean(dto.Remarks)}";
                 dailyRow.Version++;
             }
@@ -1587,9 +1628,14 @@ public sealed class WorkFromHomeService(
         row.TotalHours = totalHours;
         row.BreakMinutes = breakMinutes;
         row.Status = policy.FullDayAttendanceStatusCode?.Trim().ToUpperInvariant() ?? "WFH";
-        row.EarlyExitCount = 0;
+        row.LateCount = isLate ? 1 : 0;
+        row.EarlyExitCount = isEarly ? 1 : 0;
         row.RemarkCode = "WFH_HOURS_CORRECTED";
-        row.Remarks = $"HR/Admin corrected WFH hours: {Clean(dto.Remarks)}";
+        var infractionTag = (row.LateCount > 0 && row.EarlyExitCount > 0) ? " (LHD+ED)"
+            : row.LateCount > 0 ? " (Late Arrival)"
+            : row.EarlyExitCount > 0 ? " (Early Departure)"
+            : "";
+        row.Remarks = $"HR/Admin corrected WFH hours: {Clean(dto.Remarks)}{infractionTag}";
         row.Version++;
         exception.Status = "RESOLVED";
         exception.Resolution = $"WFH hours corrected to {totalHours:0.##} hour(s) by HR/Admin.";
@@ -2333,7 +2379,12 @@ public sealed class WorkFromHomeService(
         if (!EmploymentPeriod.WasEmployedOn(employee, date)) return Fail("WFH_EMPLOYEE_NOT_EMPLOYED", "Employee was not employed on this date.");
 
         var policy = await ActivePolicy();
-        if (policy is null) return Fail("WFH_POLICY_DISABLED", "WFH policy is not active for this company.");
+        if (policy is null || !policy.IsEnabled) return Fail("WFH_POLICY_DISABLED", "Work from home is not enabled for this company.");
+        if (!IsEligible(policy, employee)) return Fail("WFH_EMPLOYEE_NOT_ASSIGNED", "This employee is not eligible or assigned to the Work From Home policy.");
+
+        var maxWorkingDays = await GetMaxWorkingDaysPerWeekAsync(policy);
+        var weeklyLimit = WeeklyLimitFor(policy, employee, maxWorkingDays);
+        if (weeklyLimit <= 0) return Fail("WFH_EMPLOYEE_NOT_ASSIGNED", "This employee has 0 weekly WFH days allocated.");
 
         var workingDayGuard = await ValidateWorkingDay(employee, policy, date);
         if (workingDayGuard is not null)
@@ -2348,6 +2399,115 @@ public sealed class WorkFromHomeService(
             "HdWfh" => "SecondHalf",
             _ => "FullDay"
         };
+
+        if (grantType is "WfhWfo" or "WfoWfh" or "FullDay")
+        {
+            var activeLeaves = await leaveRequests.GetAll(l =>
+                l.CompanyId == CompanyId && l.EmployeeId == employee.UserId &&
+                (l.Status == EnumsHelper.LeaveRequestStatus.Pending || l.Status == EnumsHelper.LeaveRequestStatus.Accepted) &&
+                l.StartDate <= date && l.EndDate >= date);
+            if (activeLeaves.Any())
+            {
+                return Fail("WFH_LEAVE_OVERLAP",
+                    grantType is "WfhWfo" or "WfoWfh"
+                        ? "Cannot grant hybrid WFH+WFO because an active leave request exists on this date. A single day cannot have both WFH+WFO and leave simultaneously."
+                        : "Cannot grant full-day WFH because an active leave request exists on this date.");
+            }
+        }
+        else if (await HasActiveLeaveOverlap(employee.UserId, date, date, durationType))
+        {
+            return Fail("WFH_LEAVE_OVERLAP", "The requested WFH segment overlaps with an active leave request on this date.");
+        }
+
+        var requestedUnits = (durationType is "FirstHalf" or "SecondHalf") ? 0.5m : 1.0m;
+        var week = StartOfWeek(date);
+        var weekRequests = (await requests.GetAll(x => x.CompanyId == CompanyId && x.UserId == employee.UserId &&
+            (x.Status == "Pending" || x.Status == "Approved" || x.Status == "Returned") &&
+            x.ToDate >= week && x.FromDate < week.AddDays(7))).ToList();
+
+        // Any prior requests covering this exact date will be superseded by this admin grant,
+        // so exclude them when checking remaining weekly allowance.
+        var priorOnSameDate = weekRequests.Where(x => x.FromDate.Date <= date.Date && x.ToDate.Date >= date.Date).ToList();
+        var otherWeekRequests = weekRequests.Except(priorOnSameDate).ToList();
+        var usedThisWeek = WeeklyUsage(otherWeekRequests, week);
+
+        if (usedThisWeek + requestedUnits > weeklyLimit)
+        {
+            return Fail("WFH_WEEKLY_QUOTA_EXCEEDED",
+                $"Administrative grant would exceed the employee's weekly allowance of {weeklyLimit} WFH day(s) (already used: {usedThisWeek:0.#}, requested: {requestedUnits:0.#}).");
+        }
+
+        if (policy.MaxDaysPerMonth is int monthlyLimit)
+        {
+            var month = new DateTime(date.Year, date.Month, 1);
+            var monthRequests = (await requests.GetAll(x => x.CompanyId == CompanyId && x.UserId == employee.UserId &&
+                (x.Status == "Pending" || x.Status == "Approved" || x.Status == "Returned") &&
+                x.ToDate >= month && x.FromDate < month.AddMonths(1))).ToList();
+            var otherMonthRequests = monthRequests.Where(x => !(x.FromDate.Date <= date.Date && x.ToDate.Date >= date.Date)).ToList();
+            var usedThisMonth = MonthlyUsage(otherMonthRequests, month);
+            if (usedThisMonth + requestedUnits > monthlyLimit)
+            {
+                return Fail("WFH_MONTHLY_QUOTA_EXCEEDED",
+                    $"Administrative grant would exceed the monthly limit of {monthlyLimit} WFH day(s) (already used: {usedThisMonth:0.#}, requested: {requestedUnits:0.#}).");
+            }
+        }
+
+        // Cancel prior active requests on this date so duplicate approvals never exist
+        foreach (var prior in priorOnSameDate)
+        {
+            prior.Status = "Cancelled";
+            prior.ReviewRemarksCode = "ADMIN_SUPERSEDED";
+            prior.ReviewRemarksText = "Superseded by administrative WFH grant";
+            prior.CancelledAt = DateTime.UtcNow;
+            prior.CancelledByUserId = UserId;
+            prior.Version++;
+            await requests.GetCollection().ReplaceOneAsync(
+                Builders<WorkFromHomeRequest>.Filter.Where(x => x.CompanyId == CompanyId && x.RequestId == prior.RequestId),
+                prior);
+        }
+
+        // Check for existing punches prior to resetting segments so completed work is never destroyed
+        var existingSegments = (await attendanceSegments.GetAll(x =>
+            x.CompanyId == CompanyId && x.UserId == employee.UserId && x.Date >= date && x.Date < date.AddDays(1))).ToList();
+        var existingWfhSegment = existingSegments.FirstOrDefault(x => x.SourceType == "WFH_REQUEST");
+        var existingDailyRow = await attendance.FirstOrDefault(x =>
+            x.CompanyId == CompanyId && x.UserId == employee.UserId && x.Date >= date && x.Date < date.AddDays(1));
+
+        DateTime? priorWfhCheckIn = existingWfhSegment?.CheckInTime ?? (existingDailyRow?.SourceType == "WFH_REQUEST" ? existingDailyRow.CheckInTime : null);
+        DateTime? priorWfhCheckOut = existingWfhSegment?.CheckOutTime ?? (existingDailyRow?.SourceType == "WFH_REQUEST" ? existingDailyRow.CheckOutTime : null);
+        decimal? priorWfhTotalHours = existingWfhSegment?.TotalHours ?? (existingDailyRow?.SourceType == "WFH_REQUEST" ? existingDailyRow.TotalHours : null);
+        string? priorWfhRemarks = existingWfhSegment?.Remarks ?? (existingDailyRow?.SourceType == "WFH_REQUEST" ? existingDailyRow.Remarks : null);
+
+        if (dto.WfhCheckInTime.HasValue && dto.WfhCheckOutTime.HasValue && dto.WfhCheckOutTime.Value <= dto.WfhCheckInTime.Value)
+        {
+            return Fail("WFH_INVALID_TIMINGS", "Check-out time must be later than check-in time.");
+        }
+
+        if (dto.OfficeCheckInTime.HasValue && dto.OfficeCheckOutTime.HasValue && dto.OfficeCheckOutTime.Value <= dto.OfficeCheckInTime.Value)
+        {
+            return Fail("OFFICE_INVALID_TIMINGS", "Office check-out time must be later than check-in time.");
+        }
+
+        var schedule = await effectiveSchedules.ResolveAsync(CompanyId, employee, date);
+        var tz = schedule?.TimeZoneId ?? policy.TimeZoneId ?? "Asia/Kolkata";
+
+        DateTime? verifiedWfhIn = dto.WfhCheckInTime.HasValue ? AttendanceMutationValidator.ToScheduleUtc(date, dto.WfhCheckInTime.Value, tz) : null;
+        DateTime? verifiedWfhOut = dto.WfhCheckOutTime.HasValue ? AttendanceMutationValidator.ToScheduleUtc(date, dto.WfhCheckOutTime.Value, tz) : null;
+        decimal? verifiedWfhHours = (verifiedWfhIn.HasValue && verifiedWfhOut.HasValue && verifiedWfhOut > verifiedWfhIn)
+            ? Math.Round((decimal)(verifiedWfhOut.Value - verifiedWfhIn.Value).TotalHours, 2)
+            : null;
+
+        if (!verifiedWfhIn.HasValue && priorWfhCheckIn.HasValue)
+        {
+            verifiedWfhIn = priorWfhCheckIn;
+            verifiedWfhOut = priorWfhCheckOut;
+            verifiedWfhHours = priorWfhTotalHours;
+        }
+
+        if (durationType == "FullDay" && verifiedWfhHours.HasValue && verifiedWfhHours.Value < policy.HalfDayMinimumHours)
+        {
+            return Fail("WFH_INSUFFICIENT_HOURS", $"Verified WFH duration ({verifiedWfhHours.Value:0.##} hr(s)) is below the required minimum threshold of {policy.HalfDayMinimumHours:0.##} hours.");
+        }
 
         // Create the pre-approved WorkFromHomeRequest
         var request = new WorkFromHomeRequest
@@ -2378,10 +2538,11 @@ public sealed class WorkFromHomeService(
         await attendanceSegments.DeleteAll(Builders<AttendanceDaySegment>.Filter.Where(x =>
             x.CompanyId == CompanyId && x.UserId == employee.UserId && x.Date >= date && x.Date < date.AddDays(1)));
 
+        AttendanceDaySegment? compSegment = null;
         if (grantType is "WfhWfo" or "WfoWfh")
         {
             var compSegmentName = grantType == "WfhWfo" ? "SECOND_HALF" : "FIRST_HALF";
-            var compSegment = new AttendanceDaySegment
+            compSegment = new AttendanceDaySegment
             {
                 CompanyId = CompanyId,
                 UserId = employee.UserId,
@@ -2394,23 +2555,27 @@ public sealed class WorkFromHomeService(
                 UpdatedAtUtc = DateTime.UtcNow,
                 Version = 1
             };
-            if (dto.OfficeCheckInTime.HasValue) compSegment.CheckInTime = DateTime.SpecifyKind(date.Add(dto.OfficeCheckInTime.Value), DateTimeKind.Utc);
-            if (dto.OfficeCheckOutTime.HasValue) compSegment.CheckOutTime = DateTime.SpecifyKind(date.Add(dto.OfficeCheckOutTime.Value), DateTimeKind.Utc);
+            if (dto.OfficeCheckInTime.HasValue) compSegment.CheckInTime = AttendanceMutationValidator.ToScheduleUtc(date, dto.OfficeCheckInTime.Value, tz);
+            if (dto.OfficeCheckOutTime.HasValue) compSegment.CheckOutTime = AttendanceMutationValidator.ToScheduleUtc(date, dto.OfficeCheckOutTime.Value, tz);
+            if (compSegment.CheckInTime.HasValue && compSegment.CheckOutTime.HasValue && compSegment.CheckOutTime > compSegment.CheckInTime)
+            {
+                compSegment.TotalHours = Math.Round((decimal)(compSegment.CheckOutTime.Value - compSegment.CheckInTime.Value).TotalHours, 2);
+            }
             await attendanceSegments.AddOne(compSegment);
         }
         else if (grantType is "WfhHd" or "HdWfh")
         {
             var compSegmentName = grantType == "WfhHd" ? "SECOND_HALF" : "FIRST_HALF";
-            var compSegment = new AttendanceDaySegment
+            compSegment = new AttendanceDaySegment
             {
                 CompanyId = CompanyId,
                 UserId = employee.UserId,
                 EmployeeId = employee.EmployeeId,
                 Date = date,
                 Segment = compSegmentName,
-                Status = "HD",
+                Status = !string.IsNullOrWhiteSpace(dto.LeaveStatusCode) ? dto.LeaveStatusCode.Trim().ToUpperInvariant() : "HD",
                 SourceType = "ADMIN_MANUAL",
-                Remarks = "Half-day companion to administrative WFH grant",
+                Remarks = $"Half-day leave ({dto.LeaveStatusCode ?? "HD"}) companion to administrative WFH grant",
                 UpdatedAtUtc = DateTime.UtcNow,
                 Version = 1
             };
@@ -2420,6 +2585,144 @@ public sealed class WorkFromHomeService(
         var changedDates = new List<DateTime>();
         var reconcileResult = await ReconcileApproved(request, employee, policy, 1, null, changedDates);
         if (!reconcileResult.Success) return reconcileResult;
+
+        var wfhSegmentName = durationType == "FirstHalf" ? "FIRST_HALF" : durationType == "SecondHalf" ? "SECOND_HALF" : null;
+        AttendanceDaySegment? createdWfhSegment = null;
+        if (wfhSegmentName != null)
+        {
+            createdWfhSegment = await attendanceSegments.FirstOrDefault(x =>
+                x.CompanyId == CompanyId && x.UserId == employee.UserId &&
+                x.Date >= date && x.Date < date.AddDays(1) && x.Segment == wfhSegmentName);
+        }
+
+        var dailyRow = await attendance.FirstOrDefault(x =>
+            x.CompanyId == CompanyId && x.UserId == employee.UserId &&
+            x.Date >= date && x.Date < date.AddDays(1));
+
+        decimal finalWfhHours = 0m;
+        bool hasSufficientWfhHours = false;
+
+        if (createdWfhSegment != null && (verifiedWfhIn.HasValue || verifiedWfhOut.HasValue))
+        {
+            createdWfhSegment.CheckInTime = verifiedWfhIn;
+            createdWfhSegment.CheckOutTime = verifiedWfhOut;
+            createdWfhSegment.TotalHours = verifiedWfhHours;
+            if (verifiedWfhHours.HasValue) finalWfhHours = verifiedWfhHours.Value;
+            hasSufficientWfhHours = verifiedWfhHours.HasValue && verifiedWfhHours.Value >= policy.HalfDayMinimumHours;
+            if (hasSufficientWfhHours)
+            {
+                createdWfhSegment.Status = "WFH";
+                createdWfhSegment.Remarks = dto.WfhCheckInTime.HasValue
+                    ? $"Verified by HR Admin attendance grant: {dto.Remarks.Trim()}"
+                    : (priorWfhRemarks ?? $"Verified WFH attendance: {verifiedWfhHours:0.##} hr(s)");
+            }
+            else if (verifiedWfhOut.HasValue && verifiedWfhHours.HasValue && verifiedWfhHours.Value < policy.HalfDayMinimumHours)
+            {
+                createdWfhSegment.Status = "A";
+                createdWfhSegment.Remarks = $"Clocked out early ({verifiedWfhHours:0.##} hr(s) worked; below required half-day) - HR Regularized";
+            }
+            createdWfhSegment.Version++;
+            await attendanceSegments.GetCollection().ReplaceOneAsync(x => x.AttendanceDaySegmentId == createdWfhSegment.AttendanceDaySegmentId, createdWfhSegment);
+        }
+        var grace = schedule is null ? TimeSpan.FromMinutes(15) : TimeSpan.FromMinutes(Math.Max(schedule.GraceMinutes, 0));
+        var lateArrivalBoundary = schedule?.LateArrivalAfter ?? (schedule is null ? new TimeSpan(9, 15, 0) : schedule.StartTime.Add(grace));
+        var earlyDepartureBoundary = schedule?.EarlyDepartureBefore ?? (schedule is null ? new TimeSpan(17, 45, 0) : schedule.EndTime.Subtract(grace));
+
+        if (durationType == "FullDay" && dailyRow != null && (verifiedWfhIn.HasValue || verifiedWfhOut.HasValue))
+        {
+            dailyRow.CheckInTime = verifiedWfhIn;
+            dailyRow.CheckOutTime = verifiedWfhOut;
+            dailyRow.TotalHours = verifiedWfhHours;
+            if (verifiedWfhHours.HasValue) finalWfhHours = verifiedWfhHours.Value;
+            hasSufficientWfhHours = verifiedWfhHours.HasValue && verifiedWfhHours.Value >= policy.FullDayMinimumHours;
+
+            // Evaluate Late Arrival against effective schedule
+            if (dto.WfhCheckInTime.HasValue)
+            {
+                dailyRow.LateCount = dto.WfhCheckInTime.Value > lateArrivalBoundary ? 1 : 0;
+            }
+
+            // Evaluate Early Departure against effective schedule
+            if (dto.WfhCheckOutTime.HasValue)
+            {
+                dailyRow.EarlyExitCount = dto.WfhCheckOutTime.Value < earlyDepartureBoundary ? 1 : 0;
+            }
+
+            if (hasSufficientWfhHours)
+            {
+                dailyRow.Status = policy.FullDayAttendanceStatusCode ?? "WFH";
+                var infractionTag = (dailyRow.LateCount > 0 && dailyRow.EarlyExitCount > 0) ? " (LHD+ED)"
+                    : dailyRow.LateCount > 0 ? " (Late Arrival)"
+                    : dailyRow.EarlyExitCount > 0 ? " (Early Departure)"
+                    : "";
+                dailyRow.Remarks = $"Verified by HR Admin attendance grant: {dto.Remarks.Trim()}{infractionTag}";
+            }
+            dailyRow.Version++;
+            await attendance.GetCollection().ReplaceOneAsync(x => x.AttendanceId == dailyRow.AttendanceId, dailyRow);
+        }
+
+        if (dailyRow != null && (grantType is "WfhWfo" or "WfoWfh"))
+        {
+            var officeIn = compSegment?.CheckInTime;
+            var officeOut = compSegment?.CheckOutTime;
+            var officeHours = compSegment?.TotalHours ?? 0m;
+            var wfhIn = createdWfhSegment?.CheckInTime;
+            var wfhOut = createdWfhSegment?.CheckOutTime;
+            var wfhHours = createdWfhSegment?.TotalHours ?? 0m;
+
+            var allIns = new[] { officeIn, wfhIn }.Where(x => x.HasValue).Select(x => x!.Value).ToList();
+            var allOuts = new[] { officeOut, wfhOut }.Where(x => x.HasValue).Select(x => x!.Value).ToList();
+
+            dailyRow.CheckInTime = allIns.Any() ? allIns.Min() : null;
+            dailyRow.CheckOutTime = allOuts.Any() ? allOuts.Max() : null;
+            var combinedHours = Math.Round(officeHours + wfhHours, 2);
+            dailyRow.TotalHours = combinedHours > 0m ? combinedHours : null;
+
+            dailyRow.Status = policy.WfhWfoAttendanceStatusCode ?? "WFH+WFO";
+            dailyRow.RemarkCode = "WFH_WFO_COMBINATION";
+
+            var firstSessionIn = grantType == "WfoWfh" ? dto.OfficeCheckInTime : dto.WfhCheckInTime;
+            if (firstSessionIn.HasValue)
+            {
+                dailyRow.LateCount = firstSessionIn.Value > lateArrivalBoundary ? 1 : 0;
+            }
+
+            var secondSessionOut = grantType == "WfoWfh" ? dto.WfhCheckOutTime : dto.OfficeCheckOutTime;
+            if (secondSessionOut.HasValue)
+            {
+                dailyRow.EarlyExitCount = secondSessionOut.Value < earlyDepartureBoundary ? 1 : 0;
+            }
+            else if (hasSufficientWfhHours || combinedHours >= 4.0m)
+            {
+                dailyRow.EarlyExitCount = 0;
+            }
+
+            var infractionTag = (dailyRow.LateCount > 0 && dailyRow.EarlyExitCount > 0) ? " (LHD+ED)"
+                : dailyRow.LateCount > 0 ? " (Late Arrival)"
+                : dailyRow.EarlyExitCount > 0 ? " (Early Departure)"
+                : "";
+            dailyRow.Remarks = $"Administrative WFH grant: {dto.Remarks.Trim()}{infractionTag}";
+
+            dailyRow.Version++;
+            await attendance.GetCollection().ReplaceOneAsync(x => x.AttendanceId == dailyRow.AttendanceId, dailyRow);
+        }
+
+        if (hasSufficientWfhHours || finalWfhHours >= policy.HalfDayMinimumHours)
+        {
+            var pendingHoursExceptions = await exceptions.GetAll(x =>
+                x.CompanyId == CompanyId && x.EmployeeId == employee.EmployeeId &&
+                x.AttendanceDate == date && x.ExceptionType == "WFH_INSUFFICIENT_HOURS" &&
+                x.Status == "PENDING_REVIEW");
+
+            foreach (var exc in pendingHoursExceptions)
+            {
+                exc.Status = "RESOLVED";
+                exc.Resolution = $"Resolved by HR Admin verified attendance grant ({dto.Remarks.Trim()}). Hours verified: {finalWfhHours:0.##}h.";
+                exc.ReviewedBy = UserId;
+                exc.ReviewedAt = DateTime.UtcNow;
+                await exceptions.GetCollection().ReplaceOneAsync(x => x.Id == exc.Id, exc);
+            }
+        }
 
         await InvalidateSummary(employee, date);
         return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = "Work from home granted successfully with an audited record." };
@@ -2502,15 +2805,31 @@ public sealed class WorkFromHomeService(
         if (checkIn)
         {
             if (checkInTime.HasValue) return Fail("WFH_DUPLICATE_CHECK_IN", "Check-in was already recorded.");
-            if (row is not null) { row.CheckInTime = now; row.Remarks = $"Checked in through employee WFH portal ({requestId})"; }
+            var grace = schedule is null ? TimeSpan.FromMinutes(15) : TimeSpan.FromMinutes(Math.Max(schedule.GraceMinutes, 0));
+            var lateArrivalBoundary = schedule?.LateArrivalAfter ?? (schedule is null ? new TimeSpan(9, 15, 0) : schedule.StartTime.Add(grace));
+            var isLate = companyNow.TimeOfDay > lateArrivalBoundary;
+            var lateTag = isLate ? " (Late Arrival)" : "";
+
+            if (row is not null)
+            {
+                row.CheckInTime = now;
+                if (isLate) row.LateCount = 1;
+                row.Remarks = $"Checked in through employee WFH portal ({requestId}){lateTag}";
+            }
             else
             {
                 segment!.CheckInTime = now;
-                segment.Remarks = $"Checked in through employee WFH portal ({requestId})";
+                segment.Remarks = $"Checked in through employee WFH portal ({requestId}){lateTag}";
                 segment.UpdatedAtUtc = now;
                 if (dailyRow is not null)
                 {
-                    dailyRow.CheckInTime = now;
+                    var oppositeSegment = await attendanceSegments.FirstOrDefault(x =>
+                        x.CompanyId == CompanyId && x.UserId == UserId && x.Date >= day && x.Date < day.AddDays(1) && x.Segment != segment!.Segment);
+
+                    dailyRow.CheckInTime = (oppositeSegment?.CheckInTime.HasValue == true && oppositeSegment.CheckInTime.Value < now)
+                        ? oppositeSegment.CheckInTime.Value
+                        : now;
+                    if (isLate) dailyRow.LateCount = 1;
                     dailyRow.Remarks = segment.Remarks;
                     dailyRow.Version++;
                 }
@@ -2534,6 +2853,10 @@ public sealed class WorkFromHomeService(
             var workedMinutes = Math.Max(0, elapsedMinutes - breakMinutes);
             var verifiedHours = Math.Round(workedMinutes / 60m, 2, MidpointRounding.AwayFromZero);
 
+            var grace = schedule is null ? TimeSpan.FromMinutes(15) : TimeSpan.FromMinutes(Math.Max(schedule.GraceMinutes, 0));
+            var earlyDepartureBoundary = schedule?.EarlyDepartureBefore ?? (schedule is null ? new TimeSpan(17, 45, 0) : schedule.EndTime.Subtract(grace));
+            var isEarly = companyNow.TimeOfDay < earlyDepartureBoundary;
+
             var chosenType = checkOutDto?.AttendanceType?.Trim();
             var userRemarks = !string.IsNullOrWhiteSpace(checkOutDto?.Remarks) ? $" - Note: {checkOutDto.Remarks.Trim()}" : "";
 
@@ -2542,6 +2865,10 @@ public sealed class WorkFromHomeService(
                 row.CheckOutTime = now;
                 row.TotalHours = verifiedHours;
                 row.BreakMinutes = breakMinutes;
+                if (isEarly || workedMinutes < requiredHalfDayMinutes)
+                {
+                    row.EarlyExitCount = 1;
+                }
 
                 if (workedMinutes >= requiredFullDayMinutes)
                 {
@@ -2599,18 +2926,31 @@ public sealed class WorkFromHomeService(
                     row.RemarkCode = "WFH_EARLY_EXIT";
                     row.Remarks = $"Checked out through employee WFH portal (early exit: {verifiedHours:0.##} hr(s) worked; below {policy.HalfDayMinimumHours:0.##}h minimum threshold){userRemarks} - Pending HR/Admin regularisation ({requestId})";
 
+                    var payrollMonth = new DateTime(day.Year, day.Month, 1);
                     var existingExc = await exceptions.FirstOrDefault(x =>
-                        x.CompanyId == CompanyId && x.UserId == UserId &&
-                        x.AttendanceDate == day && x.LeaveRequestId == requestId &&
+                        x.CompanyId == CompanyId && x.EmployeeId == employee.EmployeeId &&
+                        x.PayrollMonth == payrollMonth &&
                         x.ExceptionType == "WFH_INSUFFICIENT_HOURS");
-                    if (existingExc is null)
+                    if (existingExc is not null)
+                    {
+                        existingExc.AttendanceDate = day;
+                        if (!existingExc.AffectedDates.Contains(day)) existingExc.AffectedDates.Add(day);
+                        existingExc.LeaveRequestId = requestId;
+                        existingExc.ExistingAttendanceId = row.AttendanceId;
+                        existingExc.ExistingStatus = row.Status;
+                        existingExc.SourceVersion = row.SourceVersion;
+                        existingExc.Status = "PENDING_REVIEW";
+                        existingExc.Reason = $"WFH check-out was completed with insufficient hours ({verifiedHours:0.##}h worked; below {policy.HalfDayMinimumHours:0.##}h half-day requirement). Pending HR/Admin regularization.";
+                        insufficientHoursException = existingExc;
+                    }
+                    else
                     {
                         insufficientHoursException = new AttendancePayrollException
                         {
                             CompanyId = CompanyId,
                             UserId = UserId,
                             EmployeeId = employee.EmployeeId,
-                            PayrollMonth = new DateTime(day.Year, day.Month, 1),
+                            PayrollMonth = payrollMonth,
                             AttendanceDate = day,
                             AffectedDates = [day],
                             ExceptionType = "WFH_INSUFFICIENT_HOURS",
@@ -2639,18 +2979,31 @@ public sealed class WorkFromHomeService(
                     segment.Status = "A";
                     segment.Remarks = $"Clocked out early ({verifiedHours:0.##} hr(s) worked; below required half-day){userRemarks} - Pending HR/Admin regularisation ({requestId})";
 
+                    var payrollMonth = new DateTime(day.Year, day.Month, 1);
                     var existingExc = await exceptions.FirstOrDefault(x =>
-                        x.CompanyId == CompanyId && x.UserId == UserId &&
-                        x.AttendanceDate == day && x.LeaveRequestId == requestId &&
+                        x.CompanyId == CompanyId && x.EmployeeId == employee.EmployeeId &&
+                        x.PayrollMonth == payrollMonth &&
                         x.ExceptionType == "WFH_INSUFFICIENT_HOURS");
-                    if (existingExc is null)
+                    if (existingExc is not null)
+                    {
+                        existingExc.AttendanceDate = day;
+                        if (!existingExc.AffectedDates.Contains(day)) existingExc.AffectedDates.Add(day);
+                        existingExc.LeaveRequestId = requestId;
+                        existingExc.ExistingAttendanceId = segment.AttendanceDaySegmentId;
+                        existingExc.ExistingStatus = segment.Status;
+                        existingExc.SourceVersion = segment.SourceVersion;
+                        existingExc.Status = "PENDING_REVIEW";
+                        existingExc.Reason = $"Half-day WFH check-out was completed with insufficient hours ({verifiedHours:0.##}h worked; below required half-day). Pending HR/Admin regularization.";
+                        insufficientHoursException = existingExc;
+                    }
+                    else
                     {
                         insufficientHoursException = new AttendancePayrollException
                         {
                             CompanyId = CompanyId,
                             UserId = UserId,
                             EmployeeId = employee.EmployeeId,
-                            PayrollMonth = new DateTime(day.Year, day.Month, 1),
+                            PayrollMonth = payrollMonth,
                             AttendanceDate = day,
                             AffectedDates = [day],
                             ExceptionType = "WFH_INSUFFICIENT_HOURS",
@@ -2666,13 +3019,29 @@ public sealed class WorkFromHomeService(
                 }
                 if (dailyRow is not null && !checkIn)
                 {
-                    dailyRow.CheckInTime = segment.CheckInTime;
-                    dailyRow.CheckOutTime = segment.CheckOutTime;
-                    dailyRow.TotalHours = segment.TotalHours;
+                    var oppositeSegment = await attendanceSegments.FirstOrDefault(x =>
+                        x.CompanyId == CompanyId && x.UserId == UserId && x.Date >= day && x.Date < day.AddDays(1) && x.Segment != segment!.Segment);
+
+                    var earliestIn = (segment.CheckInTime.HasValue && oppositeSegment?.CheckInTime.HasValue == true)
+                        ? (segment.CheckInTime.Value < oppositeSegment.CheckInTime.Value ? segment.CheckInTime : oppositeSegment.CheckInTime)
+                        : (segment.CheckInTime ?? oppositeSegment?.CheckInTime);
+
+                    var latestOut = (segment.CheckOutTime.HasValue && oppositeSegment?.CheckOutTime.HasValue == true)
+                        ? (segment.CheckOutTime.Value > oppositeSegment.CheckOutTime.Value ? segment.CheckOutTime : oppositeSegment.CheckOutTime)
+                        : (segment.CheckOutTime ?? oppositeSegment?.CheckOutTime);
+
+                    var totalHoursCombined = Math.Round((segment.TotalHours ?? 0m) + (oppositeSegment?.TotalHours ?? 0m), 2);
+
+                    dailyRow.CheckInTime = earliestIn;
+                    dailyRow.CheckOutTime = latestOut;
+                    dailyRow.TotalHours = totalHoursCombined > 0m ? totalHoursCombined : segment.TotalHours;
+                    if (isEarly || workedMinutes < requiredHalfDayMinutes)
+                    {
+                        dailyRow.EarlyExitCount = 1;
+                    }
                     if (workedMinutes < requiredHalfDayMinutes)
                     {
                         dailyRow.Status = "A";
-                        dailyRow.EarlyExitCount = 1;
                         dailyRow.RemarkCode = "WFH_EARLY_EXIT";
                         dailyRow.Remarks = segment.Remarks;
                     }
@@ -2707,7 +3076,11 @@ public sealed class WorkFromHomeService(
                     }
                 }
                 if (insufficientHoursException is not null)
-                    await exceptions.GetCollection().InsertOneAsync(transaction, insufficientHoursException, cancellationToken: cancellationToken);
+                    await exceptions.GetCollection().ReplaceOneAsync(transaction,
+                        Builders<AttendancePayrollException>.Filter.Where(x => x.Id == insufficientHoursException.Id),
+                        insufficientHoursException,
+                        new ReplaceOptions { IsUpsert = true },
+                        cancellationToken: cancellationToken);
                 await InsertOutboxEventsAsync(transaction, [auditEvent], cancellationToken);
                 if (!checkIn)
                     await summaries.GetCollection().DeleteManyAsync(transaction,
@@ -2719,7 +3092,7 @@ public sealed class WorkFromHomeService(
         }
         catch (InvalidOperationException ex) when (ex.Message == "WFH_ATTENDANCE_CHANGED")
         { return Fail("WFH_ATTENDANCE_CHANGED", "Attendance changed while recording WFH time. Refresh and try again.", StatusCodes.Status409Conflict); }
-        catch (Exception ex) when (ex is MongoCommandException mongoException && (mongoException.Code == 20 || mongoException.Code == 263))
+        catch (Exception ex) when (IsTransactionUnsupported(ex))
         {
             if (row is not null)
             {
@@ -2740,7 +3113,10 @@ public sealed class WorkFromHomeService(
                 }
             }
             if (insufficientHoursException is not null)
-                await exceptions.GetCollection().InsertOneAsync(insufficientHoursException);
+                await exceptions.GetCollection().ReplaceOneAsync(
+                    Builders<AttendancePayrollException>.Filter.Where(x => x.Id == insufficientHoursException.Id),
+                    insufficientHoursException,
+                    new ReplaceOptions { IsUpsert = true });
             await InsertOutboxEventsAsync(null, [auditEvent], CancellationToken.None);
             if (!checkIn)
                 await summaries.GetCollection().DeleteManyAsync(
@@ -2748,8 +3124,6 @@ public sealed class WorkFromHomeService(
                         x.EmployeeId == employee.EmployeeId && x.PayrollMonth == new DateTime(day.Year, day.Month, 1) && !x.IsLocked));
             return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = checkIn ? "WFH check-in recorded." : "WFH check-out recorded." };
         }
-        catch (Exception ex) when (ex is NotSupportedException || ex is MongoCommandException mongoException && mongoException.Code == 20)
-        { return Fail("WFH_TRANSACTION_REQUIRED", "WFH clock actions require MongoDB transaction support. No attendance changes were applied.", StatusCodes.Status503ServiceUnavailable); }
         catch
         { return Fail("WFH_CLOCK_WRITE_FAILED", "WFH time could not be recorded. No attendance changes were applied.", StatusCodes.Status503ServiceUnavailable); }
         return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = checkIn ? "WFH check-in recorded." : "WFH check-out recorded." };
@@ -3043,7 +3417,7 @@ public sealed class WorkFromHomeService(
         }
 
         var hasPortalClock = row.Remarks != null && (row.Remarks.Contains("Checked in through employee WFH portal") || row.Remarks.Contains("Checked out through employee WFH portal"));
-        if (!hasPortalClock && (AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent(prevSourceType) || isNewRow))
+        if (!hasPortalClock && (AttendanceSourceTransitionPolicy.IsReplaceableDefaultPresent(prevSourceType) || isNewRow || request.ReasonCode == "ADMIN_GRANT"))
         {
             if (oppositeSegment is not null && oppositeSegment.CheckInTime.HasValue)
             {
@@ -3617,6 +3991,12 @@ public sealed class WorkFromHomeService(
         catch (TimeZoneNotFoundException) { return utc.Date; }
         catch (InvalidTimeZoneException) { return utc.Date; }
     }
+    private static TimeSpan CompanyTimeOfDay(DateTime value, string? timeZoneId)
+    {
+        var utc = value.Kind == DateTimeKind.Utc ? value : value.ToUniversalTime();
+        try { return TimeZoneInfo.ConvertTimeFromUtc(utc, TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(timeZoneId) ? "UTC" : timeZoneId)).TimeOfDay; }
+        catch { return utc.TimeOfDay; }
+    }
     private static bool TryResolveCompanyLocalTime(DateTime businessDate, TimeSpan time, string? timeZoneId, out DateTime utc)
     {
         utc = default;
@@ -3635,8 +4015,8 @@ public sealed class WorkFromHomeService(
     private static string ReasonLabel(string? code) => (code ?? "OTHER").Trim().ToUpperInvariant() switch { "PERSONAL" => "Personal", "MEDICAL" => "Medical", "FAMILY" => "Family", "HOME_MAINTENANCE" => "Home maintenance", "TRAVEL_DISRUPTION" => "Travel disruption", "OPERATIONAL" => "Operational", "MANAGER_INSTRUCTION" => "Manager instruction", _ => "Other" };
     private static string DurationLabel(string? duration) => duration switch { "FirstHalf" => "First half", "SecondHalf" => "Second half", _ => "Full day" };
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim()[..Math.Min(value.Trim().Length, 500)];
-    private static Result Fail(string code, string message, int statusCode = StatusCodes.Status400BadRequest) => new() { Success = false, StatusCode = statusCode, Message = $"{code}: {message}" };
-    private static Result<T> Fail<T>(string code, string message, int statusCode = StatusCodes.Status200OK) => new() { Success = false, StatusCode = statusCode, Message = $"{code}: {message}" };
+    private static Result Fail(string code, string message, int statusCode = StatusCodes.Status400BadRequest) => new() { Success = false, StatusCode = statusCode, Message = $"{code}: {message}", ErrorCode = code };
+    private static Result<T> Fail<T>(string code, string message, int statusCode = StatusCodes.Status200OK) => new() { Success = false, StatusCode = statusCode, Message = $"{code}: {message}", ErrorCode = code };
     private static Result<T> Ok<T>(T value) => new() { Success = true, MethodResult = value };
     private static WorkFromHomePolicyDto Map(WorkFromHomePolicy x) => new() { IsEnabled=x.IsEnabled, MaxDaysPerMonth=x.MaxDaysPerMonth, MaxDaysPerWeek=x.MaxDaysPerWeek, MaxConsecutiveDays=x.MaxConsecutiveDays, MinimumAdvanceNoticeHours=x.MinimumAdvanceNoticeHours, AllowBackdatedRequest=x.AllowBackdatedRequest, MaximumBackdatedDays=x.MaximumBackdatedDays, AllowHalfDay=x.AllowHalfDay, AllowMixedDay=x.AllowMixedDay, ManagerApprovalRequired=x.ManagerApprovalRequired, AllowManagerSelfApproval=x.AllowManagerSelfApproval, AllowOnWeeklyOff=x.AllowOnWeeklyOff, AllowOnHoliday=x.AllowOnHoliday, RequireReason=x.RequireReason, RequireAttachment=x.RequireAttachment, ApplyToAllEmployees=x.ApplyToAllEmployees, ApplicableDepartments=x.ApplicableDepartments ?? [], ApplicableEmployeeIds=x.ApplicableEmployeeIds ?? [], ExcludedEmployeeIds=x.ExcludedEmployeeIds ?? [], ApplicableEmploymentTypes=x.ApplicableEmploymentTypes ?? [], EffectiveFrom=x.EffectiveFrom, EffectiveTo=x.EffectiveTo, AllowedCheckInFrom=x.AllowedCheckInFrom, AllowedCheckInUntil=x.AllowedCheckInUntil, AllowedCheckOutFrom=x.AllowedCheckOutFrom, AllowedCheckOutUntil=x.AllowedCheckOutUntil, OfficeStartTime=x.OfficeStartTime, OfficeEndTime=x.OfficeEndTime, TimeZoneId=x.TimeZoneId, FullDayMinimumHours=x.FullDayMinimumHours, HalfDayMinimumHours=x.HalfDayMinimumHours, FullDayAttendanceStatusCode=x.FullDayAttendanceStatusCode, HalfDayAttendanceStatusCode=x.HalfDayAttendanceStatusCode, MixedAttendanceStatusCode=x.MixedAttendanceStatusCode, WfhWfoAttendanceStatusCode=x.WfhWfoAttendanceStatusCode, WfhHdAttendanceStatusCode=x.WfhHdAttendanceStatusCode, SameDayCutoffTime=x.SameDayCutoffTime, SameDayGraceMinutes=x.SameDayGraceMinutes, AllowLateApplicationWithApproval=x.AllowLateApplicationWithApproval, AllowedDaysOfWeek=x.AllowedDaysOfWeek ?? [], BlockedDaysOfWeek=x.BlockedDaysOfWeek ?? [] };
     private async Task<Dictionary<string, string>> GetDepartmentNameMapAsync()

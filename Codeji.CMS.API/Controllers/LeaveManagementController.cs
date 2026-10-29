@@ -288,6 +288,15 @@ public class LeaveManagementController : BaseApiController
         return await _leaveManagementService.UpdateEmployeeLeaveBalance(LeaveBalanceRequestDto);
     }
 
+    [Route("trigger-monthly-accrual")]
+    [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Create)]
+    public async Task<IActionResult> TriggerMonthlyAccrual()
+    {
+        await _leaveManagementService.EmployeeLeaveBalanceAccrual();
+        return Ok(new { success = true, message = "Monthly leave accrual processed successfully." });
+    }
+
     [Route("GetAllEmployeeLeaveBalances")]
     [HttpPost]
     [ModulePermission(AppModule.LeaveManagement, Permission.View)]

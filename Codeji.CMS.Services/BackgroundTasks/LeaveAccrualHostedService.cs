@@ -19,35 +19,36 @@ public class LeaveAccrualHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Execute catch-up immediately upon application startup
+        _logger.LogInformation("Leave accrual hosted service started. Executing startup check...");
+        await RunJob(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var indiaNow = IndiaTime.Now;
-            DateTime nextRunIndia;
-            if (indiaNow.Day == 1)
-            {
-                _logger.LogInformation("Running leave accrual service on the 1st of the month in IST: {Now}", indiaNow);
-                await RunJob(stoppingToken);
-                nextRunIndia = new DateTime(indiaNow.Year, indiaNow.Month, 1).AddMonths(1);
-            }
-            else
-            {
-                nextRunIndia = new DateTime(indiaNow.Year, indiaNow.Month, 1).AddMonths(1);
-            }
+            // Schedule next execution for tomorrow at 00:05 AM IST
+            var nextRunIndia = indiaNow.Date.AddDays(1).AddMinutes(5);
             var nextRun = IndiaTime.ToUtc(nextRunIndia);
-            _logger.LogInformation("Leave accrual service next run: {NextRunIndia} IST ({NextRunUtc} UTC)", nextRunIndia, nextRun);
+            _logger.LogInformation("Next leave accrual check scheduled at: {NextRunIndia} IST ({NextRunUtc} UTC)", nextRunIndia, nextRun);
             var delay = nextRun - DateTime.UtcNow;
             if (delay <= TimeSpan.Zero)
             {
-                delay = TimeSpan.FromSeconds(1);
+                delay = TimeSpan.FromMinutes(1);
             }
 
             try
             {
                 await Task.Delay(delay, stoppingToken);
+                await RunJob(stoppingToken);
             }
             catch (TaskCanceledException)
             {
                 break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error in leave accrual service loop.");
+                await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
             }
         }
     }
@@ -59,6 +60,7 @@ public class LeaveAccrualHostedService : BackgroundService
             using var scope = _serviceProvider.CreateScope();
             var leaveServices = scope.ServiceProvider.GetRequiredService<ILeaveManagementService>();
             await leaveServices.EmployeeLeaveBalanceAccrual();
+            _logger.LogInformation("Leave accrual cycle completed successfully.");
         }
         catch (Exception ex)
         {
@@ -66,8 +68,3 @@ public class LeaveAccrualHostedService : BackgroundService
         }
     }
 }
-
-
-
-
-

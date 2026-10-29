@@ -1,3 +1,4 @@
+using Codeji.CMS.Services.Employees.Interface;
 using Microsoft.AspNetCore.Mvc;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Salary;
@@ -48,17 +49,37 @@ namespace Codeji.CMS.API.Controllers
         }
 
         [HttpGet("active/{userId}")]
-        public async Task<IActionResult> GetActiveSalary(Guid userId)
+        public async Task<IActionResult> GetActiveSalary(Guid userId, [FromServices] IRoleService roleService)
         {
-            var salary = await _salaryService.GetActiveSalaryAsync(CurrentContext.CompanyId(_httpContextAccessor), userId);
+            var currentUserId = CurrentContext.UserId(_httpContextAccessor);
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+
+            if (userId.ToString() != currentUserId)
+            {
+                var hasAccess = await roleService.VerifyUserAccess(
+                    AppModule.PayrollSettings, [Permission.View], currentUserId, companyId);
+                if (!hasAccess) return Forbid();
+            }
+
+            var salary = await _salaryService.GetActiveSalaryAsync(companyId, userId);
             if (salary == null) return NotFound(new { success = false, message = "No active salary found" });
             return Ok(new { success = true, data = salary });
         }
 
         [HttpGet("history/{userId}")]
-        public async Task<IActionResult> GetSalaryHistory(Guid userId)
+        public async Task<IActionResult> GetSalaryHistory(Guid userId, [FromServices] IRoleService roleService)
         {
-            var salaries = await _salaryService.GetSalaryHistoryAsync(CurrentContext.CompanyId(_httpContextAccessor), userId);
+            var currentUserId = CurrentContext.UserId(_httpContextAccessor);
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+
+            if (userId.ToString() != currentUserId)
+            {
+                var hasAccess = await roleService.VerifyUserAccess(
+                    AppModule.PayrollSettings, [Permission.View], currentUserId, companyId);
+                if (!hasAccess) return Forbid();
+            }
+
+            var salaries = await _salaryService.GetSalaryHistoryAsync(companyId, userId);
             return Ok(new { success = true, data = salaries });
         }
 

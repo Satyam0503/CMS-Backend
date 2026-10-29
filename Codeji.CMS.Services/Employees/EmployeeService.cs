@@ -2620,10 +2620,10 @@ namespace Codeji.CMS.Services.Employees
             var exit = await _employeeExitRepository.FirstOrDefault(x =>
                 x.CompanyId == companyId
                 && x.EmployeeExitId == request.EmployeeExitId
-                && x.IsActive
+                && (x.IsActive || EmployeeLifecycleStatuses.IsCompletedEmploymentStatus(x.Status))
                 && !x.IsDeleted
             );
-            if (exit is null || exit.Version != request.Version)
+            if (request is null || exit is null || exit.Version != request.Version)
                 return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             if (exit.EmployeeUserId == actorUserId)
                 return new Result { Success = false, Message = "SELF_EXIT_REVIEW_FORBIDDEN" };
@@ -2856,6 +2856,45 @@ namespace Codeji.CMS.Services.Employees
                         Message = "EMPLOYEE_LIFECYCLE_UPDATE_FAILED",
                     };
             }
+            if (saved.Success && request.Action == "Reject")
+            {
+                var employee = await _employeeRepository.FirstOrDefault(x =>
+                    x.CompanyId == companyId && x.UserId == exit.EmployeeUserId && !x.IsDeleted
+                );
+                if (employee is not null)
+                {
+                    employee.EmploymentStatus = "Active";
+                    employee.ExitDate = null;
+                    employee.LastWorkingDate = null;
+                    employee.UpdatedBy = actorUserId;
+                    employee.UpdatedDate = DateTime.UtcNow;
+                    if (employee.Lifecycle is not null)
+                    {
+                        var previousOffboarding = employee.Lifecycle.OffboardingStatus;
+                        employee.Lifecycle.EmploymentStatus = EmployeeLifecycleStatuses.Active;
+                        employee.Lifecycle.OffboardingStatus = EmployeeLifecycleStatuses.OffboardingNone;
+                        employee.Lifecycle.AvailabilityEffectiveFrom = DateTime.UtcNow;
+                        employee.Lifecycle.Version++;
+                        employee.Lifecycle.History.Add(
+                            new EmployeeLifecycleStatusHistory
+                            {
+                                Dimension = nameof(EmployeeLifecycleState.OffboardingStatus),
+                                PreviousValue = previousOffboarding,
+                                NewValue = EmployeeLifecycleStatuses.OffboardingNone,
+                                Reason = $"Resignation rejected: {request.Notes?.Trim()}",
+                                ChangedBy = actorUserId,
+                                ChangedAtUtc = DateTime.UtcNow,
+                            }
+                        );
+                    }
+                    await _employeeRepository.Update(
+                        Builders<EmpUser>.Filter.Where(x =>
+                            x.CompanyId == companyId && x.UserId == employee.UserId && !x.IsDeleted
+                        ),
+                        employee
+                    );
+                }
+            }
             if (
                 saved.Success
                 && request.Action == "JointDiscussion"
@@ -2883,6 +2922,8 @@ namespace Codeji.CMS.Services.Employees
         )
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId))
                 return new Result { Success = false, Message = "EXIT_DISCUSSION_INVALID" };
@@ -2892,7 +2933,7 @@ namespace Codeji.CMS.Services.Employees
                 && x.IsActive
                 && !x.IsDeleted
             );
-            if (exit is null || exit.Version != request.Version)
+            if (request is null || exit is null || exit.Version != request.Version)
                 return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             if (exit.EmployeeUserId != actorUserId || exit.Status != "DiscussionRequested")
                 return new Result
@@ -2973,6 +3014,8 @@ namespace Codeji.CMS.Services.Employees
         )
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (
                 request is null
@@ -2987,7 +3030,7 @@ namespace Codeji.CMS.Services.Employees
                 && x.IsActive
                 && !x.IsDeleted
             );
-            if (exit is null || exit.Version != request.Version)
+            if (request is null || exit is null || exit.Version != request.Version)
                 return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             if (
                 exit.Status != "DiscussionRequested"
@@ -3069,7 +3112,7 @@ namespace Codeji.CMS.Services.Employees
                 && x.IsActive
                 && !x.IsDeleted
             );
-            if (exit is null || exit.Version != request.Version)
+            if (request is null || exit is null || exit.Version != request.Version)
                 return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             if (selfOnly && exit.EmployeeUserId != actorUserId)
                 return new Result { Success = false, Message = "EXIT_WITHDRAW_FORBIDDEN" };
@@ -3154,7 +3197,7 @@ namespace Codeji.CMS.Services.Employees
             if (closed.Success && status is ("Withdrawn" or "Cancelled"))
             {
                 await RevokeFormerEmployeePortalTokens(companyId, exit.EmployeeExitId);
-                if (status == "Withdrawn")
+                if (status is "Withdrawn" or "Cancelled")
                 {
                     var employee = await _employeeRepository.FirstOrDefault(x =>
                         x.CompanyId == companyId && x.UserId == exit.EmployeeUserId && !x.IsDeleted
@@ -3166,6 +3209,37 @@ namespace Codeji.CMS.Services.Employees
                         employee.LastWorkingDate = null;
                         employee.UpdatedBy = actorUserId;
                         employee.UpdatedDate = DateTime.UtcNow;
+                        if (employee.Lifecycle is not null)
+                        {
+                            var prevEmployment = employee.Lifecycle.EmploymentStatus;
+                            var prevOffboarding = employee.Lifecycle.OffboardingStatus;
+                            employee.Lifecycle.EmploymentStatus = EmployeeLifecycleStatuses.Active;
+                            employee.Lifecycle.OffboardingStatus = EmployeeLifecycleStatuses.OffboardingNone;
+                            employee.Lifecycle.AvailabilityEffectiveFrom = DateTime.UtcNow;
+                            employee.Lifecycle.Version++;
+                            employee.Lifecycle.History.Add(
+                                new EmployeeLifecycleStatusHistory
+                                {
+                                    Dimension = nameof(EmployeeLifecycleState.EmploymentStatus),
+                                    PreviousValue = prevEmployment,
+                                    NewValue = EmployeeLifecycleStatuses.Active,
+                                    Reason = $"Employee exit {status.ToLowerInvariant()}",
+                                    ChangedBy = actorUserId,
+                                    ChangedAtUtc = DateTime.UtcNow,
+                                }
+                            );
+                            employee.Lifecycle.History.Add(
+                                new EmployeeLifecycleStatusHistory
+                                {
+                                    Dimension = nameof(EmployeeLifecycleState.OffboardingStatus),
+                                    PreviousValue = prevOffboarding,
+                                    NewValue = EmployeeLifecycleStatuses.OffboardingNone,
+                                    Reason = $"Employee exit {status.ToLowerInvariant()}",
+                                    ChangedBy = actorUserId,
+                                    ChangedAtUtc = DateTime.UtcNow,
+                                }
+                            );
+                        }
                         await _employeeRepository.Update(
                             Builders<EmpUser>.Filter.Where(x =>
                                 x.CompanyId == companyId
@@ -3185,6 +3259,8 @@ namespace Codeji.CMS.Services.Employees
         )
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (request is null || string.IsNullOrWhiteSpace(request.EmployeeExitId))
                 return new Result { Success = false, Message = "EXIT_WITHDRAWAL_INVALID" };
@@ -3705,6 +3781,8 @@ namespace Codeji.CMS.Services.Employees
         )
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (
                 request is null
@@ -3842,6 +3920,8 @@ namespace Codeji.CMS.Services.Employees
         )
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (
                 !await IsHrExitActor(companyId, actorUserId)
@@ -4145,6 +4225,8 @@ namespace Codeji.CMS.Services.Employees
         )
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (
                 request is null
@@ -4259,6 +4341,11 @@ namespace Codeji.CMS.Services.Employees
         /// ISSUE #11: Cancel a pending notice adjustment. Employees can cancel their own Pending requests;
         /// HR can cancel any pending adjustment. Cannot cancel Approved, Declined, or AwaitingEmployeeDecision statuses.
         /// </summary>
+        public Task<Result> CancelEmployeeExitNoticeAdjustment(CancelEmployeeExitNoticeAdjustmentRequest request) =>
+            request is null
+                ? Task.FromResult(new Result { Success = false, Message = "EXIT_REQUEST_INVALID" })
+                : CancelEmployeeExitNoticeAdjustment(request.EmployeeExitId, request.NoticeAdjustmentId, request.Version, request.Reason);
+
         public async Task<Result> CancelEmployeeExitNoticeAdjustment(
             string employeeExitId,
             string noticeAdjustmentId,
@@ -4964,7 +5051,7 @@ namespace Codeji.CMS.Services.Employees
                     || EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.Status)
                 )
             );
-            if (exit is null || exit.Version != request.Version)
+            if (request is null || exit is null || exit.Version != request.Version)
                 return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             if (DateTime.UtcNow.Date < exit.LastWorkingDate.Date)
                 return new Result { Success = false, Message = "LAST_WORKING_DATE_NOT_REACHED" };
@@ -5163,7 +5250,7 @@ namespace Codeji.CMS.Services.Employees
                     || EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.Status)
                 )
             );
-            if (exit is null || exit.Version != request.Version)
+            if (request is null || exit is null || exit.Version != request.Version)
                 return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             if (DateTime.UtcNow.Date < exit.LastWorkingDate.Date)
                 return new Result { Success = false, Message = "LAST_WORKING_DATE_NOT_REACHED" };
@@ -5272,12 +5359,12 @@ namespace Codeji.CMS.Services.Employees
                         + PayrollDeductionLineTotals.AdditionalAmount(payroll.DeductionLines)
                 : payrollRunSource!.DeductionAmount;
             settlement.SalaryPayable = salaryPayable;
-            settlement.Reimbursements = 0;
-            settlement.LeaveEncashment = 0;
-            settlement.BonusesAndIncentives = payrollBonus;
-            settlement.Deductions = deductions;
-            settlement.NoticeRecovery = approvedNoticeRecovery;
-            settlement.OutstandingDues = 0;
+            settlement.Reimbursements = request.Reimbursements >= 0 ? request.Reimbursements : 0;
+            settlement.LeaveEncashment = request.LeaveEncashment >= 0 ? request.LeaveEncashment : 0;
+            settlement.BonusesAndIncentives = request.BonusesAndIncentives > 0 ? request.BonusesAndIncentives : payrollBonus;
+            settlement.Deductions = request.Deductions > 0 ? request.Deductions : deductions;
+            settlement.NoticeRecovery = request.NoticeRecovery > 0 ? request.NoticeRecovery : approvedNoticeRecovery;
+            settlement.OutstandingDues = request.OutstandingDues >= 0 ? request.OutstandingDues : 0;
             settlement.SourcePayrollId = payroll?.Id;
             settlement.SourcePayrollMonth = payroll?.PayMonth ?? payrollRunSource?.PayrollMonth;
             settlement.SourcePayrollRunId = payrollRunSource?.PayrollRunId;
@@ -5336,7 +5423,7 @@ namespace Codeji.CMS.Services.Employees
                     || EmployeeLifecycleStatuses.CompletedEmploymentStatuses.Contains(x.Status)
                 )
             );
-            if (exit is null || exit.Version != request.Version)
+            if (request is null || exit is null || exit.Version != request.Version)
                 return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             var settlement = await _employeeFinalSettlementRepository!.FirstOrDefault(x =>
                 x.CompanyId == companyId && x.EmployeeExitId == exit.EmployeeExitId && !x.IsDeleted
@@ -5901,7 +5988,7 @@ namespace Codeji.CMS.Services.Employees
                 && x.IsActive
                 && !x.IsDeleted
             );
-            if (exit is null || exit.Version != request.Version)
+            if (request is null || exit is null || exit.Version != request.Version)
                 return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             var clearance = exit.Clearances.SingleOrDefault(x =>
                 x.ClearanceId == request.ClearanceId
@@ -6023,7 +6110,7 @@ namespace Codeji.CMS.Services.Employees
                         && x.EmployeeExitId == exit.EmployeeExitId
                         && x.Version == request.Version
                         && !x.IsDeleted
-                        && (x.IsActive || x.Status == "Resigned" || x.Status == "Terminated")
+                        && (x.IsActive || x.Status == "Resigned" || x.Status == "Terminated" || x.Status == "Completed" || x.Status == "Retired" || x.Status == "ContractEnded")
                     ),
                     exit
                 );
@@ -6104,7 +6191,7 @@ namespace Codeji.CMS.Services.Employees
                         && x.EmployeeExitId == exit.EmployeeExitId
                         && x.Version == request.Version
                         && !x.IsDeleted
-                        && (x.IsActive || x.Status == "Resigned" || x.Status == "Terminated")
+                        && (x.IsActive || x.Status == "Resigned" || x.Status == "Terminated" || x.Status == "Completed" || x.Status == "Retired" || x.Status == "ContractEnded")
                     ),
                     exit
                 );
@@ -6437,12 +6524,13 @@ namespace Codeji.CMS.Services.Employees
                 && !x.IsDeleted
             );
             var isHr = await IsHrExitActor(companyId, actorUserId);
-            if (
-                exit is null
-                || exit.Version != request.Version
-                || (exit.EmployeeUserId != actorUserId && !isHr)
-                || (!exit.IsActive && !isHr)
-            )
+            if (request is null || exit is null || exit.Version != request.Version)
+                return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
+            if (exit.Status is "Withdrawn" or "Cancelled" or "Rejected")
+                return new Result { Success = false, Message = "EXIT_CASE_INACTIVE" };
+            if (exit.EmployeeUserId != actorUserId && !isHr)
+                return new Result { Success = false, Message = "EXIT_EVIDENCE_FORBIDDEN" };
+            if (!exit.IsActive && !isHr && !EmployeeLifecycleStatuses.IsCompletedEmploymentStatus(exit.Status) && exit.Status != "Completed")
                 return new Result { Success = false, Message = "EXIT_EVIDENCE_FORBIDDEN" };
             var documentRequest = string.IsNullOrWhiteSpace(request.FormerEmployeeRequestId)
                 ? null
@@ -6522,7 +6610,7 @@ namespace Codeji.CMS.Services.Employees
                         && x.EmployeeExitId == exit.EmployeeExitId
                         && x.Version == request.Version
                         && !x.IsDeleted
-                        && (x.IsActive || x.Status == "Resigned" || x.Status == "Terminated")
+                        && (x.IsActive || x.Status == "Resigned" || x.Status == "Terminated" || x.Status == "Completed" || x.Status == "Retired" || x.Status == "ContractEnded")
                     ),
                     exit
                 );
@@ -6581,7 +6669,7 @@ namespace Codeji.CMS.Services.Employees
                         && x.EmployeeExitId == exit.EmployeeExitId
                         && x.Version == request.Version
                         && !x.IsDeleted
-                        && (x.IsActive || x.Status == "Resigned" || x.Status == "Terminated")
+                        && (x.IsActive || x.Status == "Resigned" || x.Status == "Terminated" || x.Status == "Completed" || x.Status == "Retired" || x.Status == "ContractEnded")
                     ),
                     exit
                 );
@@ -6642,7 +6730,7 @@ namespace Codeji.CMS.Services.Employees
                         && x.EmployeeExitId == exit.EmployeeExitId
                         && x.Version == request.Version
                         && !x.IsDeleted
-                        && (x.IsActive || x.Status == "Resigned" || x.Status == "Terminated")
+                        && (x.IsActive || x.Status == "Resigned" || x.Status == "Terminated" || x.Status == "Completed" || x.Status == "Retired" || x.Status == "ContractEnded")
                     ),
                     exit
                 );
@@ -6756,11 +6844,11 @@ namespace Codeji.CMS.Services.Employees
                     && x.EmployeeExitId == request.EmployeeExitId
                     && !x.IsDeleted
                 );
-            if (
-                exit is null
-                || exit.EmployeeUserId != actorUserId
-                || exit.Version != request.Version
-            )
+            if (request is null || exit is null || exit.Version != request.Version)
+                return new Result { Success = false, Message = "EXIT_ACKNOWLEDGEMENT_FORBIDDEN" };
+            if (exit.Status is "Withdrawn" or "Cancelled" or "Rejected" || !exit.IsActive)
+                return new Result { Success = false, Message = "EXIT_CASE_INACTIVE" };
+            if (exit.EmployeeUserId != actorUserId)
                 return new Result { Success = false, Message = "EXIT_ACKNOWLEDGEMENT_FORBIDDEN" };
             exit.PostExitAccess ??= new EmployeeExitPostExitAccess();
             exit.PostExitAccess.AcknowledgementStatus = "Acknowledged";
@@ -6812,15 +6900,25 @@ namespace Codeji.CMS.Services.Employees
                 && x.EmployeeExitId == request.EmployeeExitId
                 && !x.IsDeleted
             );
-            if (
-                exit is null
-                || exit.EmployeeUserId != actorUserId
-                || exit.Version != request.Version
-            )
+            if (request is null || exit is null || exit.Version != request.Version)
                 return new Result
                 {
                     Success = false,
                     Message = "FORMER_EMPLOYEE_REQUEST_FORBIDDEN",
+                };
+            if (exit.Status is "Withdrawn" or "Cancelled" or "Rejected")
+                return new Result { Success = false, Message = "EXIT_CASE_INACTIVE" };
+            if (exit.EmployeeUserId != actorUserId)
+                return new Result
+                {
+                    Success = false,
+                    Message = "FORMER_EMPLOYEE_REQUEST_FORBIDDEN",
+                };
+            if (!EmployeeLifecycleStatuses.IsCompletedEmploymentStatus(exit.Status) && exit.Status != "Completed")
+                return new Result
+                {
+                    Success = false,
+                    Message = "FORMER_EMPLOYEE_REQUEST_NOT_APPLICABLE",
                 };
             exit.FormerEmployeeRequests.Add(
                 new EmployeeExitFormerEmployeeRequest
@@ -6942,7 +7040,7 @@ namespace Codeji.CMS.Services.Employees
                 && x.IsActive
                 && !x.IsDeleted
             );
-            if (exit is null || exit.Version != request.Version)
+            if (request is null || exit is null || exit.Version != request.Version)
                 return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             var clearance = exit.Clearances.SingleOrDefault(x =>
                 x.ClearanceId == request.ClearanceId
@@ -6986,6 +7084,8 @@ namespace Codeji.CMS.Services.Employees
         )
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (!await IsHrExitActor(companyId, actorUserId) || request is null)
                 return new Result { Success = false, Message = "EXIT_INTERVIEW_FORBIDDEN" };
@@ -6995,7 +7095,7 @@ namespace Codeji.CMS.Services.Employees
                 && x.IsActive
                 && !x.IsDeleted
             );
-            if (exit is null || exit.Version != request.Version)
+            if (request is null || exit is null || exit.Version != request.Version)
                 return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             exit.ExitInterview = new EmployeeExitInterview
             {
@@ -7032,6 +7132,8 @@ namespace Codeji.CMS.Services.Employees
         )
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (
                 !await IsHrExitActor(companyId, actorUserId)
@@ -7050,7 +7152,7 @@ namespace Codeji.CMS.Services.Employees
                 && x.IsActive
                 && !x.IsDeleted
             );
-            if (exit is null || exit.Version != request.Version)
+            if (request is null || exit is null || exit.Version != request.Version)
                 return new Result { Success = false, Message = "EXIT_CASE_CHANGED_OR_NOT_FOUND" };
             var newOwner = await _employeeRepository.FirstOrDefault(x =>
                 x.CompanyId == companyId
@@ -7110,10 +7212,22 @@ namespace Codeji.CMS.Services.Employees
                 || !EmployeeLifecycleStatuses.IsCompletedEmploymentStatus(exit.Status)
             )
                 return new Result { Success = false, Message = "REJOIN_NOT_ALLOWED" };
-            if (
-                exit.PolicySnapshot?.AllowRejoin == false
-                || exit.ExitInterview?.IsRehireEligible != true
-            )
+            bool isEligibleForRehire;
+            if (exit.PolicySnapshot?.AllowRejoin == false)
+            {
+                isEligibleForRehire = false;
+            }
+            else if (exit.ExitInterview != null)
+            {
+                isEligibleForRehire = exit.ExitInterview.IsRehireEligible == true;
+            }
+            else
+            {
+                // Fallback to snapshotted offboarding policy allow-rejoin configuration when interview was omitted
+                isEligibleForRehire = exit.PolicySnapshot?.AllowRejoin ?? true;
+            }
+
+            if (!isEligibleForRehire)
                 return new Result { Success = false, Message = "REJOIN_NOT_ELIGIBLE" };
             var employee = await _employeeRepository.FirstOrDefault(x =>
                 x.CompanyId == companyId && x.UserId == exit.EmployeeUserId && !x.IsDeleted
@@ -7218,6 +7332,8 @@ namespace Codeji.CMS.Services.Employees
         )
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
+                return new Result { Success = false, Message = "EXIT_OFFBOARDING_MODULE_DISABLED" };
             var actorUserId = CurrentContext.UserId(_httpContextAccessor);
             if (
                 !await _roleService.VerifyUserAccess(
@@ -7230,15 +7346,14 @@ namespace Codeji.CMS.Services.Employees
                 return new Result { Success = false, Message = "EXIT_EXCEPTION_FORBIDDEN" };
             if (request is null || string.IsNullOrWhiteSpace(request.Reason))
                 return new Result { Success = false, Message = "EXIT_EXCEPTION_REASON_REQUIRED" };
-            // Exceptional completion is deliberately routed through the same atomic completion path.
-            // It can no longer bypass clearance, session-revocation, payroll, or audit safeguards.
             return await CompleteEmployeeExit(
                 new CompleteEmployeeExitRequest
                 {
                     EmployeeExitId = request.EmployeeExitId,
                     Version = request.Version,
-                    Notes = $"Exceptional completion request: {request.Reason.Trim()}",
-                }
+                    Notes = $"Exceptional completion override: {request.Reason.Trim()}",
+                },
+                isExceptionalOverride: true
             );
         }
 
@@ -7928,6 +8043,8 @@ namespace Codeji.CMS.Services.Employees
                         "CalculateSettlement",
                         "ApproveSettlement",
                         "MarkSettlementPaid",
+                        "GenerateDocuments",
+                        "RecordInterview",
                     ]);
                 if (
                     (
@@ -8305,7 +8422,10 @@ namespace Codeji.CMS.Services.Employees
             };
         }
 
-        public async Task<Result> CompleteEmployeeExit(CompleteEmployeeExitRequest request)
+        public Task<Result> CompleteEmployeeExit(CompleteEmployeeExitRequest request) =>
+            CompleteEmployeeExit(request, isExceptionalOverride: false);
+
+        public async Task<Result> CompleteEmployeeExit(CompleteEmployeeExitRequest request, bool isExceptionalOverride = false)
         {
             var companyId = CurrentContext.CompanyId(_httpContextAccessor);
             if (!await _roleService.IsModuleAccessibleForCompany(Codeji.CMS.Utility.Constraints.AppModule.Offboarding, companyId))
@@ -8350,19 +8470,22 @@ namespace Codeji.CMS.Services.Employees
                         : EmployeeLifecycleStatuses.Terminated
                 );
             if (
-                completedExitType == EmployeeLifecycleStatuses.Resigned
+                !isExceptionalOverride
+                && completedExitType == EmployeeLifecycleStatuses.Resigned
                 && exit.PolicySnapshot?.RequireResignationEvidence == true
                 && !exit.Evidence.Any(x => x.Category == "Resignation" && x.Status == "Verified")
             )
                 return new Result { Success = false, Message = "RESIGNATION_EVIDENCE_PENDING" };
             if (
-                completedExitType != EmployeeLifecycleStatuses.Deceased
+                !isExceptionalOverride
+                && completedExitType != EmployeeLifecycleStatuses.Deceased
                 && exit.PolicySnapshot?.RequireEmployeeAcknowledgement == true
                 && exit.PostExitAccess?.AcknowledgementStatus != "Acknowledged"
             )
                 return new Result { Success = false, Message = "EMPLOYEE_ACKNOWLEDGEMENT_PENDING" };
             if (
-                completedExitType != EmployeeLifecycleStatuses.Deceased
+                !isExceptionalOverride
+                && completedExitType != EmployeeLifecycleStatuses.Deceased
                 && (
                     string.IsNullOrWhiteSpace(exit.PostExitAccess?.PersonalEmail)
                     || exit.PostExitAccess.PersonalEmailVerified != true
@@ -8374,7 +8497,8 @@ namespace Codeji.CMS.Services.Employees
                     Message = "POST_EXIT_CONTACT_VERIFICATION_REQUIRED",
                 };
             if (
-                exit.Clearances.Any(x => x.IsMandatory && x.Status is not ("Completed" or "Waived"))
+                !isExceptionalOverride
+                && exit.Clearances.Any(x => x.IsMandatory && x.Status is not ("Completed" or "Waived"))
             )
                 return new Result { Success = false, Message = "MANDATORY_CLEARANCE_PENDING" };
             if (
@@ -8700,7 +8824,7 @@ namespace Codeji.CMS.Services.Employees
                                         session,
                                         Builders<LeaveRequest>.Filter.Where(x =>
                                             x.CompanyId == companyId
-                                            && x.EmployeeId == employee.EmployeeId
+                                            && (x.EmployeeId == employee.UserId || x.EmployeeId == employee.EmployeeId)
                                             && x.EndDate > exit.LastWorkingDate
                                             && (
                                                 x.Status == EnumsHelper.LeaveRequestStatus.Pending
@@ -8822,7 +8946,7 @@ namespace Codeji.CMS.Services.Employees
                     await _leaveRequestRepository.UpdateMany(
                         Builders<LeaveRequest>.Filter.Where(x =>
                             x.CompanyId == companyId
-                            && x.EmployeeId == employee.EmployeeId
+                            && (x.EmployeeId == employee.UserId || x.EmployeeId == employee.EmployeeId)
                             && x.EndDate > exit.LastWorkingDate
                             && (
                                 x.Status == EnumsHelper.LeaveRequestStatus.Pending
@@ -8863,34 +8987,63 @@ namespace Codeji.CMS.Services.Employees
             decimal Amount
         )> CalculateNoticeRecovery(string companyId, EmployeeExit exit, int shortfallDays)
         {
-            if (_employeePayrollRepository is null || shortfallDays <= 0)
-                return (false, 0, 0);
-            var payrolls = await _employeePayrollRepository.GetAll(x =>
-                x.CompanyId == companyId && x.UserId == exit.EmployeeUserId && x.IsProcessed
-            );
-            var payroll = payrolls.OrderByDescending(x => x.PayMonth).FirstOrDefault();
-            if (payroll is null)
-            {
-                // Fall back to active compensation structure if no processed monthly payroll run exists yet
-                var fallbackPayrolls = await _employeePayrollRepository.GetAll(x =>
-                    x.CompanyId == companyId && x.UserId == exit.EmployeeUserId
-                );
-                payroll = fallbackPayrolls.OrderByDescending(x => x.CreatedAt).FirstOrDefault();
-            }
-            if (payroll is null)
+            if (shortfallDays <= 0)
                 return (false, 0, 0);
 
             var basis = exit.PolicySnapshot?.NoticePaySalaryBasis ?? "GrossMonthly";
             var divisor = exit.PolicySnapshot?.NoticePayDailyRateDivisor ?? 30;
             if (divisor is < 1 or > 31)
                 return (false, 0, 0);
-            var monthlyAmount =
-                basis == "BasicMonthly"
-                    ? payroll.BasicPay
-                    : payroll.BasicPay
-                        + payroll.Allowance.HRA
-                        + payroll.Allowance.LTA
-                        + payroll.Allowance.OtherAllowance;
+
+            decimal monthlyAmount = 0m;
+
+            // 1. Query modern PayrollRunEmployees first if repository is available
+            if (_payrollRunEmployeesRepository is not null)
+            {
+                var runEmployees = await _payrollRunEmployeesRepository.GetAll(x =>
+                    x.CompanyId == companyId && x.EmployeeId == exit.EmployeeUserId
+                );
+                var latestRunEmployee = runEmployees.OrderByDescending(x => x.Id).FirstOrDefault();
+                if (latestRunEmployee is not null && latestRunEmployee.GrossAmount > 0)
+                {
+                    monthlyAmount = latestRunEmployee.GrossAmount;
+                    if (basis == "BasicMonthly" && latestRunEmployee.InputSnapshot?.SalaryStructures is not null)
+                    {
+                        var basicComponent = latestRunEmployee.InputSnapshot.SalaryStructures
+                            .SelectMany(s => s.Components)
+                            .FirstOrDefault(c => c.Code == "BASIC" || c.Name.Equals("Basic", StringComparison.OrdinalIgnoreCase) || c.Name.Equals("BasicPay", StringComparison.OrdinalIgnoreCase));
+                        if (basicComponent is not null && basicComponent.Value > 0)
+                            monthlyAmount = basicComponent.Value;
+                    }
+                }
+            }
+
+            // 2. Fall back to legacy EmpPayRoll if modern payroll had no entries
+            if (monthlyAmount <= 0 && _employeePayrollRepository is not null)
+            {
+                var payrolls = await _employeePayrollRepository.GetAll(x =>
+                    x.CompanyId == companyId && x.UserId == exit.EmployeeUserId && x.IsProcessed
+                );
+                var payroll = payrolls.OrderByDescending(x => x.PayMonth).FirstOrDefault();
+                if (payroll is null)
+                {
+                    // Fall back to active compensation structure if no processed monthly payroll run exists yet
+                    var fallbackPayrolls = await _employeePayrollRepository.GetAll(x =>
+                        x.CompanyId == companyId && x.UserId == exit.EmployeeUserId
+                    );
+                    payroll = fallbackPayrolls.OrderByDescending(x => x.CreatedAt).FirstOrDefault();
+                }
+                if (payroll is not null)
+                {
+                    monthlyAmount = basis == "BasicMonthly"
+                        ? payroll.BasicPay
+                        : payroll.BasicPay
+                            + payroll.Allowance.HRA
+                            + payroll.Allowance.LTA
+                            + payroll.Allowance.OtherAllowance;
+                }
+            }
+
             if (monthlyAmount <= 0)
                 return (false, 0, 0);
 

@@ -1,7 +1,12 @@
+using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.PayRoll;
+using Codeji.CMS.GenericRepository.Interfaces;
+using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.PayRoll;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.middlewares;
@@ -18,15 +23,65 @@ public sealed class TaxDeclarationController(
 {
     [HttpGet("employee/{employeeId}/year/{financialYear}")]
     [ModulePermission(AppModule.PayRoll, Permission.View)]
-    public Task<Result<EmployeeTaxDeclarationDto>> GetDeclaration(string employeeId, string financialYear) =>
-        service.GetDeclaration(CurrentContext.CompanyId(context), employeeId, financialYear);
+    public async Task<ActionResult<Result<EmployeeTaxDeclarationDto>>> GetDeclaration(
+        string employeeId,
+        string financialYear,
+        [FromServices] IRoleService roleService,
+        [FromServices] IMongoDbRepository<EmpUser> employeeRepo)
+    {
+        var companyId = CurrentContext.CompanyId(context);
+        var currentUserId = CurrentContext.UserId(context);
+
+        var currentEmployee = await employeeRepo.FirstOrDefault(x =>
+            x.CompanyId == companyId && x.UserId == currentUserId && !x.IsDeleted);
+
+        bool isSelf = (currentEmployee != null && string.Equals(currentEmployee.EmployeeId, employeeId, StringComparison.OrdinalIgnoreCase))
+            || string.Equals(currentUserId, employeeId, StringComparison.OrdinalIgnoreCase);
+
+        if (!isSelf)
+        {
+            var hasEditAccess = await roleService.VerifyUserAccess(
+                AppModule.PayRoll, [Permission.Edit], currentUserId, companyId);
+            if (!hasEditAccess)
+            {
+                return Forbid();
+            }
+        }
+
+        var result = await service.GetDeclaration(companyId, employeeId, financialYear);
+        return Ok(result);
+    }
 
     [HttpPost("employee/{employeeId}/submit")]
-    [ModulePermission(AppModule.PayRoll, Permission.Edit)]
-    public Task<Result<EmployeeTaxDeclarationDto>> SubmitDeclaration(
+    [ModulePermission(AppModule.PayRoll, Permission.View, Permission.Edit)]
+    public async Task<ActionResult<Result<EmployeeTaxDeclarationDto>>> SubmitDeclaration(
         string employeeId,
-        [FromBody] SubmitTaxDeclarationRequestDto request) =>
-        service.SubmitDeclaration(CurrentContext.CompanyId(context), employeeId, request, CurrentContext.UserId(context));
+        [FromBody] SubmitTaxDeclarationRequestDto request,
+        [FromServices] IRoleService roleService,
+        [FromServices] IMongoDbRepository<EmpUser> employeeRepo)
+    {
+        var currentUserId = CurrentContext.UserId(context);
+        var companyId = CurrentContext.CompanyId(context);
+
+        var currentEmployee = await employeeRepo.FirstOrDefault(x =>
+            x.CompanyId == companyId && x.UserId == currentUserId && !x.IsDeleted);
+
+        bool isSelf = (currentEmployee != null && string.Equals(currentEmployee.EmployeeId, employeeId, StringComparison.OrdinalIgnoreCase))
+            || string.Equals(currentUserId, employeeId, StringComparison.OrdinalIgnoreCase);
+
+        if (!isSelf)
+        {
+            var hasEditAccess = await roleService.VerifyUserAccess(
+                AppModule.PayRoll, [Permission.Edit], currentUserId, companyId);
+            if (!hasEditAccess)
+            {
+                return Forbid();
+            }
+        }
+
+        var result = await service.SubmitDeclaration(companyId, employeeId, request, currentUserId);
+        return Ok(result);
+    }
 
     [HttpPost("{declarationId}/review")]
     [ModulePermission(AppModule.PayRoll, Permission.Approve)]
@@ -37,7 +92,7 @@ public sealed class TaxDeclarationController(
 
     [HttpGet("company/{financialYear}")]
     [ModulePermission(AppModule.PayRoll, Permission.View)]
-    public Task<Result<System.Collections.Generic.List<EmployeeTaxDeclarationDto>>> GetCompanyDeclarations(
+    public Task<Result<List<EmployeeTaxDeclarationDto>>> GetCompanyDeclarations(
         string financialYear,
         [FromQuery] string? status = null) =>
         service.GetCompanyDeclarations(CurrentContext.CompanyId(context), financialYear, status);
