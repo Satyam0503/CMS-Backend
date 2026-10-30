@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Recruitments;
 using Codeji.CMS.DTO.ResponseModel;
@@ -66,12 +67,34 @@ public sealed class RecruitmentOfferService(
         var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
         JobVacancy? vacancy = vacancies is null ? null : await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == command.VacancyId && !x.IsDeleted);
         var allowCustomWorkflows = config is null || config.AllowJobWorkflowCustomization;
+
+        // Resolve active approval policy (if configured)
+        var policy = approvalPolicies is null ? null : await approvalPolicies.FirstOrDefault(x => x.CompanyId == companyId && x.VacancyId == command.VacancyId && !x.IsDeleted);
+        if (policy is null && approvalPolicies is not null && vacancy is not null && (!string.IsNullOrWhiteSpace(vacancy.LegalEntityId) || !string.IsNullOrWhiteSpace(vacancy.DepartmentId) || !string.IsNullOrWhiteSpace(vacancy.Grade)))
+            policy = await approvalPolicies.FirstOrDefault(x => x.CompanyId == companyId && string.IsNullOrEmpty(x.VacancyId) && x.LegalEntityId == vacancy.LegalEntityId && x.DepartmentId == vacancy.DepartmentId && x.Grade == vacancy.Grade && !x.IsDeleted);
+        policy ??= approvalPolicies is null ? null : await approvalPolicies.FirstOrDefault(x => x.CompanyId == companyId && string.IsNullOrEmpty(x.VacancyId) && string.IsNullOrEmpty(x.LegalEntityId) && string.IsNullOrEmpty(x.DepartmentId) && string.IsNullOrEmpty(x.Grade) && !x.IsDeleted);
+
+        var currentRoleId = CurrentContext.UserRoleId(context);
+        var currentUserId = CurrentContext.UserId(context);
+        var roleMatches = string.IsNullOrWhiteSpace(policy?.ApproverRoleId) || string.Equals(currentRoleId, policy.ApproverRoleId, StringComparison.Ordinal);
+        var delegateMatches = !string.IsNullOrWhiteSpace(policy?.DelegatedApproverUserId) && string.Equals(currentUserId, policy.DelegatedApproverUserId, StringComparison.Ordinal) && (!policy!.DelegationExpiresAtUtc.HasValue || policy.DelegationExpiresAtUtc > DateTime.UtcNow);
+        var isAdmin = !string.IsNullOrWhiteSpace(CurrentContext.AdminUserId(context))
+            || (context.HttpContext?.User?.Claims.Any(c => c.Type == ClaimTypes.Role && (string.Equals(c.Value, "Admin", StringComparison.OrdinalIgnoreCase) || string.Equals(c.Value, "Administrator", StringComparison.OrdinalIgnoreCase) || string.Equals(c.Value, "SuperAdmin", StringComparison.OrdinalIgnoreCase))) ?? false);
+        var isAuthorizedApprover = roleMatches || delegateMatches || isAdmin;
+
+        var thresholdApplies = policy is not null && (string.IsNullOrWhiteSpace(policy.Currency) || string.Equals(policy.Currency, command.Currency.Trim(), StringComparison.OrdinalIgnoreCase)) && command.Salary >= policy.ApprovalThreshold;
+        var policyRequiresApproval = (config is null || config.OfferApproval)
+            && !string.Equals(config?.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)
+            && policy is not null
+            && thresholdApplies
+            && !isAuthorizedApprover;
+
         var fastTrackOfferAllowed = (allowCustomWorkflows ? vacancy?.WorkflowMode switch
         {
             "Direct" => true,
             "Enterprise" => false,
             _ => (bool?)null
-        } : null) ?? (config is not null && (!config.OfferApproval || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)));
+        } : null) ?? !policyRequiresApproval;
 
         if (existing is null)
         {
@@ -81,7 +104,8 @@ public sealed class RecruitmentOfferService(
                 "Direct" => false,
                 "Enterprise" => true,
                 _ => (bool?)null
-            } : null) ?? ((config is null || config.OfferApproval) && !string.Equals(config?.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase));
+            } : null) ?? policyRequiresApproval;
+
             if (string.Equals(requestedStatus, RecruitmentOfferStatus.Sent, StringComparison.OrdinalIgnoreCase) && reqApproval)
                 return Fail(result, RecruitmentErrorCodes.InvalidTransition, "Offer requires approval before sending.", StatusCodes.Status409Conflict);
             if (!string.Equals(requestedStatus, RecruitmentOfferStatus.Draft, StringComparison.OrdinalIgnoreCase)
@@ -124,29 +148,19 @@ public sealed class RecruitmentOfferService(
         if (!isAllowedTransition)
             return Fail(result, RecruitmentErrorCodes.InvalidTransition, "Offer status transition is not allowed.", StatusCodes.Status409Conflict);
 
-        var requireOfferApproval = (allowCustomWorkflows ? vacancy?.WorkflowMode switch
+        if (string.Equals(command.Status, RecruitmentOfferStatus.Approved, StringComparison.OrdinalIgnoreCase) && policyRequiresApproval)
         {
-            "Direct" => false,
-            "Enterprise" => true,
-            _ => (bool?)null
-        } : null) ?? ((config is null || config.OfferApproval) && !string.Equals(config?.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase));
-        if (string.Equals(command.Status, RecruitmentOfferStatus.Approved, StringComparison.OrdinalIgnoreCase) && requireOfferApproval)
-        {
-
-            var policy = approvalPolicies is null ? null : await approvalPolicies.FirstOrDefault(x => x.CompanyId == companyId && x.VacancyId == command.VacancyId && !x.IsDeleted);
-            if (policy is null && approvalPolicies is not null && vacancy is not null && (!string.IsNullOrWhiteSpace(vacancy.LegalEntityId) || !string.IsNullOrWhiteSpace(vacancy.DepartmentId) || !string.IsNullOrWhiteSpace(vacancy.Grade)))
-                policy = await approvalPolicies.FirstOrDefault(x => x.CompanyId == companyId && string.IsNullOrEmpty(x.VacancyId) && x.LegalEntityId == vacancy.LegalEntityId && x.DepartmentId == vacancy.DepartmentId && x.Grade == vacancy.Grade && !x.IsDeleted);
-            policy ??= approvalPolicies is null ? null : await approvalPolicies.FirstOrDefault(x => x.CompanyId == companyId && string.IsNullOrEmpty(x.VacancyId) && string.IsNullOrEmpty(x.LegalEntityId) && string.IsNullOrEmpty(x.DepartmentId) && string.IsNullOrEmpty(x.Grade) && !x.IsDeleted);
-
-            var roleMatches = string.IsNullOrWhiteSpace(policy?.ApproverRoleId) || string.Equals(CurrentContext.UserRoleId(context), policy.ApproverRoleId, StringComparison.Ordinal);
-            var delegateMatches = !string.IsNullOrWhiteSpace(policy?.DelegatedApproverUserId) && string.Equals(CurrentContext.UserId(context), policy.DelegatedApproverUserId, StringComparison.Ordinal) && (!policy!.DelegationExpiresAtUtc.HasValue || policy.DelegationExpiresAtUtc > DateTime.UtcNow);
-            if ((!string.IsNullOrWhiteSpace(policy?.ApproverRoleId) || !string.IsNullOrWhiteSpace(policy?.DelegatedApproverUserId)) && !roleMatches && !delegateMatches)
+            if (!isAuthorizedApprover)
                 return Fail(result, RecruitmentErrorCodes.ApprovalRequired, "This offer must be approved by the configured approver role or active delegation.", StatusCodes.Status403Forbidden);
 
-            var requiresReference = policy?.RequireApprovalReference ?? true;
-            var thresholdApplies = policy is null || (string.Equals(policy.Currency, command.Currency.Trim(), StringComparison.OrdinalIgnoreCase) && command.Salary >= policy.ApprovalThreshold);
+            var requiresReference = policy?.RequireApprovalReference ?? false;
             if (requiresReference && thresholdApplies && string.IsNullOrWhiteSpace(command.ApprovalReference) && string.IsNullOrWhiteSpace(existing.ApprovalReference))
                 return Fail(result, RecruitmentErrorCodes.ApprovalRequired, "A shared approval reference is required before an offer can be approved.", StatusCodes.Status409Conflict);
+        }
+        else if (string.Equals(command.Status, RecruitmentOfferStatus.Sent, StringComparison.OrdinalIgnoreCase) && policyRequiresApproval)
+        {
+            if (!isAuthorizedApprover)
+                return Fail(result, RecruitmentErrorCodes.ApprovalRequired, "This offer must be approved by the configured approver role or active delegation before sending.", StatusCodes.Status403Forbidden);
         }
 
         var currentVersion = existing.Version <= 0 ? 1 : existing.Version;
