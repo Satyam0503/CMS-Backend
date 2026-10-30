@@ -1,6 +1,11 @@
 using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Attendance;
+using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Attendance;
+using Moq;
 using Xunit;
 
 namespace Codeji.CMS.Services.Tests;
@@ -98,6 +103,109 @@ public class AttendanceBugFixVerificationTests
         var paidDays4 = Math.Max(0m, 10m - 15m - 0m);
         Assert.Equal(0m, paidDays4);
     }
+
+    [Fact]
+    public async Task AttendanceCorrection_PayrollReadiness_BlocksWhenPending_And_PassesWhenNoPending()
+    {
+        var correctionsMock = new Mock<IMongoDbRepository<AttendanceCorrectionRequest>>();
+        var employeesMock = new Mock<IMongoDbRepository<EmpUser>>();
+        var service = new AttendancePayrollReadinessService(correctionsMock.Object, employeesMock.Object);
+
+        var companyId = "company-1";
+        var payMonth = new DateTime(2026, 10, 1);
+
+        // Case 1: Pending correction exists -> Should block payroll
+        correctionsMock.Setup(x => x.GetAll(It.IsAny<System.Linq.Expressions.Expression<Func<AttendanceCorrectionRequest, bool>>>()))
+            .ReturnsAsync(new List<AttendanceCorrectionRequest>
+            {
+                new() { CompanyId = companyId, UserId = "user-1", AttendanceDate = new DateTime(2026, 10, 15), Status = "Pending", Reason = "Forgot punch" }
+            });
+
+        employeesMock.Setup(x => x.GetAll(It.IsAny<System.Linq.Expressions.Expression<Func<EmpUser, bool>>>()))
+            .ReturnsAsync(new List<EmpUser>
+            {
+                new() { UserId = "user-1", EmployeeId = "EMP001", FirstName = "John", LastName = "Doe", Email = "john.doe@example.com" }
+            });
+
+        var resultBlocked = await service.EvaluateAsync(companyId, payMonth);
+        Assert.False(resultBlocked.IsReady);
+        Assert.Single(resultBlocked.BlockingReasons);
+        Assert.Contains("EMP001", resultBlocked.BlockingReasons[0]);
+
+        // Case 2: Once reviewed (e.g. Approved or Rejected), pending query returns empty -> Payroll is ready
+        correctionsMock.Setup(x => x.GetAll(It.IsAny<System.Linq.Expressions.Expression<Func<AttendanceCorrectionRequest, bool>>>()))
+            .ReturnsAsync(new List<AttendanceCorrectionRequest>());
+
+        var resultReady = await service.EvaluateAsync(companyId, payMonth);
+        Assert.True(resultReady.IsReady);
+        Assert.Empty(resultReady.BlockingReasons);
+    }
+
+
+    [Fact]
+    public void AttendanceException_DateMatching_MatchesIstOffsetAndUtcDates()
+    {
+        // A date stored as 18:30Z of previous day represents midnight IST of target date
+        var storedUtcMidnightIst = new DateTime(2026, 10, 18, 18, 30, 0, DateTimeKind.Utc);
+        var targetBusinessDate = new DateTime(2026, 10, 19);
+
+        var businessDate = CalendarDateHelpers.ToBusinessDate(storedUtcMidnightIst);
+        var expectedBusinessDate = DateOnly.FromDateTime(targetBusinessDate);
+
+        Assert.Equal(expectedBusinessDate, businessDate);
+    }
+
+    [Fact]
+    public async Task AttendanceEditGuard_AllowsResolutionAndOverride_OnWeekendsAndHolidays()
+    {
+        var empMock = new Mock<IMongoDbRepository<EmpUser>>();
+        var payrollMock = new Mock<IMongoDbRepository<EmpPayRoll>>();
+        var summariesMock = new Mock<IMongoDbRepository<MonthlyAttendanceSummary>>();
+        var weeklyMock = new Mock<IMongoDbRepository<WeeklyOffSetting>>();
+        var calendarMock = new Mock<IMongoDbRepository<Codeji.CMS.Repository.Entities.Calendar.CalendarEntity>>();
+        var exitMock = new Mock<IMongoDbRepository<Codeji.CMS.Repository.Entities.Employees.EmployeeExitAttendanceCutoff>>();
+
+        var employee = new EmpUser
+        {
+            CompanyId = "comp-1",
+            UserId = "user-1",
+            EmployeeId = "EMP01",
+            FirstName = "Test",
+            LastName = "User",
+            Email = "test@example.com",
+            DateOfJoining = "2026-01-01"
+        };
+
+        empMock.Setup(x => x.GetAll(It.IsAny<System.Linq.Expressions.Expression<Func<EmpUser, bool>>>(), It.IsAny<bool>(), false))
+            .ReturnsAsync(new List<EmpUser> { employee });
+
+        weeklyMock.Setup(x => x.GetAll(It.IsAny<System.Linq.Expressions.Expression<Func<WeeklyOffSetting, bool>>>(), It.IsAny<bool>(), false))
+            .ReturnsAsync(new List<WeeklyOffSetting> { new() { CompanyId = "comp-1", OffDays = [(int)DayOfWeek.Sunday] } });
+
+        var guard = new AttendanceEditGuard(
+            empMock.Object,
+            payrollMock.Object,
+            summariesMock.Object,
+            weeklyMock.Object,
+            calendarMock.Object,
+            exitMock.Object
+        );
+
+        // Sunday is configured off day
+        var sunday = new DateTime(2026, 10, 18); // Sunday
+
+        // When not an exception resolution or override, it throws
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            guard.EnsureEditableWorkingDayAsync("comp-1", "user-1", sunday, isExceptionResolution: false, allowSourceOverride: false));
+
+        // When isExceptionResolution is true, it does not throw
+        var exceptionEx = await Record.ExceptionAsync(() =>
+            guard.EnsureEditableWorkingDayAsync("comp-1", "user-1", sunday, isExceptionResolution: true, allowSourceOverride: false));
+        Assert.Null(exceptionEx);
+
+        // When allowSourceOverride is true, it does not throw
+        var overrideEx = await Record.ExceptionAsync(() =>
+            guard.EnsureEditableWorkingDayAsync("comp-1", "user-1", sunday, isExceptionResolution: false, allowSourceOverride: true));
+        Assert.Null(overrideEx);
+    }
 }
-
-

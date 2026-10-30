@@ -22,7 +22,8 @@ public sealed class RecruitmentInterviewService(
     IMongoDbRepository<EmpUser>? employees = null,
     IMongoDbRepository<JobVacancy>? vacancies = null,
     IRecruitmentExternalActionService? externalActions = null,
-    IMongoDbRepository<ApplicantLogs>? applicantLogs = null) : IRecruitmentInterviewService
+    IMongoDbRepository<ApplicantLogs>? applicantLogs = null,
+    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null) : IRecruitmentInterviewService
 {
     public async Task<Result<string>> Upsert(RecruitmentInterviewCommand command, string actorUserId)
     {
@@ -59,7 +60,9 @@ public sealed class RecruitmentInterviewService(
             ? await interviews.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && x.LastCommandIdempotencyKey == idempotencyKey && !x.IsDeleted)
             : await interviews.FirstOrDefault(x => x.CompanyId == companyId && x.InterviewId == command.InterviewId && !x.IsDeleted);
 
-        if (existing is null && command.RoundNumber > 1)
+        var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
+        var allowParallel = config?.ParallelPanels ?? false;
+        if (existing is null && command.RoundNumber > 1 && !allowParallel)
         {
             var priorRounds = (await interviews.GetAll(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && x.VacancyId == command.VacancyId && !x.IsDeleted && x.RoundNumber < command.RoundNumber)).ToList();
             for (var round = 1; round < command.RoundNumber; round++)

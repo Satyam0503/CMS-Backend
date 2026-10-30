@@ -8,6 +8,7 @@ namespace Codeji.CMS.Services.Attendance;
 
 public interface IOfficeScheduleSettingsService
 {
+    Task<Result<OfficeScheduleSettingsDto>> EnsureDefaultScheduleAsync(string companyId, CancellationToken cancellationToken = default);
     Task<Result<OfficeScheduleSettingsDto>> GetAsync(string companyId, CancellationToken cancellationToken = default);
     Task<Result<OfficeScheduleSettingsDto>> GetAllAsync(string companyId, CancellationToken cancellationToken = default);
     Task<Result<OfficeScheduleSettingsDto>> SaveAsync(string companyId, string actorUserId, OfficeScheduleSettingsDto request, CancellationToken cancellationToken = default);
@@ -20,6 +21,32 @@ public sealed class OfficeScheduleSettingsService(
     IMongoDbRepository<DepartmentScheduleAssignment> departmentAssignments,
     IShiftAttendanceReconciliationService? shiftReconciliation = null) : IOfficeScheduleSettingsService
 {
+    public async Task<Result<OfficeScheduleSettingsDto>> EnsureDefaultScheduleAsync(string companyId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(companyId)) return Fail("OFFICE_SCHEDULE_COMPANY_REQUIRED");
+
+        // Do not rely on the repository's ambient/default filter for tenant data.
+        var existingSchedules = (await schedules.GetAll(
+                x => x.CompanyId == companyId && !x.IsDeleted,
+                withDefaultFilter: false))
+            .ToList();
+
+        var defaultSchedule = existingSchedules.FirstOrDefault(x => x.IsDefault)
+            ?? existingSchedules.FirstOrDefault();
+
+        if (defaultSchedule != null)
+        {
+            return new Result<OfficeScheduleSettingsDto> { Success = true, MethodResult = ToDto(defaultSchedule) };
+        }
+
+        var newDefault = CreateDefault(companyId);
+        var addResult = await schedules.AddOne(newDefault);
+        if (!addResult.Success) return Fail("OFFICE_SCHEDULE_DEFAULT_CREATE_FAILED");
+
+        return new Result<OfficeScheduleSettingsDto> { Success = true, MethodResult = ToDto(newDefault) };
+    }
+
     public async Task<Result<OfficeScheduleSettingsDto>> GetAsync(string companyId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -31,7 +58,12 @@ public sealed class OfficeScheduleSettingsService(
                 x => x.CompanyId == companyId && x.IsActive && x.IsDefault && !x.IsDeleted,
                 withDefaultFilter: false))
             .OrderByDescending(x => x.EffectiveFrom).FirstOrDefault();
-        return new Result<OfficeScheduleSettingsDto> { Success = true, MethodResult = schedule is null ? Default() : ToDto(schedule) };
+        if (schedule is null)
+        {
+            return await EnsureDefaultScheduleAsync(companyId, cancellationToken);
+        }
+
+        return new Result<OfficeScheduleSettingsDto> { Success = true, MethodResult = ToDto(schedule) };
     }
 
     public async Task<Result<OfficeScheduleSettingsDto>> GetAllAsync(string companyId, CancellationToken cancellationToken = default)
@@ -40,15 +72,12 @@ public sealed class OfficeScheduleSettingsService(
         if (string.IsNullOrWhiteSpace(companyId)) return Fail("OFFICE_SCHEDULE_COMPANY_REQUIRED");
 
         var entities = (await schedules.GetAll(x => x.CompanyId == companyId && !x.IsDeleted, withDefaultFilter: false)).ToList();
-        // Legacy companies may only have the UI fallback rather than a persisted
-        // schedule. Materialize it before adding another shift, otherwise the
-        // first saved shift replaces that apparent default in the list.
+        // Materialize default schedule if missing before adding or listing shifts.
         if (entities.Count == 0)
         {
-            var defaultSchedule = CreateDefault(companyId);
-            var createResult = await schedules.AddOne(defaultSchedule);
-            if (!createResult.Success) return Fail("OFFICE_SCHEDULE_DEFAULT_CREATE_FAILED");
-            entities.Add(defaultSchedule);
+            var ensureResult = await EnsureDefaultScheduleAsync(companyId, cancellationToken);
+            if (!ensureResult.Success) return Fail("OFFICE_SCHEDULE_DEFAULT_CREATE_FAILED");
+            entities = (await schedules.GetAll(x => x.CompanyId == companyId && !x.IsDeleted, withDefaultFilter: false)).ToList();
         }
         // Recover the short-lived UI-only-default release: it produced a single
         // persisted "Shift 2" that was incorrectly promoted to default because
@@ -159,21 +188,44 @@ public sealed class OfficeScheduleSettingsService(
         if (schedule is null) return Failure("OFFICE_SCHEDULE_NOT_FOUND");
         if (schedule.IsDefault) return Failure("OFFICE_SCHEDULE_DEFAULT_CANNOT_BE_DELETED");
 
-        // Removing an in-use shift would change the attendance behaviour of
-        // assigned employees or departments. Keep its historical record and
-        // require the assignment to be moved before the admin deletes it.
+        // Default shifts cannot be deleted.
+        if (schedule.IsDefault) return Failure("OFFICE_SCHEDULE_DEFAULT_CANNOT_BE_DELETED");
+
+        var now = DateTime.UtcNow;
+
+        // When a custom shift is deleted, any employees or departments assigned
+        // to it automatically fall back to the company's default shift.
+        // Cascade-deactivate active assignments pointing to this scheduleId.
         var hasEmployeeAssignments = (await employeeAssignments.GetAll(
                 x => x.CompanyId == companyId && x.ScheduleId == scheduleId && x.IsActive && !x.IsDeleted,
                 withDefaultFilter: false))
             .Any();
+        if (hasEmployeeAssignments)
+        {
+            await employeeAssignments.UpdateMany(
+                Builders<EmployeeScheduleAssignment>.Filter.Where(x => x.CompanyId == companyId && x.ScheduleId == scheduleId && x.IsActive && !x.IsDeleted),
+                Builders<EmployeeScheduleAssignment>.Update
+                    .Set(x => x.IsActive, false)
+                    .Set(x => x.EffectiveTo, now.Date.AddDays(-1))
+                    .Set(x => x.UpdatedBy, actorUserId)
+                    .Set(x => x.UpdatedDate, now));
+        }
+
         var hasDepartmentAssignments = (await departmentAssignments.GetAll(
                 x => x.CompanyId == companyId && x.ScheduleId == scheduleId && x.IsActive && !x.IsDeleted,
                 withDefaultFilter: false))
             .Any();
-        if (hasEmployeeAssignments || hasDepartmentAssignments)
-            return Failure("OFFICE_SCHEDULE_IN_USE");
+        if (hasDepartmentAssignments)
+        {
+            await departmentAssignments.UpdateMany(
+                Builders<DepartmentScheduleAssignment>.Filter.Where(x => x.CompanyId == companyId && x.ScheduleId == scheduleId && x.IsActive && !x.IsDeleted),
+                Builders<DepartmentScheduleAssignment>.Update
+                    .Set(x => x.IsActive, false)
+                    .Set(x => x.EffectiveTo, now.Date.AddDays(-1))
+                    .Set(x => x.UpdatedBy, actorUserId)
+                    .Set(x => x.UpdatedDate, now));
+        }
 
-        var now = DateTime.UtcNow;
         var result = await schedules.UpdateMany(
             Builders<CompanyOfficeSchedule>.Filter.And(
                 Builders<CompanyOfficeSchedule>.Filter.Eq(x => x.CompanyId, companyId),
@@ -185,9 +237,17 @@ public sealed class OfficeScheduleSettingsService(
                 .Set(x => x.IsActive, false)
                 .Set(x => x.UpdatedBy, actorUserId)
                 .Set(x => x.UpdatedDate, now));
-        return result.Success
-            ? new Result { Success = true, Message = "Office schedule deleted." }
-            : Failure("OFFICE_SCHEDULE_DELETE_FAILED");
+
+        if (!result.Success)
+            return Failure("OFFICE_SCHEDULE_DELETE_FAILED");
+
+        if (shiftReconciliation != null)
+        {
+            try { await shiftReconciliation.ReconcileTodayShiftAttendanceAsync(companyId, cancellationToken); }
+            catch { /* Non-blocking */ }
+        }
+
+        return new Result { Success = true, Message = "Office schedule deleted." };
     }
 
     private static bool TryTime(string value, out TimeSpan time) => TimeSpan.TryParse(value, out time);
@@ -200,6 +260,7 @@ public sealed class OfficeScheduleSettingsService(
         StartTime = TimeSpan.FromHours(9), EndTime = TimeSpan.FromHours(18),
         CheckInAllowedFrom = TimeSpan.FromHours(8.5), CheckInAllowedUntil = TimeSpan.FromHours(10),
         CheckOutAllowedFrom = TimeSpan.FromHours(17.5), CheckOutAllowedUntil = TimeSpan.FromHours(19),
+        GraceMinutes = 15,
         BreakMinutes = 60, RequiredWorkingMinutes = 480, EffectiveFrom = DateTime.UtcNow.Date,
         IsActive = true, IsDefault = true, CreatedBy = "system", CreatedDate = DateTime.UtcNow
     };

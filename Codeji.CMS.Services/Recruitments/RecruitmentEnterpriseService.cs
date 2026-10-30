@@ -30,7 +30,8 @@ public sealed class RecruitmentEnterpriseService(
  IMongoDbRepository<RecruitmentPreboardingCase>? preboardingCases = null,
  IMongoDbRepository<RecruitmentScreeningReview>? screeningReviews = null,
  IMongoDbRepository<RecruitmentHiringDecision>? hiringDecisions = null,
- IMongoDbRepository<RecruitmentOnboardingCase>? onboardingCases = null) : IRecruitmentEnterpriseService
+ IMongoDbRepository<RecruitmentOnboardingCase>? onboardingCases = null,
+ IMongoDbRepository<JobVacancy>? vacancies = null) : IRecruitmentEnterpriseService
 {
  public async Task<Result<string>> Merge(RecruitmentApplicantMergeCommand command,string actor)
  {
@@ -72,9 +73,35 @@ public sealed class RecruitmentEnterpriseService(
   var rows=(await applicants.GetAll(x=>x.CompanyId==company&&(string.IsNullOrWhiteSpace(vacancyId)||x.VacancyId==vacancyId))).ToList();
   var activeRows=rows.Where(x=>!x.IsDeleted&&x.MergeStatus!="Merged").ToList();
   var mergedCount=rows.Count(x=>x.MergeStatus=="Merged");
-  var a=(canonical is not null && canonical.Count > 0)
-   ? new RecruitmentAnalytics{TotalApplicants=canonical.Count,ActiveApplicants=canonical.Count(x=>x.CurrentStage!="Rejected"),RejectedApplicants=canonical.Count(x=>x.CurrentStage=="Rejected"),MergedApplicants=mergedCount,ByStage=canonical.GroupBy(x=>x.CurrentStage).ToDictionary(x=>x.Key,x=>x.Count())}
-   : new RecruitmentAnalytics{TotalApplicants=activeRows.Count,ActiveApplicants=activeRows.Count(x=>x.ActivityType!=ActivityType.Rejected),RejectedApplicants=activeRows.Count(x=>x.ActivityType==ActivityType.Rejected),MergedApplicants=mergedCount,ByStage=activeRows.GroupBy(x=>x.ActivityType.ToString()).ToDictionary(x=>x.Key,x=>x.Count())};
+  var canonicalMap = canonical?.ToDictionary(x => x.ApplicantId, x => x) ?? new Dictionary<string, RecruitmentJobApplication>();
+  var stageCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+  foreach (var row in activeRows)
+  {
+   var hasCanonical = canonicalMap.TryGetValue(row.ApplicantId, out var canApp);
+   var stage = (hasCanonical && !string.IsNullOrWhiteSpace(canApp!.CurrentStage)) ? canApp.CurrentStage : row.ActivityType.ToString();
+   if (!hasCanonical && applications is not null)
+   {
+    var newCan = new RecruitmentJobApplication { CompanyId = company, ApplicantId = row.ApplicantId, VacancyId = row.VacancyId ?? string.Empty, CurrentStage = stage, CreatedBy = row.ApplicantId, CreatedDate = row.CreatedDate ?? DateTime.UtcNow, UpdatedBy = row.ApplicantId, UpdatedDate = row.UpdatedDate ?? DateTime.UtcNow, StageHistory = [new RecruitmentApplicationStageEvent { FromStage = "None", ToStage = stage, ActorUserId = row.ApplicantId, Reason = "Auto-synchronized from applicant profile" }] };
+    _ = applications.AddOne(newCan);
+    canonicalMap[row.ApplicantId] = newCan;
+   }
+   stageCounts[stage] = stageCounts.GetValueOrDefault(stage, 0) + 1;
+   if (stage is "Preboarding" or "ReadyForHire" or "Hired")
+   {
+    stageCounts["Selected"] = stageCounts.GetValueOrDefault("Selected", 0) + 1;
+   }
+  }
+  var a = new RecruitmentAnalytics
+  {
+   TotalApplicants = activeRows.Count,
+   ActiveApplicants = activeRows.Count(x => { var st = (canonicalMap.TryGetValue(x.ApplicantId, out var c) && !string.IsNullOrWhiteSpace(c.CurrentStage)) ? c.CurrentStage : x.ActivityType.ToString(); return !string.Equals(st, "Rejected", StringComparison.OrdinalIgnoreCase); }),
+   RejectedApplicants = activeRows.Count(x => { var st = (canonicalMap.TryGetValue(x.ApplicantId, out var c) && !string.IsNullOrWhiteSpace(c.CurrentStage)) ? c.CurrentStage : x.ActivityType.ToString(); return string.Equals(st, "Rejected", StringComparison.OrdinalIgnoreCase); }),
+   MergedApplicants = mergedCount,
+   ByStage = stageCounts
+  };
+
+
+
   var acceptedOffers=(await offers.GetAll(x=>x.CompanyId==company&&!x.IsDeleted&&x.Status==RecruitmentOfferStatus.Accepted&&(string.IsNullOrWhiteSpace(vacancyId)||x.VacancyId==vacancyId))).ToList(); var applicantCreated=activeRows.Where(x=>x.CreatedDate.HasValue).ToDictionary(x=>x.ApplicantId,x=>x.CreatedDate!.Value); var hireDays=acceptedOffers.Where(x=>x.RespondedAtUtc.HasValue&&applicantCreated.TryGetValue(x.ApplicantId,out _)).Select(x=>(decimal)(x.RespondedAtUtc!.Value-applicantCreated[x.ApplicantId]).TotalDays).Where(x=>x>=0).ToList(); a.TimeToHireSampleSize=hireDays.Count; a.AverageTimeToHireDays=hireDays.Count==0?null:Math.Round(hireDays.Average(),2); var r=new Result<RecruitmentAnalytics>{Success=true,StatusCode=200,Message="Recruitment analytics loaded.",MethodResult=a,Data=a,TotalRecords=a.TotalApplicants}; return r;
  }
  public async Task<Result<List<RecruitmentSelectedCandidateQueueItem>>> SelectedCandidates(string? vacancyId)
@@ -97,7 +124,12 @@ public sealed class RecruitmentEnterpriseService(
   var company=CurrentContext.CompanyId(context); if(string.IsNullOrWhiteSpace(company)) return new Result<List<RecruitmentPreboardingQueueItem>>{Success=false,StatusCode=400,ErrorCode=RecruitmentErrorCodes.InvalidRequest,Message="Company context is required."};
   if(preboardingCases is null) return new Result<List<RecruitmentPreboardingQueueItem>>{Success=true,StatusCode=200,MethodResult=[],Data=[],TotalRecords=0,Message="Preboarding queue is not configured."};
   var rows=(await preboardingCases.GetAll(x=>x.CompanyId==company&&!x.IsDeleted&&x.Status!=RecruitmentPreboardingStatus.Completed)).ToList();
-  var items=rows.Select(x=>new RecruitmentPreboardingQueueItem{CaseId=x.CaseId,ApplicantId=x.ApplicantId,OfferId=x.OfferId,Status=x.Status,OwnerUserId=x.OwnerUserId,PendingTaskCount=x.Tasks.Count(t=>t.Status is not ("Completed" or "Skipped")),ReadyForHire=x.Tasks.Count>0&&x.Tasks.All(t=>t.Status is "Completed" or "Skipped"),FirstBlockerCode=x.Tasks.FirstOrDefault(t=>t.Status is not ("Completed" or "Skipped"))?.Code}).OrderByDescending(x=>x.PendingTaskCount).ToList();
+  var applicantIds = rows.Select(x => x.ApplicantId).Distinct().ToHashSet();
+  var appList = (await applicants.GetAll(x => x.CompanyId == company && !x.IsDeleted && applicantIds.Contains(x.ApplicantId))).ToList();
+  var appMap = appList.ToDictionary(x => x.ApplicantId, x => x);
+  var vacIds = appList.Select(x => x.VacancyId).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().ToHashSet();
+  var vacMap = vacancies is not null && vacIds.Count > 0 ? (await vacancies.GetAll(x => x.CompanyId == company && !x.IsDeleted && vacIds.Contains(x.JobId))).ToDictionary(x => x.JobId, x => x.Title) : new Dictionary<string, string>();
+  var items=rows.Select(x=>{ appMap.TryGetValue(x.ApplicantId, out var app); var vId = app?.VacancyId ?? string.Empty; vacMap.TryGetValue(vId, out var vTitle); return new RecruitmentPreboardingQueueItem{CaseId=x.CaseId,ApplicantId=x.ApplicantId,ApplicantName=app is null ? null : $"{app.FirstName} {app.LastName}".Trim(),Email=app?.Email,VacancyId=vId,VacancyName=vTitle,OfferId=x.OfferId,Status=x.Status,OwnerUserId=x.OwnerUserId,PendingTaskCount=x.Tasks.Count(t=>t.Status is not ("Completed" or "Skipped")),ReadyForHire=x.Tasks.Count>0&&x.Tasks.All(t=>t.Status is "Completed" or "Skipped"),FirstBlockerCode=x.Tasks.FirstOrDefault(t=>t.Status is not ("Completed" or "Skipped"))?.Code}; }).OrderByDescending(x=>x.PendingTaskCount).ToList();
   return new Result<List<RecruitmentPreboardingQueueItem>>{Success=true,StatusCode=200,MethodResult=items,Data=items,TotalRecords=items.Count,Message="Preboarding queue loaded."};
  }
  public async Task<Result<string>> UpdatePreboarding(RecruitmentPreboardingUpdateCommand command, string actor)

@@ -6,6 +6,7 @@ using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
+using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.Services.Recruitments;
 
@@ -72,6 +73,16 @@ public sealed class RecruitmentInterviewDebriefService(
                     targetApplicant.FinalInterviewRecommendation = computed.FinalInterviewScore > 0 ? computed.FinalInterviewRecommendation : null;
                     targetApplicant.EvaluatedRoundsCount = computed.EvaluatedRoundsCount;
                     targetApplicant.FinalScoreCalculatedAtUtc = DateTime.UtcNow;
+                    var debriefStage = interview.DebriefDecision.Equals("Reject", StringComparison.OrdinalIgnoreCase) ? "Rejected" : interview.DebriefDecision.Equals("Hold", StringComparison.OrdinalIgnoreCase) ? "OnHold" : "Shortlisted";
+                    if (Enum.TryParse<ActivityType>(debriefStage, out var newActivityType))
+                    {
+                        if (newActivityType is ActivityType.Rejected or ActivityType.OnHold || (newActivityType == ActivityType.Shortlisted && targetApplicant.ActivityType is ActivityType.New or ActivityType.InProgress))
+                        {
+                            targetApplicant.ActivityType = newActivityType;
+                            targetApplicant.UpdatedBy = actorUserId;
+                            targetApplicant.UpdatedDate = DateTime.UtcNow;
+                        }
+                    }
                     await applicants.Update(Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == targetApplicant.ApplicantId), targetApplicant);
                 }
             }

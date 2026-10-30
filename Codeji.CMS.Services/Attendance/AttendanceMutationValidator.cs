@@ -106,7 +106,7 @@ public sealed class AttendanceMutationValidator(
         try
         {
             var isExceptionResolution = string.Equals(request.RemarkCode, "MONTHLY_EXCEPTION_RESOLUTION", StringComparison.OrdinalIgnoreCase);
-            await editGuard.EnsureEditableWorkingDayAsync(request.CompanyId, request.TargetUserId, date, isExceptionResolution);
+            await editGuard.EnsureEditableWorkingDayAsync(request.CompanyId, request.TargetUserId, date, isExceptionResolution, request.AllowSourceOverride);
         }
         catch (InvalidOperationException ex) { return Fail(result, ex.Message); }
 

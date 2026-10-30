@@ -1,6 +1,8 @@
 using System.Linq.Expressions;
 using Codeji.CMS.Domain.Models;
+using Codeji.CMS.DTO.Attendance;
 using Codeji.CMS.DTO.RequestModels.Company;
+using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities;
 using Codeji.CMS.Repository.Entities.Company;
@@ -121,8 +123,41 @@ public sealed class CompanyRegistrationProvisioningTests
         fixture.UserRepository.Verify(x => x.AddOne(It.IsAny<EmpUser>()), Times.Never);
         fixture.EmployeeService.Verify(x => x.ReserveNextEmployeeId(It.IsAny<string>()), Times.Never);
         fixture.TokenRepository.Verify(x => x.AddOne(It.IsAny<UserSecurityToken>()), Times.Never);
+        fixture.OfficeScheduleSettingsService.Verify(x => x.EnsureDefaultScheduleAsync(company.CompanyId, It.IsAny<CancellationToken>()), Times.Once);
         fixture.CompanyRepository.Verify(x => x.Update(It.IsAny<FilterDefinition<Company>>(), It.Is<Company>(saved =>
             saved.CompanyId == "company-pending" && saved.Status && saved.ProvisioningState == "Active")), Times.Once);
+    }
+
+    [Fact]
+    public async Task Register_fails_provisioning_when_office_schedule_defaults_fail()
+    {
+        var fixture = new Fixture();
+        var user = AdminUser("company-pending", "CorrectPassword1!");
+        var company = CompanyRecord("company-pending", user.UserId, user.EmailNormalized, active: false);
+        var role = new RoleEntity { RolesId = "admin-role", CompanyId = company.CompanyId, RoleType = 1, Titles = "Administrator", UserRoles = [] };
+
+        fixture.UserRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>(), false, false))
+            .ReturnsAsync(user);
+        fixture.CompanyRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Company, bool>>>(), false, false))
+            .ReturnsAsync(company);
+        fixture.CompanyRepository
+            .Setup(x => x.Update(It.IsAny<FilterDefinition<Company>>(), It.IsAny<Company>()))
+            .ReturnsAsync(new Result { Success = true });
+        fixture.RoleService.Setup(x => x.AddDefaultRole(company.CompanyId)).ReturnsAsync([role]);
+        fixture.AttendanceStatusService.Setup(x => x.EnsureCompanyDefaults(company.CompanyId)).Returns(Task.CompletedTask);
+        fixture.OfficeScheduleSettingsService
+            .Setup(x => x.EnsureDefaultScheduleAsync(company.CompanyId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Result<OfficeScheduleSettingsDto> { Success = false, Message = "OFFICE_SCHEDULE_DEFAULT_CREATE_FAILED" });
+
+        var result = await fixture.Service.Register(Request("CorrectPassword1!"));
+
+        Assert.False(result.Success);
+        Assert.Equal(StatusCodes.Status500InternalServerError, result.StatusCode);
+        Assert.Contains("office schedule", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("The office schedule defaults could not be created.", company.ProvisioningLastError);
+        Assert.Equal("Failed", company.ProvisioningState);
     }
 
     [Fact]
@@ -199,6 +234,7 @@ public sealed class CompanyRegistrationProvisioningTests
         public Mock<IEmployeeService> EmployeeService { get; } = new();
         public Mock<IMiddlewareService> MiddlewareService { get; } = new();
         public Mock<IAttendanceStatusService> AttendanceStatusService { get; } = new();
+        public Mock<IOfficeScheduleSettingsService> OfficeScheduleSettingsService { get; } = new();
         public CompanyService Service { get; }
 
         public Fixture()
@@ -222,7 +258,10 @@ public sealed class CompanyRegistrationProvisioningTests
                 AttendanceStatusService.Object,
                 new Mock<IMongoClient>().Object,
                 new Mock<ILogger<CompanyService>>().Object,
-                RecruitmentConfigRepository.Object);
+                RecruitmentConfigRepository.Object,
+                OfficeScheduleSettingsService.Object);
+            OfficeScheduleSettingsService.Setup(x => x.EnsureDefaultScheduleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Result<OfficeScheduleSettingsDto> { Success = true });
         }
     }
 }

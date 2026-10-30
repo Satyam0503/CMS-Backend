@@ -4,6 +4,10 @@ public sealed class RecruitmentOnboardingQueueItem
 {
     public string CaseId { get; set; } = string.Empty;
     public string ApplicantId { get; set; } = string.Empty;
+    public string? ApplicantName { get; set; }
+    public string? Email { get; set; }
+    public string? VacancyId { get; set; }
+    public string? VacancyName { get; set; }
     public string EmployeeUserId { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public int Version { get; set; }
@@ -15,4 +19,3 @@ public sealed class RecruitmentOnboardingQueueItem
     public string? FirstBlockingTaskTitle { get; set; }
     public DateTime? UpdatedDate { get; set; }
 }
-

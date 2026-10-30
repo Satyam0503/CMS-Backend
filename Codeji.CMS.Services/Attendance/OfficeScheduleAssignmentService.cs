@@ -74,12 +74,14 @@ public sealed class OfficeScheduleAssignmentService(
         // A repeated save must not create another active assignment. It also avoids
         // a needless close-and-reinsert cycle for an unchanged employee override.
         if (current is not null && string.Equals(current.ScheduleId, scheduleId, StringComparison.Ordinal))
-            if (shiftReconciliation != null)
         {
-            try { await shiftReconciliation.ReconcileTodayShiftAttendanceAsync(companyId, cancellationToken); }
-            catch { /* Non-blocking */ }
+            if (shiftReconciliation != null)
+            {
+                try { await shiftReconciliation.ReconcileTodayShiftAttendanceAsync(companyId, cancellationToken); }
+                catch { /* Non-blocking */ }
+            }
+            return await GetEmployeeAsync(companyId, userId, cancellationToken);
         }
-        return await GetEmployeeAsync(companyId, userId, cancellationToken);
 
         var now = DateTime.UtcNow;
         // There is nothing to close for an employee currently inheriting the

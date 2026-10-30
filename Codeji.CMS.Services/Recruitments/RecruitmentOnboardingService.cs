@@ -14,7 +14,9 @@ namespace Codeji.CMS.Services.Recruitments;
 public sealed class RecruitmentOnboardingService(
     IMongoDbRepository<RecruitmentOnboardingCase> cases,
     IHttpContextAccessor context,
-    IMongoDbRepository<EmpUser>? employees = null) : IRecruitmentOnboardingService
+    IMongoDbRepository<EmpUser>? employees = null,
+    IMongoDbRepository<Applicant>? applicants = null,
+    IMongoDbRepository<JobVacancy>? vacancies = null) : IRecruitmentOnboardingService
 {
     private static readonly HashSet<string> ValidStatuses = [
         RecruitmentOnboardingStatus.PendingActivation,
@@ -47,6 +49,15 @@ public sealed class RecruitmentOnboardingService(
             .OrderByDescending(x => x.UpdatedDate)
             .ToList();
         var page = casesForTenant.Skip((pageNo - 1) * pageSize).Take(pageSize).ToList();
+        var applicantIds = page.Select(x => x.ApplicantId).Distinct().ToHashSet();
+        var appList = applicants is not null && applicantIds.Count > 0
+            ? (await applicants.GetAll(x => x.CompanyId == companyId && !x.IsDeleted && applicantIds.Contains(x.ApplicantId))).ToList()
+            : [];
+        var appMap = appList.ToDictionary(x => x.ApplicantId, x => x);
+        var vacIds = appList.Select(x => x.VacancyId).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().ToHashSet();
+        var vacMap = vacancies is not null && vacIds.Count > 0
+            ? (await vacancies.GetAll(x => x.CompanyId == companyId && !x.IsDeleted && vacIds.Contains(x.JobId))).ToDictionary(x => x.JobId, x => x.Title)
+            : new Dictionary<string, string>();
         var items = page.Select(item =>
         {
             var total = item.Tasks.Count;
@@ -57,6 +68,10 @@ public sealed class RecruitmentOnboardingService(
             {
                 CaseId = item.CaseId,
                 ApplicantId = item.ApplicantId,
+                ApplicantName = appMap.TryGetValue(item.ApplicantId, out var app) ? $"{app.FirstName} {app.LastName}".Trim() : null,
+                Email = app?.Email,
+                VacancyId = app?.VacancyId ?? string.Empty,
+                VacancyName = vacMap.GetValueOrDefault(app?.VacancyId ?? string.Empty),
                 EmployeeUserId = item.EmployeeUserId,
                 Status = item.Status,
                 Version = item.Version,

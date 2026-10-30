@@ -48,6 +48,7 @@ namespace Codeji.CMS.Services
         private readonly IAttendanceStatusService _attendanceStatusService;
         private readonly IMongoClient _mongoClient;
         private readonly IMongoDbRepository<RecruitmentEnterpriseConfig> _recruitmentConfigRepo;
+        private readonly IOfficeScheduleSettingsService? _officeScheduleSettings;
 
 
         public CompanyService(
@@ -69,7 +70,8 @@ namespace Codeji.CMS.Services
             IAttendanceStatusService attendanceStatusService,
             IMongoClient mongoClient,
             ILogger<CompanyService> logger,
-            IMongoDbRepository<RecruitmentEnterpriseConfig> recruitmentConfigRepo)
+            IMongoDbRepository<RecruitmentEnterpriseConfig> recruitmentConfigRepo,
+            IOfficeScheduleSettingsService? officeScheduleSettings = null)
         {
             _roleService = roleService;
             _companyRepo = companyRepo;
@@ -90,6 +92,7 @@ namespace Codeji.CMS.Services
             _mongoClient = mongoClient;
             _logger = logger;
             _recruitmentConfigRepo = recruitmentConfigRepo;
+            _officeScheduleSettings = officeScheduleSettings;
         }
 
         public async Task<Result> Register(CompanyRequestModel companyModel)
@@ -200,6 +203,12 @@ namespace Codeji.CMS.Services
                 }
 
                 await _attendanceStatusService.EnsureCompanyDefaults(companyId);
+                if (_officeScheduleSettings != null)
+                {
+                    var scheduleResult = await _officeScheduleSettings.EnsureDefaultScheduleAsync(companyId);
+                    if (!scheduleResult.Success)
+                        return await FailProvisioning(company, "The office schedule defaults could not be created.");
+                }
                 var recruitmentDefaults = await EnsureRecruitmentDefaults(companyId, user.UserId);
                 if (!recruitmentDefaults.Success)
                     return await FailProvisioning(company, "The recruitment defaults could not be created.");

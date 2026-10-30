@@ -8,7 +8,7 @@ using Codeji.CMS.Utility.Enums;
 
 public interface IAttendanceEditGuard
 {
-    Task EnsureEditableWorkingDayAsync(string companyId, string userId, DateTime date, bool isExceptionResolution = false);
+    Task EnsureEditableWorkingDayAsync(string companyId, string userId, DateTime date, bool isExceptionResolution = false, bool allowSourceOverride = false);
 }
 
 public sealed class AttendanceEditGuard(
@@ -19,7 +19,7 @@ public sealed class AttendanceEditGuard(
     IMongoDbRepository<CalendarEntity> calendar,
     IMongoDbRepository<EmployeeExitAttendanceCutoff> exitCutoffs) : IAttendanceEditGuard
 {
-    public async Task EnsureEditableWorkingDayAsync(string companyId, string userId, DateTime date, bool isExceptionResolution = false)
+    public async Task EnsureEditableWorkingDayAsync(string companyId, string userId, DateTime date, bool isExceptionResolution = false, bool allowSourceOverride = false)
     {
         var employee = (await employees.GetAll(x =>
             x.CompanyId == companyId && x.UserId == userId && !x.IsDeleted, withDefaultFilter: false)).FirstOrDefault()
@@ -42,16 +42,21 @@ public sealed class AttendanceEditGuard(
         if (!isExceptionResolution && (await summaries.GetAll(x => x.CompanyId == employee.CompanyId && x.UserId == userId && x.PayrollMonth == month && x.IsLocked, withDefaultFilter: false)).Any())
             throw new InvalidOperationException($"Attendance for employee {employee.EmployeeId} cannot be changed because attendance for {month:MMMM yyyy} is locked.");
 
-        var weekly = (await weeklyOffs.GetAll(x => x.CompanyId == employee.CompanyId, withDefaultFilter: false)).FirstOrDefault();
-        var offDays = weekly?.OffDays ?? [(int)DayOfWeek.Saturday, (int)DayOfWeek.Sunday];
-        if (offDays.Contains((int)date.DayOfWeek))
-            throw new InvalidOperationException($"{date:yyyy-MM-dd} is a configured weekly off for employee {employee.EmployeeId}.");
+        // Exceptions resolutions and administrative overrides must be allowed on weekends/holidays
+        // (for example, to resolve historical discrepancies or mark authorized overtime/shifts).
+        if (!isExceptionResolution && !allowSourceOverride)
+        {
+            var weekly = (await weeklyOffs.GetAll(x => x.CompanyId == employee.CompanyId, withDefaultFilter: false)).FirstOrDefault();
+            var offDays = weekly?.OffDays ?? [(int)DayOfWeek.Saturday, (int)DayOfWeek.Sunday];
+            if (offDays.Contains((int)date.DayOfWeek))
+                throw new InvalidOperationException($"{date:yyyy-MM-dd} is a configured weekly off for employee {employee.EmployeeId}.");
 
-        var holidays = await calendar.GetAll(x => x.CompanyId == employee.CompanyId && x.Type == EnumsHelper.CalendarItem.Holiday &&
-            // A ±1 day window tolerates a legacy row stored as an IST-midnight instant
-            // converted to UTC; CalendarDateHelpers.MatchesDate makes the exact call.
-            (x.Recurring || (x.Date >= date.Date.AddDays(-1) && x.Date <= date.Date.AddDays(1))), withDefaultFilter: false);
-        if (holidays.Any(x => CalendarDateHelpers.MatchesDate(x, date)))
-            throw new InvalidOperationException($"{date:yyyy-MM-dd} is a company holiday for employee {employee.EmployeeId}.");
+            var holidays = await calendar.GetAll(x => x.CompanyId == employee.CompanyId && x.Type == EnumsHelper.CalendarItem.Holiday &&
+                // A ±1 day window tolerates a legacy row stored as an IST-midnight instant
+                // converted to UTC; CalendarDateHelpers.MatchesDate makes the exact call.
+                (x.Recurring || (x.Date >= date.Date.AddDays(-1) && x.Date <= date.Date.AddDays(1))), withDefaultFilter: false);
+            if (holidays.Any(x => CalendarDateHelpers.MatchesDate(x, date)))
+                throw new InvalidOperationException($"{date:yyyy-MM-dd} is a company holiday for employee {employee.EmployeeId}.");
+        }
     }
 }

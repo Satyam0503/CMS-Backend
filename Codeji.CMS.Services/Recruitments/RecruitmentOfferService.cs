@@ -75,10 +75,22 @@ public sealed class RecruitmentOfferService(
 
         if (existing is null)
         {
-            if (!string.Equals(command.Status, RecruitmentOfferStatus.Draft, StringComparison.OrdinalIgnoreCase) && !fastTrackOfferAllowed)
-                return Fail(result, RecruitmentErrorCodes.InvalidTransition, "Create the offer as Draft first, then submit it for approval or send it.", StatusCodes.Status409Conflict);
+            var requestedStatus = string.IsNullOrWhiteSpace(command.Status) ? RecruitmentOfferStatus.Draft : command.Status.Trim();
+            var reqApproval = (allowCustomWorkflows ? vacancy?.WorkflowMode switch
+            {
+                "Direct" => false,
+                "Enterprise" => true,
+                _ => (bool?)null
+            } : null) ?? ((config is null || config.OfferApproval) && !string.Equals(config?.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase));
+            if (string.Equals(requestedStatus, RecruitmentOfferStatus.Sent, StringComparison.OrdinalIgnoreCase) && reqApproval)
+                return Fail(result, RecruitmentErrorCodes.InvalidTransition, "Offer requires approval before sending.", StatusCodes.Status409Conflict);
+            if (!string.Equals(requestedStatus, RecruitmentOfferStatus.Draft, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(requestedStatus, RecruitmentOfferStatus.PendingApproval, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(requestedStatus, RecruitmentOfferStatus.Sent, StringComparison.OrdinalIgnoreCase)
+                && !fastTrackOfferAllowed)
+                return Fail(result, RecruitmentErrorCodes.InvalidTransition, "Create the offer as Draft or submit it for approval first.", StatusCodes.Status409Conflict);
 
-            var initialStatus = fastTrackOfferAllowed && !string.IsNullOrWhiteSpace(command.Status) ? command.Status.Trim() : RecruitmentOfferStatus.Draft;
+            var initialStatus = requestedStatus;
             var offer = new RecruitmentOffer
             {
                 CompanyId = companyId,
@@ -251,6 +263,31 @@ public sealed class RecruitmentOfferService(
                             canonical.UpdatedBy = actorUserId;
                             canonical.UpdatedDate = DateTime.UtcNow;
                             await applications.Update(Builders<RecruitmentJobApplication>.Filter.Where(x => x.CompanyId == companyId && x.ApplicationId == canonical.ApplicationId), canonical);
+                        }
+                        else if (canonical is null)
+                        {
+                            var newCanonical = new RecruitmentJobApplication
+                            {
+                                CompanyId = companyId,
+                                ApplicantId = applicant.ApplicantId,
+                                VacancyId = applicant.VacancyId ?? string.Empty,
+                                CurrentStage = nameof(ActivityType.Selected),
+                                CreatedBy = actorUserId,
+                                CreatedDate = DateTime.UtcNow,
+                                UpdatedBy = actorUserId,
+                                UpdatedDate = DateTime.UtcNow,
+                                StageHistory =
+                                [
+                                    new RecruitmentApplicationStageEvent
+                                    {
+                                        FromStage = applicant.ActivityType.ToString(),
+                                        ToStage = nameof(ActivityType.Selected),
+                                        ActorUserId = actorUserId,
+                                        Reason = "Offer accepted"
+                                    }
+                                ]
+                            };
+                            await applications.AddOne(newCanonical);
                         }
                     }
                 }
