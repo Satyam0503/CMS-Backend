@@ -58,9 +58,9 @@ public sealed class ModuleLifecycleEndToEndTests
         Assert.NotNull(payrollSettingsModule);
         Assert.False(payrollSettingsModule.IsAccessible, "PayrollSettings should cascade to inaccessible");
         Assert.NotNull(leaveModule);
-        Assert.False(leaveModule.IsAccessible, "LeaveManagement should cascade to inaccessible");
+        Assert.True(leaveModule.IsAccessible, "LeaveManagement is independent and should remain accessible when only PayRoll is disabled");
         Assert.NotNull(attendanceModule);
-        Assert.False(attendanceModule.IsAccessible, "Attendance should cascade to inaccessible");
+        Assert.True(attendanceModule.IsAccessible, "Attendance is independent and should remain accessible when only PayRoll is disabled");
     }
 
     [Fact]
@@ -90,7 +90,9 @@ public sealed class ModuleLifecycleEndToEndTests
         var roleService = BuildRoleServiceWithAccessibility(
             isJobsAccessible: false,
             isPayrollAccessible: false,
-            isOffboardingAccessible: true);
+            isOffboardingAccessible: true,
+            isLeaveAccessible: false,
+            isAttendanceAccessible: false);
 
         var permissions = await roleService.GetRolePermissionOfuser(AdminRoleId, TestCompanyId);
 
@@ -109,6 +111,27 @@ public sealed class ModuleLifecycleEndToEndTests
     }
 
     [Fact]
+    public async Task GetRolePermissionOfuser_RetainsLeaveAndAttendancePermissions_WhenOnlyPayrollIsDisabled()
+    {
+        var roleService = BuildRoleServiceWithAccessibility(
+            isJobsAccessible: true,
+            isPayrollAccessible: false,
+            isOffboardingAccessible: true,
+            isLeaveAccessible: true,
+            isAttendanceAccessible: true);
+
+        var permissions = await roleService.GetRolePermissionOfuser(AdminRoleId, TestCompanyId);
+
+        Assert.DoesNotContain(permissions, p => p.StartsWith("PayRoll."));
+        Assert.DoesNotContain(permissions, p => p.StartsWith("Payroll_Settings."));
+
+        Assert.Contains(permissions, p => p.StartsWith("Leave_Management."));
+        Assert.Contains(permissions, p => p.StartsWith("Attendance."));
+        Assert.Contains(permissions, p => p.StartsWith("Employees."));
+        Assert.Contains(permissions, p => p.StartsWith("Jobs."));
+    }
+
+    [Fact]
     public async Task GetRolePermissionOfuser_FiltersOutOffboardingPermissions_WhenOffboardingIsDisabled()
     {
         var roleService = BuildRoleServiceWithAccessibility(
@@ -121,6 +144,34 @@ public sealed class ModuleLifecycleEndToEndTests
         Assert.DoesNotContain(permissions, p => p.StartsWith("Offboarding."));
         Assert.Contains(permissions, p => p.StartsWith("Employees."));
         Assert.Contains(permissions, p => p.StartsWith("Jobs."));
+    }
+
+    [Fact]
+    public async Task GetRolePermissionOfuser_FiltersOutLeaveManagement_WhenLeaveManagementIsDisabled()
+    {
+        var roleService = BuildRoleServiceWithAccessibility(
+            isJobsAccessible: true,
+            isPayrollAccessible: true,
+            isLeaveAccessible: false);
+
+        var permissions = await roleService.GetRolePermissionOfuser(AdminRoleId, TestCompanyId);
+
+        Assert.DoesNotContain(permissions, p => p.StartsWith("Leave_Management."));
+        Assert.Contains(permissions, p => p.StartsWith("Employees."));
+        Assert.Contains(permissions, p => p.StartsWith("PayRoll."));
+    }
+
+    [Fact]
+    public async Task VerifyUserAccess_RejectsLeaveManagement_WhenLeaveManagementIsDisabled()
+    {
+        var roleService = BuildRoleServiceWithAccessibility(
+            isJobsAccessible: true,
+            isPayrollAccessible: true,
+            isLeaveAccessible: false);
+
+        var canAccessLeave = await roleService.VerifyUserAccess(AppModule.LeaveManagement, [PermissionConst.View], "user-1", TestCompanyId);
+
+        Assert.False(canAccessLeave);
     }
 
     private static (CompanyMasterService Service, Mock<IMongoDbRepository<RolePermission>> RolePermRepo) BuildCompanyMasterServiceWithModules(bool jobsAccessible, bool payrollAccessible)
@@ -201,9 +252,11 @@ public sealed class ModuleLifecycleEndToEndTests
     }
 
     private static IRoleService BuildRoleServiceWithAccessibility(
-        bool isJobsAccessible,
-        bool isPayrollAccessible,
-        bool isOffboardingAccessible)
+        bool isJobsAccessible = true,
+        bool isPayrollAccessible = true,
+        bool isOffboardingAccessible = true,
+        bool isLeaveAccessible = true,
+        bool isAttendanceAccessible = true)
     {
         var modules = new List<Module>
         {
@@ -241,7 +294,9 @@ public sealed class ModuleLifecycleEndToEndTests
         {
             bool isAccessible = true;
             if (mp.ModuleId is 7 or 8 or 9 or 10 && !isJobsAccessible) isAccessible = false;
-            if (mp.ModuleId is 11 or 12 or 13 or 14 && !isPayrollAccessible) isAccessible = false;
+            if (mp.ModuleId is 11 or 12 && !isPayrollAccessible) isAccessible = false;
+            if (mp.ModuleId == 13 && !isLeaveAccessible) isAccessible = false;
+            if (mp.ModuleId == 14 && !isAttendanceAccessible) isAccessible = false;
             if (mp.ModuleId == 6 && !isOffboardingAccessible) isAccessible = false;
 
             rolePerms.Add(new RolePermission

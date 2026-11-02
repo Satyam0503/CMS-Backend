@@ -426,6 +426,10 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
 
     public async Task<Result<UpdateLeavePolicyRequest>> GetAllLeavePolicies(string companyId, bool? status)
     {
+        if (_roleService != null && !await _roleService.IsModuleAccessibleForCompany(AppModule.LeaveManagement, companyId))
+        {
+            return new Result<UpdateLeavePolicyRequest> { Success = false, Message = "Module is not accessible for this company." };
+        }
         Expression<Func<LeavePolicy, bool>> expression = status.HasValue ? lp => lp.CompanyId == companyId && lp.Status == status.Value : lp => lp.CompanyId == companyId;
         IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(expression);
         var list = _mapper.Map<List<UpdateLeavePolicyRequest>>(leavePolicies);
@@ -515,6 +519,10 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
     public async Task<Result<UpdateLeavePolicyRequest>> GetMySelfServicePolicies()
     {
         var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        if (_roleService != null && !await _roleService.IsModuleAccessibleForCompany(AppModule.LeaveManagement, companyId))
+        {
+            return new Result<UpdateLeavePolicyRequest> { Success = false, Message = "Module is not accessible for this company." };
+        }
         var userId = CurrentContext.UserId(_httpContextAccessor);
         var policies = await GetAllLeavePolicies(companyId, true);
 
@@ -562,6 +570,10 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
     {
         Result result = new();
         var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        if (_roleService != null && !await _roleService.IsModuleAccessibleForCompany(AppModule.LeaveManagement, companyId))
+        {
+            return new Result { Success = false, Message = "Module is not accessible for this company." };
+        }
         var leavePolicy = await _leavePolicyRepo.FirstOrDefault(lp => lp.CompanyId == companyId && lp.Id == leaveRequest.LeavePolicyId && lp.Status);
         if (leavePolicy is null) return result;
         if (leavePolicy.PolicyType == EnumsHelper.LeavePolicyType.WorkFromHome)
@@ -1014,6 +1026,10 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
     {
         Result<MyLeaveRequestResponse> result = new();
         var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        if (_roleService != null && !await _roleService.IsModuleAccessibleForCompany(AppModule.LeaveManagement, companyId))
+        {
+            return new Result<MyLeaveRequestResponse> { Success = false, Message = "Module is not accessible for this company." };
+        }
         Expression<Func<LeaveRequest, bool>> whereCondition = lr =>
                 lr.CompanyId == companyId && lr.EmployeeId == filter.EmployeeId
             && (filter.Status == null || (lr.Status == filter.Status))
@@ -1062,6 +1078,10 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
     public async Task<Result> DeleteLeaveRequest(string leaveRequestId)
     {
         var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        if (_roleService != null && !await _roleService.IsModuleAccessibleForCompany(AppModule.LeaveManagement, companyId))
+        {
+            return new Result { Success = false, Message = "Module is not accessible for this company." };
+        }
         var userId = CurrentContext.UserId(_httpContextAccessor);
         Expression<Func<LeaveRequest, bool>> whereCondition = lr => lr.CompanyId == companyId && lr.EmployeeId == userId && lr.LeaveRequestId == leaveRequestId;
         LeaveRequest? existingLeaveRequest = await _leave.FirstOrDefault(whereCondition);
@@ -2230,6 +2250,11 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
     {
         Result<EmployeeLeaveBalanceResponseDto> result = new() { Success = false };
         var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        if (_roleService != null && !await _roleService.IsModuleAccessibleForCompany(AppModule.LeaveManagement, companyId))
+        {
+            result.Message = "Module is not accessible for this company.";
+            return result;
+        }
         bool isEmpExist = await _employeeRepository.Exist(x =>
             x.CompanyId == companyId && x.UserId == employeeId && x.Status);
         if (!isEmpExist) return result;

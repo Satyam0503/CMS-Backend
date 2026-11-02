@@ -298,6 +298,8 @@ public class RoleServices : IRoleService
 
             bool isJobsAccessible = await IsModuleAccessibleForCompany(AppModule.Jobs, companyId);
             bool isPayrollAccessible = await IsModuleAccessibleForCompany(AppModule.PayRoll, companyId);
+            bool isLeaveAccessible = await IsModuleAccessibleForCompany(AppModule.LeaveManagement, companyId);
+            bool isAttendanceAccessible = await IsModuleAccessibleForCompany(AppModule.Attendance, companyId);
             bool isOffboardingAccessible = await IsModuleAccessibleForCompany(AppModule.Offboarding, companyId);
             bool isWfhAccessible = await IsModuleAccessibleForCompany(AppModule.WorkFromHome, companyId);
             bool isNoticeAccessible = await IsModuleAccessibleForCompany(AppModule.NoticeBoard, companyId);
@@ -319,9 +321,17 @@ public class RoleServices : IRoleService
 
                     if (!isPayrollAccessible && (
                         string.Equals(x.ModuleConstant, AppModule.PayRoll, StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(x.ModuleConstant, AppModule.PayrollSettings, StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(x.ModuleConstant, AppModule.LeaveManagement, StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(x.ModuleConstant, AppModule.Attendance, StringComparison.OrdinalIgnoreCase)))
+                        string.Equals(x.ModuleConstant, AppModule.PayrollSettings, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return false;
+                    }
+
+                    if (!isLeaveAccessible && string.Equals(x.ModuleConstant, AppModule.LeaveManagement, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    if (!isAttendanceAccessible && string.Equals(x.ModuleConstant, AppModule.Attendance, StringComparison.OrdinalIgnoreCase))
                     {
                         return false;
                     }
@@ -362,14 +372,31 @@ public class RoleServices : IRoleService
                 .OrderBy(x => x)
                 .ToArray();
 
-            if (role.RoleType == (int)EnumsHelper.Roles.Employee && isOffboardingAccessible)
+            if (role.RoleType == (int)EnumsHelper.Roles.Employee)
             {
                 var list = res.ToList();
-                var viewPerm = $"{AppModule.Offboarding}.{PermissionConst.View}";
-                var submitPerm = $"{AppModule.Offboarding}.{PermissionConst.Submit}";
-                if (!list.Contains(viewPerm)) list.Add(viewPerm);
-                if (!list.Contains(submitPerm)) list.Add(submitPerm);
-                res = list.OrderBy(x => x).ToArray();
+                bool modified = false;
+                if (isOffboardingAccessible)
+                {
+                    var viewPerm = $"{AppModule.Offboarding}.{PermissionConst.View}";
+                    var submitPerm = $"{AppModule.Offboarding}.{PermissionConst.Submit}";
+                    if (!list.Contains(viewPerm)) { list.Add(viewPerm); modified = true; }
+                    if (!list.Contains(submitPerm)) { list.Add(submitPerm); modified = true; }
+                }
+                if (isLeaveAccessible)
+                {
+                    var viewPerm = $"{AppModule.LeaveManagement}.{PermissionConst.View}";
+                    if (!list.Contains(viewPerm)) { list.Add(viewPerm); modified = true; }
+                }
+                if (isAttendanceAccessible)
+                {
+                    var viewPerm = $"{AppModule.Attendance}.{PermissionConst.View}";
+                    if (!list.Contains(viewPerm)) { list.Add(viewPerm); modified = true; }
+                }
+                if (modified)
+                {
+                    res = list.OrderBy(x => x).ToArray();
+                }
             }
         }
         return res;

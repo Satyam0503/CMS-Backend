@@ -142,13 +142,11 @@ public class CompanyMasterService : ICompanyMasterService
                 string.Equals(m.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.CareerProfile, StringComparison.OrdinalIgnoreCase));
             targetModules.AddRange(related);
         }
-        // If toggling PayRoll, cascade to Payroll_Settings, Leave_Management, and Attendance
+        // If toggling PayRoll, cascade to Payroll_Settings
         else if (string.Equals(module.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.PayRoll, StringComparison.OrdinalIgnoreCase))
         {
             var related = allModules.Where(m =>
-                string.Equals(m.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.PayrollSettings, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(m.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.LeaveManagement, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(m.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.Attendance, StringComparison.OrdinalIgnoreCase));
+                string.Equals(m.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.PayrollSettings, StringComparison.OrdinalIgnoreCase));
             targetModules.AddRange(related);
         }
 
@@ -250,9 +248,7 @@ public class CompanyMasterService : ICompanyMasterService
         if (!isPayrollAccessible)
         {
             foreach (var item in resultList.Where(x =>
-                string.Equals(x.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.PayrollSettings, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(x.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.LeaveManagement, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(x.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.Attendance, StringComparison.OrdinalIgnoreCase)))
+                string.Equals(x.ModuleConstant, Codeji.CMS.Utility.Constraints.AppModule.PayrollSettings, StringComparison.OrdinalIgnoreCase)))
             {
                 item.IsAccessible = false;
             }
