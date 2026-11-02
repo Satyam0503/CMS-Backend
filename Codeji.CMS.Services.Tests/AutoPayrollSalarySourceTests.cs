@@ -85,7 +85,7 @@ public sealed class AutoPayrollSalarySourceTests
             Repository<PayrollPayGroup>().Object, Repository<SalaryTemplate>().Object,
             Repository<EmployeeSalaryStructure>().Object);
 
-        var result = await service.GeneratePayrollForMonthAsync("company-1", new DateTime(2026, 10, 1));
+        var result = await service.GeneratePayrollForMonthAsync("company-1", new DateTime(2026, 10, 1), plannedPaymentDate: new DateTime(2026, 10, 31));
 
         Assert.False(result.Success);
         Assert.Equal(422, result.StatusCode);
@@ -130,7 +130,7 @@ public sealed class AutoPayrollSalarySourceTests
             Repository<PayrollPayGroup>().Object, Repository<SalaryTemplate>().Object,
             Repository(salary).Object);
 
-        var result = await service.GeneratePayrollForMonthAsync("company-1", new DateTime(2026, 10, 1));
+        var result = await service.GeneratePayrollForMonthAsync("company-1", new DateTime(2026, 10, 1), plannedPaymentDate: new DateTime(2026, 10, 31));
 
         Assert.False(result.Success);
         Assert.Contains("MEAL", result.Message);
@@ -299,7 +299,7 @@ public sealed class AutoPayrollSalarySourceTests
             Repository<PayrollPayGroup>().Object, Repository<SalaryTemplate>().Object,
             Repository(expiredCanonical).Object);
 
-        var result = await service.GeneratePayrollForMonthAsync("company-1", new DateTime(2026, 10, 1));
+        var result = await service.GeneratePayrollForMonthAsync("company-1", new DateTime(2026, 10, 1), plannedPaymentDate: new DateTime(2026, 10, 31));
 
         Assert.True(result.Success);
         Assert.Contains("1 employee(s) have no salary structure defined", result.Message);
@@ -403,7 +403,7 @@ public sealed class AutoPayrollSalarySourceTests
             Repository<PayrollPayGroup>().Object, Repository<SalaryTemplate>().Object,
             Repository(empSalary).Object);
 
-        var result = await service.GeneratePayrollForMonthAsync("company-1", new DateTime(2026, 10, 1));
+        var result = await service.GeneratePayrollForMonthAsync("company-1", new DateTime(2026, 10, 1), plannedPaymentDate: new DateTime(2026, 10, 31));
 
         Assert.True(result.Success, result.Message);
         Assert.NotNull(capturedDto);
