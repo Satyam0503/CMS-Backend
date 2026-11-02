@@ -4,9 +4,12 @@ using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Repository.Entities.Leave;
 using Codeji.CMS.Services.Employees;
+using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
 using MapsterMapper;
+using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Attendance
 {
@@ -70,6 +73,13 @@ namespace Codeji.CMS.Services.Attendance
         private readonly IAttendanceInitializationService? _initializationService;
         private readonly IMongoDbRepository<AttendancePenaltyPolicy>? _penaltyPolicies;
         private readonly IShiftAttendanceReconciliationService? _shiftReconciliation;
+        private readonly IMongoDbRepository<LeaveRequest>? _leaves;
+        private readonly IMongoDbRepository<EmployeeLeaveBalance>? _leaveBalances;
+        private readonly IMongoDbRepository<MonthlyAttendanceSummary>? _summaries;
+        private readonly IMongoDbRepository<AttendancePayrollException>? _exceptions;
+        private readonly IMongoDbRepository<WorkFromHomeRequest>? _wfhRequests;
+        private readonly IMongoDbRepository<JobTitles>? _jobTitles;
+        private readonly IMongoDbRepository<Codeji.CMS.Repository.Entities.Company.Company>? _companies;
 
         public AdminAttendanceService(
             IAttendanceRepository attendanceRepository,
@@ -85,7 +95,14 @@ namespace Codeji.CMS.Services.Attendance
             IMongoDbRepository<Department>? departments = null,
             IAttendanceInitializationService? initializationService = null,
             IMongoDbRepository<AttendancePenaltyPolicy>? penaltyPolicies = null,
-            IShiftAttendanceReconciliationService? shiftReconciliation = null
+            IShiftAttendanceReconciliationService? shiftReconciliation = null,
+            IMongoDbRepository<LeaveRequest>? leaves = null,
+            IMongoDbRepository<EmployeeLeaveBalance>? leaveBalances = null,
+            IMongoDbRepository<MonthlyAttendanceSummary>? summaries = null,
+            IMongoDbRepository<AttendancePayrollException>? exceptions = null,
+            IMongoDbRepository<WorkFromHomeRequest>? wfhRequests = null,
+            IMongoDbRepository<JobTitles>? jobTitles = null,
+            IMongoDbRepository<Codeji.CMS.Repository.Entities.Company.Company>? companies = null
         )
         {
             _attendanceRepository = attendanceRepository;
@@ -102,6 +119,13 @@ namespace Codeji.CMS.Services.Attendance
             _initializationService = initializationService;
             _penaltyPolicies = penaltyPolicies;
             _shiftReconciliation = shiftReconciliation;
+            _leaves = leaves;
+            _leaveBalances = leaveBalances;
+            _summaries = summaries;
+            _exceptions = exceptions;
+            _wfhRequests = wfhRequests;
+            _jobTitles = jobTitles;
+            _companies = companies;
         }
 
         public async Task<AttendanceResponseDto> AddManualAttendance(
@@ -114,6 +138,11 @@ namespace Codeji.CMS.Services.Attendance
                 throw new ArgumentNullException(nameof(dto));
 
             var normalizedDate = DateTime.SpecifyKind(dto.Date.Date, DateTimeKind.Utc);
+            var existing = await _attendanceRepository.GetByUserAndDateAsync(
+                companyId,
+                dto.UserId,
+                normalizedDate
+            );
             var prepared = await Prepare(
                 companyId,
                 actorUserId,
@@ -122,7 +151,9 @@ namespace Codeji.CMS.Services.Attendance
                 dto.Status,
                 dto.CheckInTime,
                 dto.CheckOutTime,
-                dto.Remarks
+                dto.Remarks,
+                existing?.Version,
+                dto.AllowSourceOverride
             );
             if (
                 !string.IsNullOrWhiteSpace(dto.EmployeeId)
@@ -131,13 +162,150 @@ namespace Codeji.CMS.Services.Attendance
                 throw new InvalidOperationException(
                     "Employee identity does not match the selected user."
                 );
+
+            if (prepared.RequiresLeaveReversal && !string.IsNullOrEmpty(prepared.LeaveRequestIdToReverse) && _leaves != null)
+            {
+                var leaveRequest = await _leaves.FirstOrDefault(x => x.CompanyId == companyId && x.LeaveRequestId == prepared.LeaveRequestIdToReverse);
+                if (leaveRequest != null && leaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted)
+                {
+                    if (_leaveBalances != null)
+                    {
+                        var balance = await _leaveBalances.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == dto.UserId && x.LeavePolicyId == leaveRequest.LeavePolicyId);
+                        if (balance != null)
+                        {
+                            var balanceUpdate = Builders<EmployeeLeaveBalance>.Update
+                                .Inc(x => x.Remaining, leaveRequest.TotalDays)
+                                .Inc(x => x.Taken, -leaveRequest.TotalDays)
+                                .Inc(x => x.Version, 1)
+                                .Set(x => x.UpdatedDate, DateTime.UtcNow);
+                            await _leaveBalances.UpdateMany(Builders<EmployeeLeaveBalance>.Filter.Eq(x => x.Id, balance.Id), balanceUpdate);
+                        }
+                    }
+                    var leaveUpdate = Builders<LeaveRequest>.Update
+                        .Set(x => x.Status, EnumsHelper.LeaveRequestStatus.WithDrawn)
+                        .Set(x => x.ReviewedBy, actorUserId)
+                        .Set(x => x.Comment, $"Attendance overridden to {dto.Status} by HR: {dto.Remarks?.Trim()}")
+                        .Set(x => x.ReviewedAt, DateTime.UtcNow)
+                        .Set(x => x.UpdatedDate, DateTime.UtcNow)
+                        .Set(x => x.ReconciliationStatus, "Reversed")
+                        .Set(x => x.ReconciliationErrorCode, null)
+                        .Set(x => x.ReconciliationErrorMessage, null)
+                        .Inc(x => x.Version, 1);
+                    await _leaves.UpdateMany(Builders<LeaveRequest>.Filter.Eq(x => x.LeaveRequestId, leaveRequest.LeaveRequestId), leaveUpdate);
+                }
+            }
+
+            if (_wfhRequests != null)
+            {
+                var candidateRequests = new List<WorkFromHomeRequest>();
+                if (prepared.RequiresWfhConversion && !string.IsNullOrEmpty(prepared.WfhRequestIdToConvert))
+                {
+                    var specific = await _wfhRequests.FirstOrDefault(x => x.CompanyId == companyId && x.RequestId == prepared.WfhRequestIdToConvert);
+                    if (specific != null) candidateRequests.Add(specific);
+                }
+
+                if (dto.AllowSourceOverride || existing?.SourceType == "WFH_REQUEST")
+                {
+                    var overlapping = await _wfhRequests.GetAll(x =>
+                        x.CompanyId == companyId &&
+                        x.UserId == dto.UserId &&
+                        x.Status == "Approved" &&
+                        x.FromDate <= normalizedDate &&
+                        x.ToDate >= normalizedDate);
+                    foreach (var req in overlapping)
+                    {
+                        if (candidateRequests.All(c => c.RequestId != req.RequestId))
+                            candidateRequests.Add(req);
+                    }
+                }
+
+                foreach (var wfhReq in candidateRequests)
+                {
+                    wfhReq.OfficeConversions ??= [];
+                    if (!wfhReq.OfficeConversions.Any(c => c.AttendanceDate.Date == normalizedDate.Date))
+                    {
+                        var conversion = new WorkFromHomeOfficeConversion
+                        {
+                            AttendanceDate = normalizedDate,
+                            OfficeCheckInTime = prepared.Attendance.CheckInTime ?? DateTime.UtcNow,
+                            OfficeCheckOutTime = prepared.Attendance.CheckOutTime ?? DateTime.UtcNow,
+                            PreviousAttendanceStatus = existing?.Status ?? "WFH",
+                            PreviousCheckInTime = existing?.CheckInTime,
+                            PreviousCheckOutTime = existing?.CheckOutTime,
+                            PreviousTotalHours = existing?.TotalHours,
+                            PreviousRemarks = existing?.Remarks,
+                            Remarks = dto.Remarks ?? "Overridden to office attendance by HR",
+                            ConvertedByUserId = actorUserId,
+                            ConvertedAtUtc = DateTime.UtcNow
+                        };
+                        wfhReq.OfficeConversions.Add(conversion);
+                        wfhReq.Version++;
+                        wfhReq.UpdatedBy = actorUserId;
+                        wfhReq.UpdatedDate = DateTime.UtcNow;
+                        await _wfhRequests.Update(Builders<WorkFromHomeRequest>.Filter.Eq(x => x.RequestId, wfhReq.RequestId), wfhReq);
+                    }
+                }
+            }
+
+            if (dto.AllowSourceOverride)
+            {
+                var isWfhStatus = string.Equals(dto.Status, "WFH", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(dto.Status, "WFH+WFO", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(dto.Status, "WFH-HD", StringComparison.OrdinalIgnoreCase);
+
+                if (!isWfhStatus)
+                {
+                    await _attendanceSegments.DeleteAll(Builders<AttendanceDaySegment>.Filter.Where(x =>
+                        x.CompanyId == companyId && x.UserId == dto.UserId && x.Date >= normalizedDate && x.Date < normalizedDate.AddDays(1) &&
+                        (x.SourceType == "LEAVE" || x.SourceType == "WFH_REQUEST")));
+                }
+                else
+                {
+                    var segments = await _attendanceSegments.GetAll(x =>
+                        x.CompanyId == companyId && x.UserId == dto.UserId && x.Date >= normalizedDate && x.Date < normalizedDate.AddDays(1));
+                    foreach (var seg in segments)
+                    {
+                        if (prepared.Attendance.CheckInTime.HasValue) seg.CheckInTime = prepared.Attendance.CheckInTime;
+                        if (prepared.Attendance.CheckOutTime.HasValue) seg.CheckOutTime = prepared.Attendance.CheckOutTime;
+                        if (prepared.Attendance.TotalHours.HasValue) seg.TotalHours = prepared.Attendance.TotalHours;
+                        seg.Remarks = $"Punch timings regularized by HR: {dto.Remarks?.Trim()}";
+                        seg.UpdatedAtUtc = DateTime.UtcNow;
+                        seg.Version++;
+                        await _attendanceSegments.Update(Builders<AttendanceDaySegment>.Filter.Eq(x => x.AttendanceDaySegmentId, seg.AttendanceDaySegmentId), seg);
+                    }
+                }
+            }
+
             var result = prepared.Existing is null
                 ? await _attendanceRepository.AddAsync(prepared.Attendance)
                 : await PersistUpdate(companyId, dto.UserId, normalizedDate, prepared.Attendance);
+
+            if (_summaries != null)
+            {
+                var monthStart = new DateTime(dto.Date.Year, dto.Date.Month, 1);
+                await _summaries.DeleteAll(Builders<MonthlyAttendanceSummary>.Filter.Where(x =>
+                    x.CompanyId == companyId && x.UserId == dto.UserId && x.PayrollMonth == monthStart && !x.IsLocked));
+            }
+
+            if (dto.AllowSourceOverride && _exceptions != null)
+            {
+                await _exceptions.UpdateMany(
+                    Builders<AttendancePayrollException>.Filter.Where(x =>
+                        x.CompanyId == companyId && x.UserId == dto.UserId &&
+                        (x.AttendanceDate == normalizedDate || x.AffectedDates.Contains(normalizedDate)) &&
+                        x.Status == "PENDING_REVIEW"),
+                    Builders<AttendancePayrollException>.Update
+                        .Set(x => x.Status, "RESOLVED")
+                        .Set(x => x.Resolution, $"Resolved via attendance override to {dto.Status}: {dto.Remarks}")
+                        .Set(x => x.ReviewedBy, actorUserId)
+                        .Set(x => x.ReviewedAt, DateTime.UtcNow)
+                );
+            }
+
             await _auditWriter.WriteMutationAsync(
                 companyId,
                 actorUserId,
-                prepared.Existing is null ? "CREATED" : "UPDATED",
+                dto.AllowSourceOverride ? "ADMIN_SOURCE_OVERRIDE" : (prepared.Existing is null ? "CREATED" : "UPDATED"),
                 result
             );
             return _mapper.Map<AttendanceResponseDto>(result);
@@ -171,13 +339,105 @@ namespace Codeji.CMS.Services.Attendance
                 dto.CheckInTime,
                 dto.CheckOutTime,
                 dto.Remarks,
-                existing.Version
+                existing.Version,
+                dto.AllowSourceOverride
             );
+
+            if (prepared.RequiresLeaveReversal && !string.IsNullOrEmpty(prepared.LeaveRequestIdToReverse) && _leaves != null)
+            {
+                var leaveRequest = await _leaves.FirstOrDefault(x => x.CompanyId == companyId && x.LeaveRequestId == prepared.LeaveRequestIdToReverse);
+                if (leaveRequest != null && leaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted)
+                {
+                    if (_leaveBalances != null)
+                    {
+                        var balance = await _leaveBalances.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == userId && x.LeavePolicyId == leaveRequest.LeavePolicyId);
+                        if (balance != null)
+                        {
+                            var balanceUpdate = Builders<EmployeeLeaveBalance>.Update
+                                .Inc(x => x.Remaining, leaveRequest.TotalDays)
+                                .Inc(x => x.Taken, -leaveRequest.TotalDays)
+                                .Inc(x => x.Version, 1)
+                                .Set(x => x.UpdatedDate, DateTime.UtcNow);
+                            await _leaveBalances.UpdateMany(Builders<EmployeeLeaveBalance>.Filter.Eq(x => x.Id, balance.Id), balanceUpdate);
+                        }
+                    }
+                    var leaveUpdate = Builders<LeaveRequest>.Update
+                        .Set(x => x.Status, EnumsHelper.LeaveRequestStatus.WithDrawn)
+                        .Set(x => x.ReviewedBy, actorUserId)
+                        .Set(x => x.Comment, $"Attendance overridden to {dto.Status} by HR: {dto.Remarks?.Trim()}")
+                        .Set(x => x.ReviewedAt, DateTime.UtcNow)
+                        .Set(x => x.UpdatedDate, DateTime.UtcNow)
+                        .Set(x => x.ReconciliationStatus, "Reversed")
+                        .Set(x => x.ReconciliationErrorCode, null)
+                        .Set(x => x.ReconciliationErrorMessage, null)
+                        .Inc(x => x.Version, 1);
+                    await _leaves.UpdateMany(Builders<LeaveRequest>.Filter.Eq(x => x.LeaveRequestId, leaveRequest.LeaveRequestId), leaveUpdate);
+                }
+            }
+
+            if (prepared.RequiresWfhConversion && !string.IsNullOrEmpty(prepared.WfhRequestIdToConvert) && _wfhRequests != null)
+            {
+                var wfhReq = await _wfhRequests.FirstOrDefault(x => x.CompanyId == companyId && x.RequestId == prepared.WfhRequestIdToConvert);
+                if (wfhReq != null)
+                {
+                    var conversion = new WorkFromHomeOfficeConversion
+                    {
+                        AttendanceDate = normalizedDate,
+                        OfficeCheckInTime = prepared.Attendance.CheckInTime ?? DateTime.UtcNow,
+                        OfficeCheckOutTime = prepared.Attendance.CheckOutTime ?? DateTime.UtcNow,
+                        PreviousAttendanceStatus = existing.Status,
+                        PreviousCheckInTime = existing.CheckInTime,
+                        PreviousCheckOutTime = existing.CheckOutTime,
+                        PreviousTotalHours = existing.TotalHours,
+                        PreviousRemarks = existing.Remarks,
+                        Remarks = dto.Remarks ?? "Overridden to office attendance by HR",
+                        ConvertedByUserId = actorUserId,
+                        ConvertedAtUtc = DateTime.UtcNow
+                    };
+                    wfhReq.OfficeConversions ??= [];
+                    wfhReq.OfficeConversions.Add(conversion);
+                    wfhReq.Version++;
+                    wfhReq.UpdatedBy = actorUserId;
+                    wfhReq.UpdatedDate = DateTime.UtcNow;
+                    await _wfhRequests.Update(Builders<WorkFromHomeRequest>.Filter.Eq(x => x.RequestId, wfhReq.RequestId), wfhReq);
+                }
+            }
+
+            if (dto.AllowSourceOverride)
+            {
+                await _attendanceSegments.DeleteAll(Builders<AttendanceDaySegment>.Filter.Where(x =>
+                    x.CompanyId == companyId && x.UserId == userId && x.Date >= normalizedDate && x.Date < normalizedDate.AddDays(1) &&
+                    (x.SourceType == "LEAVE" || x.SourceType == "WFH_REQUEST")));
+            }
+
             await PersistUpdate(companyId, userId, date.Date, prepared.Attendance);
+
+            if (_summaries != null)
+            {
+                var monthStart = new DateTime(date.Year, date.Month, 1);
+                await _summaries.DeleteAll(Builders<MonthlyAttendanceSummary>.Filter.Where(x =>
+                    x.CompanyId == companyId && x.UserId == userId && x.PayrollMonth == monthStart && !x.IsLocked));
+            }
+
+            if (dto.AllowSourceOverride && _exceptions != null)
+            {
+                await _exceptions.UpdateMany(
+                    Builders<AttendancePayrollException>.Filter.Where(x =>
+                        x.CompanyId == companyId && x.UserId == userId &&
+                        (x.AttendanceDate == normalizedDate || x.AffectedDates.Contains(normalizedDate)) &&
+                        x.Status == "PENDING_REVIEW"),
+                    Builders<AttendancePayrollException>.Update
+                        .Set(x => x.Status, "RESOLVED")
+                        .Set(x => x.Resolution, $"Resolved via attendance override to {dto.Status}: {dto.Remarks}")
+                        .Set(x => x.ReviewedBy, actorUserId)
+                        .Set(x => x.ReviewedAt, DateTime.UtcNow)
+                );
+            }
+
             await _auditWriter.WriteMutationAsync(
                 companyId,
                 actorUserId,
-                "UPDATED",
+                dto.AllowSourceOverride ? "ADMIN_SOURCE_OVERRIDE" : "UPDATED",
                 prepared.Attendance
             );
             return true;
@@ -192,7 +452,8 @@ namespace Codeji.CMS.Services.Attendance
             string? checkIn,
             string? checkOut,
             string? remarks,
-            long? expectedVersion = null
+            long? expectedVersion = null,
+            bool allowSourceOverride = false
         )
         {
             var hasTimes =
@@ -227,7 +488,9 @@ namespace Codeji.CMS.Services.Attendance
                 if (outTime == null && inTime != null)
                     outTime = string.Equals(status, "ED", StringComparison.OrdinalIgnoreCase)
                         ? new TimeOnly(14, 0)
-                        : new TimeOnly(18, 0);
+                        : string.Equals(status, "HD", StringComparison.OrdinalIgnoreCase)
+                            ? new TimeOnly(13, 30)
+                            : new TimeOnly(18, 0);
             }
             var validation = await _mutationValidator.PrepareAsync(
                 new AttendanceMutationRequest
@@ -243,6 +506,7 @@ namespace Codeji.CMS.Services.Attendance
                     OperatorRemark = remarks,
                     ExpectedAttendanceVersion = expectedVersion,
                     PreserveRequestedStatus = true,
+                    AllowSourceOverride = allowSourceOverride,
                 }
             );
             if (!validation.Success || validation.MethodResult is null)
@@ -576,6 +840,21 @@ namespace Codeji.CMS.Services.Attendance
                 .GroupBy(x => x.Code.Trim().ToUpperInvariant())
                 .ToDictionary(x => x.Key, x => x.First());
 
+            string companyName = "Codeji CMS";
+            if (_companies != null)
+            {
+                try
+                {
+                    var comp = await _companies.FirstOrDefault(x => x.CompanyId == companyId);
+                    if (!string.IsNullOrWhiteSpace(comp?.CompanyName))
+                        companyName = comp.CompanyName.Trim();
+                }
+                catch
+                {
+                    // Fallback to default
+                }
+            }
+
             Dictionary<string, string> departmentMap = [];
             if (_departments != null)
             {
@@ -590,12 +869,37 @@ namespace Codeji.CMS.Services.Attendance
                             d => d.DepartmentId,
                             d =>
                                 d.Titles?.FirstOrDefault(t => t.Language == "en")?.Label
+                                ?? d.Titles?.FirstOrDefault()?.Label
                                 ?? d.DepartmentId
                         );
                 }
                 catch
                 {
                     // Graceful fallback if department repository fails
+                }
+            }
+
+            Dictionary<string, string> jobTitleMap = [];
+            if (_jobTitles != null)
+            {
+                try
+                {
+                    var titles = await _jobTitles.GetAll(x =>
+                        x.CompanyId == companyId && !x.IsDeleted
+                    );
+                    jobTitleMap = titles
+                        .Where(t => !string.IsNullOrWhiteSpace(t.JobTitleId))
+                        .ToDictionary(
+                            t => t.JobTitleId,
+                            t =>
+                                t.Titles?.FirstOrDefault(l => l.Language == "en")?.Label
+                                ?? t.Titles?.FirstOrDefault()?.Label
+                                ?? t.JobTitleId
+                        );
+                }
+                catch
+                {
+                    // Graceful fallback if job titles repository fails
                 }
             }
 
@@ -623,7 +927,13 @@ namespace Codeji.CMS.Services.Attendance
             }
 
             using var workbook = new XLWorkbook();
+            workbook.Properties.Title = $"Monthly Attendance Report - {year}-{month:D2}";
+            workbook.Properties.Subject = $"Monthly Attendance Register ({monthStart:MMMM yyyy})";
+            workbook.Properties.Author = "Codeji CMS";
+            workbook.Properties.Company = companyName;
+
             var sheet = workbook.Worksheets.Add("Attendance report");
+            sheet.ShowGridLines = true;
             sheet.Cell(1, 1).Value = "Employee ID";
             sheet.Cell(1, 2).Value = "Employee Name";
             sheet.Cell(1, 3).Value = "Department";
@@ -644,16 +954,19 @@ namespace Codeji.CMS.Services.Attendance
             sheet.Cell(1, summaryStartCol + 4).Value = "Weekly Off\n(WO)";
             sheet.Cell(1, summaryStartCol + 5).Value = "Holiday\n(H)";
             sheet.Cell(1, summaryStartCol + 6).Value = "Total Paid\nDays";
+            sheet.Cell(1, summaryStartCol + 7).Value = "Total Worked\nHours";
+            sheet.Cell(1, summaryStartCol + 8).Value = "Late / Early\nMarks";
 
-            var lastColumn = daysInMonth + 11;
+            var lastColumn = daysInMonth + 13;
             var headerRange = sheet.Range(1, 1, 1, lastColumn);
             headerRange.Style.Font.Bold = true;
+            headerRange.Style.Font.FontSize = 10;
             headerRange.Style.Fill.BackgroundColor = XLColor.FromHtml("3F2A63");
             headerRange.Style.Font.FontColor = XLColor.White;
             headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             headerRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
             headerRange.Style.Alignment.WrapText = true;
-            sheet.Row(1).Height = 32;
+            sheet.Row(1).Height = 36;
 
             var summaryHeaderRange = sheet.Range(1, summaryStartCol, 1, lastColumn);
             summaryHeaderRange.Style.Fill.BackgroundColor = XLColor.FromHtml("2D1E47");
@@ -672,12 +985,19 @@ namespace Codeji.CMS.Services.Attendance
                         ? dName
                         : employee.Department ?? string.Empty;
                 sheet.Cell(row, 3).Value = deptName;
-                sheet.Cell(row, 4).Value = employee.JobRole ?? string.Empty;
+
+                var desigName =
+                    !string.IsNullOrWhiteSpace(employee.JobRole)
+                    && jobTitleMap.TryGetValue(employee.JobRole, out var jName)
+                        ? jName
+                        : employee.JobRole ?? string.Empty;
+                sheet.Cell(row, 4).Value = desigName;
 
                 sheet.Cell(row, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
                 sheet.Cell(row, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
                 sheet.Cell(row, 3).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
                 sheet.Cell(row, 4).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+                sheet.Range(row, 1, row, 4).Style.Font.FontSize = 10;
 
                 decimal presentCount = 0;
                 decimal halfDayCount = 0;
@@ -686,6 +1006,7 @@ namespace Codeji.CMS.Services.Attendance
                 decimal weeklyOffCount = 0;
                 decimal holidayCount = 0;
                 decimal paidDays = 0;
+                decimal totalWorkedHours = 0;
 
                 var allowedLimit = policyMap.TryGetValue(employee.UserId, out var empPolicy)
                     ? empPolicy.CombinedLhdEdMonthlyLimit
@@ -709,6 +1030,32 @@ namespace Codeji.CMS.Services.Attendance
                 {
                     attendance.TryGetValue((employee.UserId, date.Date), out var daily);
                     segments.TryGetValue((employee.UserId, date.Date), out var daySegments);
+
+                    // Track worked hours
+                    if (daily != null)
+                    {
+                        if (daily.TotalHours.HasValue && daily.TotalHours.Value > 0)
+                            totalWorkedHours += (decimal)daily.TotalHours.Value;
+                        else if (daily.CheckInTime.HasValue && daily.CheckOutTime.HasValue)
+                        {
+                            var h = (daily.CheckOutTime.Value - daily.CheckInTime.Value).TotalHours;
+                            if (h < 0) h += 24;
+                            totalWorkedHours += (decimal)h;
+                        }
+                    }
+                    else if (daySegments != null && daySegments.Count > 0)
+                    {
+                        foreach (var seg in daySegments)
+                        {
+                            if (seg.CheckInTime.HasValue && seg.CheckOutTime.HasValue)
+                            {
+                                var h = (seg.CheckOutTime.Value - seg.CheckInTime.Value).TotalHours;
+                                if (h < 0) h += 24;
+                                totalWorkedHours += (decimal)h;
+                            }
+                        }
+                    }
+
                     var (cellValue, statusCode) = FormatAttendanceCell(
                         daily,
                         daySegments,
@@ -773,6 +1120,15 @@ namespace Codeji.CMS.Services.Attendance
                 pdCell.Style.NumberFormat.Format = "0.#";
                 pdCell.Style.Font.Bold = true;
                 pdCell.Style.Fill.BackgroundColor = XLColor.FromHtml("E8F0FE");
+                pdCell.Style.Font.FontColor = XLColor.FromHtml("1A73E8");
+
+                var hrsCell = sheet.Cell(row, summaryStartCol + 7);
+                hrsCell.Value = Math.Round(totalWorkedHours, 1);
+                hrsCell.Style.NumberFormat.Format = "0.#";
+
+                var marksCell = sheet.Cell(row, summaryStartCol + 8);
+                marksCell.Value = empInfractions.Count;
+                marksCell.Style.NumberFormat.Format = "0";
 
                 for (var sc = summaryStartCol; sc <= lastColumn; sc++)
                 {
@@ -792,13 +1148,13 @@ namespace Codeji.CMS.Services.Attendance
             var lastRow = Math.Max(row - 1, 1);
             sheet.Range(1, 1, lastRow, lastColumn).SetAutoFilter();
             sheet.Column(1).Width = 16;
-            sheet.Column(2).Width = 24;
-            sheet.Column(3).Width = 20;
-            sheet.Column(4).Width = 22;
+            sheet.Column(2).Width = 26;
+            sheet.Column(3).Width = 22;
+            sheet.Column(4).Width = 26;
             for (var column = 5; column < summaryStartCol; column++)
                 sheet.Column(column).Width = 18;
             for (var column = summaryStartCol; column <= lastColumn; column++)
-                sheet.Column(column).Width = 13;
+                sheet.Column(column).Width = 14;
 
             sheet.Range(1, 1, lastRow, lastColumn).Style.Alignment.Vertical =
                 XLAlignmentVerticalValues.Center;
@@ -829,9 +1185,11 @@ namespace Codeji.CMS.Services.Attendance
             {
                 lines.Add(daily.Status);
                 if (daily.CheckInTime.HasValue || daily.CheckOutTime.HasValue)
-                    lines.Add(
-                        $"In {FormatAttendanceTime(daily.CheckInTime)} Â· Out {FormatAttendanceTime(daily.CheckOutTime)}"
-                    );
+                {
+                    var inTime = FormatAttendanceTime(daily.CheckInTime);
+                    var outTime = FormatAttendanceTime(daily.CheckOutTime);
+                    lines.Add($"In {inTime} - Out {outTime}");
+                }
                 return (
                     string.Join(Environment.NewLine, lines),
                     daily.Status?.Trim().ToUpperInvariant() ?? "P"
@@ -848,9 +1206,11 @@ namespace Codeji.CMS.Services.Attendance
                         : segment.Segment;
                     lines.Add($"{label}: {segment.Status}");
                     if (segment.CheckInTime.HasValue || segment.CheckOutTime.HasValue)
-                        lines.Add(
-                            $"In {FormatAttendanceTime(segment.CheckInTime)} Â· Out {FormatAttendanceTime(segment.CheckOutTime)}"
-                        );
+                    {
+                        var inTime = FormatAttendanceTime(segment.CheckInTime);
+                        var outTime = FormatAttendanceTime(segment.CheckOutTime);
+                        lines.Add($"In {inTime} - Out {outTime}");
+                    }
                 }
                 return (
                     string.Join(Environment.NewLine, lines),
@@ -865,11 +1225,11 @@ namespace Codeji.CMS.Services.Attendance
                 EmploymentPeriod.TryGetJoiningDate(employee, out var joiningDate)
                 && date.Date < joiningDate.Date
             )
-                return ("â€”", "NOT_ELIGIBLE");
+                return ("-", "NOT_ELIGIBLE");
 
             var lastWorkingDate = EmploymentPeriod.GetLastWorkingDate(employee);
             if (lastWorkingDate.HasValue && date.Date > lastWorkingDate.Value)
-                return ("â€”", "NOT_EMPLOYED");
+                return ("-", "NOT_EMPLOYED");
 
             if (!workingDates.Contains(DateOnly.FromDateTime(date)))
             {
@@ -1064,13 +1424,33 @@ namespace Codeji.CMS.Services.Attendance
                     "Weekly Off" or "Weekend" => "F5F5F5",
                     string s when s.StartsWith("Holiday", StringComparison.OrdinalIgnoreCase) =>
                         "EDE7F6",
-                    "â€”" or "Future" or "Not eligible" or "Not employed" => "FAFAFA",
+                    "-" or "â€”" or "Future" or "Not eligible" or "Not employed" => "FAFAFA",
                     _ when IsLeaveCode(normalizedStatus) => "E1F5FE",
                     _ => "FFFFFF",
                 };
             cell.Style.Fill.BackgroundColor = XLColor.FromHtml(color);
+            cell.Style.Font.FontColor = GetContrastingTextColor(color);
+            cell.Style.Font.FontSize = 9;
             cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-            cell.Style.Border.OutsideBorderColor = XLColor.FromHtml("E0E0E0");
+            cell.Style.Border.OutsideBorderColor = XLColor.FromHtml("D9DEE7");
+        }
+
+        private static XLColor GetContrastingTextColor(string hexColor)
+        {
+            if (string.IsNullOrWhiteSpace(hexColor))
+                return XLColor.FromHtml("212121");
+
+            var hex = hexColor.Trim().TrimStart('#');
+            if (hex.Length == 6
+                && int.TryParse(hex[..2], System.Globalization.NumberStyles.HexNumber, null, out var r)
+                && int.TryParse(hex.Substring(2, 2), System.Globalization.NumberStyles.HexNumber, null, out var g)
+                && int.TryParse(hex.Substring(4, 2), System.Globalization.NumberStyles.HexNumber, null, out var b))
+            {
+                var luminance = (0.299 * r) + (0.587 * g) + (0.114 * b);
+                return luminance < 140 ? XLColor.White : XLColor.FromHtml("1A1A1A");
+            }
+
+            return XLColor.FromHtml("212121");
         }
 
         private static bool IsHexColor(string? value) =>
@@ -1078,6 +1458,6 @@ namespace Codeji.CMS.Services.Attendance
             && System.Text.RegularExpressions.Regex.IsMatch(value, "^#[0-9A-Fa-f]{6}$");
 
         private static string FormatAttendanceTime(DateTime? time) =>
-            time.HasValue ? IndiaTime.ToIndiaTime(time.Value).ToString("HH:mm") : "â€“";
+            time.HasValue ? IndiaTime.ToIndiaTime(time.Value).ToString("HH:mm") : "--:--";
     }
 }

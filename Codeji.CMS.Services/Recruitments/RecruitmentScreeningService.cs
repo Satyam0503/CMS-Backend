@@ -164,6 +164,31 @@ public sealed class RecruitmentScreeningService(
                 canonical.UpdatedDate = DateTime.UtcNow;
                 await applications.Update(Builders<RecruitmentJobApplication>.Filter.Where(x => x.CompanyId == companyId && x.ApplicationId == canonical.ApplicationId && !x.IsDeleted), canonical);
             }
+            else if (canonical is null)
+            {
+                var newCanonical = new RecruitmentJobApplication
+                {
+                    CompanyId = companyId,
+                    ApplicantId = applicant.ApplicantId,
+                    VacancyId = applicant.VacancyId ?? string.Empty,
+                    CurrentStage = nextStage.Value.ToString(),
+                    CreatedBy = actorUserId,
+                    CreatedDate = DateTime.UtcNow,
+                    UpdatedBy = actorUserId,
+                    UpdatedDate = DateTime.UtcNow,
+                    StageHistory =
+                    [
+                        new RecruitmentApplicationStageEvent
+                        {
+                            FromStage = applicant.ActivityType.ToString(),
+                            ToStage = nextStage.Value.ToString(),
+                            ActorUserId = actorUserId,
+                            Reason = $"Screening decision: {decision}"
+                        }
+                    ]
+                };
+                await applications.AddOne(newCanonical);
+            }
         }
     }
 

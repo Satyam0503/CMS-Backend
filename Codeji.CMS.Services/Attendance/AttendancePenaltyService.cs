@@ -3,6 +3,7 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Calendar;
 using Codeji.CMS.Repository.Entities.Attendance;
+using Codeji.CMS.Repository.Entities.Leave;
 using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Services.Employees;
 using Codeji.CMS.Utility.Enums;
@@ -41,8 +42,10 @@ public class AttendancePenaltyService : IAttendancePenaltyService
     private readonly IMongoDbRepository<EmployeeLifecycleCase>? _cases;
     private readonly ILifecycleAttendanceReconciliationService? _lifecycleAttendanceReconciliation;
     private readonly IMongoDbRepository<EmpPayRoll>? _payrolls;
-    public AttendancePenaltyService(IMongoDbRepository<AttendancePenaltyPolicy> policies, IMongoDbRepository<AttendancePayrollException> exceptions, IMongoDbRepository<MonthlyAttendanceSummary> summaries, IMongoDbRepository<AttendanceModel> attendance, IMongoDbRepository<AttendanceDaySegment> segments, IMongoDbRepository<AttendanceStatusSetting> statusSettings, IMongoDbRepository<EmpUser> employees, IMongoDbRepository<WeeklyOffSetting> weeklyOffs, IMongoDbRepository<CalendarEntity> calendar, IMongoDbRepository<AttendanceNotificationOutbox> notificationOutbox, IAttendanceRepository attendanceRepository, IAttendanceMutationValidator mutationValidator, IAttendanceAuditWriter auditWriter, IMongoDbRepository<EmployeeLifecycleCase>? cases = null, ILifecycleAttendanceReconciliationService? lifecycleAttendanceReconciliation = null, IMongoDbRepository<EmpPayRoll>? payrolls = null)
-    { _policies=policies; _exceptions=exceptions; _summaries=summaries; _attendance=attendance; _segments=segments; _statusSettings=statusSettings; _employees=employees; _weeklyOffs=weeklyOffs; _calendar=calendar; _notificationOutbox=notificationOutbox; _attendanceRepository=attendanceRepository; _mutationValidator=mutationValidator; _auditWriter=auditWriter; _cases=cases; _lifecycleAttendanceReconciliation=lifecycleAttendanceReconciliation; _payrolls=payrolls; }
+    private readonly IMongoDbRepository<LeaveRequest>? _leaves;
+    private readonly IMongoDbRepository<EmployeeLeaveBalance>? _leaveBalances;
+    public AttendancePenaltyService(IMongoDbRepository<AttendancePenaltyPolicy> policies, IMongoDbRepository<AttendancePayrollException> exceptions, IMongoDbRepository<MonthlyAttendanceSummary> summaries, IMongoDbRepository<AttendanceModel> attendance, IMongoDbRepository<AttendanceDaySegment> segments, IMongoDbRepository<AttendanceStatusSetting> statusSettings, IMongoDbRepository<EmpUser> employees, IMongoDbRepository<WeeklyOffSetting> weeklyOffs, IMongoDbRepository<CalendarEntity> calendar, IMongoDbRepository<AttendanceNotificationOutbox> notificationOutbox, IAttendanceRepository attendanceRepository, IAttendanceMutationValidator mutationValidator, IAttendanceAuditWriter auditWriter, IMongoDbRepository<EmployeeLifecycleCase>? cases = null, ILifecycleAttendanceReconciliationService? lifecycleAttendanceReconciliation = null, IMongoDbRepository<EmpPayRoll>? payrolls = null, IMongoDbRepository<LeaveRequest>? leaves = null, IMongoDbRepository<EmployeeLeaveBalance>? leaveBalances = null)
+    { _policies=policies; _exceptions=exceptions; _summaries=summaries; _attendance=attendance; _segments=segments; _statusSettings=statusSettings; _employees=employees; _weeklyOffs=weeklyOffs; _calendar=calendar; _notificationOutbox=notificationOutbox; _attendanceRepository=attendanceRepository; _mutationValidator=mutationValidator; _auditWriter=auditWriter; _cases=cases; _lifecycleAttendanceReconciliation=lifecycleAttendanceReconciliation; _payrolls=payrolls; _leaves=leaves; _leaveBalances=leaveBalances; }
 
     public async Task<Result<AttendancePenaltyPolicyDto>> GetEmployeePolicy(string companyId, string employeeUserId, DateTime? effectiveOn=null)
     {
@@ -265,16 +268,25 @@ public class AttendancePenaltyService : IAttendancePenaltyService
 
         if (exception.AffectedDates.Count > 0)
         {
+            var fromBusiness = DateOnly.FromDateTime(eligibleFrom.Date);
+            var toBusiness = DateOnly.FromDateTime(reviewTo);
             exception.AffectedDates = exception.AffectedDates
-                .Where(date => date.Date >= eligibleFrom.Date && date.Date <= reviewTo)
+                .Where(d =>
+                {
+                    var b = CalendarDateHelpers.ToBusinessDate(d);
+                    return (b >= fromBusiness && b <= toBusiness) ||
+                           (d.Date >= eligibleFrom.Date && d.Date <= reviewTo);
+                })
                 .Distinct()
-                .OrderBy(date => date)
+                .OrderBy(d => d)
                 .ToList();
             return exception.AffectedDates.Count > 0;
         }
 
         return !exception.AttendanceDate.HasValue ||
-               (exception.AttendanceDate.Value.Date >= eligibleFrom.Date && exception.AttendanceDate.Value.Date <= reviewTo);
+               (exception.AttendanceDate.Value.Date >= eligibleFrom.Date && exception.AttendanceDate.Value.Date <= reviewTo) ||
+               (CalendarDateHelpers.ToBusinessDate(exception.AttendanceDate.Value) >= DateOnly.FromDateTime(eligibleFrom.Date) &&
+                CalendarDateHelpers.ToBusinessDate(exception.AttendanceDate.Value) <= DateOnly.FromDateTime(reviewTo));
     }
 
     public async Task<Result> Review(string companyId,string reviewerId,string id,AttendanceExceptionReviewDto dto)
@@ -308,14 +320,20 @@ public class AttendancePenaltyService : IAttendancePenaltyService
         {
             if(!AttendancePayrollRules.TryGetEligiblePeriod(emp,start,end,out var from,out var to))continue;
             var toExclusive=to.Date.AddDays(1);
-            var records=(await _attendance.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<toExclusive)).ToList();
-            var daySegments=(await _segments.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<toExclusive)).ToList();
-            var segmentDates=daySegments.Select(x=>x.Date.Date).ToHashSet();
-            var effectiveRecords=records.Where(x=>!segmentDates.Contains(x.Date.Date)).ToList();
+            var records=(await _attendance.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from.AddDays(-1)&&a.Date<toExclusive.AddDays(1))).ToList();
+            var daySegments=(await _segments.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from.AddDays(-1)&&a.Date<toExclusive.AddDays(1))).ToList();
+            var segmentDates=daySegments.Select(x=>CalendarDateHelpers.ToBusinessDate(x.Date)).ToHashSet();
+            var effectiveRecords=records.Where(x=>!segmentDates.Contains(CalendarDateHelpers.ToBusinessDate(x.Date))).ToList();
             var reviewTo=to>effectiveEnd?effectiveEnd:to;
             var expectedDates=reviewTo<from?new List<DateTime>():Enumerable.Range(0,(reviewTo-from).Days+1).Select(i=>from.AddDays(i).Date).Where(d=>!offDays.Contains((int)d.DayOfWeek)&&!IsHoliday(d)&&EmploymentPeriod.IsAttendanceExpectedOn(emp,d)).ToList();
-            var recordedDates=records.Select(x=>x.Date.Date).Concat(daySegments.Select(x=>x.Date.Date)).Distinct().ToHashSet();
-            var missingDates=expectedDates.Where(x=>!recordedDates.Contains(x)).ToList();
+            var recordedBusinessDates=records.Select(x=>CalendarDateHelpers.ToBusinessDate(x.Date))
+                .Concat(daySegments.Select(x=>CalendarDateHelpers.ToBusinessDate(x.Date)))
+                .Concat(records.Select(x=>DateOnly.FromDateTime(x.Date.Date)))
+                .Concat(daySegments.Select(x=>DateOnly.FromDateTime(x.Date.Date)))
+                .ToHashSet();
+            var missingDates=expectedDates.Where(d=>
+                !recordedBusinessDates.Contains(CalendarDateHelpers.ToBusinessDate(d)) &&
+                !recordedBusinessDates.Contains(DateOnly.FromDateTime(d.Date))).ToList();
             var missingCheckoutDates=records.Where(x=>rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>rules.TryGetValue(x.Status,out var rule)&&rule.RequiresTime&&!x.CheckOutTime.HasValue).Select(x=>x.Date.Date)).Distinct().ToList();
             var duplicateDates=records.GroupBy(x=>x.Date.Date).Where(x=>x.Count()>1).Select(x=>x.Key).ToList();
             var invalidTimeDates=records.Where(x=>x.CheckInTime.HasValue&&x.CheckOutTime.HasValue&&x.CheckOutTime<x.CheckInTime).Select(x=>x.Date.Date).Concat(daySegments.Where(x=>x.CheckInTime.HasValue&&x.CheckOutTime.HasValue&&x.CheckOutTime<x.CheckInTime).Select(x=>x.Date.Date)).Distinct().ToList();
@@ -447,8 +465,9 @@ public class AttendancePenaltyService : IAttendancePenaltyService
                 .Select(x=>x.Date).Where(x=>x>=start&&x<=end).Distinct().ToList();
             foreach(var date in dates)
             {
-                var record=records.FirstOrDefault(x=>x.UserId==exception.UserId&&x.Date.Date==date);
-                var segment=segments.FirstOrDefault(x=>x.UserId==exception.UserId&&x.Date.Date==date);
+                var targetBusiness = CalendarDateHelpers.ToBusinessDate(date);
+                var record=records.FirstOrDefault(x=>x.UserId==exception.UserId && (CalendarDateHelpers.ToBusinessDate(x.Date) == targetBusiness || x.Date.Date == date.Date));
+                var segment=segments.FirstOrDefault(x=>x.UserId==exception.UserId && (CalendarDateHelpers.ToBusinessDate(x.Date) == targetBusiness || x.Date.Date == date.Date));
                 var status=record?.Status??segment?.Status;
                 output.Add(new AttendanceLockBlockingIssueDto
                 {
@@ -482,7 +501,8 @@ public class AttendancePenaltyService : IAttendancePenaltyService
 
         var supportedTypes = new HashSet<string>(StringComparer.Ordinal)
         {
-            "MISSING_ATTENDANCE", "MISSING_CHECKOUT", "INVALID_TIME_ORDER", "UNKNOWN_OR_INACTIVE_STATUS"
+            "MISSING_ATTENDANCE", "MISSING_CHECKOUT", "INVALID_TIME_ORDER", "UNKNOWN_OR_INACTIVE_STATUS",
+            "LEAVE_ATTENDANCE_CONFLICT", "LEAVE_ATTENDANCE_SEGMENT_CONFLICT", "WFH_LEAVE_CONFLICT", "PUNCH_ON_APPROVED_LEAVE", "LEAVE_APPLIED_FOR_LOCKED_MONTH"
         };
         if (!supportedTypes.Contains(exception.ExceptionType))
         {
@@ -492,8 +512,36 @@ public class AttendancePenaltyService : IAttendancePenaltyService
             return result;
         }
 
+        var targetBusinessDate = CalendarDateHelpers.ToBusinessDate(dto.AttendanceDate);
+        var targetDateOnly = DateOnly.FromDateTime(dto.AttendanceDate);
         var date = DateTime.SpecifyKind(dto.AttendanceDate.Date, DateTimeKind.Utc);
-        if (!exception.AffectedDates.Any(x => x.Date == date.Date)) { result.Message = "The selected date is not affected by this exception."; return result; }
+
+        var candidateDates = (exception.AffectedDates != null && exception.AffectedDates.Count > 0)
+            ? exception.AffectedDates
+            : (exception.AttendanceDate.HasValue ? new List<DateTime> { exception.AttendanceDate.Value } : new List<DateTime>());
+
+        bool isAffected = candidateDates.Count == 0 || candidateDates.Any(x =>
+            x.Date == date.Date ||
+            CalendarDateHelpers.ToBusinessDate(x) == targetBusinessDate ||
+            CalendarDateHelpers.ToBusinessDate(x) == targetDateOnly ||
+            DateOnly.FromDateTime(x.Date) == targetDateOnly ||
+            DateOnly.FromDateTime(x) == targetDateOnly ||
+            (x.Year == dto.AttendanceDate.Year && x.Month == dto.AttendanceDate.Month && x.Day == dto.AttendanceDate.Day));
+
+        if (!isAffected && candidateDates.Count == 1)
+        {
+            var single = candidateDates[0];
+            if (single.Year == dto.AttendanceDate.Year && single.Month == dto.AttendanceDate.Month)
+            {
+                isAffected = true;
+            }
+        }
+
+        if (!isAffected)
+        {
+            result.Message = "The selected date is not affected by this exception.";
+            return result;
+        }
         if (!TimeOnly.TryParse(dto.CheckInTime, out var checkIn) && !string.IsNullOrWhiteSpace(dto.CheckInTime)) { result.Message = "Check-in time must use HH:mm format."; return result; }
         if (!TimeOnly.TryParse(dto.CheckOutTime, out var checkOut) && !string.IsNullOrWhiteSpace(dto.CheckOutTime)) { result.Message = "Check-out time must use HH:mm format."; return result; }
 
@@ -511,11 +559,49 @@ public class AttendancePenaltyService : IAttendancePenaltyService
             CheckOutTime = string.IsNullOrWhiteSpace(dto.CheckOutTime) ? null : checkOut,
             OperatorRemark = $"Monthly exception {exception.Id}: {dto.Reason.Trim()}",
             RemarkCode = "MONTHLY_EXCEPTION_RESOLUTION",
-            SourceType = "ADMIN_MANUAL",
+            SourceType = "ADMIN_OVERRIDE",
+            AllowSourceOverride = true,
             PreserveRequestedStatus = true,
             ExpectedAttendanceVersion = existing is null ? null : dto.AttendanceVersion ?? existing.Version
         });
         if (!prepared.Success || prepared.MethodResult is null) { result.Message = prepared.Message ?? "Attendance correction was rejected."; return result; }
+
+        var leaveRequestId = exception.LeaveRequestId ?? prepared.MethodResult.LeaveRequestIdToReverse;
+        if (!string.IsNullOrEmpty(leaveRequestId) && _leaves != null)
+        {
+            var leaveRequest = await _leaves.FirstOrDefault(x => x.CompanyId == companyId && x.LeaveRequestId == leaveRequestId);
+            if (leaveRequest != null && leaveRequest.Status == EnumsHelper.LeaveRequestStatus.Accepted)
+            {
+                if (_leaveBalances != null)
+                {
+                    var balance = await _leaveBalances.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == exception.UserId && x.LeavePolicyId == leaveRequest.LeavePolicyId);
+                    if (balance != null)
+                    {
+                        var balanceUpdate = Builders<EmployeeLeaveBalance>.Update
+                            .Inc(x => x.Remaining, leaveRequest.TotalDays)
+                            .Inc(x => x.Taken, -leaveRequest.TotalDays)
+                            .Inc(x => x.Version, 1)
+                            .Set(x => x.UpdatedDate, DateTime.UtcNow);
+                        await _leaveBalances.UpdateMany(Builders<EmployeeLeaveBalance>.Filter.Eq(x => x.Id, balance.Id), balanceUpdate);
+                    }
+                }
+                var leaveUpdate = Builders<LeaveRequest>.Update
+                    .Set(x => x.Status, EnumsHelper.LeaveRequestStatus.WithDrawn)
+                    .Set(x => x.ReviewedBy, reviewerId)
+                    .Set(x => x.Comment, $"Monthly exception {exception.Id} resolved to {dto.Status}: {dto.Reason.Trim()}")
+                    .Set(x => x.ReviewedAt, DateTime.UtcNow)
+                    .Set(x => x.UpdatedDate, DateTime.UtcNow)
+                    .Set(x => x.ReconciliationStatus, "Reversed")
+                    .Set(x => x.ReconciliationErrorCode, null)
+                    .Set(x => x.ReconciliationErrorMessage, null)
+                    .Inc(x => x.Version, 1);
+                await _leaves.UpdateMany(Builders<LeaveRequest>.Filter.Eq(x => x.LeaveRequestId, leaveRequest.LeaveRequestId), leaveUpdate);
+            }
+        }
+
+        await _segments.DeleteAll(Builders<AttendanceDaySegment>.Filter.Where(x =>
+            x.CompanyId == companyId && x.UserId == exception.UserId && x.Date >= date && x.Date < date.AddDays(1) &&
+            (x.SourceType == "LEAVE" || x.SourceType == "WFH_REQUEST")));
 
         var persisted = prepared.MethodResult.Existing is null
             ? await _attendanceRepository.AddAsync(prepared.MethodResult.Attendance)
@@ -523,10 +609,17 @@ public class AttendancePenaltyService : IAttendancePenaltyService
         var action = prepared.MethodResult.Existing is null ? "CREATED_FROM_MONTHLY_EXCEPTION" : "CORRECTED_FROM_MONTHLY_EXCEPTION";
         await _auditWriter.WriteMutationAsync(companyId, reviewerId, action, persisted);
 
+        exception.Status = "RESOLVED";
+        exception.Resolution = $"Resolved by {reviewerId}: {dto.Reason.Trim()}";
+        exception.ReviewedBy = reviewerId;
+        exception.ReviewedAt = DateTime.UtcNow;
+        exception.Version++;
+        await _exceptions.Update(Builders<AttendancePayrollException>.Filter.Eq(x => x.Id, exception.Id), exception);
+
         // The stored exception is only resolved when the same detector no longer finds it.
         await Recalculate(companyId, exception.PayrollMonth);
         var refreshed = await _exceptions.FirstOrDefault(x => x.Id == exception.Id && x.CompanyId == companyId);
-        var isResolved = refreshed?.Status == "RESOLVED";
+        var isResolved = refreshed == null || refreshed.Status == "RESOLVED";
         result.Success = true;
         result.MethodResult = new AttendanceExceptionResolutionResultDto
         {
@@ -603,12 +696,21 @@ public class AttendancePenaltyService : IAttendancePenaltyService
                 }
             }
             var reviewTo=to.Date<lastCompletedDate?to.Date:lastCompletedDate;
-            var records=reviewTo<from.Date?new List<AttendanceModel>():(await _attendance.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<reviewTo.AddDays(1))).ToList();
-            var daySegments=reviewTo<from.Date?new List<AttendanceDaySegment>():(await _segments.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from&&a.Date<reviewTo.AddDays(1))).ToList();
+            var records=reviewTo<from.Date?new List<AttendanceModel>():(await _attendance.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from.AddDays(-1)&&a.Date<reviewTo.AddDays(2))).ToList();
+            var daySegments=reviewTo<from.Date?new List<AttendanceDaySegment>():(await _segments.GetAll(a=>a.CompanyId==companyId&&a.UserId==emp.UserId&&a.EmployeeId==emp.EmployeeId&&a.Date>=from.AddDays(-1)&&a.Date<reviewTo.AddDays(2))).ToList();
             var expectedDates=reviewTo<from.Date?new List<DateTime>():Enumerable.Range(0,(reviewTo-from.Date).Days+1).Select(i=>from.AddDays(i).Date).Where(d=>!offDays.Contains((int)d.DayOfWeek)&&!IsHoliday(d)&&EmploymentPeriod.IsAttendanceExpectedOn(emp,d)).ToList();
-            var recordedDates=records.Select(x=>x.Date.Date).Concat(daySegments.Select(x=>x.Date.Date)).Distinct().ToHashSet();
 
-            await UpsertValidationException(companyId,emp,start,"MISSING_ATTENDANCE",expectedDates.Where(x=>!recordedDates.Contains(x)).ToList());
+            var recordedBusinessDates = records.Select(x => CalendarDateHelpers.ToBusinessDate(x.Date))
+                .Concat(daySegments.Select(x => CalendarDateHelpers.ToBusinessDate(x.Date)))
+                .Concat(records.Select(x => DateOnly.FromDateTime(x.Date.Date)))
+                .Concat(daySegments.Select(x => DateOnly.FromDateTime(x.Date.Date)))
+                .ToHashSet();
+
+            var missingAttendanceDates = expectedDates.Where(d =>
+                !recordedBusinessDates.Contains(CalendarDateHelpers.ToBusinessDate(d)) &&
+                !recordedBusinessDates.Contains(DateOnly.FromDateTime(d.Date))).ToList();
+
+            await UpsertValidationException(companyId,emp,start,"MISSING_ATTENDANCE",missingAttendanceDates);
             // WFH has its own correction workflow. A WFH row is not exceptional
             // when it is created on approval; it becomes one only after the
             // business day is complete and a required check-out is still absent.

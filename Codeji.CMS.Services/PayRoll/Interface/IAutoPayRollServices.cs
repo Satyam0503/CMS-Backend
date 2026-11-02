@@ -4,5 +4,9 @@ namespace Codeji.CMS.Services.PayRoll.Interface;
 
 public interface IAutoPayRollServices
 {
-    Task<Result> GeneratePayrollForMonthAsync(string companyId, DateTime payMonth, IReadOnlyCollection<string>? targetEmployeeIds = null);
+    Task<Result> GeneratePayrollForMonthAsync(
+        string companyId,
+        DateTime payMonth,
+        IReadOnlyCollection<string>? targetEmployeeIds = null,
+        DateTime? plannedPaymentDate = null);
 }

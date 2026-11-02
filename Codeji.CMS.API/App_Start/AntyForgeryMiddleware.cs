@@ -1,4 +1,4 @@
-﻿
+
 using System.Net;
 using System.Text;
 using Codeji.CMS.Utility.Helpers;
@@ -26,8 +26,9 @@ namespace Codeji.CMS.API.App_Start
             var isHttpGet = string.Equals(context.Request.Method, "GET", StringComparison.OrdinalIgnoreCase);
             var currentCompanyId = CurrentContext.CompanyId(_httpContextAccessor);
             var path = context?.Request?.Path.Value ?? string.Empty;
+            var isExemptPath = CompanyIdMiddleware.IsTenantValidationExemptPath(context?.Request?.Path ?? PathString.Empty);
 
-            if (!debugModeEnabled && !isHttpGet && !context.User.Identity.IsAuthenticated)
+            if (!debugModeEnabled && !isHttpGet && !context.User.Identity.IsAuthenticated && !isExemptPath)
             {
                 await _antiforgery.ValidateRequestAsync(context);
             }
@@ -37,9 +38,9 @@ namespace Codeji.CMS.API.App_Start
             context.Request.Headers.TryGetValue("AppVersion", out var versionFromHeader);
             var incomingAppVersion = versionFromHeader.FirstOrDefault()?.Trim() ?? string.Empty;
             var configuredAppVersion = ConfigManager.AppSettings.AppVersion;
-            string[] ignoredEndpoints = new string[] { "/notificationhub", "/GetAppVersion", "/antiforgerytoken" };
+            string[] ignoredEndpoints = new string[] { "/notificationhub", "/chathub", "/GetAppVersion", "/antiforgerytoken" };
 
-            if (!debugModeEnabled &&
+            if (!debugModeEnabled && !isExemptPath &&
                 !ignoredEndpoints.Any(path.Contains) &&
                 (string.IsNullOrWhiteSpace(incomingAppVersion) ||
                  !string.Equals(incomingAppVersion, configuredAppVersion, StringComparison.OrdinalIgnoreCase)))

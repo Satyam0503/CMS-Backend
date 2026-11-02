@@ -16,6 +16,7 @@ public string? AttendanceId { get; set; }
     public string? SourceType { get; set; }
     public string? SourceId { get; set; }
     public int SourceVersion { get; set; }
+    [BsonDateTimeOptions(Kind = DateTimeKind.Utc)]
     public DateTime Date { get; set; }
     public DateTime? CheckInTime { get; set; }
     public DateTime? CheckOutTime { get; set; }

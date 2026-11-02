@@ -1,4 +1,4 @@
-﻿using Codeji.CMS.Domain.Models;
+using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO;
 using Codeji.CMS.DTO.Dashboard;
 using Codeji.CMS.DTO.Employee;
@@ -43,6 +43,7 @@ namespace Codeji.CMS.Services.Employees.Interface
                 Task<Result> RequestEmployeeExitNoticeAdjustment(RequestEmployeeExitNoticeAdjustmentRequest request);
                 Task<Result> DecideEmployeeExitNoticeAdjustment(DecideEmployeeExitNoticeAdjustmentRequest request);
                 Task<Result> DecideOwnEmployeeExitNoticeOffer(DecideOwnEmployeeExitNoticeOfferRequest request);
+                Task<Result> CancelEmployeeExitNoticeAdjustment(CancelEmployeeExitNoticeAdjustmentRequest request);
                 Task<Result> UpsertEmployeeExitPolicy(UpsertEmployeeExitPolicyRequest request);
                 Task<Result> UpsertEmployeeExitClearanceTemplate(UpsertEmployeeExitClearanceTemplateRequest request);
                 Task<Result> DeleteEmployeeExitClearanceTemplate(string templateId);

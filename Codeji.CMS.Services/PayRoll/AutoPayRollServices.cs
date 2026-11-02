@@ -3,6 +3,7 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.PayRoll;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Attendance;
+using Codeji.CMS.Repository.Entities.Company;
 using Codeji.CMS.Services.PayRoll.Interface;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.DTO.Salary;
@@ -32,6 +33,10 @@ namespace Codeji.CMS.Services.PayRoll
         private readonly IMongoDbRepository<SalaryTemplate>? _salaryTemplates;
         private readonly IMongoDbRepository<EmployeeSalaryStructure>? _employeeSalaryStructures;
         private readonly IMongoDbRepository<AttendancePenaltyPolicy>? _penaltyPolicies;
+        private readonly IMongoDbRepository<PayrollAdjustment>? _adjustments;
+        private readonly IProfessionalTaxResolver _ptResolver;
+        private readonly IMongoDbRepository<Company>? _companyRepository;
+        private readonly IMongoDbRepository<EmployeeTaxDeclaration>? _taxDeclarations;
 
         public AutoPayrollServices(
             IPayRollServices payRollServices,
@@ -50,7 +55,11 @@ namespace Codeji.CMS.Services.PayRoll
             IMongoDbRepository<PayrollPayGroup>? payGroups = null,
             IMongoDbRepository<SalaryTemplate>? salaryTemplates = null,
             IMongoDbRepository<EmployeeSalaryStructure>? employeeSalaryStructures = null,
-            IMongoDbRepository<AttendancePenaltyPolicy>? penaltyPolicies = null)
+            IMongoDbRepository<AttendancePenaltyPolicy>? penaltyPolicies = null,
+            IMongoDbRepository<PayrollAdjustment>? adjustments = null,
+            IProfessionalTaxResolver? ptResolver = null,
+            IMongoDbRepository<Company>? companyRepository = null,
+            IMongoDbRepository<EmployeeTaxDeclaration>? taxDeclarations = null)
         {
             _payRollServices = payRollServices;
             _employeeRepository = employeeRepository;
@@ -69,9 +78,17 @@ namespace Codeji.CMS.Services.PayRoll
             _salaryTemplates = salaryTemplates;
             _employeeSalaryStructures = employeeSalaryStructures;
             _penaltyPolicies = penaltyPolicies;
+            _adjustments = adjustments;
+            _ptResolver = ptResolver ?? new ProfessionalTaxResolver();
+            _companyRepository = companyRepository;
+            _taxDeclarations = taxDeclarations;
         }
 
-        public async Task<Result> GeneratePayrollForMonthAsync(string companyId, DateTime payMonth, IReadOnlyCollection<string>? targetEmployeeIds = null)
+        public async Task<Result> GeneratePayrollForMonthAsync(
+            string companyId,
+            DateTime payMonth,
+            IReadOnlyCollection<string>? targetEmployeeIds = null,
+            DateTime? plannedPaymentDate = null)
         {
             var monthStart = new DateTime(payMonth.Year, payMonth.Month, 1);
             // Payroll keys are calendar months. Use the canonical first-of-month value for
@@ -79,6 +96,8 @@ namespace Codeji.CMS.Services.PayRoll
             // second key for the same displayed month.
             payMonth = monthStart;
             var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+            var tdsPaymentDate = (plannedPaymentDate ?? DateTime.UtcNow).Date;
+            var tdsPeriod = PayrollTaxPeriod.ResolveIndiaSalaryPayment(tdsPaymentDate);
             var employees = (await _employeeRepository.GetAll(e => e.CompanyId == companyId && !e.IsDeleted))
                 .Where(e => EmploymentPeriod.IsPayrollIncludedForMonth(e, monthStart))
                 .ToList();
@@ -130,6 +149,8 @@ namespace Codeji.CMS.Services.PayRoll
             var salaryTemplates = _salaryTemplates is null ? Array.Empty<SalaryTemplate>() : (await _salaryTemplates.GetAll(x => x.CompanyId == companyId && x.IsActive)).ToArray();
             var canonicalSalaryStructures = _employeeSalaryStructures is null ? Array.Empty<EmployeeSalaryStructure>() : (await _employeeSalaryStructures.GetAll(x => x.CompanyId == companyId && x.ApprovalStatus == "APPROVED" && x.Status == "ACTIVE")).ToArray();
             var assignmentRows = (await _assignments.GetAll(x => x.CompanyId == companyId)).ToArray();
+            var company = _companyRepository is null ? null : await _companyRepository.FirstOrDefault(c => c.CompanyId == companyId);
+            var companyDefaultState = company?.State;
 
             // Validate every eligible employee before the first payroll write. This prevents a
             // later employee validation failure from leaving an unnoticed partial company run.
@@ -153,9 +174,20 @@ namespace Codeji.CMS.Services.PayRoll
                     joiningDate: joining.Date);
                 // Mid-month policy transitions adopt the active policy as of period end instead of blocking the whole company
                 var validationProfile = validationPolicy.Profile ?? PayrollPolicyResolver.ResolvePolicy(companyId, policyPeriodEnd, PayrollPolicyResolver.ResolveAssignment(companyId, employee.EmployeeId, policyPeriodEnd, assignmentRows), policyProfiles, payGroups);
-                var validationTdsMode = validationProfile?.TdsMode ?? divisorSetting.TdsMode;
+                var taxAssignment = PayrollPolicyResolver.ResolveAssignment(companyId, employee.EmployeeId, tdsPaymentDate, assignmentRows);
+                var taxProfile = PayrollPolicyResolver.ResolvePolicy(companyId, tdsPaymentDate, taxAssignment, policyProfiles, payGroups, validationPolicy.PayGroupId);
+                var validationTdsMode = taxProfile?.TdsMode ?? validationProfile?.TdsMode ?? divisorSetting.TdsMode;
                 if (!PayrollCalculationRules.IsSupportedTdsMode(validationTdsMode))
                     validationErrors.Add($"{employee.EmployeeId}: configured TDS mode '{validationTdsMode}' is unsupported; choose AUTO_NEW_REGIME, AUTO_OLD_REGIME, or MANUAL_ONLY before processing payroll.");
+                if (!string.Equals(validationTdsMode, "MANUAL_ONLY", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (validationProfile is not null && taxProfile is null)
+                        validationErrors.Add($"{employee.EmployeeId}: no approved TDS policy is effective on planned salary payment date {tdsPaymentDate:yyyy-MM-dd}. Configure the company or pay-group tax policy for financial year {tdsPeriod.FinancialYear}.");
+                    if (taxProfile is not null && !string.Equals(taxProfile.FinancialYear?.Trim(), tdsPeriod.FinancialYear, StringComparison.Ordinal))
+                        validationErrors.Add($"{employee.EmployeeId}: TDS policy '{taxProfile.Name}' is configured for tax year '{taxProfile.FinancialYear}', but planned salary payment date {tdsPaymentDate:yyyy-MM-dd} belongs to {tdsPeriod.FinancialYear}. Configure an approved policy effective for the payment date and tax year.");
+                    if (taxProfile is not null && (!taxProfile.StatutoryJurisdiction.StartsWith("IN", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(taxProfile.StatutoryRuleVersion)))
+                        validationErrors.Add($"{employee.EmployeeId}: the TDS policy effective on {tdsPaymentDate:yyyy-MM-dd} needs an Indian jurisdiction and statutory rule version.");
+                }
                 var invalidSalaryIdentity = canonicalSalaryStructures.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeId == employee.EmployeeId &&
                     x.EffectiveFrom.Date <= monthEnd.Date && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value.Date >= monthStart.Date) &&
                     !Guid.TryParse(x.Id, out _));
@@ -194,6 +226,13 @@ namespace Codeji.CMS.Services.PayRoll
 
             try
             {
+                var monthAdjustments = _adjustments != null
+                    ? (await _adjustments.GetAll(x => x.CompanyId == companyId && x.Status == "APPROVED" && x.TargetPeriod == monthStart)).ToList()
+                    : [];
+                var adjustmentsByEmployee = monthAdjustments
+                    .GroupBy(x => x.EmployeeId, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
                 foreach (var emp in employees)
                 {
                     if (processedEmployeeIds.Contains(emp.EmployeeId))
@@ -222,6 +261,8 @@ namespace Codeji.CMS.Services.PayRoll
                         assignmentRows, canonicalSalaryStructures, policyProfiles, payGroups,
                         joiningDate: joiningDate.Date);
                     var resolvedProfile = resolvedPolicyPeriod.Profile ?? PayrollPolicyResolver.ResolvePolicy(companyId, policyPeriodEnd, assignment, policyProfiles, payGroups);
+                    var taxAssignment = PayrollPolicyResolver.ResolveAssignment(companyId, emp.EmployeeId, tdsPaymentDate, assignmentRows);
+                    var tdsPolicyProfile = PayrollPolicyResolver.ResolvePolicy(companyId, tdsPaymentDate, taxAssignment, policyProfiles, payGroups, resolvedPolicyPeriod.PayGroupId);
                     var salaryResolution = PayrollSalarySourceResolver.Resolve(
                         companyId, emp.EmployeeId, monthStart, monthEnd, canonicalSalaryStructures,
                         () => _salaryRepository.Get(s => s.CompanyId == companyId && s.EmployeeId == emp.EmployeeId && s.EffectiveFrom <= monthEnd && (!s.EffectiveTo.HasValue || s.EffectiveTo.Value >= monthStart)).ToList(),
@@ -249,7 +290,7 @@ namespace Codeji.CMS.Services.PayRoll
                     var effectiveEsicWageCeiling = resolvedProfile?.EsicWageCeiling ?? divisorSetting.EsicWageCeiling;
                     var effectiveEsicEmployeeRate = resolvedProfile?.EsicEmployeeRatePercent ?? divisorSetting.EsicEmployeeRatePercent;
                     var effectiveEsicEmployerRate = resolvedProfile?.EsicEmployerRatePercent ?? divisorSetting.EsicEmployerRatePercent;
-                    var effectiveTdsMode = !string.IsNullOrWhiteSpace(employeeTaxRegime) ? employeeTaxRegime : (resolvedProfile?.TdsMode ?? divisorSetting.TdsMode);
+                    var effectiveTdsMode = !string.IsNullOrWhiteSpace(employeeTaxRegime) ? employeeTaxRegime : (tdsPolicyProfile?.TdsMode ?? resolvedProfile?.TdsMode ?? divisorSetting.TdsMode);
                     var isAttendanceExempt = string.Equals(employeeAttendanceMode, "EXEMPT", StringComparison.OrdinalIgnoreCase);
 
                     var attendanceSummary = await _attendanceSummaryRepository.FirstOrDefault(x =>
@@ -357,7 +398,7 @@ namespace Codeji.CMS.Services.PayRoll
                     decimal originalLTA = PayrollSalaryValueResolver.Resolve(hasApprovedEmployeeStructure, assignedTemplate?.Lta, eligibleDays > 0 ? weightedLtaSum / eligibleDays : latestSalaryRecord?.Lta ?? 0m, latestSalaryRecord?.Lta ?? 0m);
                     decimal originalOtherAllowance = PayrollSalaryValueResolver.Resolve(hasApprovedEmployeeStructure, assignedTemplate?.OtherAllowance, eligibleDays > 0 ? weightedOtherSum / eligibleDays : latestSalaryRecord?.OtherAllowances ?? 0m, latestSalaryRecord?.OtherAllowances ?? 0m);
                     decimal originalBonus = PayrollSalaryValueResolver.Resolve(hasApprovedEmployeeStructure, assignedTemplate?.Bonus, eligibleDays > 0 ? weightedBonusSum / eligibleDays : latestSalaryRecord?.Bonus ?? 0m, latestSalaryRecord?.Bonus ?? 0m);
-                    decimal contractualFixedMonthlyGross = originalBasic + originalHRA + originalLTA + originalOtherAllowance;
+                    decimal contractualFixedMonthlyGross = originalBasic + originalHRA + originalLTA + originalOtherAllowance + originalBonus;
 
                     var eligibleToExclusive = eligibleTo.Date.AddDays(1);
                     var attendanceRecords = await _attendanceRepository.GetAll(a =>
@@ -404,10 +445,17 @@ namespace Codeji.CMS.Services.PayRoll
                         bonus = PayrollCalculationRules.RoundMoney(weightedBonusSum / daysInMonth);
                     }
 
+                    adjustmentsByEmployee.TryGetValue(emp.EmployeeId, out var employeeAdjustments);
+                    employeeAdjustments ??= [];
+                    decimal earningAdjustmentsSum = employeeAdjustments
+                        .Where(x => string.Equals(x.ComponentKind, "EARNING", StringComparison.OrdinalIgnoreCase))
+                        .Sum(x => x.Amount);
+                    otherAllowance = PayrollCalculationRules.RoundMoney(otherAllowance + earningAdjustmentsSum);
+
                     // Transparent payslip model: keep earned/prorated basic before attendance LOP;
                     // LOP is stored once in the deductions section and subtracted once from net pay.
                     decimal finalBasic = basicAfterJoining;
-                    decimal earnedFixedGross = finalBasic + hra + lta + otherAllowance;
+                    decimal earnedFixedGross = finalBasic + hra + lta + otherAllowance + bonus;
 
                     decimal perDaySalary = PayrollCalculationRules.ResolvePerDayLopRate(
                         divisorSetting.LopCalculationBase,
@@ -449,7 +497,7 @@ namespace Codeji.CMS.Services.PayRoll
 
                     decimal paidDaysValue = isAttendanceExempt ? eligibleDays : Math.Max(0m, eligibleDays - lossOfPayDays);
 
-                    decimal monthlyGross = earnedFixedGross + bonus;
+                    decimal monthlyGross = earnedFixedGross;
                     decimal earnedGrossAfterLop = Math.Max(0m, monthlyGross - lossOfPay);
 
                     // Statutory EPF & ESIC auto-calculation according to company policy
@@ -466,18 +514,42 @@ namespace Codeji.CMS.Services.PayRoll
                         effectiveEsicWageCeiling,
                         effectiveEsicEmployeeRate);
 
-                    // Year-To-Date (YTD) + Remaining FY Months projection for Section 192 Income Tax (TDS):
-                    // Non-taxable earnings are excluded from taxable gross base, and one-time bonus is added once.
-                    var fyStartYear = monthStart.Month >= 4 ? monthStart.Year : monthStart.Year - 1;
-                    var fyStart = new DateTime(fyStartYear, 4, 1);
-                    var fyEnd = new DateTime(fyStartYear + 1, 3, 1);
-                    int remainingMonthsInFy = ((fyEnd.Year - monthStart.Year) * 12) + (fyEnd.Month - monthStart.Month) + 1;
+                    // Statutory Professional Tax (PT) auto-calculation according to state jurisdiction
+                    var effectivePtMode = resolvedProfile?.PtMode ?? "STATUTORY";
+                    var effectiveJurisdiction = _ptResolver.ResolveEffectiveState(
+                        assignment?.WorkLocationState,
+                        resolvedProfile?.StatutoryJurisdiction,
+                        companyDefaultState);
+                    decimal monthlyPt = _ptResolver.CalculateMonthlyPt(
+                        effectiveJurisdiction,
+                        earnedGrossAfterLop,
+                        monthStart.Month,
+                        emp.Gender,
+                        effectivePtMode);
 
+                    // Salary TDS follows the tax year in which salary is paid, not the month it was earned.
+                    // Non-taxable earnings are excluded from taxable gross base, and one-time bonus is added once.
                     var priorFyPayrolls = _empPayRollRepository
-                        .Get(p => p.CompanyId == companyId && p.EmployeeId == emp.EmployeeId && (p.IsProcessed || p.WorkflowStatus == "PROCESSED" || p.WorkflowStatus == "PAID" || p.WorkflowStatus == "CLOSED" || p.PaymentStatus == "PAID" || p.PaymentStatus == "CLOSED") && p.PayMonth >= fyStart && p.PayMonth < monthStart)
+                        .Get(p => p.CompanyId == companyId && p.EmployeeId == emp.EmployeeId &&
+                            (p.IsProcessed || p.WorkflowStatus == "PROCESSED" || p.WorkflowStatus == "PAID" || p.WorkflowStatus == "CLOSED" || p.PaymentStatus == "PAID" || p.PaymentStatus == "CLOSED"))
+                        .ToList()
+                        .Where(p =>
+                        {
+                            var priorPaymentDate = p.CalculationSnapshot?.TdsPaymentDate?.Date ?? p.PaidDate.Date;
+                            var priorTaxYear = p.CalculationSnapshot?.TdsFinancialYear ?? PayrollTaxPeriod.ResolveIndiaSalaryPayment(priorPaymentDate).FinancialYear;
+                            return string.Equals(priorTaxYear, tdsPeriod.FinancialYear, StringComparison.Ordinal) &&
+                                   priorPaymentDate >= tdsPeriod.StartDate && priorPaymentDate < tdsPaymentDate;
+                        })
                         .ToList();
 
+                    var tdsTaxMonth = new DateTime(tdsPaymentDate.Year, tdsPaymentDate.Month, 1);
+                    int remainingMonthsInFy = ((tdsPeriod.EndDateExclusive.Year - tdsTaxMonth.Year) * 12) +
+                                              (tdsPeriod.EndDateExclusive.Month - tdsTaxMonth.Month);
+                    remainingMonthsInFy = Math.Clamp(remainingMonthsInFy, 1, 12);
+
                     decimal ytdTaxAlreadyDeducted = priorFyPayrolls.Sum(p => p.Deduction?.IncomeTax ?? 0m);
+                    decimal ytdActualGross = priorFyPayrolls.Sum(p =>
+                        Math.Max(0m, p.BasicPay + (p.Allowance?.HRA ?? 0m) + (p.Allowance?.LTA ?? 0m) + (p.Allowance?.OtherAllowance ?? 0m) + p.Bonus - (p.Deduction?.LossOfPay ?? 0m)));
                     decimal nonTaxableMonthlyEarnings = canonicalRecords
                         .SelectMany(r => r.Components)
                         .Where(c => string.Equals(c.Kind, "EARNING", StringComparison.OrdinalIgnoreCase) && !c.IsTaxable)
@@ -491,18 +563,16 @@ namespace Codeji.CMS.Services.PayRoll
 
                     if (priorFyPayrolls.Count > 0)
                     {
-                        decimal ytdActualGross = priorFyPayrolls.Sum(p =>
-                            Math.Max(0m, p.BasicPay + (p.Allowance?.HRA ?? 0m) + (p.Allowance?.LTA ?? 0m) + (p.Allowance?.OtherAllowance ?? 0m) + p.Bonus - (p.Deduction?.LossOfPay ?? 0m)));
                         annualGrossIncome = ytdActualGross + taxableEarnedGrossAfterLop + (taxableContractualFixedMonthlyGross * futureMonthsAfterCurrent);
                     }
-                    else if (joiningDate.Date >= fyStart)
+                    else if (joiningDate.Date >= tdsPeriod.StartDate)
                     {
                         // Mid-year joiner with no prior FY payrolls: project only for remaining months employed in this FY
                         annualGrossIncome = Math.Max(0m, taxableEarnedGrossAfterLop + (taxableContractualFixedMonthlyGross * futureMonthsAfterCurrent) + bonus);
                     }
                     else
                     {
-                        if (monthStart == fyStart)
+                        if (tdsTaxMonth == tdsPeriod.StartDate)
                         {
                             annualGrossIncome = Math.Max(0m, taxableEarnedGrossAfterLop + (taxableContractualFixedMonthlyGross * futureMonthsAfterCurrent) + bonus);
                         }
@@ -513,11 +583,100 @@ namespace Codeji.CMS.Services.PayRoll
                         }
                     }
 
-                    decimal monthlyIncomeTax = PayrollCalculationRules.CalculateMonthlyTds(
-                        annualGrossIncome,
-                        effectiveTdsMode,
-                        ytdTaxAlreadyDeducted,
-                        divisorMonths);
+                    EmployeeTaxDeclaration? employeeTaxDeclaration = null;
+                    if (_taxDeclarations is not null)
+                    {
+                        employeeTaxDeclaration = (await _taxDeclarations.GetAll(x =>
+                            x.CompanyId == companyId &&
+                            x.EmployeeId == emp.EmployeeId &&
+                            x.FinancialYear == tdsPeriod.FinancialYear &&
+                            x.Status == "APPROVED"))
+                            .OrderByDescending(x => x.Version)
+                            .FirstOrDefault();
+                    }
+
+                    if (employeeTaxDeclaration is not null)
+                    {
+                        effectiveTdsMode = employeeTaxDeclaration.Regime == "OLD_REGIME" ? "AUTO_OLD_REGIME" : "AUTO_NEW_REGIME";
+                    }
+
+                    decimal monthlyIncomeTax;
+                    decimal annualTaxEstimate;
+                    string tdsEstimateStatus;
+                    List<string> tdsEstimateLimitations;
+                    decimal prevEmployerSalary = employeeTaxDeclaration?.PreviousEmployerGrossSalary ?? 0m;
+                    decimal prevEmployerTds = employeeTaxDeclaration?.PreviousEmployerTds ?? 0m;
+                    decimal otherIncomeDeclared = (employeeTaxDeclaration?.OtherIncomeSavingsInterest ?? 0m) + (employeeTaxDeclaration?.OtherIncomeOther ?? 0m);
+                    decimal app80C = employeeTaxDeclaration?.ApprovedSection80C ?? 0m;
+                    decimal app80Ccd1B = employeeTaxDeclaration?.ApprovedSection80Ccd1B ?? 0m;
+                    decimal app80D = employeeTaxDeclaration?.ApprovedSection80D ?? 0m;
+                    decimal appSec24 = employeeTaxDeclaration?.ApprovedSection24HomeLoanInterest ?? 0m;
+                    decimal appHra = employeeTaxDeclaration?.ApprovedHraExemption ?? 0m;
+                    decimal appOtherDeductions = (employeeTaxDeclaration?.ApprovedSection80E ?? 0m) + (employeeTaxDeclaration?.ApprovedOtherDeductions ?? 0m);
+                    decimal totalDeductionsDeclared = app80C + app80Ccd1B + app80D + appSec24 + appHra + appOtherDeductions;
+
+                    if (string.Equals(effectiveTdsMode, "MANUAL_ONLY", StringComparison.OrdinalIgnoreCase))
+                    {
+                        monthlyIncomeTax = 0m;
+                        annualTaxEstimate = 0m;
+                        tdsEstimateStatus = "MANUAL_REVIEW";
+                        tdsEstimateLimitations = [];
+                    }
+                    else if (employeeTaxDeclaration is not null)
+                    {
+                        monthlyIncomeTax = PayrollCalculationRules.CalculateMonthlyTds(
+                            annualGrossIncome,
+                            effectiveTdsMode,
+                            ytdTaxAlreadyDeducted,
+                            divisorMonths,
+                            prevEmployerSalary,
+                            prevEmployerTds,
+                            otherIncomeDeclared,
+                            app80C,
+                            app80Ccd1B,
+                            app80D,
+                            appSec24,
+                            appHra,
+                            appOtherDeductions);
+
+                        annualTaxEstimate = PayrollCalculationRules.CalculateAnnualIncomeTaxWithCess(
+                            annualGrossIncome,
+                            effectiveTdsMode,
+                            prevEmployerSalary,
+                            otherIncomeDeclared,
+                            app80C,
+                            app80Ccd1B,
+                            app80D,
+                            appSec24,
+                            appHra,
+                            appOtherDeductions);
+
+                        tdsEstimateStatus = "APPROVED_DECLARATION_PROJECTION";
+                        tdsEstimateLimitations =
+                        [
+                            $"Calculated using approved employee tax declaration for FY {tdsPeriod.FinancialYear} under {employeeTaxDeclaration.Regime}.",
+                            $"Approved deductions: {totalDeductionsDeclared:C}, Previous employer taxable salary: {prevEmployerSalary:C}, Previous TDS: {prevEmployerTds:C}."
+                        ];
+                    }
+                    else
+                    {
+                        monthlyIncomeTax = PayrollCalculationRules.CalculateMonthlyTds(
+                            annualGrossIncome,
+                            effectiveTdsMode,
+                            ytdTaxAlreadyDeducted,
+                            divisorMonths);
+
+                        annualTaxEstimate = PayrollCalculationRules.CalculateAnnualIncomeTaxWithCess(annualGrossIncome, effectiveTdsMode);
+                        tdsEstimateStatus = "INCOMPLETE_SALARY_ONLY_ESTIMATE";
+                        tdsEstimateLimitations =
+                        [
+                            "Previous-employer salary and tax deducted are not included unless represented by payroll rows in this company.",
+                            "For a mid-year joiner with no prior payroll rows in this tax year, salary already earned before the current payroll month is not included in the projection.",
+                            "Employee declarations, eligible deduction claims, submitted evidence, and reviewer decisions are not captured by the current payroll flow.",
+                            "Other income, perquisites, and tax adjustments outside this employer's payroll are not included.",
+                            "This is a salary-only estimate from the current payroll calculation rules; it is not a complete statutory tax computation."
+                        ];
+                    }
 
                     var salaryDeductionLines = weightedSalaryDeductions
                         .Select(x => new PayrollDeductionLineDto
@@ -538,6 +697,25 @@ namespace Codeji.CMS.Services.PayRoll
                             SourceId = attendanceException?.Id
                         });
                     }
+                    foreach (var adj in employeeAdjustments.Where(x => string.Equals(x.ComponentKind, "DEDUCTION", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        payrollDeductionLines.Add(new PayrollDeductionLineDto
+                        {
+                            Code = $"ADJ_{adj.ComponentCode?.Trim().ToUpperInvariant() ?? "DEDUCTION"}",
+                            Description = $"{adj.Type}: {adj.ComponentName ?? adj.Reason}",
+                            Amount = adj.Amount,
+                            SourceId = adj.Id
+                        });
+                    }
+                    if (monthlyPt > 0m)
+                    {
+                        payrollDeductionLines.Add(new PayrollDeductionLineDto
+                        {
+                            Code = "PT",
+                            Description = $"Professional Tax ({effectiveJurisdiction ?? "Statutory"})",
+                            Amount = monthlyPt
+                        });
+                    }
 
                     var otherAllowanceLines = weightedSalaryEarnings
                         .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
@@ -549,6 +727,15 @@ namespace Codeji.CMS.Services.PayRoll
                         })
                         .Where(x => x.Amount > 0m)
                         .ToList();
+                    foreach (var adj in employeeAdjustments.Where(x => string.Equals(x.ComponentKind, "EARNING", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        otherAllowanceLines.Add(new PayrollEarningLineDto
+                        {
+                            Code = string.IsNullOrWhiteSpace(adj.ComponentCode) ? "ADJUSTMENT" : adj.ComponentCode.Trim().ToUpperInvariant(),
+                            Description = $"{adj.Type}: {adj.ComponentName ?? adj.Reason}",
+                            Amount = adj.Amount
+                        });
+                    }
                     if (otherAllowanceLines.Count > 0)
                     {
                         // Keep the breakdown's displayed sum aligned exactly with the
@@ -574,13 +761,34 @@ namespace Codeji.CMS.Services.PayRoll
                         LossOfPay = lossOfPay,
                         EPF = epf,
                         ESIC = esic,
+                        ProfessionalTax = monthlyPt,
                         IncomeTax = monthlyIncomeTax,
                         HealthInsurance = daysInMonth > 0 ? PayrollCalculationRules.RoundMoney(weightedHealthInsuranceSum / daysInMonth) : 0m,
                         DeductionLines = payrollDeductionLines,
                         ReplaceDeductionLines = true,
                         CalculationSnapshot = new PayrollCalculationSnapshotDto
                         {
-                            PayrollMonth = monthStart, JoiningDateUsed = joiningDate.Date, ExitDateUsed = exitDate,
+                            PayrollMonth = monthStart,
+                            TdsPaymentDate = tdsPaymentDate,
+                            TdsFinancialYear = tdsPeriod.FinancialYear,
+                            TdsIncomeTaxAct = tdsPeriod.IncomeTaxAct,
+                            TdsSection = tdsPeriod.SalaryTdsSection,
+                            TdsJurisdiction = tdsPolicyProfile?.StatutoryJurisdiction,
+                            TdsPolicyProfileId = tdsPolicyProfile?.Id,
+                            TdsPolicyProfileVersion = tdsPolicyProfile?.Version ?? 0,
+                            TdsStatutoryRuleVersion = tdsPolicyProfile?.StatutoryRuleVersion,
+                            TdsEstimateStatus = tdsEstimateStatus,
+                            TdsCurrentYearTaxableSalaryYtd = ytdActualGross,
+                            TdsCurrentMonthlyTaxableSalaryBasis = taxableContractualFixedMonthlyGross,
+                            TdsProjectedAnnualTaxableSalary = annualGrossIncome,
+                            TdsPreviousEmployerSalary = prevEmployerSalary,
+                            TdsOtherIncomeDeclared = otherIncomeDeclared,
+                            TdsEligibleDeductionsDeclared = totalDeductionsDeclared,
+                            TdsYtdTaxDeducted = ytdTaxAlreadyDeducted + prevEmployerTds,
+                            TdsEstimatedAnnualTax = annualTaxEstimate,
+                            TdsRemainingPayments = divisorMonths,
+                            TdsEstimateLimitations = tdsEstimateLimitations,
+                            JoiningDateUsed = joiningDate.Date, ExitDateUsed = exitDate,
                             EligibleFrom = eligibleFrom, EligibleTo = eligibleTo, DivisorPolicy = effectiveDivisorPolicy, Divisor = resolvedDivisor, DivisorPolicyVersion = resolvedProfile?.Version ?? divisorSetting.Version,
                             LhdCount = attendanceException?.LhdCount ?? (attendanceSummary?.LhdCount ?? 0),
                             EdCount = attendanceException?.EdCount ?? (attendanceSummary?.EdCount ?? 0),
@@ -589,7 +797,21 @@ namespace Codeji.CMS.Services.PayRoll
                             ExceededCount = attendanceException?.ExceededOccurrenceCount ?? 0,
                             ExceptionDecision = attendanceException?.Decision, PenaltyDayFraction = approvedPenaltyDays,
                             PenaltyAmount = PayrollCalculationRules.RoundMoney(approvedPenaltyDays * perDaySalary), PolicyId = attendanceException?.PolicyId,
-                            PolicyVersion = attendanceException?.PolicyVersion ?? 0, AttendanceSummaryVersion = attendanceSummary?.Version ?? 0, PayrollAssignmentId = assignment?.Id, PayrollAssignmentVersion = assignment?.Version ?? 0, PayGroupId = resolvedPolicyPeriod.PayGroupId ?? assignment?.PayGroupId, PayGroupVersion = payGroups.FirstOrDefault(x => x.Id == (resolvedPolicyPeriod.PayGroupId ?? assignment?.PayGroupId))?.Version ?? 0, SalaryTemplateId = assignedTemplate?.Id, SalaryTemplateVersion = assignedTemplate?.Version ?? 0, ResolvedPolicyProfileId = resolvedProfile?.Id, ResolvedPolicyVersion = resolvedProfile?.Version ?? 0, EpfMode = effectiveEpfMode, EpfWageCeiling = effectiveEpfWageCeiling, EpfEmployeeRatePercent = effectiveEpfEmployeeRate, EpfEmployerRatePercent = effectiveEpfEmployerRate, EsicMode = effectiveEsicMode, EsicWageCeiling = effectiveEsicWageCeiling, EsicEmployeeRatePercent = effectiveEsicEmployeeRate, EsicEmployerRatePercent = effectiveEsicEmployerRate, TdsMode = effectiveTdsMode,
+                            PolicyVersion = attendanceException?.PolicyVersion ?? 0, AttendanceSummaryVersion = attendanceSummary?.Version ?? 0,
+                             AttendanceSummaryId = attendanceSummary?.Id,
+                             ExpectedWorkingDays = attendanceSummary?.ExpectedWorkingDays ?? 0,
+                             EligibleWorkingDays = attendanceSummary?.EligibleWorkingDays ?? 0,
+                             PresentDays = attendanceSummary?.PresentDays ?? 0,
+                             WfhDays = attendanceSummary?.WfhDays ?? 0,
+                             PaidLeaveDays = attendanceSummary?.PaidLeaveDays ?? 0,
+                             UnpaidLeaveDays = attendanceSummary?.UnpaidLeaveDays ?? 0,
+                             HalfDays = attendanceSummary?.HalfDays ?? 0,
+                             AbsentDays = attendanceSummary?.AbsentDays ?? 0,
+                             PaidDays = paidDaysValue,
+                             UnpaidDays = attendanceSummary?.UnpaidDays ?? 0,
+                             LossOfPayDays = lossOfPayDays,
+                             LossOfPay = lossOfPay,
+                             PayrollAssignmentId = assignment?.Id, PayrollAssignmentVersion = assignment?.Version ?? 0, PayGroupId = resolvedPolicyPeriod.PayGroupId ?? assignment?.PayGroupId, PayGroupVersion = payGroups.FirstOrDefault(x => x.Id == (resolvedPolicyPeriod.PayGroupId ?? assignment?.PayGroupId))?.Version ?? 0, SalaryTemplateId = assignedTemplate?.Id, SalaryTemplateVersion = assignedTemplate?.Version ?? 0, ResolvedPolicyProfileId = resolvedProfile?.Id, ResolvedPolicyVersion = resolvedProfile?.Version ?? 0, EpfMode = effectiveEpfMode, EpfWageCeiling = effectiveEpfWageCeiling, EpfEmployeeRatePercent = effectiveEpfEmployeeRate, EpfEmployerRatePercent = effectiveEpfEmployerRate, EsicMode = effectiveEsicMode, EsicWageCeiling = effectiveEsicWageCeiling, EsicEmployeeRatePercent = effectiveEsicEmployeeRate, EsicEmployerRatePercent = effectiveEsicEmployerRate, TdsMode = effectiveTdsMode, ProfessionalTax = monthlyPt, PtJurisdiction = effectiveJurisdiction, PtMode = effectivePtMode,
                             SalaryRevisions = canonicalRecords.OrderBy(x => x.EffectiveFrom).ThenBy(x => x.Version).Select(x => new PayrollSalaryRevisionReferenceDto { SalaryStructureId = x.Id, Version = x.Version }).ToList(),
                             SalaryStructures = canonicalRecords.Count > 0
                                 ? canonicalRecords.OrderBy(x => x.EffectiveFrom).ThenBy(x => x.Version).Select(x => new PayrollSalaryStructureSnapshotDto

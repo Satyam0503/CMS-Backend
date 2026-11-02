@@ -467,6 +467,57 @@ public class WorkFromHomeModuleAccessibilityTests
     }
 
     [Fact]
+    public async Task SaveEmployeeAllocation_WhenWeeklyLimitExceedsWorkingDays_RejectsAllocation()
+    {
+        var service = CreateService(isModuleAccessible: true);
+        var policy = new WorkFromHomePolicy
+        {
+            CompanyId = "comp-123",
+            PolicyId = "policy-1",
+            Version = 1,
+            MaxDaysPerWeek = 3,
+            EmployeeAllocations = [],
+            ApplicableEmployeeIds = [],
+            ExcludedEmployeeIds = []
+        };
+        _employeeRepo.Setup(x => x.Exist(It.IsAny<System.Linq.Expressions.Expression<Func<EmpUser, bool>>>(), false))
+            .ReturnsAsync(true);
+        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<WorkFromHomePolicy, bool>>>()))
+            .ReturnsAsync(policy);
+
+        // When standard company work week has 5 working days (Sat/Sun off), limit 8 or 6 should be rejected
+        var result = await service.SaveEmployeeAllocation(new WorkFromHomeEmployeeAllocationDto
+        {
+            EmployeeId = "EMP-1",
+            WeeklyLimit = 8
+        });
+
+        Assert.False(result.Success);
+        Assert.Contains("working day(s) per week", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SavePolicy_WhenMaxDaysPerWeekExceedsWorkingDays_RejectsPolicy()
+    {
+        var service = CreateService(isModuleAccessible: true);
+        _policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<System.Linq.Expressions.Expression<Func<WorkFromHomePolicy, bool>>>()))
+            .ReturnsAsync(new WorkFromHomePolicy { CompanyId = "comp-123", Version = 1 });
+
+        var result = await service.SavePolicy(new WorkFromHomePolicyDto
+        {
+            IsEnabled = true,
+            MaxDaysPerWeek = 8,
+            ApplicableDepartments = [],
+            ApplicableEmployeeIds = [],
+            ExcludedEmployeeIds = [],
+            ApplicableEmploymentTypes = []
+        });
+
+        Assert.False(result.Success);
+        Assert.Contains("working day(s) per week", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task GetEmployeeContext_WhenModuleDisabled_ReturnsModuleDisabledReason()
     {
         var service = CreateService(isModuleAccessible: false);

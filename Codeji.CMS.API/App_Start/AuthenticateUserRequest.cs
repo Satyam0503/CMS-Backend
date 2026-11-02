@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel.Design;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http;
@@ -99,8 +99,15 @@ namespace Codeji.CMS.API.App_Start
                 //     }
                 // }
                 // catch (Exception) { }
-                var permissionAttribute = permissionAttributes.FirstOrDefault();
-                bool isValid = await _roleServices.VerifyUserAccess(permissionAttribute.Module, permissionAttribute.Permissions, userId, company_Id);
+                bool isValid = false;
+                foreach (var attr in permissionAttributes)
+                {
+                    if (await _roleServices.VerifyUserAccess(attr.Module, attr.Permissions, userId, company_Id))
+                    {
+                        isValid = true;
+                        break;
+                    }
+                }
                 // Check if the user has the required permissions for the module
                 if (!isValid)
                 {
@@ -114,7 +121,7 @@ namespace Codeji.CMS.API.App_Start
 
         }
 
-        private static bool IsTenantValidationExemptPath(PathString path) =>
+        public static bool IsTenantValidationExemptPath(PathString path) =>
             path.StartsWithSegments("/api/account/antiforgerytoken") ||
             path.StartsWithSegments("/api/app/checkAppVersion") ||
             path.StartsWithSegments("/api/account/register") ||

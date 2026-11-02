@@ -17,6 +17,8 @@ public class AdminAttendanceCreateDto
     public string Status { get; set; } = "P";
 
     public string? Remarks { get; set; }
+
+    public bool AllowSourceOverride { get; set; }
 }
 
 

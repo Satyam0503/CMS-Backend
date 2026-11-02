@@ -22,7 +22,8 @@ public sealed class EmployeeSalaryStructureService(
     IMongoDbRepository<PayrollSalaryComponentDefinition>? componentDefinitions = null,
     IMongoDbRepository<PayrollPayGroup>? payGroups = null,
     IMongoDbRepository<SalaryTemplate>? salaryTemplates = null,
-    IMongoClient? mongoClient = null) : IEmployeeSalaryStructureService
+    IMongoClient? mongoClient = null,
+    IMongoDbRepository<EmpPayRoll>? payrolls = null) : IEmployeeSalaryStructureService
 {
     public async Task<List<EmployeeSalaryStructureDto>> GetHistory(string companyId, string employeeId) =>
         (await repository.GetAll(x => x.CompanyId == companyId && x.EmployeeId == employeeId.Trim()))
@@ -85,7 +86,17 @@ public sealed class EmployeeSalaryStructureService(
                 return FailDto(409, "A salary structure cannot be reassigned to another employee.");
             if (existingRecord.Version != dto.Version) return FailDto(409, "Salary structure changed; reload and retry.");
             if (existingRecord.ApprovalStatus != "DRAFT")
-                return FailDto(409, "Submitted or approved salary structures are immutable. Create a new effective-dated revision.");
+            {
+                var candidateMonthStart = new DateTime(candidateStart.Year, candidateStart.Month, 1);
+                var hasProcessedPayroll = payrolls != null && await payrolls.Exist(p =>
+                    p.CompanyId == companyId &&
+                    p.EmployeeId == employeeId &&
+                    (p.PayMonth >= candidateMonthStart || p.PaidDate >= candidateStart) &&
+                    (p.IsProcessed || p.WorkflowStatus == "PROCESSED" || p.WorkflowStatus == "PAID" || p.WorkflowStatus == "CLOSED"));
+
+                if (hasProcessedPayroll || payrolls is null)
+                    return FailDto(409, "Submitted or approved salary structures are immutable once processed in payroll. Create a new effective-dated revision.");
+            }
         }
         else
         {
@@ -96,9 +107,29 @@ public sealed class EmployeeSalaryStructureService(
                 dto.Id = openDraft.Id;
                 dto.Version = openDraft.Version;
             }
+            else
+            {
+                var activeOnDate = await repository.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeId == employeeId && x.ApprovalStatus == "APPROVED" && x.Status == "ACTIVE" && x.EffectiveFrom.Date == candidateStart);
+                if (activeOnDate is not null && payrolls != null)
+                {
+                    var candidateMonthStart = new DateTime(candidateStart.Year, candidateStart.Month, 1);
+                    var hasProcessedPayroll = await payrolls.Exist(p =>
+                        p.CompanyId == companyId &&
+                        p.EmployeeId == employeeId &&
+                        (p.PayMonth >= candidateMonthStart || p.PaidDate >= candidateStart) &&
+                        (p.IsProcessed || p.WorkflowStatus == "PROCESSED" || p.WorkflowStatus == "PAID" || p.WorkflowStatus == "CLOSED"));
+
+                    if (!hasProcessedPayroll)
+                    {
+                        existingRecord = activeOnDate;
+                        dto.Id = activeOnDate.Id;
+                        dto.Version = activeOnDate.Version;
+                    }
+                }
+            }
         }
         var existing = (await repository.GetAll(x => x.CompanyId == companyId && x.EmployeeId == employeeId)).ToList();
-        var overlaps = existing.Where(x => x.Id != dto.Id && !(x.EffectiveFrom.Date < candidateStart && !x.EffectiveTo.HasValue && x.ApprovalStatus == "APPROVED" && x.Status == "ACTIVE") && x.EffectiveFrom.Date <= candidateEnd && (x.EffectiveTo?.Date ?? DateTime.MaxValue.Date) >= candidateStart).ToList();
+        var overlaps = existing.Where(x => x.Id != dto.Id && !(x.EffectiveFrom.Date <= candidateStart && !x.EffectiveTo.HasValue && x.ApprovalStatus == "APPROVED" && x.Status == "ACTIVE") && x.EffectiveFrom.Date <= candidateEnd && (x.EffectiveTo?.Date ?? DateTime.MaxValue.Date) >= candidateStart).ToList();
         if (overlaps.Any(x => x.ApprovalStatus is "APPROVED" or "SUBMITTED"))
             return FailDto(409, "The employee already has an overlapping approved or submitted salary structure.");
 
@@ -146,6 +177,14 @@ public sealed class EmployeeSalaryStructureService(
                     component.CalculationType = definition.CalculationType.Trim().ToUpperInvariant();
                     component.BaseComponentCode = definition.BaseComponentCode?.Trim().ToUpperInvariant();
                     component.IsTaxable = definition.IsTaxable;
+                    component.IsRecurring = definition.IsRecurring;
+                    component.IsStatutory = definition.IsStatutory;
+                    component.IsEmployerContribution = definition.IsEmployerContribution;
+                    component.ProrationBasis = definition.ProrationBasis;
+                    component.TaxExemptionSection = definition.TaxExemptionSection;
+                    component.IncludeInPfWage = definition.IncludeInPfWage;
+                    component.IncludeInEsiWage = definition.IncludeInEsiWage;
+                    component.IncludeInPtWage = definition.IncludeInPtWage;
                     resolvedComponents.Add(component);
                 }
                 mappedComponents = resolvedComponents;

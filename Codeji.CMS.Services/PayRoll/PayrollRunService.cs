@@ -34,7 +34,8 @@ public sealed class PayrollRunService(
     IMongoDbRepository<PayrollPayGroup>? payGroups = null,
     IMongoDbRepository<PayrollPolicyProfile>? policyProfiles = null,
     IMongoDbRepository<EmployeeSalaryStructure>? employeeSalaryStructures = null,
-    ISalaryRepository? legacySalaries = null
+    ISalaryRepository? legacySalaries = null,
+    IPayrollReadinessService? readinessService = null
 ) : IPayrollRunService
 {
     public async Task<Result<PayrollRunDto>> Create(
@@ -76,6 +77,13 @@ public sealed class PayrollRunService(
             )
         )
             return Fail(400, "Unsupported payroll run type.");
+
+        if (readinessService is not null)
+        {
+            var readiness = await readinessService.ValidateCompanyPayrollReadiness(companyId, start);
+            if (!readiness.IsReady)
+                return Fail(400, $"Company payroll setup is not ready for {start:MMMM yyyy}: {string.Join("; ", readiness.BlockingIssues)}");
+        }
         var requestedEmployeeIds = request.EmployeeIds ?? [];
         if (population == "SELECTED" && requestedEmployeeIds.Count == 0)
             return Fail(400, "Selected population requires employees.");
@@ -572,6 +580,34 @@ public sealed class PayrollRunService(
                     IncomeTax = x.StatutorySnapshot.IncomeTax,
                     ProfessionalTax = x.StatutorySnapshot.ProfessionalTax,
                 },
+                AttendanceSnapshot = new PayrollAttendanceSnapshotDto
+                {
+                    SummaryId = x.AttendanceSnapshot.SummaryId,
+                    SummaryVersion = x.AttendanceSnapshot.SummaryVersion,
+                    IsApproved = x.AttendanceSnapshot.IsApproved,
+                    IsLocked = x.AttendanceSnapshot.IsLocked,
+                    ApprovedBy = x.AttendanceSnapshot.ApprovedBy,
+                    ApprovedAt = x.AttendanceSnapshot.ApprovedAt,
+                    LockedAt = x.AttendanceSnapshot.LockedAt,
+                    LockedBy = x.AttendanceSnapshot.LockedBy,
+                    ExpectedWorkingDays = x.AttendanceSnapshot.ExpectedWorkingDays,
+                    EligibleWorkingDays = x.AttendanceSnapshot.EligibleWorkingDays,
+                    PresentDays = x.AttendanceSnapshot.PresentDays,
+                    WfhDays = x.AttendanceSnapshot.WfhDays,
+                    PaidLeaveDays = x.AttendanceSnapshot.PaidLeaveDays,
+                    UnpaidLeaveDays = x.AttendanceSnapshot.UnpaidLeaveDays,
+                    HalfDays = x.AttendanceSnapshot.HalfDays,
+                    AbsentDays = x.AttendanceSnapshot.AbsentDays,
+                    PaidDays = x.AttendanceSnapshot.PaidDays,
+                    UnpaidDays = x.AttendanceSnapshot.UnpaidDays,
+                    LhdCount = x.AttendanceSnapshot.LhdCount,
+                    EdCount = x.AttendanceSnapshot.EdCount,
+                    CombinedLhdEdCount = x.AttendanceSnapshot.CombinedLhdEdCount,
+                    LossOfPayDays = x.AttendanceSnapshot.LossOfPayDays,
+                    LossOfPayAmount = x.AttendanceSnapshot.LossOfPayAmount,
+                    Divisor = x.AttendanceSnapshot.Divisor,
+                    DivisorPolicy = x.AttendanceSnapshot.DivisorPolicy,
+                },
             })
             .ToList();
         return new Result<List<PayrollRunEmployeeDto>>
@@ -779,6 +815,7 @@ public sealed class PayrollRunService(
             PeriodEnd = x.PeriodEnd,
             PayDate = x.PayDate,
             RunType = x.RunType,
+            ParentRunId = x.ParentRunId,
             Status = x.Status,
             PopulationType = x.PopulationType,
             DepartmentId = x.DepartmentId,
@@ -791,6 +828,7 @@ public sealed class PayrollRunService(
             GrossTotal = x.GrossTotal,
             DeductionTotal = x.DeductionTotal,
             NetTotal = x.NetTotal,
+            LegacyPayrollRowsSynchronizedAtUtc = x.LegacyPayrollRowsSynchronizedAtUtc,
             CreatedBy = x.CreatedBy,
             CreatedAtUtc = x.CreatedAtUtc,
         };

@@ -23,6 +23,7 @@ public interface IPayrollTemplateService
     Task<Result> RetireTemplate(string companyId, string actorUserId, string templateId, int version);
     Task<Result> DeleteTemplate(string companyId, string actorUserId, string templateId, int version);
     Task<Result> SeedStandardComponents(string companyId, string actorUserId);
+    Task<Result<SalaryTemplatePreviewDto>> PreviewTemplate(string companyId, SalaryTemplateDto dto);
 }
 
 public sealed class PayrollTemplateService(
@@ -70,7 +71,12 @@ public sealed class PayrollTemplateService(
             {
                 ComponentId = c.ComponentId, Code = c.Code, Name = c.Name, Kind = c.Kind,
                 CalculationType = c.CalculationType, BaseComponentCode = c.BaseComponentCode,
-                Value = c.Value, IsTaxable = c.IsTaxable, SortOrder = c.SortOrder
+                Value = c.Value, Percentage = c.Percentage, IsTaxable = c.IsTaxable, SortOrder = c.SortOrder,
+                IsStatutory = c.IsStatutory, IsEmployerContribution = c.IsEmployerContribution,
+                IsRecurring = c.IsRecurring, TaxExemptionSection = c.TaxExemptionSection,
+                ProrationBasis = c.ProrationBasis, GlAccountCode = c.GlAccountCode,
+                IncludeInPfWage = c.IncludeInPfWage, IncludeInEsiWage = c.IncludeInEsiWage,
+                IncludeInPtWage = c.IncludeInPtWage
             }).ToList()
         }).ToList();
 
@@ -126,7 +132,17 @@ public sealed class PayrollTemplateService(
             // that may already be referenced by templates or historical salaries.
             Id = string.Empty, CompanyId = companyId, Code = code, Name = dto.Name.Trim(),
             Kind = kind, CalculationType = calculationType, BaseComponentCode = dto.BaseComponentCode?.Trim().ToUpperInvariant(),
-            IsTaxable = dto.IsTaxable, EffectiveFrom = dto.EffectiveFrom.Date, EffectiveTo = dto.EffectiveTo?.Date,
+            IsTaxable = dto.IsTaxable,
+            IsStatutory = dto.IsStatutory,
+            IsEmployerContribution = dto.IsEmployerContribution,
+            IsRecurring = dto.IsRecurring,
+            TaxExemptionSection = dto.TaxExemptionSection?.Trim(),
+            ProrationBasis = string.IsNullOrWhiteSpace(dto.ProrationBasis) ? "ATTENDANCE" : dto.ProrationBasis.Trim().ToUpperInvariant(),
+            GlAccountCode = dto.GlAccountCode?.Trim(),
+            IncludeInPfWage = dto.IncludeInPfWage,
+            IncludeInEsiWage = dto.IncludeInEsiWage,
+            IncludeInPtWage = dto.IncludeInPtWage,
+            EffectiveFrom = dto.EffectiveFrom.Date, EffectiveTo = dto.EffectiveTo?.Date,
             IsActive = dto.IsActive, Version = versions.Count == 0 ? 1 : versions.Max(x => x.Version) + 1
         };
         if (!closesPriorVersion) return await componentDefinitions.AddOne(entity);
@@ -139,6 +155,11 @@ public sealed class PayrollTemplateService(
             Id = previousVersion!.Id, CompanyId = previousVersion.CompanyId, Code = previousVersion.Code,
             Name = previousVersion.Name, Kind = previousVersion.Kind, CalculationType = previousVersion.CalculationType,
             BaseComponentCode = previousVersion.BaseComponentCode, IsTaxable = previousVersion.IsTaxable,
+            IsStatutory = previousVersion.IsStatutory, IsEmployerContribution = previousVersion.IsEmployerContribution,
+            IsRecurring = previousVersion.IsRecurring, TaxExemptionSection = previousVersion.TaxExemptionSection,
+            ProrationBasis = previousVersion.ProrationBasis, GlAccountCode = previousVersion.GlAccountCode,
+            IncludeInPfWage = previousVersion.IncludeInPfWage, IncludeInEsiWage = previousVersion.IncludeInEsiWage,
+            IncludeInPtWage = previousVersion.IncludeInPtWage,
             EffectiveFrom = previousVersion.EffectiveFrom, EffectiveTo = dto.EffectiveFrom.Date.AddDays(-1),
             IsActive = previousVersion.IsActive, Version = previousVersion.Version
         };
@@ -161,6 +182,11 @@ public sealed class PayrollTemplateService(
             Id = previousVersion.Id, CompanyId = previousVersion.CompanyId, Code = previousVersion.Code,
             Name = previousVersion.Name, Kind = previousVersion.Kind, CalculationType = previousVersion.CalculationType,
             BaseComponentCode = previousVersion.BaseComponentCode, IsTaxable = previousVersion.IsTaxable,
+            IsStatutory = previousVersion.IsStatutory, IsEmployerContribution = previousVersion.IsEmployerContribution,
+            IsRecurring = previousVersion.IsRecurring, TaxExemptionSection = previousVersion.TaxExemptionSection,
+            ProrationBasis = previousVersion.ProrationBasis, GlAccountCode = previousVersion.GlAccountCode,
+            IncludeInPfWage = previousVersion.IncludeInPfWage, IncludeInEsiWage = previousVersion.IncludeInEsiWage,
+            IncludeInPtWage = previousVersion.IncludeInPtWage,
             EffectiveFrom = previousVersion.EffectiveFrom, EffectiveTo = priorEndDate,
             IsActive = previousVersion.IsActive, Version = previousVersion.Version
         };
@@ -185,11 +211,11 @@ public sealed class PayrollTemplateService(
         var startOfYear = new DateTime(DateTime.UtcNow.Year, 1, 1);
         var standards = new List<PayrollSalaryComponentDefinition>
         {
-            new() { Id = string.Empty, CompanyId = companyId, Code = "HRA", Name = "House Rent Allowance", Kind = "EARNING", CalculationType = "FIXED", IsTaxable = true, EffectiveFrom = startOfYear, IsActive = true, Version = 1 },
-            new() { Id = string.Empty, CompanyId = companyId, Code = "SPECIAL_ALLOWANCE", Name = "Special Allowance", Kind = "EARNING", CalculationType = "FIXED", IsTaxable = true, EffectiveFrom = startOfYear, IsActive = true, Version = 1 },
-            new() { Id = string.Empty, CompanyId = companyId, Code = "LTA", Name = "Leave Travel Allowance", Kind = "EARNING", CalculationType = "FIXED", IsTaxable = true, EffectiveFrom = startOfYear, IsActive = true, Version = 1 },
-            new() { Id = string.Empty, CompanyId = companyId, Code = "BONUS", Name = "Annual / Performance Bonus", Kind = "EARNING", CalculationType = "FIXED", IsTaxable = true, EffectiveFrom = startOfYear, IsActive = true, Version = 1 },
-            new() { Id = string.Empty, CompanyId = companyId, Code = "HEALTH_INSURANCE", Name = "Group Health Insurance", Kind = "DEDUCTION", CalculationType = "FIXED", IsTaxable = false, EffectiveFrom = startOfYear, IsActive = true, Version = 1 }
+            new() { Id = string.Empty, CompanyId = companyId, Code = "HRA", Name = "House Rent Allowance", Kind = "EARNING", CalculationType = "FIXED", IsTaxable = true, IsRecurring = true, TaxExemptionSection = "10(13A)", ProrationBasis = "ATTENDANCE", IncludeInPfWage = false, IncludeInEsiWage = true, IncludeInPtWage = true, EffectiveFrom = startOfYear, IsActive = true, Version = 1 },
+            new() { Id = string.Empty, CompanyId = companyId, Code = "SPECIAL_ALLOWANCE", Name = "Special Allowance", Kind = "EARNING", CalculationType = "FIXED", IsTaxable = true, IsRecurring = true, ProrationBasis = "ATTENDANCE", IncludeInPfWage = true, IncludeInEsiWage = true, IncludeInPtWage = true, EffectiveFrom = startOfYear, IsActive = true, Version = 1 },
+            new() { Id = string.Empty, CompanyId = companyId, Code = "LTA", Name = "Leave Travel Allowance", Kind = "EARNING", CalculationType = "FIXED", IsTaxable = true, IsRecurring = true, TaxExemptionSection = "10(5)", ProrationBasis = "ATTENDANCE", IncludeInPfWage = false, IncludeInEsiWage = false, IncludeInPtWage = true, EffectiveFrom = startOfYear, IsActive = true, Version = 1 },
+            new() { Id = string.Empty, CompanyId = companyId, Code = "BONUS", Name = "Statutory / Monthly Bonus", Kind = "EARNING", CalculationType = "FIXED", IsTaxable = true, IsRecurring = true, ProrationBasis = "NOT_PRORATED", IncludeInPfWage = false, IncludeInEsiWage = true, IncludeInPtWage = true, EffectiveFrom = startOfYear, IsActive = true, Version = 1 },
+            new() { Id = string.Empty, CompanyId = companyId, Code = "HEALTH_INSURANCE", Name = "Group Health Insurance", Kind = "DEDUCTION", CalculationType = "FIXED", IsTaxable = false, IsRecurring = true, TaxExemptionSection = "80D", ProrationBasis = "NOT_PRORATED", EffectiveFrom = startOfYear, IsActive = true, Version = 1 }
         };
 
         var addedCount = 0;
@@ -458,17 +484,66 @@ public sealed class PayrollTemplateService(
                     ComponentId = definition.Id, Code = definition.Code, Name = definition.Name,
                     Kind = definition.Kind, CalculationType = definition.CalculationType,
                     BaseComponentCode = definition.BaseComponentCode, Value = item.Value,
-                    IsTaxable = definition.IsTaxable, SortOrder = item.SortOrder == 0 ? index : item.SortOrder
+                    Percentage = item.Percentage,
+                    IsTaxable = definition.IsTaxable,
+                    IsStatutory = definition.IsStatutory,
+                    IsEmployerContribution = definition.IsEmployerContribution,
+                    IsRecurring = definition.IsRecurring,
+                    TaxExemptionSection = definition.TaxExemptionSection,
+                    ProrationBasis = definition.ProrationBasis,
+                    GlAccountCode = definition.GlAccountCode,
+                    IncludeInPfWage = definition.IncludeInPfWage,
+                    IncludeInEsiWage = definition.IncludeInEsiWage,
+                    IncludeInPtWage = definition.IncludeInPtWage,
+                    SortOrder = item.SortOrder == 0 ? index : item.SortOrder
                 };
             }).OrderBy(x => x.SortOrder).ToList();
+        }
+
+        // Prevent duplicate / conflicting representation between legacy fields and component arrays
+        var legacyPairs = new (string Code, decimal? Value)[]
+        {
+            ("BASIC", dto.BasicPay),
+            ("HRA", dto.Hra),
+            ("LTA", dto.Lta),
+            ("OTHER_ALLOWANCE", dto.OtherAllowance),
+            ("BONUS", dto.Bonus)
+        };
+        foreach (var (legacyCode, legacyVal) in legacyPairs)
+        {
+            if (legacyVal.HasValue && legacyVal.Value > 0)
+            {
+                var matchingComponent = components.FirstOrDefault(c =>
+                    string.Equals(c.Code, legacyCode, StringComparison.OrdinalIgnoreCase) ||
+                    (legacyCode == "BASIC" && string.Equals(c.Code, "BASIC_PAY", StringComparison.OrdinalIgnoreCase)));
+                if (matchingComponent is not null && matchingComponent.Value != legacyVal.Value)
+                {
+                    return new Result
+                    {
+                        Success = false,
+                        StatusCode = 409,
+                        Message = $"Component '{legacyCode}' is specified in both legacy template fields and component items with conflicting amounts ({legacyVal.Value} vs {matchingComponent.Value}). Unify the amounts to prevent double-counting."
+                    };
+                }
+            }
         }
 
         var calculation = PayrollComponentCalculationEngine.Calculate(
             new[] { ("BASIC", dto.BasicPay), ("HRA", dto.Hra), ("LTA", dto.Lta), ("OTHER_ALLOWANCE", dto.OtherAllowance), ("BONUS", dto.Bonus) }
                 .Where(item => item.Item2.HasValue || !components.Any(component => string.Equals(component.Code, item.Item1, StringComparison.OrdinalIgnoreCase)))
                 .Select(item => new PayrollComponentSnapshot { Code = item.Item1, Name = item.Item1, Value = item.Item2 ?? 0 })
-                .Concat(components.Select(item => new PayrollComponentSnapshot { Code = item.Code, Name = item.Name, Kind = item.Kind,
-                    CalculationType = item.CalculationType, BaseComponentCode = item.BaseComponentCode, Value = item.Value, SortOrder = item.SortOrder })));
+                .Concat(components.Select(item => new PayrollComponentSnapshot
+                {
+                    Code = item.Code, Name = item.Name, Kind = item.Kind,
+                    CalculationType = item.CalculationType, BaseComponentCode = item.BaseComponentCode,
+                    Value = item.Value, Percentage = item.Percentage,
+                    IsTaxable = item.IsTaxable, IsStatutory = item.IsStatutory,
+                    IsEmployerContribution = item.IsEmployerContribution, IsRecurring = item.IsRecurring,
+                    TaxExemptionSection = item.TaxExemptionSection, ProrationBasis = item.ProrationBasis,
+                    GlAccountCode = item.GlAccountCode, IncludeInPfWage = item.IncludeInPfWage,
+                    IncludeInEsiWage = item.IncludeInEsiWage, IncludeInPtWage = item.IncludeInPtWage,
+                    SortOrder = item.SortOrder
+                })));
         if (!calculation.Success)
             return new Result { Success = false, StatusCode = 400, Message = calculation.ErrorMessage, ErrorCode = calculation.ErrorCode };
 
@@ -528,11 +603,147 @@ public sealed class PayrollTemplateService(
             Builders<SalaryTemplate>.Filter.Eq(x => x.Version, version));
     }
 
+    public async Task<Result<SalaryTemplatePreviewDto>> PreviewTemplate(string companyId, SalaryTemplateDto dto)
+    {
+        if (new[] { dto.BasicPay, dto.Hra, dto.Lta, dto.OtherAllowance, dto.Bonus }.Any(value => value < 0) ||
+            dto.Components.Any(component => component.Value < 0))
+            return new Result<SalaryTemplatePreviewDto> { Success = false, StatusCode = 400, Message = "Salary template amounts and rates cannot be negative." };
+
+        List<PayrollSalaryComponentDefinition> companyDefinitions = [];
+        if (componentDefinitions is not null)
+        {
+            companyDefinitions = (await componentDefinitions.GetAll(x => x.CompanyId == companyId)).ToList();
+        }
+
+        var components = dto.Components.Select((item, index) =>
+        {
+            PayrollSalaryComponentDefinition? def = null;
+            if (!string.IsNullOrWhiteSpace(item.ComponentId))
+                def = companyDefinitions.FirstOrDefault(x => x.Id == item.ComponentId);
+            if (def is null && !string.IsNullOrWhiteSpace(item.Code))
+                def = companyDefinitions.FirstOrDefault(x => string.Equals(x.Code, item.Code, StringComparison.OrdinalIgnoreCase));
+
+            return new PayrollSalaryTemplateComponent
+            {
+                ComponentId = def?.Id ?? item.ComponentId,
+                Code = def?.Code ?? item.Code.Trim().ToUpperInvariant(),
+                Name = def?.Name ?? item.Name.Trim(),
+                Kind = def?.Kind ?? (string.IsNullOrWhiteSpace(item.Kind) ? "EARNING" : item.Kind.Trim().ToUpperInvariant()),
+                CalculationType = def?.CalculationType ?? (string.IsNullOrWhiteSpace(item.CalculationType) ? "FIXED" : item.CalculationType.Trim().ToUpperInvariant()),
+                BaseComponentCode = def?.BaseComponentCode ?? item.BaseComponentCode?.Trim().ToUpperInvariant(),
+                Value = item.Value,
+                Percentage = item.Percentage,
+                IsTaxable = def?.IsTaxable ?? item.IsTaxable,
+                IsStatutory = def?.IsStatutory ?? item.IsStatutory,
+                IsEmployerContribution = def?.IsEmployerContribution ?? item.IsEmployerContribution,
+                IsRecurring = def?.IsRecurring ?? item.IsRecurring,
+                TaxExemptionSection = def?.TaxExemptionSection ?? item.TaxExemptionSection,
+                ProrationBasis = def?.ProrationBasis ?? item.ProrationBasis,
+                GlAccountCode = def?.GlAccountCode ?? item.GlAccountCode,
+                IncludeInPfWage = def?.IncludeInPfWage ?? item.IncludeInPfWage,
+                IncludeInEsiWage = def?.IncludeInEsiWage ?? item.IncludeInEsiWage,
+                IncludeInPtWage = def?.IncludeInPtWage ?? item.IncludeInPtWage,
+                SortOrder = item.SortOrder == 0 ? index : item.SortOrder
+            };
+        }).OrderBy(x => x.SortOrder).ToList();
+
+        // Prevent duplicate / conflicting representation between legacy fields and component arrays
+        var legacyPairs = new (string Code, decimal? Value)[]
+        {
+            ("BASIC", dto.BasicPay),
+            ("HRA", dto.Hra),
+            ("LTA", dto.Lta),
+            ("OTHER_ALLOWANCE", dto.OtherAllowance),
+            ("BONUS", dto.Bonus)
+        };
+        foreach (var (legacyCode, legacyVal) in legacyPairs)
+        {
+            if (legacyVal.HasValue && legacyVal.Value > 0)
+            {
+                var matchingComponent = components.FirstOrDefault(c =>
+                    string.Equals(c.Code, legacyCode, StringComparison.OrdinalIgnoreCase) ||
+                    (legacyCode == "BASIC" && string.Equals(c.Code, "BASIC_PAY", StringComparison.OrdinalIgnoreCase)));
+                if (matchingComponent is not null && matchingComponent.Value != legacyVal.Value)
+                {
+                    return new Result<SalaryTemplatePreviewDto>
+                    {
+                        Success = false,
+                        StatusCode = 409,
+                        Message = $"Component '{legacyCode}' is specified in both legacy template fields and component items with conflicting amounts ({legacyVal.Value} vs {matchingComponent.Value}). Unify the amounts to prevent double-counting."
+                    };
+                }
+            }
+        }
+
+        var snapshotComponents = new[] { ("BASIC", dto.BasicPay), ("HRA", dto.Hra), ("LTA", dto.Lta), ("OTHER_ALLOWANCE", dto.OtherAllowance), ("BONUS", dto.Bonus) }
+            .Where(item => item.Item2.HasValue || !components.Any(component => string.Equals(component.Code, item.Item1, StringComparison.OrdinalIgnoreCase)))
+            .Select(item => new PayrollComponentSnapshot { Code = item.Item1, Name = item.Item1, Value = item.Item2 ?? 0 })
+            .Concat(components.Select(item => new PayrollComponentSnapshot
+            {
+                Code = item.Code,
+                Name = item.Name,
+                Kind = item.Kind,
+                CalculationType = item.CalculationType,
+                BaseComponentCode = item.BaseComponentCode,
+                Value = item.Value,
+                Percentage = item.Percentage,
+                IsTaxable = item.IsTaxable,
+                IsStatutory = item.IsStatutory,
+                IsEmployerContribution = item.IsEmployerContribution,
+                IsRecurring = item.IsRecurring,
+                TaxExemptionSection = item.TaxExemptionSection,
+                ProrationBasis = item.ProrationBasis,
+                GlAccountCode = item.GlAccountCode,
+                IncludeInPfWage = item.IncludeInPfWage,
+                IncludeInEsiWage = item.IncludeInEsiWage,
+                IncludeInPtWage = item.IncludeInPtWage,
+                SortOrder = item.SortOrder
+            }));
+
+        var calculation = PayrollComponentCalculationEngine.Calculate(snapshotComponents);
+        if (!calculation.Success)
+            return new Result<SalaryTemplatePreviewDto>
+            {
+                Success = false,
+                StatusCode = 400,
+                Message = calculation.ErrorMessage,
+                ErrorCode = calculation.ErrorCode
+            };
+
+        var preview = new SalaryTemplatePreviewDto
+        {
+            Success = true,
+            MonthlyGross = calculation.Gross,
+            AnnualGross = PayrollCalculationRules.RoundMoney(calculation.Gross * 12m),
+            MonthlyEmployeeDeductions = calculation.Deductions,
+            AnnualEmployeeDeductions = PayrollCalculationRules.RoundMoney(calculation.Deductions * 12m),
+            MonthlyEmployerContributions = calculation.EmployerContributions,
+            AnnualEmployerContributions = PayrollCalculationRules.RoundMoney(calculation.EmployerContributions * 12m),
+            MonthlyTotalCtc = calculation.TotalCostToCompany,
+            AnnualTotalCtc = PayrollCalculationRules.RoundMoney(calculation.TotalCostToCompany * 12m),
+            IndicativeMonthlyTakeHome = calculation.Net,
+            IndicativeAnnualTakeHome = PayrollCalculationRules.RoundMoney(calculation.Net * 12m),
+            ComponentBreakdown = new Dictionary<string, decimal>(calculation.Values, StringComparer.OrdinalIgnoreCase),
+            ExplanatoryNote = "Indicative take-home excludes attendance loss of pay, tax declarations, and state statutory changes which are determined dynamically at payroll run execution time."
+        };
+
+        return new Result<SalaryTemplatePreviewDto>
+        {
+            Success = true,
+            StatusCode = 200,
+            Data = preview
+        };
+    }
     private static PayrollSalaryComponentDto Map(PayrollSalaryComponentDefinition x) => new()
     {
         Id = x.Id, Code = x.Code, Name = x.Name, Kind = x.Kind, CalculationType = x.CalculationType,
         BaseComponentCode = x.BaseComponentCode, IsTaxable = x.IsTaxable, EffectiveFrom = x.EffectiveFrom,
-        EffectiveTo = x.EffectiveTo, IsActive = x.IsActive, Version = x.Version
+        EffectiveTo = x.EffectiveTo, IsActive = x.IsActive, Version = x.Version,
+        IsStatutory = x.IsStatutory, IsEmployerContribution = x.IsEmployerContribution,
+        IsRecurring = x.IsRecurring, TaxExemptionSection = x.TaxExemptionSection,
+        ProrationBasis = x.ProrationBasis, GlAccountCode = x.GlAccountCode,
+        IncludeInPfWage = x.IncludeInPfWage, IncludeInEsiWage = x.IncludeInEsiWage,
+        IncludeInPtWage = x.IncludeInPtWage
     };
 
     private static Result InvalidDates(string message = "Name and valid effective dates are required.") =>

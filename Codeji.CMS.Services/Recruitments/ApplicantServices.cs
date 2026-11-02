@@ -338,6 +338,30 @@ namespace Codeji.CMS.Services.Recruitments
             if (result.Success)
             {
                 result.ResourceId = user.ApplicantId;
+                if (_jobApplicationRepository is not null)
+                {
+                    await _jobApplicationRepository.AddOne(new RecruitmentJobApplication
+                    {
+                        CompanyId = user.CompanyId,
+                        ApplicantId = user.ApplicantId,
+                        VacancyId = user.VacancyId,
+                        CurrentStage = user.ActivityType.ToString(),
+                        StageHistory =
+                        [
+                            new RecruitmentApplicationStageEvent
+                            {
+                                FromStage = "None",
+                                ToStage = user.ActivityType.ToString(),
+                                ActorUserId = user.ApplicantId,
+                                Reason = "Initial application submitted via career portal"
+                            }
+                        ],
+                        CreatedBy = user.ApplicantId,
+                        CreatedDate = DateTime.UtcNow,
+                        UpdatedBy = user.ApplicantId,
+                        UpdatedDate = DateTime.UtcNow
+                    });
+                }
                 if (_applicationTokenRepository is not null)
                 {
                     string rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));

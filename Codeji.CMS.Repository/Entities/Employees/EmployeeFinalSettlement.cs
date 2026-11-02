@@ -22,6 +22,7 @@ public sealed class EmployeeFinalSettlement : BaseClass
     public decimal SalaryPayable { get; set; }
     public decimal Reimbursements { get; set; }
     public decimal LeaveEncashment { get; set; }
+    public decimal Gratuity { get; set; }
     public decimal BonusesAndIncentives { get; set; }
     public decimal Deductions { get; set; }
     public decimal NoticeRecovery { get; set; }

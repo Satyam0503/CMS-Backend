@@ -197,9 +197,53 @@ public sealed class PayrollAdjustmentService(
             : updated;
     }
 
-    public Task<Result> Process(string companyId, string actor, string id, PayrollAdjustmentActionDto request) =>
-        Task.FromResult(Fail(409,
-            "Adjustment processing is unavailable until the approved amount is included in correction-run gross-to-net and statutory calculations. The adjustment remains approved."));
+    public async Task<Result> Process(string companyId, string actor, string id, PayrollAdjustmentActionDto request)
+    {
+        var adjustment = await adjustments.FirstOrDefault(x => x.CompanyId == companyId && x.Id == id);
+        if (adjustment is null) return Fail(404, "Adjustment was not found.");
+        if (adjustment.Status != "APPROVED")
+            return Fail(409, "Only an approved adjustment can be processed.");
+
+        if (string.IsNullOrWhiteSpace(request?.CorrectionPayrollRunId))
+            return Fail(400, "A correction payroll run ID is required to process the adjustment.");
+
+        var runId = request.CorrectionPayrollRunId.Trim();
+        var run = await runs.FirstOrDefault(x => x.CompanyId == companyId && x.Id == runId);
+        if (run is null)
+            return Fail(404, "Correction payroll run was not found.");
+
+        var employeeRunRow = await employees.FirstOrDefault(x =>
+            x.CompanyId == companyId && x.PayrollRunId == runId && x.EmployeeId == adjustment.EmployeeId);
+        if (employeeRunRow is null || employeeRunRow.Status != "CALCULATED")
+            return Fail(409, "The employee was not calculated in the specified correction payroll run.");
+
+        if (run.Status is not ("PROCESSED" or "PAID" or "CLOSED"))
+            return Fail(409,
+                "Adjustment processing is unavailable until the approved amount is included in a processed correction-run gross-to-net and statutory calculations. The adjustment remains approved.");
+
+        adjustment.Status = "PROCESSED";
+        adjustment.CorrectionPayrollRunId = runId;
+        adjustment.ProcessedBy = actor;
+        adjustment.ProcessedAtUtc = DateTime.UtcNow;
+        adjustment.AuditHistory.Add(new PayrollAdjustmentAuditEvent
+        {
+            Action = "Processed",
+            ActorId = actor,
+            OccurredAtUtc = DateTime.UtcNow,
+            Notes = $"Processed in payroll run {runId}"
+        });
+
+        var updated = await adjustments.Update(
+            Builders<PayrollAdjustment>.Filter.Eq(x => x.CompanyId, companyId) &
+            Builders<PayrollAdjustment>.Filter.Eq(x => x.Id, id) &
+            Builders<PayrollAdjustment>.Filter.Eq(x => x.Status, "APPROVED"),
+            adjustment);
+
+        return !updated.Success && updated.StatusCode == 400
+            ? Fail(409, "The adjustment changed before processing. Refresh the queue and try again.")
+            : updated;
+    }
+
 
     private static Result Fail(int statusCode, string message) =>
         new() { Success = false, StatusCode = statusCode, Message = message };

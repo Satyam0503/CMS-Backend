@@ -251,9 +251,12 @@ public class LeaveManagementController : BaseApiController
     [Route("LeaveRequest/{leaveRequestId}/Status")]
     [HttpPatch]
     [ModulePermission(AppModule.LeaveManagement, Permission.Edit)]
-    public async Task<Result> UpdateLeaveRequestStatus(string leaveRequestId, [FromBody] LeaveRequestUpdateDto model)
+    public async Task<IActionResult> UpdateLeaveRequestStatus(string leaveRequestId, [FromBody] LeaveRequestUpdateDto model)
     {
-        return await _leaveManagementService.UpdateLeaveRequestStatus(leaveRequestId, model);
+        var result = await _leaveManagementService.UpdateLeaveRequestStatus(leaveRequestId, model);
+        return result.ErrorCode == "LEAVE_WFH_TRANSACTION_REQUIRED"
+            ? StatusCode(StatusCodes.Status503ServiceUnavailable, result)
+            : Ok(result);
     }
 
     [Route("GetLeaveRequestSummary")]
@@ -283,6 +286,15 @@ public class LeaveManagementController : BaseApiController
     public async Task<Result> UpdateEmpLeaveBalance(List<LeaveBalanceRequestDto> LeaveBalanceRequestDto)
     {
         return await _leaveManagementService.UpdateEmployeeLeaveBalance(LeaveBalanceRequestDto);
+    }
+
+    [Route("trigger-monthly-accrual")]
+    [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Create)]
+    public async Task<IActionResult> TriggerMonthlyAccrual()
+    {
+        await _leaveManagementService.EmployeeLeaveBalanceAccrual();
+        return Ok(new { success = true, message = "Monthly leave accrual processed successfully." });
     }
 
     [Route("GetAllEmployeeLeaveBalances")]

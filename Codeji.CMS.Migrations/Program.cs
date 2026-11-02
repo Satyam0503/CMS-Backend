@@ -87,6 +87,141 @@ if (args.Contains("repair-payroll-policy-profile-index", StringComparer.OrdinalI
     return;
 }
 
+if (args.Contains("repair-wfh-outbox", StringComparer.OrdinalIgnoreCase))
+{
+    var repair = new RepairWorkFromHomeOutboxMissingRequestId();
+    await repair.ExecuteAsync(db);
+    Console.WriteLine($"Applied targeted migration {repair.Id} to database {db.DatabaseNamespace.DatabaseName}.");
+    return;
+}
+
+if (args.Contains("inspect-wfh", StringComparer.OrdinalIgnoreCase))
+{
+    var requestsCol = db.GetCollection<BsonDocument>("WorkFromHomeRequest");
+    var recentRequests = await requestsCol.Find(Builders<BsonDocument>.Filter.Empty)
+        .Sort(Builders<BsonDocument>.Sort.Descending("CreatedDate"))
+        .Limit(10)
+        .ToListAsync();
+    Console.WriteLine($"=== RECENT WFH REQUESTS ({recentRequests.Count}) ===");
+    foreach (var r in recentRequests)
+    {
+        Console.WriteLine($"Id: {r.GetValue("RequestId", "")}, User: {r.GetValue("UserId", "")}, Emp: {r.GetValue("EmployeeId", "")}, Status: {r.GetValue("Status", "")}, Duration: {r.GetValue("DurationType", "")}, Reason: {r.GetValue("ReasonCode", "")}/{r.GetValue("ReasonText", "")}");
+        Console.WriteLine($"   FromDate: {r.GetValue("FromDate", BsonNull.Value)} (BsonType: {r.GetValue("FromDate", BsonNull.Value).BsonType})");
+        Console.WriteLine($"   ToDate: {r.GetValue("ToDate", BsonNull.Value)}");
+        Console.WriteLine($"   CreatedDate: {r.GetValue("CreatedDate", BsonNull.Value)}");
+    }
+
+    var attCol = db.GetCollection<BsonDocument>("Attendance");
+    var recentAtt = await attCol.Find(Builders<BsonDocument>.Filter.Gte("Date", new DateTime(2026, 10, 25)))
+        .Sort(Builders<BsonDocument>.Sort.Descending("Date"))
+        .Limit(20)
+        .ToListAsync();
+    Console.WriteLine($"=== ATTENDANCE RECORDS (Oct 25-31) ({recentAtt.Count}) ===");
+    foreach (var a in recentAtt)
+    {
+        Console.WriteLine($"Id: {a.GetValue("AttendanceId", "")}, User: {a.GetValue("UserId", "")}, Date: {a.GetValue("Date", BsonNull.Value)}, Status: {a.GetValue("Status", "")}, Source: {a.GetValue("SourceType", "")}/{a.GetValue("SourceId", "")}, Remarks: {a.GetValue("Remarks", "")}");
+    }
+
+    var segCol = db.GetCollection<BsonDocument>("AttendanceDaySegment");
+    var recentSeg = await segCol.Find(Builders<BsonDocument>.Filter.Gte("Date", new DateTime(2026, 10, 25)))
+        .Sort(Builders<BsonDocument>.Sort.Descending("Date"))
+        .Limit(20)
+        .ToListAsync();
+    Console.WriteLine($"=== SEGMENT RECORDS (Oct 25-31) ({recentSeg.Count}) ===");
+    foreach (var s in recentSeg)
+    {
+        Console.WriteLine($"User: {s.GetValue("UserId", "")}, Date: {s.GetValue("Date", BsonNull.Value)}, Segment: {s.GetValue("Segment", "")}, Status: {s.GetValue("Status", "")}, Source: {s.GetValue("SourceType", "")}/{s.GetValue("SourceId", "")}");
+    }
+    return;
+}
+
+if (args.Contains("repair-wfh-dates", StringComparer.OrdinalIgnoreCase))
+{
+    var requestsCol = db.GetCollection<BsonDocument>("WorkFromHomeRequest");
+    var segCol = db.GetCollection<BsonDocument>("AttendanceDaySegment");
+    var attCol = db.GetCollection<BsonDocument>("Attendance");
+
+    var allRequests = await requestsCol.Find(Builders<BsonDocument>.Filter.Empty).ToListAsync();
+    int fixedReqCount = 0;
+    foreach (var r in allRequests)
+    {
+        bool changed = false;
+        var id = r["_id"];
+        if (r.TryGetValue("FromDate", out var fromVal) && fromVal.IsBsonDateTime)
+        {
+            var dt = fromVal.ToUniversalTime();
+            if (dt.TimeOfDay != TimeSpan.Zero)
+            {
+                var correctedFrom = DateTime.SpecifyKind(dt.AddHours(5.5).Date, DateTimeKind.Utc);
+                r["FromDate"] = new BsonDateTime(correctedFrom);
+                changed = true;
+            }
+        }
+        if (r.TryGetValue("ToDate", out var toVal) && toVal.IsBsonDateTime)
+        {
+            var dt = toVal.ToUniversalTime();
+            if (dt.TimeOfDay != TimeSpan.Zero)
+            {
+                var correctedTo = DateTime.SpecifyKind(dt.AddHours(5.5).Date, DateTimeKind.Utc);
+                r["ToDate"] = new BsonDateTime(correctedTo);
+                changed = true;
+            }
+        }
+        if (changed)
+        {
+            await requestsCol.ReplaceOneAsync(Builders<BsonDocument>.Filter.Eq("_id", id), r);
+            fixedReqCount++;
+        }
+    }
+    Console.WriteLine($"Repaired {fixedReqCount} WorkFromHomeRequest documents with shifted dates.");
+
+    var allSegments = await segCol.Find(Builders<BsonDocument>.Filter.Empty).ToListAsync();
+    int fixedSegCount = 0;
+    foreach (var s in allSegments)
+    {
+        var id = s["_id"];
+        if (s.TryGetValue("Date", out var dateVal) && dateVal.IsBsonDateTime)
+        {
+            var dt = dateVal.ToUniversalTime();
+            if (dt.TimeOfDay != TimeSpan.Zero)
+            {
+                var correctedDate = DateTime.SpecifyKind(dt.AddHours(5.5).Date, DateTimeKind.Utc);
+                s["Date"] = new BsonDateTime(correctedDate);
+                await segCol.ReplaceOneAsync(Builders<BsonDocument>.Filter.Eq("_id", id), s);
+                fixedSegCount++;
+            }
+        }
+    }
+    Console.WriteLine($"Repaired {fixedSegCount} AttendanceDaySegment documents with shifted dates.");
+
+    var aaravUser = "0e94eb40-53ee-42ea-8598-f3c8edf02863";
+    var oct28Utc = new DateTime(2026, 10, 28, 0, 0, 0, DateTimeKind.Utc);
+    var aaravSegmentsOct28 = await segCol.Find(Builders<BsonDocument>.Filter.And(
+        Builders<BsonDocument>.Filter.Eq("UserId", aaravUser),
+        Builders<BsonDocument>.Filter.Eq("Date", oct28Utc)
+    )).ToListAsync();
+
+    if (aaravSegmentsOct28.Count >= 2)
+    {
+        var fh = aaravSegmentsOct28.FirstOrDefault(x => x.GetValue("Segment", "").AsString == "FIRST_HALF");
+        var sh = aaravSegmentsOct28.FirstOrDefault(x => x.GetValue("Segment", "").AsString == "SECOND_HALF");
+        if (fh != null && sh != null)
+        {
+            string status = "WFH+WFO";
+            var update = Builders<BsonDocument>.Update
+                .Set("Status", status)
+                .Set("RemarkCode", "WFH_WFO_COMBINATION")
+                .Set("Remarks", "Administrative WFH grant: First Half WFH + Second Half Office");
+            await attCol.UpdateOneAsync(Builders<BsonDocument>.Filter.And(
+                Builders<BsonDocument>.Filter.Eq("UserId", aaravUser),
+                Builders<BsonDocument>.Filter.Eq("Date", oct28Utc)
+            ), update);
+            Console.WriteLine($"Synchronized Aarav Sharma daily attendance on 2026-10-28 to {status}.");
+        }
+    }
+    return;
+}
+
 if (args.Contains("inspect-lifecycle-policies", StringComparer.OrdinalIgnoreCase))
 {
     var companies = db.GetCollection<BsonDocument>("Company");

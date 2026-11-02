@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 namespace Codeji.CMS.Utility.Constraints
 {
     public static class AppModule
@@ -65,6 +65,7 @@ namespace Codeji.CMS.Utility.Constraints
     public static class Languages
     {
         public static readonly string English = "en";
+        public static readonly string Hindi = "hi";
         public static readonly string Mandarin = "zh";
         public static readonly string Spanish = "es";
         public static readonly string Japanese = "ja";

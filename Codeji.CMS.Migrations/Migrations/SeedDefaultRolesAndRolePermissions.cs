@@ -58,6 +58,10 @@ public class SeedDefaultRolesAndRolePermissions : IMigration
         yield return (AppModule.Employees, PermissionConst.Create);
         foreach (var p in FullAccess(AppModule.Calendar)) yield return p;
         yield return (AppModule.NoticeBoard, PermissionConst.Create);
+        yield return (AppModule.WorkFromHome, PermissionConst.ViewOwn);
+        yield return (AppModule.WorkFromHome, PermissionConst.CreateOwn);
+        yield return (AppModule.WorkFromHome, PermissionConst.EditOwn);
+        yield return (AppModule.WorkFromHome, PermissionConst.CancelOwn);
     }
 
     public async Task ExecuteAsync(IMongoDatabase db)

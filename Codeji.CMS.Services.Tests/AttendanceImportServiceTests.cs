@@ -1469,4 +1469,29 @@ public sealed class AttendanceImportServiceTests
         Assert.Equal(5.0m, day3.TotalHours);
         Assert.Equal(1, day3.EarlyExitCount);
     }
+
+    [Theory]
+    [InlineData("22:00 - 06:00", "P", 8.0, null)]
+    [InlineData("23:00 - 07:00", "P", 8.0, null)]
+    [InlineData("20:00 - 04:30", "P", 8.5, null)]
+    [InlineData("09:00 - 09:00", null, 0.0, "Check-out time cannot equal check-in time.")]
+    public void ParseMusterCell_OvernightAndIdenticalPunches_EvaluatesCorrectly(
+        string rawText, string? expectedStatus, double expectedHours, string? expectedError)
+    {
+        var result = AttendanceImportService.ParseMusterCell(rawText);
+
+        if (expectedError == null)
+        {
+            Assert.Null(result.ParseError);
+            Assert.Equal(expectedStatus, result.StatusCode);
+            Assert.NotNull(result.CheckInTime);
+            Assert.NotNull(result.CheckOutTime);
+            var duration = (result.CheckOutTime.Value - result.CheckInTime.Value).TotalHours;
+            Assert.Equal(expectedHours, duration);
+        }
+        else
+        {
+            Assert.Equal(expectedError, result.ParseError);
+        }
+    }
 }

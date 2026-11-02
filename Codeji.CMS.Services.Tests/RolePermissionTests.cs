@@ -9,6 +9,8 @@ using Codeji.CMS.Services.Interface;
 using MapsterMapper;
 using Moq;
 using AuthRole = Codeji.CMS.Utility.Enums.EnumsHelper.Roles;
+using AppModuleConst = Codeji.CMS.Utility.Constraints.AppModule;
+using PermissionConst = Codeji.CMS.Utility.Constraints.Permission;
 using Module = Codeji.CMS.Repository.Entities.RolePermissions.Module;
 
 namespace Codeji.CMS.Services.Tests;
@@ -89,6 +91,98 @@ public class RolePermissionTests
 
         var allowed = await fixture.Service.VerifyUserAccess(
             "Employee", [requestedPermission], "user-1", "company-1");
+
+        Assert.Equal(expected, allowed);
+    }
+
+    [Theory]
+    [InlineData((int)AuthRole.Administrator, true)]
+    [InlineData((int)AuthRole.HR, true)]
+    [InlineData((int)AuthRole.HRExecutive, true)]
+    [InlineData((int)AuthRole.Employee, false)]
+    public async Task LeaveApprovalPermission_DefaultRolesMatchConfiguredAccess(int roleType, bool expected)
+    {
+        var fixture = new RoleFixture();
+        fixture.Middleware.Setup(x => x.GetUserById("reviewer-1"))
+            .ReturnsAsync(new UserModel { UserId = "reviewer-1", RoleId = "role-1", CompanyId = "company-1" });
+        fixture.RoleRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Codeji.CMS.Repository.Entities.RolePermissions.Roles, bool>>>(), false))
+            .ReturnsAsync((Expression<Func<Codeji.CMS.Repository.Entities.RolePermissions.Roles, bool>> predicate, bool _, bool _) =>
+            {
+                var role = new Codeji.CMS.Repository.Entities.RolePermissions.Roles
+                {
+                    RolesId = "role-1", CompanyId = "company-1", RoleType = roleType,
+                    Titles = "Test role", UserRoles = []
+                };
+                return predicate.Compile()(role) ? role : null;
+            });
+        fixture.PermissionRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new Permission { PermissionId = 1, PermissionConstant = PermissionConst.Edit, PermissionName = "Edit" }]);
+        fixture.ModuleRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([
+                new Module { ModuleId = 13, ModuleConstant = AppModuleConst.LeaveManagement, ModuleName = "Leave Management" },
+                new Module { ModuleId = 10, ModuleConstant = AppModuleConst.PayRoll, ModuleName = "PayRoll" },
+            ]);
+        fixture.ModulePermissionRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([
+                new ModulePermission { ModulePermissionId = 130, ModuleId = 13, PermissionId = 1 },
+                new ModulePermission { ModulePermissionId = 100, ModuleId = 10, PermissionId = 1 },
+            ]);
+        var rolePermissions = new[]
+        {
+            // Payroll is the parent feature gate for Leave Management, and a role grant enables each module.
+            new RolePermission { CompanyId = "company-1", RoleId = "module-enabled-role", ModulePermissionId = 100, IsAccessible = true, HasAccess = true },
+            new RolePermission { CompanyId = "company-1", RoleId = "module-enabled-role", ModulePermissionId = 130, IsAccessible = true, HasAccess = true },
+            // HR grants Edit; the Administrator role bypasses individual permissions.
+            // The Employee role intentionally has no Leave Management grant by default.
+            new RolePermission { CompanyId = "company-1", RoleId = "role-1", ModulePermissionId = 130, IsAccessible = roleType is (int)AuthRole.HR or (int)AuthRole.HRExecutive, HasAccess = roleType is (int)AuthRole.HR or (int)AuthRole.HRExecutive },
+        };
+        fixture.RolePermissionRepository
+            .Setup(x => x.Get(It.IsAny<Expression<Func<RolePermission, bool>>>(), null, false))
+            .Returns((Expression<Func<RolePermission, bool>> predicate, object? _, bool _) =>
+                rolePermissions.Where(predicate.Compile()).AsQueryable());
+
+        var allowed = await fixture.Service.VerifyUserAccess(
+            AppModuleConst.LeaveManagement, [PermissionConst.Edit], "reviewer-1", "company-1");
+
+        Assert.Equal(expected, allowed);
+    }
+
+    [Theory]
+    [InlineData("CreateOwn", "Create", true)]
+    [InlineData("CreateForEmployee", "Create", false)]
+    public async Task WorkFromHome_CreatePermissionMapsGenericGrantToOwnRequestsOnly(
+        string requestedPermission, string assignedPermission, bool expected)
+    {
+        var fixture = new RoleFixture();
+        fixture.Middleware.Setup(x => x.GetUserById("user-1"))
+            .ReturnsAsync(new UserModel { UserId = "user-1", RoleId = "role-1", CompanyId = "company-1" });
+        fixture.RoleRepository
+            .Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<Codeji.CMS.Repository.Entities.RolePermissions.Roles, bool>>>(), false))
+            .ReturnsAsync((Expression<Func<Codeji.CMS.Repository.Entities.RolePermissions.Roles, bool>> predicate, bool _, bool _) =>
+            {
+                var role = new Codeji.CMS.Repository.Entities.RolePermissions.Roles
+                {
+                    RolesId = "role-1", CompanyId = "company-1", RoleType = (int)AuthRole.Employee,
+                    Titles = "Employee", UserRoles = []
+                };
+                return predicate.Compile()(role) ? role : null;
+            });
+        fixture.PermissionRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new Permission { PermissionId = 1, PermissionConstant = assignedPermission, PermissionName = assignedPermission }]);
+        fixture.ModuleRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new Module { ModuleId = 1, ModuleConstant = "Work_From_Home", ModuleName = "Work From Home" }]);
+        fixture.ModulePermissionRepository.Setup(x => x.GetAll(null, false, true))
+            .ReturnsAsync([new ModulePermission { ModulePermissionId = 10, ModuleId = 1, PermissionId = 1 }]);
+        var assigned = new[]
+        {
+            new RolePermission { CompanyId = "company-1", RoleId = "role-1", ModulePermissionId = 10, IsAccessible = true, HasAccess = true }
+        };
+        fixture.RolePermissionRepository.Setup(x => x.Get(It.IsAny<Expression<Func<RolePermission, bool>>>(), null, false))
+            .Returns((Expression<Func<RolePermission, bool>> predicate, object? _, bool _) => assigned.Where(predicate.Compile()).AsQueryable());
+
+        var allowed = await fixture.Service.VerifyUserAccess(
+            "Work_From_Home", [requestedPermission], "user-1", "company-1");
 
         Assert.Equal(expected, allowed);
     }

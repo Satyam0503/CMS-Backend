@@ -629,6 +629,149 @@ public sealed class EmployeeSalaryStructureServiceTests
         return client;
     }
 
+    [Fact]
+    public async Task SaveDraft_AllowsPrePayrollCorrection_WhenNoPayrollProcessed()
+    {
+        var approved = new EmployeeSalaryStructure
+        {
+            Id = "approved-1", CompanyId = "company-1", EmployeeId = "e1",
+            EffectiveFrom = new DateTime(2026, 11, 1), ApprovalStatus = "APPROVED", Status = "ACTIVE", Version = 1
+        };
+        var salaries = Repository(new[] { approved });
+        var employees = Repository(new[] { new EmpUser { EmployeeId = "e1", CompanyId = "company-1", FirstName = "Employee", LastName = "One", Email = "e@example.com" } });
+        var payrolls = Repository(Array.Empty<EmpPayRoll>());
+        var dto = Draft("e1", new DateTime(2026, 11, 1));
+        dto.Id = "approved-1";
+        dto.Version = 1;
+        dto.Components.Add(new EmployeeSalaryComponentValueDto { ComponentCode = "BONUS", ComponentName = "Bonus", Value = 3000m, IsRecurring = true });
+        var service = new EmployeeSalaryStructureService(salaries.Object, employees.Object, payrolls: payrolls.Object);
+
+        var result = await service.SaveDraft("company-1", "actor", dto);
+
+        Assert.True(result.Success);
+        salaries.Verify(x => x.Update(It.IsAny<FilterDefinition<EmployeeSalaryStructure>>(), It.Is<EmployeeSalaryStructure>(s => s.Id == "approved-1" && s.Version == 2)), Times.Once);
+    }
+
+    [Fact]
+    public async Task SaveDraft_RejectsPrePayrollCorrection_WhenPayrollAlreadyProcessed()
+    {
+        var approved = new EmployeeSalaryStructure
+        {
+            Id = "approved-1", CompanyId = "company-1", EmployeeId = "e1",
+            EffectiveFrom = new DateTime(2026, 11, 1), ApprovalStatus = "APPROVED", Status = "ACTIVE", Version = 1
+        };
+        var processedPayroll = new EmpPayRoll
+        {
+            UserId = Guid.NewGuid().ToString("D"), BasicPay = 10000m, PaidDays = 30,
+            CompanyId = "company-1", EmployeeId = "e1",
+            PayMonth = new DateTime(2026, 11, 1), PaidDate = new DateTime(2026, 11, 30),
+            IsProcessed = true, WorkflowStatus = "PROCESSED", PaymentStatus = "PAID"
+        };
+        var salaries = Repository(new[] { approved });
+        var employees = Repository(new[] { new EmpUser { EmployeeId = "e1", CompanyId = "company-1", FirstName = "Employee", LastName = "One", Email = "e@example.com" } });
+        var payrolls = Repository(new[] { processedPayroll });
+        var dto = Draft("e1", new DateTime(2026, 11, 1));
+        dto.Id = "approved-1";
+        dto.Version = 1;
+        var service = new EmployeeSalaryStructureService(salaries.Object, employees.Object, payrolls: payrolls.Object);
+
+        var result = await service.SaveDraft("company-1", "actor", dto);
+
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Contains("immutable once processed in payroll", result.Message);
+    }
+
+    [Fact]
+    public async Task SaveDraft_AutoResolvesActiveStructure_AndAllowsCorrectionWhenIdOmitted()
+    {
+        var approved = new EmployeeSalaryStructure
+        {
+            Id = "approved-1", CompanyId = "company-1", EmployeeId = "e1",
+            EffectiveFrom = new DateTime(2026, 11, 1), ApprovalStatus = "APPROVED", Status = "ACTIVE", Version = 1
+        };
+        var salaries = Repository(new[] { approved });
+        var employees = Repository(new[] { new EmpUser { EmployeeId = "e1", CompanyId = "company-1", FirstName = "Employee", LastName = "One", Email = "e@example.com" } });
+        var payrolls = Repository(Array.Empty<EmpPayRoll>());
+        var dto = Draft("e1", new DateTime(2026, 11, 1));
+        dto.Components.Add(new EmployeeSalaryComponentValueDto { ComponentCode = "BONUS", ComponentName = "Bonus", Value = 3000m, IsRecurring = true });
+        var service = new EmployeeSalaryStructureService(salaries.Object, employees.Object, payrolls: payrolls.Object);
+
+        var result = await service.SaveDraft("company-1", "actor", dto);
+
+        Assert.True(result.Success);
+        salaries.Verify(x => x.Update(It.IsAny<FilterDefinition<EmployeeSalaryStructure>>(), It.Is<EmployeeSalaryStructure>(s => s.Id == "approved-1" && s.MonthlyGross == 13000m)), Times.Once);
+    }
+
+    [Fact]
+    public async Task SaveDraft_RejectsPrePayrollCorrection_WhenMidMonthRevisionDateHasProcessedPayrollForThatMonth()
+    {
+        var approved = new EmployeeSalaryStructure
+        {
+            Id = "approved-mid", CompanyId = "company-1", EmployeeId = "e1",
+            EffectiveFrom = new DateTime(2026, 11, 15), ApprovalStatus = "APPROVED", Status = "ACTIVE", Version = 1
+        };
+        var processedPayroll = new EmpPayRoll
+        {
+            UserId = Guid.NewGuid().ToString("D"), BasicPay = 10000m, PaidDays = 30,
+            CompanyId = "company-1", EmployeeId = "e1",
+            PayMonth = new DateTime(2026, 11, 1),
+            PaidDate = new DateTime(2026, 11, 30),
+            IsProcessed = true, WorkflowStatus = "PROCESSED"
+        };
+        var salaries = Repository(new[] { approved });
+        var employees = Repository(new[] { new EmpUser { EmployeeId = "e1", CompanyId = "company-1", FirstName = "Employee", LastName = "One", Email = "e@example.com" } });
+        var payrolls = Repository(new[] { processedPayroll });
+        var dto = Draft("e1", new DateTime(2026, 11, 15));
+        dto.Id = "approved-mid";
+        dto.Version = 1;
+        var service = new EmployeeSalaryStructureService(salaries.Object, employees.Object, payrolls: payrolls.Object);
+
+        var result = await service.SaveDraft("company-1", "actor", dto);
+
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Contains("immutable once processed in payroll", result.Message);
+    }
+
+    [Fact]
+    public async Task SaveDraft_Then_Approve_InPlaceCorrection_SuccessfullyUpdatesApprovedStructure()
+    {
+        var approved = new EmployeeSalaryStructure
+        {
+            Id = "approved-inplace", CompanyId = "company-1", EmployeeId = "e1",
+            EffectiveFrom = new DateTime(2026, 11, 1), ApprovalStatus = "APPROVED", Status = "ACTIVE", Version = 1,
+            MonthlyGross = 40000m
+        };
+        var salaries = Repository(new[] { approved });
+        var employees = Repository(new[] { new EmpUser { EmployeeId = "e1", CompanyId = "company-1", FirstName = "Employee", LastName = "One", Email = "e@example.com" } });
+        var payrolls = Repository(Array.Empty<EmpPayRoll>());
+        var dto = Draft("e1", new DateTime(2026, 11, 1));
+        dto.Id = "approved-inplace";
+        dto.Version = 1;
+        dto.Components =
+        [
+            new EmployeeSalaryComponentValueDto { ComponentCode = "BASIC", ComponentName = "Basic", Value = 40000m },
+            new EmployeeSalaryComponentValueDto { ComponentCode = "BONUS", ComponentName = "Bonus", Value = 3000m }
+        ];
+        var service = new EmployeeSalaryStructureService(salaries.Object, employees.Object, payrolls: payrolls.Object);
+
+        var draftResult = await service.SaveDraft("company-1", "actor", dto);
+        Assert.True(draftResult.Success);
+        Assert.NotNull(draftResult.MethodResult);
+        Assert.Equal(2, draftResult.MethodResult.Version);
+
+        // Simulate repository maintaining the updated row state
+        approved.Version = 2;
+        approved.ApprovalStatus = "DRAFT";
+        approved.Status = "DRAFT";
+        approved.MonthlyGross = 43000m;
+
+        var approveResult = await service.Approve("company-1", "admin", "approved-inplace", 2, isCompanyAdministrator: true);
+        Assert.True(approveResult.Success);
+        Assert.Equal(200, approveResult.StatusCode);
+    }
+
     private static EmployeeSalaryStructureDto Draft(string employeeId, DateTime from) => new() { EmployeeId = employeeId, EffectiveFrom = from, Currency = "INR", PaymentFrequency = "MONTHLY", Components = [new EmployeeSalaryComponentValueDto { ComponentCode = "BASIC", ComponentName = "Basic", Value = 10000m }] };
 
     private static Mock<IMongoDbRepository<TEntity>> Repository<TEntity>(IEnumerable<TEntity> items)

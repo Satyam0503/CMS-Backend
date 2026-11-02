@@ -9,6 +9,7 @@ using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.Employees.Interface;
 
 namespace Codeji.CMS.API.Controllers;
 
@@ -28,10 +29,24 @@ public class AdminAttendanceController : ControllerBase
 
     [HttpPost]
     [ModulePermission(AppModule.Attendance, Permission.CreateForEmployee)]
-    public async Task<IActionResult> Add([FromBody] AdminAttendanceCreateDto dto)
+    public async Task<IActionResult> Add(
+        [FromBody] AdminAttendanceCreateDto dto,
+        [FromServices] IRoleService roleService)
     {
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
+
+        if (dto.AllowSourceOverride)
+        {
+            var hasAccess = await roleService.VerifyUserAccess(
+                AppModule.Attendance,
+                [Permission.Override, Permission.Edit],
+                CurrentContext.UserId(_context),
+                CurrentContext.CompanyId(_context)
+            );
+            if (!hasAccess)
+                return Forbid();
+        }
 
         try
         {
@@ -198,12 +213,36 @@ public class AdminAttendanceController : ControllerBase
     }
 
     [HttpGet("correction-requests")]
-    [ModulePermission(AppModule.Attendance, Permission.ViewAll)]
-    public async Task<IActionResult> CorrectionRequests([FromServices] Codeji.CMS.GenericRepository.Interfaces.IMongoDbRepository<Codeji.CMS.Repository.Entities.Attendance.AttendanceCorrectionRequest> corrections)
-        => Ok(new { items = await corrections.GetAll(x => x.CompanyId == CurrentContext.CompanyId(_context) && x.Status == "Pending") });
+    [ModulePermission(AppModule.Attendance, Permission.ViewAll, Permission.View, Permission.Review, Permission.Approve, Permission.Edit)]
+    public async Task<IActionResult> CorrectionRequests(
+        [FromServices] Codeji.CMS.GenericRepository.Interfaces.IMongoDbRepository<Codeji.CMS.Repository.Entities.Attendance.AttendanceCorrectionRequest> corrections,
+        [FromServices] IMongoDbRepository<EmpUser> employees)
+    {
+        var companyId = CurrentContext.CompanyId(_context);
+        var pending = await corrections.GetAll(x => x.CompanyId == companyId && x.Status == "Pending");
+        var userIds = pending.Select(x => x.UserId).Distinct().ToList();
+        var empList = await employees.GetAll(x => x.CompanyId == companyId && userIds.Contains(x.UserId) && !x.IsDeleted);
+        var empMap = empList.ToDictionary(x => x.UserId, x => (EmployeeId: x.EmployeeId, FullName: $"{x.FirstName} {x.LastName}".Trim(), Email: x.Email));
+
+        var items = pending.Select(x => new
+        {
+            x.Id,
+            x.UserId,
+            EmployeeId = empMap.TryGetValue(x.UserId, out var emp) ? emp.EmployeeId : string.Empty,
+            EmployeeName = empMap.TryGetValue(x.UserId, out var empInfo) ? empInfo.FullName : "Employee",
+            EmployeeEmail = empMap.TryGetValue(x.UserId, out var empMail) ? empMail.Email : string.Empty,
+            x.AttendanceDate,
+            x.Reason,
+            x.Status,
+            x.RequestedAt,
+            x.ReviewDueAt
+        }).OrderByDescending(x => x.RequestedAt).ToList();
+
+        return Ok(new { items });
+    }
 
     [HttpPut("correction-requests/{requestId}")]
-    [ModulePermission(AppModule.Attendance, Permission.Override)]
+    [ModulePermission(AppModule.Attendance, Permission.Override, Permission.Edit, Permission.Approve, Permission.Review)]
     public async Task<IActionResult> ReviewCorrection(string requestId, [FromBody] AttendanceCorrectionReviewDto model,
         [FromServices] IMongoDbRepository<AttendanceCorrectionRequest> corrections,
         [FromServices] IMongoDbRepository<Codeji.CMS.Repository.Entities.UserNotifications> userNotifications,
@@ -257,9 +296,9 @@ public class AdminAttendanceController : ControllerBase
             if (existingAttendance is not null)
             {
                 existingAttendance.Status = "P";
-                existingAttendance.CheckInTime ??= checkInUtc;
-                existingAttendance.CheckOutTime ??= checkOutUtc;
-                existingAttendance.TotalHours ??= totalHours;
+                existingAttendance.CheckInTime = checkInUtc;
+                existingAttendance.CheckOutTime = checkOutUtc;
+                existingAttendance.TotalHours = totalHours;
                 existingAttendance.Remarks = $"Attendance correction approved: {model.Note?.Trim() ?? request.Reason}";
                 existingAttendance.OperatorRemark = model.Note?.Trim();
                 existingAttendance.SystemRemark = "Approved via attendance correction request";

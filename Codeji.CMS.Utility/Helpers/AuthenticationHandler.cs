@@ -1,4 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Codeji.CMS.Utility.Enums;
@@ -31,7 +31,7 @@ namespace Codeji.CMS.Utility.Helpers
         public static string GenerateJwtToken(string userId, string companyId, string roleId, List<string> userRole)
         {
             byte[] key = Encoding.UTF8.GetBytes(ConfigManager.Jwt.SecretKey);
-            int expiryMinutes = ConfigManager.Jwt.Expiry;
+            int expiryMinutes = ConfigManager.Jwt?.Expiry > 0 ? ConfigManager.Jwt.Expiry : 60;
 
             // Define claims
             List<Claim> claims = new List<Claim>

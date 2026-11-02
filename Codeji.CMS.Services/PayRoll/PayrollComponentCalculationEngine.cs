@@ -11,6 +11,8 @@ public sealed class PayrollComponentCalculationOutcome
     public decimal Gross { get; init; }
     public decimal Deductions { get; init; }
     public decimal Net { get; init; }
+    public decimal EmployerContributions { get; init; }
+    public decimal TotalCostToCompany { get; init; }
 
     public static PayrollComponentCalculationOutcome Invalid(string code, string message) => new()
     {
@@ -74,6 +76,11 @@ public static class PayrollComponentCalculationEngine
             .Where(x => string.Equals(x.Kind, "DEDUCTION", StringComparison.OrdinalIgnoreCase) &&
                         x.IsRecurring && !x.IsStatutory && !x.IsEmployerContribution)
             .Sum(x => values[x.Code.Trim()]));
+        var employerContributions = PayrollCalculationRules.RoundMoney(byCode.Values
+            .Where(x => x.IsEmployerContribution && x.IsRecurring)
+            .Sum(x => values[x.Code.Trim()]));
+        var totalCtc = PayrollCalculationRules.RoundMoney(gross + employerContributions);
+
         if (gross < deductions)
             return PayrollComponentCalculationOutcome.Invalid("PAYROLL_NET_NEGATIVE", "Recurring employee deductions exceed recurring gross salary. Review the salary structure before payroll can proceed.");
         return new PayrollComponentCalculationOutcome
@@ -82,7 +89,9 @@ public static class PayrollComponentCalculationEngine
             Values = values,
             Gross = Math.Max(0m, gross),
             Deductions = Math.Max(0m, deductions),
-            Net = PayrollCalculationRules.RoundMoney(gross - deductions)
+            Net = PayrollCalculationRules.RoundMoney(gross - deductions),
+            EmployerContributions = Math.Max(0m, employerContributions),
+            TotalCostToCompany = Math.Max(0m, totalCtc)
         };
     }
 

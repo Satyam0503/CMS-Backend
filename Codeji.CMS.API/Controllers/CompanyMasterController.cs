@@ -106,7 +106,7 @@ public class CompanyMasterController : BaseApiController
     [HttpPatch]
     [Route("UpdateModuleAccess/{moduleId}")]
     [Authorize(Policy = "AdminOnly")]
-    public async Task<Result<string[]>> UpdateModuleAccess(string moduleId)
+    public async Task<Result<string[]>> UpdateModuleAccess(string moduleId, [FromQuery] bool? isAccessible = null)
     {
         if (string.IsNullOrEmpty(moduleId))
         {
@@ -115,7 +115,7 @@ public class CompanyMasterController : BaseApiController
                 Success = false,
             };
         }
-        var result = await _companyMasterService.UpdateModuleAccess(moduleId);
+        var result = await _companyMasterService.UpdateModuleAccess(moduleId, isAccessible);
         return result;
     }
 

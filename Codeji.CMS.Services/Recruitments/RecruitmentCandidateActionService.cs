@@ -124,6 +124,31 @@ public sealed class RecruitmentCandidateActionService(
                     canonical.UpdatedDate = DateTime.UtcNow;
                     await applications.Update(Builders<RecruitmentJobApplication>.Filter.Where(x => x.CompanyId == applicant.CompanyId && x.ApplicationId == canonical.ApplicationId), canonical);
                 }
+                else if (canonical is null)
+                {
+                    var newCanonical = new RecruitmentJobApplication
+                    {
+                        CompanyId = applicant.CompanyId,
+                        ApplicantId = applicant.ApplicantId,
+                        VacancyId = applicant.VacancyId ?? string.Empty,
+                        CurrentStage = nameof(ActivityType.Selected),
+                        CreatedBy = "candidate-action",
+                        CreatedDate = DateTime.UtcNow,
+                        UpdatedBy = "candidate-action",
+                        UpdatedDate = DateTime.UtcNow,
+                        StageHistory =
+                        [
+                            new RecruitmentApplicationStageEvent
+                            {
+                                FromStage = prevStage.ToString(),
+                                ToStage = nameof(ActivityType.Selected),
+                                ActorUserId = "candidate-action",
+                                Reason = "Candidate accepted offer"
+                            }
+                        ]
+                    };
+                    await applications.AddOne(newCanonical);
+                }
             }
 
             if (applicantLogs is not null)

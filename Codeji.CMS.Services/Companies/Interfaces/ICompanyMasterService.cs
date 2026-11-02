@@ -14,7 +14,7 @@ public interface ICompanyMasterService
     Task<Result> UpdateDepartments(List<DepartmentRequestDto> model, string userId);
     Task<Result<DepartmentResponseDto>> GetDepartmentList(bool? isActive);
     Task<bool> DeleteDepartment(string departmentId);
-    Task<Result<string[]>> UpdateModuleAccess(string moduleId);
+    Task<Result<string[]>> UpdateModuleAccess(string moduleId, bool? isAccessible = null);
     Task<List<AllModuleDetailsResponseModel>> GetAllModulesDetails(string companyId);
 
     // Company Job Titles 

@@ -36,6 +36,7 @@ public class PublicCareerService : IPublicCareerService
     private readonly IMongoCollection<PublicCompanyProfile> _companyProfiles;
     private readonly IMongoCollection<SavedJob> _savedJobs;
     private readonly IMongoCollection<CareerAnalyticsEvent> _analytics;
+    private readonly IMongoCollection<RecruitmentJobApplication>? _jobApplications;
     private readonly IPriorityTaskQueue _priorityTaskQueue;
     private readonly IMiddlewareService _middlewareService;
 
@@ -51,7 +52,8 @@ public class PublicCareerService : IPublicCareerService
         IMongoDbRepository<SavedJob> savedJobRepository,
         IMongoDbRepository<CareerAnalyticsEvent> analyticsRepository,
         IPriorityTaskQueue priorityTaskQueue,
-        IMiddlewareService middlewareService)
+        IMiddlewareService middlewareService,
+        IMongoDbRepository<RecruitmentJobApplication>? jobApplicationRepository = null)
     {
         _jobs = jobVacancyRepository.GetCollection();
         _companies = companyRepository.GetCollection();
@@ -63,6 +65,7 @@ public class PublicCareerService : IPublicCareerService
         _companyProfiles = companyProfileRepository.GetCollection();
         _savedJobs = savedJobRepository.GetCollection();
         _analytics = analyticsRepository.GetCollection();
+        _jobApplications = jobApplicationRepository?.GetCollection();
         _priorityTaskQueue = priorityTaskQueue;
         _middlewareService = middlewareService;
     }
@@ -232,6 +235,30 @@ public class PublicCareerService : IPublicCareerService
             ResumeUrl = string.Empty
         };
         await _applicants.InsertOneAsync(applicant);
+        if (_jobApplications is not null)
+        {
+            await _jobApplications.InsertOneAsync(new RecruitmentJobApplication
+            {
+                CompanyId = job.CompanyId,
+                ApplicantId = applicant.ApplicantId,
+                VacancyId = job.JobId,
+                CurrentStage = applicant.ActivityType.ToString(),
+                StageHistory =
+                [
+                    new RecruitmentApplicationStageEvent
+                    {
+                        FromStage = "None",
+                        ToStage = applicant.ActivityType.ToString(),
+                        ActorUserId = applicant.ApplicantId,
+                        Reason = "Initial application submitted from public career portal"
+                    }
+                ],
+                CreatedBy = applicant.ApplicantId,
+                CreatedDate = DateTime.UtcNow,
+                UpdatedBy = applicant.ApplicantId,
+                UpdatedDate = DateTime.UtcNow
+            });
+        }
 
         await _applicantLogs.InsertOneAsync(new ApplicantLogs
         {

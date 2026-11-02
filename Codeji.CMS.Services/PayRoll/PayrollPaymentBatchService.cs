@@ -24,7 +24,8 @@ public interface IPayrollPaymentBatchService
 public sealed class PayrollPaymentBatchService(
     IMongoDbRepository<PayrollPaymentBatch> batches,
     IMongoDbRepository<PayrollRun> runs,
-    IMongoDbRepository<PayrollRunEmployee> employees) : IPayrollPaymentBatchService
+    IMongoDbRepository<PayrollRunEmployee> employees,
+    IMongoDbRepository<EmpPayRoll>? payrolls = null) : IPayrollPaymentBatchService
 {
     public async Task<Result<PayrollPaymentBatch>> GetByRun(string companyId, string runId)
     {
@@ -167,6 +168,41 @@ public sealed class PayrollPaymentBatchService(
         else if (run.Status is not ("PAID" or "CLOSED") || paidEvent is null)
         {
             return Fail(409, "The payroll run state does not match this payment confirmation. Keep the reconciliation pending and request payroll review.");
+        }
+
+        if (payrolls is not null)
+        {
+            var paidEmployeeIds = batch.Items.Select(x => x.EmployeeId).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
+            if (paidEmployeeIds.Count > 0)
+            {
+                var actor = batch.ReconciliationStartedBy ?? batch.ReconciledBy ?? retryActor;
+                var paymentDate = run.PayDate != default ? run.PayDate : DateTime.UtcNow;
+                var payFilter = Builders<EmpPayRoll>.Filter.Eq(p => p.CompanyId, companyId) &
+                    Builders<EmpPayRoll>.Filter.Eq(p => p.PayMonth, run.PeriodStart) &
+                    Builders<EmpPayRoll>.Filter.In(p => p.EmployeeId, paidEmployeeIds) &
+                    Builders<EmpPayRoll>.Filter.Ne(p => p.PaymentStatus, "PAID") &
+                    Builders<EmpPayRoll>.Filter.Ne(p => p.PaymentStatus, "CLOSED") &
+                    Builders<EmpPayRoll>.Filter.Ne(p => p.WorkflowStatus, "CLOSED");
+
+                var payUpdate = Builders<EmpPayRoll>.Update
+                    .Set(p => p.IsProcessed, true)
+                    .Set(p => p.PaymentStatus, "PAID")
+                    .Set(p => p.WorkflowStatus, "PAID")
+                    .Set(p => p.PaymentMethod, "BANK_BATCH")
+                    .Set(p => p.PaymentReference, batch.ProviderReference ?? batch.Id)
+                    .Set(p => p.PaymentDate, paymentDate)
+                    .Set(p => p.PaymentRecordedBy, actor)
+                    .Set(p => p.PaymentNotes, batch.ReconciliationNote ?? $"Reconciled via Payment Batch {batch.Id}")
+                    .Push(p => p.AuditHistory, new PayrollAuditEvent
+                    {
+                        Action = "PayrollPaidViaBatch",
+                        ActorId = actor,
+                        OccurredAtUtc = DateTime.UtcNow,
+                        Notes = $"Reconciled via Payment Batch {batch.Id} (Provider Ref: {batch.ProviderReference})"
+                    });
+
+                await payrolls.UpdateMany(payFilter, payUpdate);
+            }
         }
 
         if (batch.Status == "RECONCILED") return new Result { Success = true, StatusCode = 200, Message = "Payment reconciliation is complete." };

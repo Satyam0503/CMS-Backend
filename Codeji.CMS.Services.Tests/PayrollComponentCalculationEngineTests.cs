@@ -57,6 +57,8 @@ public sealed class PayrollComponentCalculationEngineTests
         Assert.Equal(50000, result.Gross);
         Assert.Equal(1000, result.Deductions);
         Assert.Equal(49000, result.Net);
+        Assert.Equal(6000m, result.EmployerContributions);
+        Assert.Equal(56000m, result.TotalCostToCompany);
         Assert.Equal(4, result.Values.Count);
     }
 

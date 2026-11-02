@@ -49,11 +49,21 @@ public sealed class MyAttendanceController(IAdminAttendanceService attendance,
         if (!ModelState.IsValid) return ValidationProblem(ModelState);
         var companyId = CurrentContext.CompanyId(context);
         var userId = CurrentContext.UserId(context);
-        var record = await attendance.GetByUserAndDate(companyId, userId, model.AttendanceDate.Date);
-        if (record is null) return NotFound("ATTENDANCE_RECORD_UNAVAILABLE");
-        var duplicate = await corrections.Exist(x => x.CompanyId == companyId && x.UserId == userId && x.AttendanceDate == model.AttendanceDate.Date && x.Status == "Pending");
+        var employee = await employees.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == userId && !x.IsDeleted);
+        if (employee is null) return NotFound("EMPLOYEE_NOT_FOUND");
+
+        var requestedDate = model.AttendanceDate.Date;
+        var todayUtc = DateTime.UtcNow.Date;
+        if (requestedDate > todayUtc)
+            return BadRequest(new { message = "ATTENDANCE_DATE_IN_FUTURE", error = "Cannot request correction for a future date." });
+
+        if (DateTime.TryParse(employee.DateOfJoining, out var doj) && requestedDate < doj.Date)
+            return BadRequest(new { message = "DATE_PRIOR_TO_JOINING", error = "Attendance date cannot be earlier than joining date." });
+
+        var duplicate = await corrections.Exist(x => x.CompanyId == companyId && x.UserId == userId && x.AttendanceDate == requestedDate && x.Status == "Pending");
         if (duplicate) return Conflict("ATTENDANCE_CORRECTION_ALREADY_PENDING");
-        var request = new AttendanceCorrectionRequest { CompanyId = companyId, UserId = userId, AttendanceDate = model.AttendanceDate.Date, Reason = model.Reason.Trim(), ReviewDueAt = await AddBusinessDays(companyId, DateTime.UtcNow, 5) };
+
+        var request = new AttendanceCorrectionRequest { CompanyId = companyId, UserId = userId, AttendanceDate = requestedDate, Reason = model.Reason.Trim(), ReviewDueAt = await AddBusinessDays(companyId, DateTime.UtcNow, 5) };
         var result = await corrections.AddOne(request);
         if (result.Success)
         {

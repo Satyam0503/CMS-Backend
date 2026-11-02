@@ -90,7 +90,7 @@ public sealed class PayrollConfigurationService(
     }
 
     public async Task<List<EmployeePayrollAssignmentDto>> GetAssignments(string companyId) =>
-        (await assignments.GetAll(x => x.CompanyId == companyId)).OrderByDescending(x => x.EffectiveFrom).Select(x => new EmployeePayrollAssignmentDto { Id = x.Id, Version = x.Version, EmployeeId = x.EmployeeId, PayGroupId = x.PayGroupId, SalaryTemplateId = x.SalaryTemplateId, PolicyProfileId = x.PolicyProfileId, EffectiveFrom = x.EffectiveFrom, EffectiveTo = x.EffectiveTo, IsApproved = x.IsApproved, ApprovedBy = x.ApprovedBy, ApprovedAtUtc = x.ApprovedAtUtc, IsRejected = x.IsRejected, RejectedBy = x.RejectedBy, RejectedAtUtc = x.RejectedAtUtc, RejectionReason = x.RejectionReason, IsCancelled = x.IsCancelled, CancelledBy = x.CancelledBy, CancelledAtUtc = x.CancelledAtUtc }).ToList();
+        (await assignments.GetAll(x => x.CompanyId == companyId)).OrderByDescending(x => x.EffectiveFrom).Select(x => new EmployeePayrollAssignmentDto { Id = x.Id, Version = x.Version, EmployeeId = x.EmployeeId, PayGroupId = x.PayGroupId, SalaryTemplateId = x.SalaryTemplateId, PolicyProfileId = x.PolicyProfileId, WorkLocationState = x.WorkLocationState, EffectiveFrom = x.EffectiveFrom, EffectiveTo = x.EffectiveTo, IsApproved = x.IsApproved, ApprovedBy = x.ApprovedBy, ApprovedAtUtc = x.ApprovedAtUtc, IsRejected = x.IsRejected, RejectedBy = x.RejectedBy, RejectedAtUtc = x.RejectedAtUtc, RejectionReason = x.RejectionReason, IsCancelled = x.IsCancelled, CancelledBy = x.CancelledBy, CancelledAtUtc = x.CancelledAtUtc }).ToList();
 
     public async Task<Result> SaveAssignment(string companyId, string actorUserId, EmployeePayrollAssignmentDto dto)
     {
@@ -104,7 +104,7 @@ public sealed class PayrollConfigurationService(
             return new Result { Success = false, StatusCode = configuration.ErrorCode.Value, Message = configuration.ErrorMessage };
         var overlap = await assignments.Exist(x => x.CompanyId == companyId && x.EmployeeId == employeeId && !x.IsRejected && !x.IsCancelled && x.EffectiveFrom <= (dto.EffectiveTo ?? DateTime.MaxValue) && (!x.EffectiveTo.HasValue || x.EffectiveTo >= dto.EffectiveFrom));
         if (overlap) return new Result { Success = false, StatusCode = 409, Message = "The employee already has an overlapping payroll assignment." };
-        return await assignments.AddOne(new EmployeePayrollAssignment { CompanyId = companyId, EmployeeId = employeeId!, PayGroupId = configuration.PayGroupId, SalaryTemplateId = configuration.SalaryTemplateId, PolicyProfileId = configuration.PolicyProfileId, EffectiveFrom = dto.EffectiveFrom.Date, EffectiveTo = dto.EffectiveTo?.Date, CreatedBy = actorUserId, IsApproved = false });
+        return await assignments.AddOne(new EmployeePayrollAssignment { CompanyId = companyId, EmployeeId = employeeId!, PayGroupId = configuration.PayGroupId, SalaryTemplateId = configuration.SalaryTemplateId, PolicyProfileId = configuration.PolicyProfileId, WorkLocationState = dto.WorkLocationState?.Trim().ToUpperInvariant(), EffectiveFrom = dto.EffectiveFrom.Date, EffectiveTo = dto.EffectiveTo?.Date, CreatedBy = actorUserId, IsApproved = false });
     }
     public async Task<Result> ApproveAssignment(string companyId, string actorUserId, string employeeId, DateTime effectiveFrom)
     {
@@ -162,12 +162,20 @@ public sealed class PayrollConfigurationService(
         var assignment = await assignments.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeId == employeeId && x.EffectiveFrom == effectiveFrom.Date);
         if (assignment is null)
             return new Result { Success = false, StatusCode = 404, Message = "Payroll assignment was not found." };
+        var expectedVersion = assignment.Version;
         assignment.EffectiveTo = effectiveTo.Date;
         assignment.Version++;
-        return await assignments.Update(
+        var versionFilter = expectedVersion <= 1
+            ? Builders<EmployeePayrollAssignment>.Filter.Eq(x => x.Version, expectedVersion) | Builders<EmployeePayrollAssignment>.Filter.Exists(x => x.Version, false)
+            : Builders<EmployeePayrollAssignment>.Filter.Eq(x => x.Version, expectedVersion);
+        var updated = await assignments.Update(
             Builders<EmployeePayrollAssignment>.Filter.Eq(x => x.Id, assignment.Id) &
-            Builders<EmployeePayrollAssignment>.Filter.Eq(x => x.CompanyId, companyId),
+            Builders<EmployeePayrollAssignment>.Filter.Eq(x => x.CompanyId, companyId) &
+            versionFilter,
             assignment);
+        if (!updated.Success && updated.StatusCode == 400)
+            return new Result { Success = false, StatusCode = 409, Message = "The payroll assignment changed while being updated. Refresh and try again." };
+        return updated;
     }
 
     public async Task<Result> DeleteAssignment(string companyId, string actorUserId, string employeeId, DateTime effectiveFrom)
@@ -175,9 +183,12 @@ public sealed class PayrollConfigurationService(
         var assignment = await assignments.FirstOrDefault(x => x.CompanyId == companyId && x.EmployeeId == employeeId && x.EffectiveFrom == effectiveFrom.Date);
         if (assignment is null)
             return new Result { Success = false, StatusCode = 404, Message = "Payroll assignment was not found." };
+        if (assignment.IsApproved)
+            return new Result { Success = false, StatusCode = 409, Message = "An approved payroll assignment cannot be deleted. End or supersede the assignment instead to preserve payroll history." };
         return await assignments.Delete(
             Builders<EmployeePayrollAssignment>.Filter.Eq(x => x.Id, assignment.Id) &
-            Builders<EmployeePayrollAssignment>.Filter.Eq(x => x.CompanyId, companyId));
+            Builders<EmployeePayrollAssignment>.Filter.Eq(x => x.CompanyId, companyId) &
+            Builders<EmployeePayrollAssignment>.Filter.Eq(x => x.IsApproved, false));
     }
 
     private async Task<Result> TransitionPendingAssignment(string companyId, string actorUserId, string employeeId, DateTime effectiveFrom, Action<EmployeePayrollAssignment> transition, string status)

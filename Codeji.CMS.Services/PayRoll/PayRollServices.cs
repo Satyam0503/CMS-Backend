@@ -25,6 +25,7 @@ public class PayRollServices : IPayRollServices
     readonly PdfService _pdfService;
     readonly IAttendancePayrollReadinessService _attendanceReadiness;
     readonly IMongoDbRepository<PayrollRun>? _payrollRunsRepository;
+    readonly IMongoDbRepository<PayrollRunEmployee>? _payrollRunEmployeesRepository;
 
     public PayRollServices(
         IMongoDbRepository<EmpPayRoll> empPayRollRepository,
@@ -34,7 +35,8 @@ public class PayRollServices : IPayRollServices
         PdfService pdfService,
         IMiddlewareService middlewareService,
         IAttendancePayrollReadinessService attendanceReadiness,
-        IMongoDbRepository<PayrollRun>? payrollRunsRepository = null
+        IMongoDbRepository<PayrollRun>? payrollRunsRepository = null,
+        IMongoDbRepository<PayrollRunEmployee>? payrollRunEmployeesRepository = null
     )
     {
         _empPayRollRepository = empPayRollRepository;
@@ -45,6 +47,7 @@ public class PayRollServices : IPayRollServices
         _middlewareService = middlewareService;
         _attendanceReadiness = attendanceReadiness;
         _payrollRunsRepository = payrollRunsRepository;
+        _payrollRunEmployeesRepository = payrollRunEmployeesRepository;
     }
 
     private static decimal RoundAmount(decimal? value) =>
@@ -161,6 +164,7 @@ public class PayRollServices : IPayRollServices
             salarySlipModel.HealthInsurance = payRoll.Deduction.HealthInsurance;
             salarySlipModel.EPF = payRoll.Deduction.EPF;
             salarySlipModel.ESIC = payRoll.Deduction.ESIC;
+            salarySlipModel.ProfessionalTax = payRoll.Deduction.ProfessionalTax;
             salarySlipModel.EsicEmployeeLabel = PayrollPayslipEarningsHtml.GetEsicEmployeeLabel(
                 payRoll
             );
@@ -179,6 +183,7 @@ public class PayRollServices : IPayRollServices
                 + payRoll.Deduction.LossOfPay
                 + payRoll.Deduction.EPF
                 + payRoll.Deduction.ESIC
+                + payRoll.Deduction.ProfessionalTax
                 + salarySlipModel.OtherDeductions;
             salarySlipModel.NetSalary = salarySlipModel.GrossPay - salarySlipModel.TotalDeduction;
             salarySlipModel.NetSalaryInWords = IndianCurrencyWords.ToWords(
@@ -542,6 +547,7 @@ public class PayRollServices : IPayRollServices
                     HealthInsurance = RoundAmount(payItem.HealthInsurance),
                     EPF = RoundAmount(payItem.EPF),
                     ESIC = RoundAmount(payItem.ESIC),
+                    ProfessionalTax = RoundAmount(payItem.ProfessionalTax),
                 },
                 DeductionLines = MapDeductionLines(payItem.DeductionLines),
                 EarningLines = MapEarningLines(payItem.EarningLines),
@@ -751,6 +757,7 @@ public class PayRollServices : IPayRollServices
                     HealthInsurance = payRoll?.Deduction.HealthInsurance ?? null,
                     EPF = payRoll?.Deduction.EPF ?? null,
                     ESIC = payRoll?.Deduction.ESIC ?? null,
+                    ProfessionalTax = payRoll?.Deduction.ProfessionalTax ?? null,
                     DeductionLines =
                         payRoll
                             ?.DeductionLines.Select(x => new PayrollDeductionLineDto
@@ -939,6 +946,27 @@ public class PayRollServices : IPayRollServices
                 StatusCode = StatusCodes.Status409Conflict,
                 Message = "This employee processed payroll cannot be changed.",
             };
+
+        if (_payrollRunsRepository != null)
+        {
+            var activeRun = await _payrollRunsRepository.FirstOrDefault(r =>
+                r.CompanyId == companyId
+                && r.PeriodStart == model.PayMonth
+                && r.RunType == "REGULAR"
+                && r.IsActive
+                
+                && r.Status != "CANCELLED");
+
+            if (activeRun != null && (activeRun.Status is "APPROVED" or "PROCESSED" or "PAID" or "CLOSED"))
+            {
+                return new Result
+                {
+                    Success = false,
+                    StatusCode = StatusCodes.Status409Conflict,
+                    Message = $"Payroll for {model.PayMonth:MMMM yyyy} is {activeRun.Status.ToLowerInvariant()} under Payroll Run {activeRun.Id}. Reopen or create a correction run to make changes."
+                };
+            }
+        }
         // The (CompanyId, EmployeeId, PayMonth) unique index is the real source of truth for
         // "does this employee already have a payroll row for this month" - UserId is not part
         // of that index and can drift (re-import, offboarding/reactivation), so it must never
@@ -1001,6 +1029,7 @@ public class PayRollServices : IPayRollServices
                     HealthInsurance = model.HealthInsurance ?? 0,
                     EPF = model.EPF ?? 0,
                     ESIC = model.ESIC ?? 0,
+                    ProfessionalTax = model.ProfessionalTax ?? 0,
                 },
                 DeductionLines = MapDeductionLines(model.DeductionLines),
                 EarningLines = MapEarningLines(model.EarningLines),
@@ -1084,6 +1113,7 @@ public class PayRollServices : IPayRollServices
             payRoll.Deduction.HealthInsurance = model.HealthInsurance ?? 0;
             payRoll.Deduction.EPF = model.EPF ?? 0;
             payRoll.Deduction.ESIC = model.ESIC ?? 0;
+            payRoll.Deduction.ProfessionalTax = model.ProfessionalTax ?? 0;
             if (model.ReplaceDeductionLines || model.DeductionLines.Count > 0)
                 payRoll.DeductionLines = MapDeductionLines(model.DeductionLines);
             if (model.ReplaceEarningLines || model.EarningLines.Count > 0)
@@ -1093,6 +1123,86 @@ public class PayRollServices : IPayRollServices
             payRoll.CalculationSnapshot = MapSnapshot(model.CalculationSnapshot);
             result = await _empPayRollRepository.Update(updateExpression, payRoll);
         }
+
+        if (result.Success && _payrollRunsRepository != null && _payrollRunEmployeesRepository != null)
+        {
+            try
+            {
+                var matchingRun = await _payrollRunsRepository.FirstOrDefault(r =>
+                    r.CompanyId == companyId
+                    && r.PeriodStart == model.PayMonth
+                    && r.RunType == "REGULAR"
+                    && r.IsActive
+                    
+                    && r.Status != "CANCELLED"
+                    && (r.Status == "DRAFT" || r.Status == "PENDING_APPROVAL"));
+
+                if (matchingRun != null)
+                {
+                    var runEmployee = await _payrollRunEmployeesRepository.FirstOrDefault(x =>
+                        x.CompanyId == companyId
+                        && x.PayrollRunId == matchingRun.Id
+                        && x.EmployeeId == empUser.EmployeeId);
+
+                    var gross = model.BasicPay + (model.Bonus ?? 0) + (model.HRA ?? 0) + (model.LTA ?? 0) + (model.OtherAllowance ?? 0);
+                    var deductions = (model.LossOfPay ?? 0) + (model.IncomeTax ?? 0) + (model.HealthInsurance ?? 0) + (model.EPF ?? 0) + (model.ESIC ?? 0) + (model.ProfessionalTax ?? 0);
+                    var net = gross - deductions;
+
+                    if (runEmployee != null)
+                    {
+                        runEmployee.GrossAmount = gross;
+                        runEmployee.DeductionAmount = deductions;
+                        runEmployee.NetAmount = net;
+                        await _payrollRunEmployeesRepository.Update(
+                            Builders<PayrollRunEmployee>.Filter.Eq(x => x.Id, runEmployee.Id),
+                            runEmployee);
+                    }
+                    else
+                    {
+                        var newRunEmp = new PayrollRunEmployee
+                        {
+                            CompanyId = companyId,
+                            PayrollRunId = matchingRun.Id,
+                            EmployeeId = empUser.EmployeeId,
+                            GrossAmount = gross,
+                            DeductionAmount = deductions,
+                            NetAmount = net,
+                            Status = "READY"
+                        };
+                        await _payrollRunEmployeesRepository.AddOne(newRunEmp);
+                    }
+
+                    // Recalculate Run Totals
+                    var allRunEmployees = await _payrollRunEmployeesRepository.GetAll(x =>
+                        x.CompanyId == companyId && x.PayrollRunId == matchingRun.Id);
+                    if (allRunEmployees != null)
+                    {
+                        var empList = allRunEmployees.ToList();
+                        matchingRun.GrossTotal = empList.Sum(x => x.GrossAmount);
+                        matchingRun.DeductionTotal = empList.Sum(x => x.DeductionAmount);
+                        matchingRun.NetTotal = empList.Sum(x => x.NetAmount);
+                        matchingRun.EmployeeCount = empList.Count;
+                        matchingRun.Version++;
+                        matchingRun.AuditHistory.Add(new PayrollRunAuditEvent
+                        {
+                            Action = "EmpPayRollSynchronized",
+                            ActorId = empUser.UserId,
+                            OccurredAtUtc = DateTime.UtcNow,
+                            Notes = "Run totals recalculated after individual employee payroll sync."
+                        });
+
+                        await _payrollRunsRepository.Update(
+                            Builders<PayrollRun>.Filter.Eq(r => r.Id, matchingRun.Id),
+                            matchingRun);
+                    }
+                }
+            }
+            catch
+            {
+                // Non-fatal synchronization
+            }
+        }
+
         return result;
     }
 
@@ -1286,6 +1396,7 @@ public class PayRollServices : IPayRollServices
             + (payroll.Deduction?.HealthInsurance ?? 0m)
             + (payroll.Deduction?.EPF ?? 0m)
             + (payroll.Deduction?.ESIC ?? 0m)
+            + (payroll.Deduction?.ProfessionalTax ?? 0m)
             + PayrollDeductionLineTotals.AdditionalAmount(payroll.DeductionLines);
         if (grossPay - totalDeductions <= 0m)
             return new Result
@@ -1559,6 +1670,26 @@ public class PayRollServices : IPayRollServices
             : new PayrollCalculationSnapshot
             {
                 PayrollMonth = x.PayrollMonth,
+                TdsPaymentDate = x.TdsPaymentDate,
+                TdsFinancialYear = x.TdsFinancialYear,
+                TdsIncomeTaxAct = x.TdsIncomeTaxAct,
+                TdsSection = x.TdsSection,
+                TdsJurisdiction = x.TdsJurisdiction,
+                TdsPolicyProfileId = x.TdsPolicyProfileId,
+                TdsPolicyProfileVersion = x.TdsPolicyProfileVersion,
+                TdsStatutoryRuleVersion = x.TdsStatutoryRuleVersion,
+                TdsCalculationEngineVersion = x.TdsCalculationEngineVersion,
+                TdsEstimateStatus = x.TdsEstimateStatus,
+                TdsCurrentYearTaxableSalaryYtd = x.TdsCurrentYearTaxableSalaryYtd,
+                TdsCurrentMonthlyTaxableSalaryBasis = x.TdsCurrentMonthlyTaxableSalaryBasis,
+                TdsProjectedAnnualTaxableSalary = x.TdsProjectedAnnualTaxableSalary,
+                TdsPreviousEmployerSalary = x.TdsPreviousEmployerSalary,
+                TdsOtherIncomeDeclared = x.TdsOtherIncomeDeclared,
+                TdsEligibleDeductionsDeclared = x.TdsEligibleDeductionsDeclared,
+                TdsYtdTaxDeducted = x.TdsYtdTaxDeducted,
+                TdsEstimatedAnnualTax = x.TdsEstimatedAnnualTax,
+                TdsRemainingPayments = x.TdsRemainingPayments,
+                TdsEstimateLimitations = (x.TdsEstimateLimitations ?? []).ToList(),
                 JoiningDateUsed = x.JoiningDateUsed,
                 ExitDateUsed = x.ExitDateUsed,
                 EligibleFrom = x.EligibleFrom,
@@ -1587,10 +1718,26 @@ public class PayRollServices : IPayRollServices
                 EsicEmployeeRatePercent = x.EsicEmployeeRatePercent,
                 EsicEmployerRatePercent = x.EsicEmployerRatePercent,
                 TdsMode = x.TdsMode,
+                ProfessionalTax = x.ProfessionalTax,
+                PtJurisdiction = x.PtJurisdiction,
+                PtMode = x.PtMode,
                 PenaltyAmount = x.PenaltyAmount,
                 PolicyId = x.PolicyId,
                 PolicyVersion = x.PolicyVersion,
                 AttendanceSummaryVersion = x.AttendanceSummaryVersion,
+                AttendanceSummaryId = x.AttendanceSummaryId,
+                ExpectedWorkingDays = x.ExpectedWorkingDays,
+                EligibleWorkingDays = x.EligibleWorkingDays,
+                PresentDays = x.PresentDays,
+                WfhDays = x.WfhDays,
+                PaidLeaveDays = x.PaidLeaveDays,
+                UnpaidLeaveDays = x.UnpaidLeaveDays,
+                HalfDays = x.HalfDays,
+                AbsentDays = x.AbsentDays,
+                PaidDays = x.PaidDays,
+                UnpaidDays = x.UnpaidDays,
+                LossOfPayDays = x.LossOfPayDays,
+                LossOfPay = x.LossOfPay,
                 PayrollAssignmentVersion = x.PayrollAssignmentVersion,
                 PayGroupVersion = x.PayGroupVersion,
                 SalaryTemplateVersion = x.SalaryTemplateVersion,

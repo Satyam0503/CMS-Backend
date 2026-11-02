@@ -12,6 +12,7 @@ public sealed class PayrollPayGroup
     public string Schedule { get; set; } = "MONTHLY";
     public string? LegalEntityId { get; set; }
     public string? PolicyProfileId { get; set; }
+    public string? WorkLocationState { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime EffectiveFrom { get; set; }
     public DateTime? EffectiveTo { get; set; }
@@ -38,6 +39,7 @@ public sealed class PayrollPolicyProfile
     public decimal EsicEmployeeRatePercent { get; set; } = 0.75m;
     public decimal EsicEmployerRatePercent { get; set; } = 3.25m;
     public string TdsMode { get; set; } = "AUTO_NEW_REGIME";
+    public string PtMode { get; set; } = "STATUTORY";
     public string StatutoryJurisdiction { get; set; } = string.Empty;
     public string FinancialYear { get; set; } = string.Empty;
     public string StatutoryRuleVersion { get; set; } = string.Empty;
@@ -99,6 +101,7 @@ public sealed class EmployeePayrollAssignment
     public string? PayGroupId { get; set; }
     public string? SalaryTemplateId { get; set; }
     public string? PolicyProfileId { get; set; }
+    public string? WorkLocationState { get; set; }
     public int Version { get; set; } = 1;
     public DateTime EffectiveFrom { get; set; }
     public DateTime? EffectiveTo { get; set; }

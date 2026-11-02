@@ -237,6 +237,29 @@ public sealed class PayrollPaymentBatchServiceTests
         Assert.Single(run.AuditHistory, item => item.Action == "RunPaid" && item.Notes == "b");
     }
 
+    [Fact]
+    public async Task Reconcile_UpdatesEmpPayRollToPaid_WhenPayrollsRepoProvided()
+    {
+        var batch = new PayrollPaymentBatch
+        {
+            Id = "b", CompanyId = "c", PayrollRunId = "r", Status = "SUBMITTED",
+            ProviderReference = "PROV-12345",
+            Items = [new PayrollPaymentBatchItem { EmployeeId = "emp-1", NetAmount = 25000m }]
+        };
+        var run = Run("r", "c", "PROCESSED");
+        var batches = Repo(batch);
+        var runs = Repo(run);
+        var payrolls = Repo<EmpPayRoll>();
+        var service = new PayrollPaymentBatchService(batches.Object, runs.Object, Repo<PayrollRunEmployee>().Object, payrolls.Object);
+
+        var result = await service.Reconcile("c", "b", "finance-maker", new PaymentBatchRequestDto { Note = "HDFC batch settled", PaymentConfirmed = true });
+
+        Assert.True(result.Success);
+        Assert.Equal("RECONCILED", batch.Status);
+        Assert.Equal("PAID", run.Status);
+        payrolls.Verify(x => x.UpdateMany(It.IsAny<MongoDB.Driver.FilterDefinition<EmpPayRoll>>(), It.IsAny<MongoDB.Driver.UpdateDefinition<EmpPayRoll>>(), It.IsAny<bool>()), Times.Once);
+    }
+
     private static PayrollRun Run(string id, string companyId, string status) => new()
     {
         Id = id, CompanyId = companyId, PeriodStart = DateTime.Today,
@@ -254,6 +277,8 @@ public sealed class PayrollPaymentBatchServiceTests
             .ReturnsAsync((Expression<Func<TEntity, bool>> p, bool _, bool __) => items.Where(p.Compile()).ToArray());
         m.Setup(x => x.AddOne(It.IsAny<TEntity>())).ReturnsAsync(new Result { Success = true });
         m.Setup(x => x.Update(It.IsAny<MongoDB.Driver.FilterDefinition<TEntity>>(), It.IsAny<TEntity>()))
+            .ReturnsAsync(new Result { Success = true });
+        m.Setup(x => x.UpdateMany(It.IsAny<MongoDB.Driver.FilterDefinition<TEntity>>(), It.IsAny<MongoDB.Driver.UpdateDefinition<TEntity>>(), It.IsAny<bool>()))
             .ReturnsAsync(new Result { Success = true });
         return m;
     }

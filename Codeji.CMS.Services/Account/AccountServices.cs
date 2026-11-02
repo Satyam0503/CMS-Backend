@@ -421,6 +421,51 @@ public class AccountServices : IAccountServices
         }
         if (storedRefreshToken.IsRevoked)
         {
+            // Allow a brief grace period (30 seconds) for concurrent requests in high-latency environments (dep/test/prod)
+            // that were dispatched with the same refresh token before rotation completed.
+            if (storedRefreshToken.RevokedAt.HasValue &&
+                storedRefreshToken.RevokedAt.Value > DateTime.UtcNow.AddSeconds(-30) &&
+                !string.IsNullOrWhiteSpace(storedRefreshToken.ReplacedByToken))
+            {
+                EmpUser? graceUser = await FindSingleForAnonymousAuthAsync(_employeeRepository,
+                    x => x.UserId == storedRefreshToken.UserId && x.Status && !x.IsDeleted);
+                if (graceUser != null && (graceUser.Lifecycle == null || graceUser.Lifecycle.CanLogin()))
+                {
+                    Roles? graceRole = await FindSingleForAnonymousAuthAsync(_rolesRepository, r =>
+                        r.CompanyId == graceUser.CompanyId &&
+                        r.RolesId == graceUser.RoleId &&
+                        !r.IsDeleted &&
+                        r.HasAppAccess);
+                    if (graceRole != null)
+                    {
+                        string freshJwtToken = AuthenticationHandler.GenerateJwtToken(graceUser.UserId, graceUser.CompanyId, graceUser.RoleId, [graceRole.Titles]);
+                        string renewedRefreshToken = TokenHelper.GenerateToken();
+                        string renewedRefreshTokenHashed = TokenHelper.ComputeSha256Hash(renewedRefreshToken);
+
+                        RefreshToken graceRefreshToken = new()
+                        {
+                            UserId = graceUser.UserId,
+                            Token = renewedRefreshTokenHashed,
+                            ExpireAt = DateTime.UtcNow.AddDays(7),
+                        };
+                        Result addGraceResult = await _refreshTokenRepository.AddOne(graceRefreshToken);
+                        if (addGraceResult.Success)
+                        {
+                            storedRefreshToken.ReplacedByToken = renewedRefreshTokenHashed;
+                            await _refreshTokenRepository.Update(whereCondition, storedRefreshToken);
+
+                            result.MethodResult = new TokenResponseDto()
+                            {
+                                RefreshToken = renewedRefreshToken,
+                                Token = freshJwtToken
+                            };
+                            result.Success = true;
+                            return result;
+                        }
+                    }
+                }
+            }
+
             result.StatusCode = CustomStatusCode.RefreshTokenRevoked;
             return result;
         }
@@ -464,6 +509,7 @@ public class AccountServices : IAccountServices
         };
         Result result1 = await _refreshTokenRepository.AddOne(refreshToken);
         if (!result1.Success) return result;
+        storedRefreshToken.ReplacedByToken = newRefreshTokenHashed;
         storedRefreshToken.IsRevoked = true;
         storedRefreshToken.RevokedAt = DateTime.UtcNow;
         await _refreshTokenRepository.Update(whereCondition, storedRefreshToken);
@@ -490,6 +536,7 @@ public class AccountServices : IAccountServices
         if (storedRefreshToken.IsRevoked)
         {
             // detected the use of revoked refresh token.Remove all the active refresh token 
+
             result.StatusCode = CustomStatusCode.RefreshTokenRevoked;
             Expression<Func<RefreshToken, bool>> expression = rt => !rt.IsRevoked && rt.UserId == userid;
             return await _refreshTokenRepository.UpdateMany(expression, Builders<RefreshToken>.Update.Set(rt => rt.IsRevoked, true).Set(rt => rt.RevokedAt, DateTime.UtcNow));

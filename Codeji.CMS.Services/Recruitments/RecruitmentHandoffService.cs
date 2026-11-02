@@ -420,6 +420,31 @@ public sealed class RecruitmentHandoffService(
                 canonical.UpdatedDate = DateTime.UtcNow;
                 await applications.Update(Builders<RecruitmentJobApplication>.Filter.Where(x => x.CompanyId == companyId && x.ApplicationId == canonical.ApplicationId), canonical);
             }
+            else if (canonical is null)
+            {
+                var newCanonical = new RecruitmentJobApplication
+                {
+                    CompanyId = companyId,
+                    ApplicantId = applicant.ApplicantId,
+                    VacancyId = applicant.VacancyId ?? string.Empty,
+                    CurrentStage = "Preboarding",
+                    CreatedBy = actorUserId,
+                    CreatedDate = DateTime.UtcNow,
+                    UpdatedBy = actorUserId,
+                    UpdatedDate = DateTime.UtcNow,
+                    StageHistory =
+                    [
+                        new RecruitmentApplicationStageEvent
+                        {
+                            FromStage = applicant.ActivityType.ToString(),
+                            ToStage = "Preboarding",
+                            ActorUserId = actorUserId,
+                            Reason = $"Candidate handed off to preboarding with Employee ID {assignedEmployeeId}."
+                        }
+                    ]
+                };
+                await applications.AddOne(newCanonical);
+            }
         }
 
         await applicantLogs.AddOne(new ApplicantLogs

@@ -290,11 +290,87 @@ public class RoleServices : IRoleService
             List<int> rolePermissions = _rolePermissionRepository.Get(x => x.CompanyId == companyId && x.RoleId == role.RolesId && x.IsAccessible && x.HasAccess).Select(x => x.ModulePermissionId).ToList();
 
 
-            res = (from rp in rolePermissions
+            var rawPermissions = (from rp in rolePermissions
                     join mp in modulePermissions on rp equals mp.ModulePermissionId
                     join m in modules on mp.ModuleId equals m.ModuleId
                     join p in permissions on mp.PermissionId equals p.PermissionId
-                    select String.Format($"{m.ModuleConstant}.{p.PermissionConstant}")).OrderBy(x => x).ToArray();
+                    select new { ModuleConstant = m.ModuleConstant, PermissionString = $"{m.ModuleConstant}.{p.PermissionConstant}" }).ToList();
+
+            bool isJobsAccessible = await IsModuleAccessibleForCompany(AppModule.Jobs, companyId);
+            bool isPayrollAccessible = await IsModuleAccessibleForCompany(AppModule.PayRoll, companyId);
+            bool isOffboardingAccessible = await IsModuleAccessibleForCompany(AppModule.Offboarding, companyId);
+            bool isWfhAccessible = await IsModuleAccessibleForCompany(AppModule.WorkFromHome, companyId);
+            bool isNoticeAccessible = await IsModuleAccessibleForCompany(AppModule.NoticeBoard, companyId);
+            bool isCalendarAccessible = await IsModuleAccessibleForCompany(AppModule.Calendar, companyId);
+            bool isPolicyAccessible = await IsModuleAccessibleForCompany(AppModule.Policy, companyId);
+            bool isEmployeesAccessible = await IsModuleAccessibleForCompany(AppModule.Employees, companyId);
+
+            res = rawPermissions
+                .Where(x =>
+                {
+                    if (!isJobsAccessible && (
+                        string.Equals(x.ModuleConstant, AppModule.Jobs, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(x.ModuleConstant, AppModule.Applications, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(x.ModuleConstant, AppModule.ProcessLog, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(x.ModuleConstant, AppModule.CareerProfile, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return false;
+                    }
+
+                    if (!isPayrollAccessible && (
+                        string.Equals(x.ModuleConstant, AppModule.PayRoll, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(x.ModuleConstant, AppModule.PayrollSettings, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(x.ModuleConstant, AppModule.LeaveManagement, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(x.ModuleConstant, AppModule.Attendance, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return false;
+                    }
+
+                    if (!isOffboardingAccessible && string.Equals(x.ModuleConstant, AppModule.Offboarding, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    if (!isWfhAccessible && string.Equals(x.ModuleConstant, AppModule.WorkFromHome, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    if (!isNoticeAccessible && string.Equals(x.ModuleConstant, AppModule.NoticeBoard, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    if (!isCalendarAccessible && string.Equals(x.ModuleConstant, AppModule.Calendar, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    if (!isPolicyAccessible && string.Equals(x.ModuleConstant, AppModule.Policy, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    if (!isEmployeesAccessible && string.Equals(x.ModuleConstant, AppModule.Employees, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    return true;
+                })
+                .Select(x => x.PermissionString)
+                .OrderBy(x => x)
+                .ToArray();
+
+            if (role.RoleType == (int)EnumsHelper.Roles.Employee && isOffboardingAccessible)
+            {
+                var list = res.ToList();
+                var viewPerm = $"{AppModule.Offboarding}.{PermissionConst.View}";
+                var submitPerm = $"{AppModule.Offboarding}.{PermissionConst.Submit}";
+                if (!list.Contains(viewPerm)) list.Add(viewPerm);
+                if (!list.Contains(submitPerm)) list.Add(submitPerm);
+                res = list.OrderBy(x => x).ToArray();
+            }
         }
         return res;
     }
@@ -466,6 +542,8 @@ public class RoleServices : IRoleService
         yield return (AppModule.PayRoll, PermissionConst.Delete);
         foreach (var permission in FullAccess(AppModule.PayrollSettings)) yield return permission;
         yield return (AppModule.Policy, PermissionConst.View);
+        foreach (var permission in FullAccess(AppModule.Offboarding)) yield return permission;
+        foreach (var permission in FullAccess(AppModule.WorkFromHome)) yield return permission;
     }
 
     private static IEnumerable<(string Module, string Permission)> EmployeePermissions()
@@ -475,6 +553,12 @@ public class RoleServices : IRoleService
         yield return (AppModule.NoticeBoard, PermissionConst.Create);
         yield return (AppModule.PayRoll, PermissionConst.Edit);
         yield return (AppModule.PayrollSettings, PermissionConst.Edit);
+        yield return (AppModule.WorkFromHome, PermissionConst.ViewOwn);
+        yield return (AppModule.WorkFromHome, PermissionConst.CreateOwn);
+        yield return (AppModule.WorkFromHome, PermissionConst.EditOwn);
+        yield return (AppModule.WorkFromHome, PermissionConst.CancelOwn);
+        yield return (AppModule.Offboarding, PermissionConst.View);
+        yield return (AppModule.Offboarding, PermissionConst.Submit);
     }
 
     //Get default roles with their permission
@@ -625,6 +709,28 @@ public class RoleServices : IRoleService
                     {
                         return false;
                     }
+
+                    if (string.Equals(module, AppModule.CareerProfile, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(module, AppModule.Applications, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(module, AppModule.ProcessLog, StringComparison.OrdinalIgnoreCase))
+                    {
+                        bool isJobsAccessible = await IsModuleAccessibleForCompany(AppModule.Jobs, companyId);
+                        if (!isJobsAccessible)
+                        {
+                            return false;
+                        }
+                    }
+
+                    if (string.Equals(module, AppModule.PayrollSettings, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(module, AppModule.LeaveManagement, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(module, AppModule.Attendance, StringComparison.OrdinalIgnoreCase))
+                    {
+                        bool isPayrollAccessible = await IsModuleAccessibleForCompany(AppModule.PayRoll, companyId);
+                        if (!isPayrollAccessible)
+                        {
+                            return false;
+                        }
+                    }
                 }
             }
 
@@ -634,7 +740,10 @@ public class RoleServices : IRoleService
             }
 
             string[] modulePermissions = await GetRolePermissionOfuser(user.RoleId, companyId);
-            string[] permission = Role.Select(_ => $"{module}.{_}").ToArray();
+            string[] permission = Role
+                .SelectMany(requestedPermission => PermissionAliases(module, requestedPermission))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
             if (!string.IsNullOrEmpty(module))
                 modules = new string[] { module };
             hasPermission = permission.Any(x => modulePermissions.Contains(x));
@@ -654,6 +763,27 @@ public class RoleServices : IRoleService
         }
 
         return hasPermission;
+    }
+
+    private static IEnumerable<string> PermissionAliases(string module, string requestedPermission)
+    {
+        yield return $"{module}.{requestedPermission}";
+        if (!string.Equals(module, AppModule.WorkFromHome, StringComparison.OrdinalIgnoreCase))
+            yield break;
+
+        // The role editor historically exposes the generic CRUD permissions for
+        // Work From Home. Map them to own-request actions only; service methods
+        // still scope requests to the authenticated user and company.
+        var legacyPermission = requestedPermission switch
+        {
+            PermissionConst.ViewOwn => PermissionConst.View,
+            PermissionConst.CreateOwn => PermissionConst.Create,
+            PermissionConst.EditOwn => PermissionConst.Edit,
+            PermissionConst.CancelOwn => PermissionConst.Delete,
+            _ => null,
+        };
+        if (legacyPermission is not null)
+            yield return $"{module}.{legacyPermission}";
     }
 
 

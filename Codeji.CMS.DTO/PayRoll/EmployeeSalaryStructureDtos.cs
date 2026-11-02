@@ -13,6 +13,12 @@ public sealed class EmployeeSalaryComponentValueDto
     public bool IsRecurring { get; set; } = true;
     public bool IsStatutory { get; set; }
     public bool IsEmployerContribution { get; set; }
+    public string? TaxExemptionSection { get; set; }
+    public string ProrationBasis { get; set; } = "ATTENDANCE";
+    public string? GlAccountCode { get; set; }
+    public bool IncludeInPfWage { get; set; }
+    public bool IncludeInEsiWage { get; set; }
+    public bool IncludeInPtWage { get; set; }
 }
 
 public sealed class EmployeeSalaryStructureDto

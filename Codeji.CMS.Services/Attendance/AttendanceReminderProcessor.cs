@@ -65,7 +65,8 @@ public sealed class AttendanceReminderProcessor(
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var schedule = await schedules.ResolveAsync(companyId, employee, today, cancellationToken);
-                    if (schedule is null || !AttendanceReminderEvaluator.HasOfficeStarted(reference, schedule.StartTime)) continue;
+                    var officeStartTime = schedule?.StartTime ?? new TimeSpan(9, 0, 0);
+                    if (!AttendanceReminderEvaluator.HasOfficeStarted(reference, officeStartTime)) continue;
 
                     var prepared = await mutationValidator.PrepareAsync(new AttendanceMutationRequest
                     {

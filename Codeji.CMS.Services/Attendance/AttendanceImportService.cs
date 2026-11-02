@@ -33,6 +33,7 @@ public class AttendanceImportService : IAttendanceImportService
     private readonly IAttendanceRepository _attendanceRepository;
     private readonly IAttendanceStatusService _statusService;
     private readonly IAttendancePenaltyService _penaltyService;
+    private readonly IMongoDbRepository<AttendancePayrollException>? _exceptions;
 
     public AttendanceImportService(
         IMongoDbRepository<EmpUser> employees,
@@ -45,7 +46,8 @@ public class AttendanceImportService : IAttendanceImportService
         IMongoDbRepository<Department> departments,
         IAttendanceRepository attendanceRepository,
         IAttendanceStatusService statusService,
-        IAttendancePenaltyService penaltyService
+        IAttendancePenaltyService penaltyService,
+        IMongoDbRepository<AttendancePayrollException>? exceptions = null
     )
     {
         _employees = employees;
@@ -59,6 +61,7 @@ public class AttendanceImportService : IAttendanceImportService
         _attendanceRepository = attendanceRepository;
         _statusService = statusService;
         _penaltyService = penaltyService;
+        _exceptions = exceptions;
     }
 
     private static DateTime UtcMidnight(DateTime date) =>
@@ -1099,12 +1102,70 @@ public class AttendanceImportService : IAttendanceImportService
                         )
                     )
                     {
+                        if (_exceptions != null && parsed.HasExplicitTimes)
+                        {
+                            var payrollMonth = new DateTime(cellDate.Year, cellDate.Month, 1);
+                            var dateUtc = UtcMidnight(cellDate);
+                            var existingException = await _exceptions.FirstOrDefault(x =>
+                                x.CompanyId == companyId && x.UserId == employee.UserId &&
+                                x.PayrollMonth == payrollMonth && x.AttendanceDate == dateUtc &&
+                                x.ExceptionType == "PUNCH_ON_APPROVED_LEAVE");
+                            if (existingException == null)
+                            {
+                                await _exceptions.AddOne(new AttendancePayrollException
+                                {
+                                    CompanyId = companyId,
+                                    UserId = employee.UserId,
+                                    EmployeeId = employee.EmployeeId,
+                                    PayrollMonth = payrollMonth,
+                                    AttendanceDate = dateUtc,
+                                    AffectedDates = [dateUtc],
+                                    ExceptionType = "PUNCH_ON_APPROVED_LEAVE",
+                                    Severity = "WARNING",
+                                    Status = "PENDING_REVIEW",
+                                    LeaveRequestId = existingRow?.SourceId,
+                                    ExistingAttendanceId = existingRow?.AttendanceId,
+                                    ExistingStatus = existingRow?.Status ?? "CL",
+                                    RequestedLeaveStatus = "P",
+                                    Reason = $"Employee has approved leave but import record contains punches ({parsed.CheckInTime:HH:mm} - {parsed.CheckOutTime:HH:mm}). Review to convert to office present or keep leave.",
+                                    CreatedBy = actorUserId
+                                });
+                            }
+                        }
                         preservedLeaves++;
                         continue;
                     }
                 }
                 else if (preserveApprovedLeaves && hasExistingLeave)
                 {
+                    if (_exceptions != null && parsed.HasExplicitTimes)
+                    {
+                        var payrollMonth = new DateTime(cellDate.Year, cellDate.Month, 1);
+                        var dateUtc = UtcMidnight(cellDate);
+                        var existingException = await _exceptions.FirstOrDefault(x =>
+                            x.CompanyId == companyId && x.UserId == employee.UserId &&
+                            x.PayrollMonth == payrollMonth && x.AttendanceDate == dateUtc &&
+                            x.ExceptionType == "PUNCH_ON_APPROVED_LEAVE");
+                        if (existingException == null)
+                        {
+                            await _exceptions.AddOne(new AttendancePayrollException
+                            {
+                                CompanyId = companyId,
+                                UserId = employee.UserId,
+                                EmployeeId = employee.EmployeeId,
+                                PayrollMonth = payrollMonth,
+                                AttendanceDate = dateUtc,
+                                AffectedDates = [dateUtc],
+                                ExceptionType = "PUNCH_ON_APPROVED_LEAVE",
+                                Severity = "WARNING",
+                                Status = "PENDING_REVIEW",
+                                ExistingStatus = "CL",
+                                RequestedLeaveStatus = "P",
+                                Reason = $"Employee has approved leave but import record contains punches ({parsed.CheckInTime:HH:mm} - {parsed.CheckOutTime:HH:mm}). Review to convert to office present or keep leave.",
+                                CreatedBy = actorUserId
+                            });
+                        }
+                    }
                     preservedLeaves++;
                     continue;
                 }
@@ -1403,14 +1464,14 @@ public class AttendanceImportService : IAttendanceImportService
             {
                 var remaining = text.Remove(rangeMatch.Index, rangeMatch.Length);
                 remaining = Regex.Replace(remaining, @"[\(\)\[\]\{\}\|:]", " ").Trim();
-                var code = NormalizeStatusCode(remaining);
+                var explicitCode = NormalizeStatusCode(remaining);
+                var code = explicitCode;
 
                 if (string.IsNullOrWhiteSpace(code))
                 {
                     // No code explicitly given: derive status from duration
+                    // In .NET TimeOnly subtraction (outTime - inTime) already accounts for midnight wrap-around.
                     var duration = (outTime - inTime).TotalHours;
-                    if (outTime < inTime)
-                        duration += 24; // overnight
 
                     if (duration >= 7.5)
                         code = "P";
@@ -1424,16 +1485,23 @@ public class AttendanceImportService : IAttendanceImportService
                         code = "A";
                 }
 
+                string? parseError = null;
+                if (outTime == inTime && outTime != TimeOnly.MinValue)
+                {
+                    parseError = "Check-out time cannot equal check-in time.";
+                }
+                else if (outTime < inTime && explicitCode is "ED" or "LC" or "HD" or "LHD")
+                {
+                    parseError = "Check-out time must be later than check-in time.";
+                }
+
                 return new ParsedMusterEntry
                 {
                     RawValue = text,
                     StatusCode = code,
                     CheckInTime = inTime,
                     CheckOutTime = outTime,
-                    ParseError =
-                        (outTime <= inTime && outTime != TimeOnly.MinValue)
-                            ? "Check-out time must be later than check-in time."
-                            : null,
+                    ParseError = parseError,
                 };
             }
         }

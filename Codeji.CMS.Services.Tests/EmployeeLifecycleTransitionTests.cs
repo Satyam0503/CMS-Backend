@@ -330,5 +330,56 @@ public class EmployeeLifecycleTransitionTests
         Assert.True(EmployeeLifecycleTransitionService.TryChangeAvailability(state, EmployeeLifecycleStatuses.Working, "hr", 1, DateTime.UtcNow, null, "ABSENCE_RESOLVED", "Returned to work", out _));
         Assert.Equal(EmployeeLifecycleStatuses.Working, state.AvailabilityStatus);
     }
-}
 
+    [Fact]
+    public void Resume_work_clears_expected_return_date()
+    {
+        var state = new EmployeeLifecycleState
+        {
+            AvailabilityStatus = EmployeeLifecycleStatuses.Sabbatical,
+            AvailabilityExpectedReturnDate = DateTime.UtcNow.AddMonths(3)
+        };
+
+        var changed = EmployeeLifecycleTransitionService.TryChangeAvailability(
+            state, EmployeeLifecycleStatuses.Working, "hr", 0, DateTime.UtcNow,
+            null, "RESUME_WORK", "Employee resumed normal duties", out var error);
+
+        Assert.True(changed);
+        Assert.Empty(error);
+        Assert.Equal(EmployeeLifecycleStatuses.Working, state.AvailabilityStatus);
+        Assert.Null(state.AvailabilityExpectedReturnDate);
+    }
+
+    [Fact]
+    public void Suspended_availability_is_allowed_and_updates_state()
+    {
+        var state = new EmployeeLifecycleState
+        {
+            AvailabilityStatus = EmployeeLifecycleStatuses.Working
+        };
+
+        var changed = EmployeeLifecycleTransitionService.TryChangeAvailability(
+            state, EmployeeLifecycleStatuses.Suspended, "hr", 0, DateTime.UtcNow,
+            null, "DISCIPLINARY", "Pending inquiry", out var error);
+
+        Assert.True(changed);
+        Assert.Empty(error);
+        Assert.Equal(EmployeeLifecycleStatuses.Suspended, state.AvailabilityStatus);
+    }
+
+    [Fact]
+    public void Sabbatical_with_valid_future_return_date_succeeds()
+    {
+        var state = new EmployeeLifecycleState();
+        var returnDate = DateTime.UtcNow.AddMonths(6).Date;
+
+        var changed = EmployeeLifecycleTransitionService.TryChangeAvailability(
+            state, EmployeeLifecycleStatuses.Sabbatical, "hr", 0, DateTime.UtcNow,
+            returnDate, "STUDY_LEAVE", "Approved research degree", out var error);
+
+        Assert.True(changed);
+        Assert.Empty(error);
+        Assert.Equal(EmployeeLifecycleStatuses.Sabbatical, state.AvailabilityStatus);
+        Assert.Equal(returnDate, state.AvailabilityExpectedReturnDate);
+    }
+}

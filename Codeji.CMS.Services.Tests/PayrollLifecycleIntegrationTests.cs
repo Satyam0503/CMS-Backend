@@ -40,11 +40,14 @@ public sealed class PayrollLifecycleIntegrationTests
         var runs = InMemoryRepository.Create(run);
         var members = InMemoryRepository.Create(member);
         var payrollRows = InMemoryRepository.Create(payroll);
+        payrollRows.Setup(x => x.UpdateMany(It.IsAny<FilterDefinition<EmpPayRoll>>(), It.IsAny<UpdateDefinition<EmpPayRoll>>(), It.IsAny<bool>()))
+            .Callback(() => { payroll.IsProcessed = true; payroll.WorkflowStatus = "PROCESSED"; })
+            .ReturnsAsync(new Result { Success = true });
         var batches = InMemoryRepository.Create<PayrollPaymentBatch>();
 
         var calculation = new PayrollRunCalculationService(runs.Object, members.Object, payrollRows.Object);
         var review = new PayrollRunReviewService(runs.Object, members.Object);
-        var workflow = new PayrollRunWorkflowService(runs.Object, members.Object);
+        var workflow = new PayrollRunWorkflowService(runs.Object, members.Object, payrollRows.Object);
         var payment = new PayrollPaymentBatchService(batches.Object, runs.Object, members.Object);
 
         var calculated = await calculation.SyncCalculatedRows("company-1", run.Id, "calculator");
@@ -149,10 +152,13 @@ public sealed class PayrollLifecycleIntegrationTests
         var runs = InMemoryRepository.Create(run);
         var members = InMemoryRepository.Create(member);
         var payrollRows = InMemoryRepository.Create(payroll);
+        payrollRows.Setup(x => x.UpdateMany(It.IsAny<FilterDefinition<EmpPayRoll>>(), It.IsAny<UpdateDefinition<EmpPayRoll>>(), It.IsAny<bool>()))
+            .Callback(() => { payroll.IsProcessed = true; payroll.WorkflowStatus = "PROCESSED"; })
+            .ReturnsAsync(new Result { Success = true });
         var batches = InMemoryRepository.Create<PayrollPaymentBatch>();
 
         var calculation = new PayrollRunCalculationService(runs.Object, members.Object, payrollRows.Object);
-        var workflow = new PayrollRunWorkflowService(runs.Object, members.Object);
+        var workflow = new PayrollRunWorkflowService(runs.Object, members.Object, payrollRows.Object);
         var review = new PayrollRunReviewService(runs.Object, members.Object);
         var payment = new PayrollPaymentBatchService(batches.Object, runs.Object, members.Object);
 

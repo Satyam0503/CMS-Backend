@@ -308,6 +308,33 @@ public sealed class PayrollAdjustmentServiceTests
         adjustmentRepository.Verify(x => x.Update(It.IsAny<MongoDB.Driver.FilterDefinition<PayrollAdjustment>>(), It.IsAny<PayrollAdjustment>()), Times.Never);
     }
 
+    [Fact]
+    public async Task Process_SucceedsWhenCorrectionRunIsProcessedAndEmployeeCalculated()
+    {
+        var adjustment = new PayrollAdjustment
+        {
+            Id = "a", CompanyId = "c", OriginalPayrollRunId = "original", EmployeeId = "e",
+            Status = "APPROVED", Amount = 1250m, Reason = "approved arrears"
+        };
+        var correction = Run("correction", "c", "PROCESSED"); correction.RunType = "CORRECTION";
+        var row = new PayrollRunEmployee
+        {
+            CompanyId = "c", PayrollRunId = "correction", EmployeeId = "e", Status = "CALCULATED", NetAmount = 5000m
+        };
+        var adjustmentRepository = Repo(adjustment);
+        var service = new PayrollAdjustmentService(adjustmentRepository.Object, Repo(correction).Object, Repo(row).Object);
+
+        var result = await service.Process("c", "actor", "a", new PayrollAdjustmentActionDto { CorrectionPayrollRunId = "correction" });
+
+        Assert.True(result.Success);
+        Assert.Equal("PROCESSED", adjustment.Status);
+        Assert.Equal("correction", adjustment.CorrectionPayrollRunId);
+        Assert.Equal("actor", adjustment.ProcessedBy);
+        Assert.NotNull(adjustment.ProcessedAtUtc);
+        Assert.Single(adjustment.AuditHistory, h => h.Action == "Processed" && h.Notes == "Processed in payroll run correction");
+        adjustmentRepository.Verify(x => x.Update(It.IsAny<MongoDB.Driver.FilterDefinition<PayrollAdjustment>>(), It.IsAny<PayrollAdjustment>()), Times.Once);
+    }
+
     private static PayrollRun Run(string id, string companyId, string status) => new()
     {
         Id = id, CompanyId = companyId, PeriodStart = DateTime.Today,

@@ -71,6 +71,26 @@ public class PayrollEarningLine
 public class PayrollCalculationSnapshot
 {
     public DateTime PayrollMonth { get; set; }
+    public DateTime? TdsPaymentDate { get; set; }
+    public string? TdsFinancialYear { get; set; }
+    public string? TdsIncomeTaxAct { get; set; }
+    public string? TdsSection { get; set; }
+    public string? TdsJurisdiction { get; set; }
+    public string? TdsPolicyProfileId { get; set; }
+    public int TdsPolicyProfileVersion { get; set; }
+    public string? TdsStatutoryRuleVersion { get; set; }
+    public string TdsCalculationEngineVersion { get; set; } = "INDIA-TDS-2026.1";
+    public string TdsEstimateStatus { get; set; } = "NOT_AVAILABLE";
+    public decimal TdsCurrentYearTaxableSalaryYtd { get; set; }
+    public decimal TdsCurrentMonthlyTaxableSalaryBasis { get; set; }
+    public decimal TdsProjectedAnnualTaxableSalary { get; set; }
+    public decimal TdsPreviousEmployerSalary { get; set; }
+    public decimal TdsOtherIncomeDeclared { get; set; }
+    public decimal TdsEligibleDeductionsDeclared { get; set; }
+    public decimal TdsYtdTaxDeducted { get; set; }
+    public decimal TdsEstimatedAnnualTax { get; set; }
+    public int TdsRemainingPayments { get; set; }
+    public List<string> TdsEstimateLimitations { get; set; } = [];
     public DateTime JoiningDateUsed { get; set; }
     public DateTime? ExitDateUsed { get; set; }
     public DateTime EligibleFrom { get; set; }
@@ -89,6 +109,19 @@ public class PayrollCalculationSnapshot
     public string? PolicyId { get; set; }
     public int PolicyVersion { get; set; }
     public int AttendanceSummaryVersion { get; set; }
+    public string? AttendanceSummaryId { get; set; }
+    public int ExpectedWorkingDays { get; set; }
+    public int EligibleWorkingDays { get; set; }
+    public decimal PresentDays { get; set; }
+    public decimal WfhDays { get; set; }
+    public decimal PaidLeaveDays { get; set; }
+    public decimal UnpaidLeaveDays { get; set; }
+    public decimal HalfDays { get; set; }
+    public decimal AbsentDays { get; set; }
+    public decimal PaidDays { get; set; }
+    public decimal UnpaidDays { get; set; }
+    public decimal LossOfPayDays { get; set; }
+    public decimal LossOfPay { get; set; }
     public string? PayrollAssignmentId { get; set; }
     public int PayrollAssignmentVersion { get; set; }
     public string? PayGroupId { get; set; }
@@ -106,6 +139,9 @@ public class PayrollCalculationSnapshot
     public decimal EsicEmployeeRatePercent { get; set; } = 0.75m;
     public decimal EsicEmployerRatePercent { get; set; } = 3.25m;
     public string TdsMode { get; set; } = "AUTO_NEW_REGIME";
+    public decimal ProfessionalTax { get; set; }
+    public string? PtJurisdiction { get; set; }
+    public string PtMode { get; set; } = "STATUTORY";
     public List<PayrollSalaryRevisionReference> SalaryRevisions { get; set; } = [];
     public List<PayrollSalaryStructureSnapshot> SalaryStructures { get; set; } = [];
     public string CalculationEngineVersion { get; set; } = "2.0";
@@ -135,5 +171,6 @@ public class Deduction
     public decimal HealthInsurance { get; set; }
     public decimal EPF { get; set; }
     public decimal ESIC { get; set; }
+    public decimal ProfessionalTax { get; set; }
 }
 
