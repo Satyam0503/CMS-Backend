@@ -1666,7 +1666,32 @@ public sealed class WorkFromHomeService(
             }
             catch (InvalidOperationException ex) when (ex.Message == "WFH_ATTENDANCE_UPDATE_FAILED") { return Fail("WFH_ATTENDANCE_UPDATE_FAILED", "The half-day WFH attendance record changed before correction.", StatusCodes.Status409Conflict); }
             catch (InvalidOperationException ex) when (ex.Message == "WFH_EXCEPTION_CHANGED") { return Fail("WFH_EXCEPTION_CHANGED", "This exception was already changed. Refresh and try again.", StatusCodes.Status409Conflict); }
-            catch (Exception ex) when (ex is NotSupportedException || ex is MongoCommandException mongoException && mongoException.Code == 20) { return Fail("WFH_TRANSACTION_REQUIRED", "Correcting WFH hours requires MongoDB transaction support. No attendance or exception changes were applied.", StatusCodes.Status503ServiceUnavailable); }
+            catch (Exception ex) when (IsTransactionUnsupported(ex))
+            {
+                try
+                {
+                    var segmentWrite = await attendanceSegments.GetCollection().ReplaceOneAsync(
+                        Builders<AttendanceDaySegment>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.AttendanceDaySegmentId == segment.AttendanceDaySegmentId && x.Version == originalSegmentVersion),
+                        segment);
+                    if (segmentWrite.MatchedCount != 1) return Fail("WFH_ATTENDANCE_UPDATE_FAILED", "The half-day WFH attendance record changed before correction.", StatusCodes.Status409Conflict);
+                    if (dailyRow is not null)
+                    {
+                        var dailyWrite = await attendance.GetCollection().ReplaceOneAsync(
+                            Builders<AttendanceModel>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.AttendanceId == dailyRow.AttendanceId && x.Version == originalDailyRowVersion),
+                            dailyRow);
+                        if (dailyWrite.MatchedCount != 1) return Fail("WFH_ATTENDANCE_UPDATE_FAILED", "The daily attendance record changed before correction.", StatusCodes.Status409Conflict);
+                    }
+                    var exceptionWrite = await exceptions.GetCollection().ReplaceOneAsync(
+                        Builders<AttendancePayrollException>.Filter.Where(x => x.Id == exception.Id && x.CompanyId == CompanyId && x.Status == "PENDING_REVIEW" && x.Version == dto.ExceptionVersion),
+                        exception);
+                    if (exceptionWrite.MatchedCount != 1) return Fail("WFH_EXCEPTION_CHANGED", "This exception was already changed. Refresh and try again.", StatusCodes.Status409Conflict);
+                    await InsertOutboxEventsAsync(null, [auditEvent], CancellationToken.None);
+                }
+                catch (Exception standaloneEx)
+                {
+                    return Fail("WFH_CORRECTION_FAILED", "WFH hours could not be corrected: " + standaloneEx.Message, StatusCodes.Status503ServiceUnavailable);
+                }
+            }
             catch { return Fail("WFH_CORRECTION_FAILED", "WFH hours could not be corrected. No attendance or exception changes were applied.", StatusCodes.Status503ServiceUnavailable); }
             await InvalidateSummary(employee, dateToCorrect);
             return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = $"WFH hours updated to {totalHours:0.##} hours and the exception was resolved." };
@@ -1719,8 +1744,23 @@ public sealed class WorkFromHomeService(
         {
             return Fail("WFH_EXCEPTION_CHANGED", "This exception was already changed. Refresh and try again.", StatusCodes.Status409Conflict);
         }
-        catch (Exception ex) when (ex is NotSupportedException || ex is MongoCommandException mongoException && mongoException.Code == 20)
-        { return Fail("WFH_TRANSACTION_REQUIRED", "Correcting WFH hours requires MongoDB transaction support. No attendance or exception changes were applied.", StatusCodes.Status503ServiceUnavailable); }
+        catch (Exception ex) when (IsTransactionUnsupported(ex))
+        {
+            try
+            {
+                var attendanceWrite = await attendance.GetCollection().ReplaceOneAsync(
+                    Builders<AttendanceModel>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.AttendanceId == row.AttendanceId && x.Version == originalRowVersion), row);
+                if (attendanceWrite.MatchedCount != 1) return Fail("WFH_ATTENDANCE_UPDATE_FAILED", "The WFH attendance record could not be updated.", StatusCodes.Status409Conflict);
+                var exceptionWrite = await exceptions.GetCollection().ReplaceOneAsync(
+                    Builders<AttendancePayrollException>.Filter.Where(x => x.Id == exception.Id && x.CompanyId == CompanyId && x.Status == "PENDING_REVIEW" && x.Version == dto.ExceptionVersion), exception);
+                if (exceptionWrite.MatchedCount != 1) return Fail("WFH_EXCEPTION_CHANGED", "This exception was already changed. Refresh and try again.", StatusCodes.Status409Conflict);
+                await InsertOutboxEventsAsync(null, [rowAuditEvent], CancellationToken.None);
+            }
+            catch (Exception standaloneEx)
+            {
+                return Fail("WFH_CORRECTION_FAILED", "WFH hours could not be corrected: " + standaloneEx.Message, StatusCodes.Status503ServiceUnavailable);
+            }
+        }
         catch { return Fail("WFH_CORRECTION_FAILED", "WFH hours could not be corrected. No attendance or exception changes were applied.", StatusCodes.Status503ServiceUnavailable); }
         await InvalidateSummary(employee, dateToCorrect);
         return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = $"WFH hours updated to {totalHours:0.##} hours and the exception was resolved." };
@@ -2215,7 +2255,36 @@ public sealed class WorkFromHomeService(
         }
         catch (InvalidOperationException ex) when (ex.Message == "WFH_ATTENDANCE_CHANGED") { return Fail("WFH_ATTENDANCE_CHANGED", "Attendance changed during regularization. Refresh and try again.", StatusCodes.Status409Conflict); }
         catch (InvalidOperationException ex) when (ex.Message == "WFH_EXCEPTION_CHANGED") { return Fail("WFH_EXCEPTION_CHANGED", "An attendance exception changed during regularization. Refresh and try again.", StatusCodes.Status409Conflict); }
-        catch (Exception ex) when (ex is NotSupportedException || ex is MongoCommandException mongoException && mongoException.Code == 20) { return Fail("WFH_TRANSACTION_REQUIRED", "WFH attendance regularization requires MongoDB transaction support. No changes were applied.", StatusCodes.Status503ServiceUnavailable); }
+        catch (Exception ex) when (IsTransactionUnsupported(ex))
+        {
+            try
+            {
+                if (row is not null)
+                {
+                    var write = await attendance.GetCollection().ReplaceOneAsync(
+                        Builders<AttendanceModel>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == request.UserId && x.AttendanceId == row.AttendanceId && x.SourceType == "WFH_REQUEST" && x.SourceId == requestId && x.Version == originalRowVersion), row);
+                    if (write.MatchedCount != 1) return Fail("WFH_ATTENDANCE_CHANGED", "Attendance changed during regularization. Refresh and try again.", StatusCodes.Status409Conflict);
+                }
+                else
+                {
+                    var write = await attendanceSegments.GetCollection().ReplaceOneAsync(
+                        Builders<AttendanceDaySegment>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == request.UserId && x.AttendanceDaySegmentId == segment!.AttendanceDaySegmentId && x.SourceType == "WFH_REQUEST" && x.SourceId == requestId && x.Version == originalSegmentVersion), segment!);
+                    if (write.MatchedCount != 1) return Fail("WFH_ATTENDANCE_CHANGED", "Attendance changed during regularization. Refresh and try again.", StatusCodes.Status409Conflict);
+                }
+                foreach (var exc in linkedExceptions)
+                {
+                    var expectedVersion = exc.Version - 1;
+                    var write = await exceptions.GetCollection().ReplaceOneAsync(
+                        Builders<AttendancePayrollException>.Filter.Where(x => x.Id == exc.Id && x.CompanyId == CompanyId && x.UserId == request.UserId && x.LeaveRequestId == requestId && x.Status == "PENDING_REVIEW" && x.Version == expectedVersion), exc);
+                    if (write.MatchedCount != 1) return Fail("WFH_EXCEPTION_CHANGED", "An attendance exception changed during regularization. Refresh and try again.", StatusCodes.Status409Conflict);
+                }
+                await InsertOutboxEventsAsync(null, [auditEvent], CancellationToken.None);
+            }
+            catch (Exception standaloneEx)
+            {
+                return Fail("WFH_REGULARIZATION_FAILED", "WFH attendance could not be regularized: " + standaloneEx.Message, StatusCodes.Status503ServiceUnavailable);
+            }
+        }
         catch { return Fail("WFH_REGULARIZATION_FAILED", "WFH attendance could not be regularized. No changes were applied.", StatusCodes.Status503ServiceUnavailable); }
         await InvalidateSummary(employee, targetDate);
 

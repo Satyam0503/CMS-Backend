@@ -1891,4 +1891,412 @@ public class WorkFromHomeEndToEndTests
         Assert.NotNull(replacedRow.CheckOutTime);
         Assert.Equal(7.0m, replacedRow.TotalHours);
     }
+
+    [Fact]
+    public async Task CorrectInsufficientHours_OnStandaloneMongo_HalfDaySegment_SuccessfullyUpdatesAndResolvesException()
+    {
+        var companyId = "company-standalone-correct-hours";
+        var adminUserId = "admin-1";
+        var targetUserId = "user-kiara";
+        var date = new DateTime(2026, 10, 27, 0, 0, 0, DateTimeKind.Utc);
+
+        var httpContextAccessor = new Mock<IHttpContextAccessor>();
+        var context = new DefaultHttpContext();
+        var claims = new[]
+        {
+            new System.Security.Claims.Claim(Codeji.CMS.Utility.Enums.EnumsHelper.ClaimTypesEnum.company_id.ToString(), companyId),
+            new System.Security.Claims.Claim(Codeji.CMS.Utility.Enums.EnumsHelper.ClaimTypesEnum.user_id.ToString(), adminUserId)
+        };
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+        httpContextAccessor.Setup(h => h.HttpContext).Returns(context);
+
+        var policyRepo = new Mock<IMongoDbRepository<WorkFromHomePolicy>>();
+        policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
+            .ReturnsAsync(new WorkFromHomePolicy
+            {
+                CompanyId = companyId,
+                IsEnabled = true,
+                FullDayMinimumHours = 8.0m,
+                HalfDayMinimumHours = 4.0m,
+                FullDayAttendanceStatusCode = "WFH",
+                HalfDayAttendanceStatusCode = "WFH HD",
+                TimeZoneId = "Asia/Kolkata"
+            });
+
+        var empRepo = new Mock<IMongoDbRepository<EmpUser>>();
+        empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
+            .ReturnsAsync(new EmpUser
+            {
+                CompanyId = companyId,
+                UserId = targetUserId,
+                EmployeeId = "codeji-101",
+                FirstName = "Kiara",
+                LastName = "Singh",
+                Email = "kiara@example.com",
+                DateOfJoining = "2025-01-01",
+                Status = true
+            });
+
+        // Approved WFH request covering 2026-10-27
+        var approvedRequest = new WorkFromHomeRequest
+        {
+            RequestId = "wfh-req-101",
+            CompanyId = companyId,
+            UserId = targetUserId,
+            Status = "Approved",
+            DurationType = "HalfDay",
+            FromDate = date,
+            ToDate = date
+        };
+        var requestRepo = new Mock<IMongoDbRepository<WorkFromHomeRequest>>();
+        requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
+            .ReturnsAsync(approvedRequest);
+
+        // Half-day attendance segment (SourceId initially empty, matching the reported bug)
+        var segment = new AttendanceDaySegment
+        {
+            AttendanceDaySegmentId = "seg-101",
+            CompanyId = companyId,
+            UserId = targetUserId,
+            EmployeeId = "codeji-101",
+            Date = date,
+            Segment = "FIRST_HALF",
+            Status = "WFH HD",
+            SourceType = "WFH_REQUEST",
+            SourceId = "",
+            Version = 1
+        };
+        AttendanceDaySegment? updatedSegment = null;
+        var segmentCollection = new Mock<IMongoCollection<AttendanceDaySegment>>();
+        segmentCollection.Setup(x => x.ReplaceOneAsync(
+                It.IsAny<FilterDefinition<AttendanceDaySegment>>(),
+                It.IsAny<AttendanceDaySegment>(),
+                It.IsAny<ReplaceOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<FilterDefinition<AttendanceDaySegment>, AttendanceDaySegment, ReplaceOptions, CancellationToken>((_, s, _, _) => updatedSegment = s)
+            .ReturnsAsync(new ReplaceOneResult.Acknowledged(1, 1, null));
+        var segmentRepo = new Mock<IMongoDbRepository<AttendanceDaySegment>>();
+        segmentRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceDaySegment, bool>>>()))
+            .ReturnsAsync(segment);
+        segmentRepo.Setup(x => x.GetCollection()).Returns(segmentCollection.Object);
+
+        // Exception reported for Kiara Singh
+        var exception = new AttendancePayrollException
+        {
+            Id = "exc-101",
+            CompanyId = companyId,
+            UserId = targetUserId,
+            EmployeeId = "codeji-101",
+            PayrollMonth = new DateTime(2026, 10, 1),
+            ExceptionType = "WFH_INSUFFICIENT_HOURS",
+            AttendanceDate = date,
+            ExistingAttendanceId = "seg-101",
+            WorkFromHomeRequestId = "",
+            LeaveRequestId = "",
+            Status = "PENDING_REVIEW",
+            Version = 1
+        };
+        AttendancePayrollException? updatedException = null;
+        var exceptionCollection = new Mock<IMongoCollection<AttendancePayrollException>>();
+        exceptionCollection.Setup(x => x.ReplaceOneAsync(
+                It.IsAny<FilterDefinition<AttendancePayrollException>>(),
+                It.IsAny<AttendancePayrollException>(),
+                It.IsAny<ReplaceOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<FilterDefinition<AttendancePayrollException>, AttendancePayrollException, ReplaceOptions, CancellationToken>((_, e, _, _) => updatedException = e)
+            .ReturnsAsync(new ReplaceOneResult.Acknowledged(1, 1, null));
+        var exceptionRepo = new Mock<IMongoDbRepository<AttendancePayrollException>>();
+        exceptionRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendancePayrollException, bool>>>()))
+            .ReturnsAsync(exception);
+        exceptionRepo.Setup(x => x.GetCollection()).Returns(exceptionCollection.Object);
+
+        var attendanceRepo = new Mock<IMongoDbRepository<AttendanceModel>>();
+        attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
+            .ReturnsAsync((AttendanceModel?)null);
+
+        var outboxRepo = new Mock<IMongoDbRepository<WorkFromHomeOutboxEvent>>();
+        var outboxCollection = new Mock<IMongoCollection<WorkFromHomeOutboxEvent>>();
+        outboxCollection.Setup(x => x.InsertManyAsync(
+                It.IsAny<IEnumerable<WorkFromHomeOutboxEvent>>(),
+                It.IsAny<InsertManyOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        outboxRepo.Setup(x => x.GetCollection()).Returns(outboxCollection.Object);
+
+        var scheduleService = new Mock<IEffectiveOfficeScheduleService>();
+        scheduleService.Setup(s => s.ResolveAsync(companyId, It.IsAny<EmpUser>(), date, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CompanyOfficeSchedule
+            {
+                CompanyId = companyId,
+                ScheduleId = "SCHED-1",
+                StartTime = new TimeSpan(9, 0, 0),
+                EndTime = new TimeSpan(18, 0, 0),
+                BreakMinutes = 0,
+                TimeZoneId = "Asia/Kolkata"
+            });
+
+        // Simulate Standalone MongoDB: session starts, but WithTransactionAsync throws MongoCommandException (code 20)
+        var mongoClient = new Mock<IMongoClient>();
+        var sessionMock = new Mock<IClientSessionHandle>();
+        sessionMock.Setup(x => x.WithTransactionAsync(
+                It.IsAny<Func<IClientSessionHandle, CancellationToken, Task<bool>>>(),
+                It.IsAny<TransactionOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(CreateStandaloneMongoException());
+        mongoClient.Setup(x => x.StartSessionAsync(It.IsAny<ClientSessionOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(sessionMock.Object);
+
+        var roles = new Mock<IRoleService>();
+        roles.Setup(r => r.IsModuleAccessibleForCompany(It.IsAny<string>(), companyId)).ReturnsAsync(true);
+        roles.Setup(r => r.VerifyUserAccess(It.IsAny<string>(), It.IsAny<string[]>(), adminUserId, companyId)).ReturnsAsync(true);
+
+        var service = new WorkFromHomeService(
+            httpContextAccessor.Object,
+            policyRepo.Object,
+            requestRepo.Object,
+            outboxRepo.Object,
+            Mock.Of<IMongoDbRepository<LeaveRequest>>(),
+            empRepo.Object,
+            Mock.Of<IMongoDbRepository<Department>>(),
+            Mock.Of<IMongoDbRepository<JobTitles>>(),
+            Mock.Of<IMongoDbRepository<AttendanceStatusSetting>>(),
+            attendanceRepo.Object,
+            segmentRepo.Object,
+            exceptionRepo.Object,
+            Mock.Of<IMongoDbRepository<MonthlyAttendanceSummary>>(),
+            Mock.Of<IMongoDbRepository<WeeklyOffSetting>>(),
+            Mock.Of<IMongoDbRepository<CalendarEntity>>(),
+            Mock.Of<IMongoDbRepository<AttendanceRemarkOption>>(),
+            Mock.Of<IAttendanceEditGuard>(),
+            scheduleService.Object,
+            Mock.Of<IAttendanceInitializationService>(),
+            roles.Object,
+            Mock.Of<IMongoDbRepository<Roles>>(),
+            mongoClient.Object,
+            Mock.Of<ILeaveManagementService>(),
+            Mock.Of<ILeaveAttendanceReconciliationService>(),
+            new AttendanceStatusCalculationService()
+        );
+
+        var dto = new WorkFromHomeHoursCorrectionDto
+        {
+            // 09:00 IST to 14:00 IST = 03:30 UTC to 08:30 UTC (5.0 hours >= 4.0h half-day minimum)
+            CheckInTime = date.AddHours(3).AddMinutes(30),
+            CheckOutTime = date.AddHours(8).AddMinutes(30),
+            Remarks = "Approved first half punches verified by HR",
+            ExceptionVersion = 1
+        };
+
+        var result = await service.CorrectInsufficientHours("exc-101", dto);
+
+        Assert.True(result.Success, $"Failed with: {result.ErrorCode} - {result.Message}");
+        Assert.Equal(200, result.StatusCode);
+        Assert.NotNull(updatedSegment);
+        Assert.Equal("WFH", updatedSegment.Status);
+        Assert.Equal(5.0m, updatedSegment.TotalHours);
+        Assert.Equal("wfh-req-101", updatedSegment.SourceId);
+
+        Assert.NotNull(updatedException);
+        Assert.Equal("RESOLVED", updatedException.Status);
+        Assert.Equal("wfh-req-101", updatedException.LeaveRequestId);
+        Assert.Equal(2, updatedException.Version);
+    }
+
+    [Fact]
+    public async Task CorrectInsufficientHours_OnStandaloneMongo_FullDayRow_SuccessfullyUpdatesAndResolvesException()
+    {
+        var companyId = "company-standalone-full-day";
+        var adminUserId = "admin-1";
+        var targetUserId = "user-anaya";
+        var date = new DateTime(2026, 10, 26, 0, 0, 0, DateTimeKind.Utc);
+
+        var httpContextAccessor = new Mock<IHttpContextAccessor>();
+        var context = new DefaultHttpContext();
+        var claims = new[]
+        {
+            new System.Security.Claims.Claim(Codeji.CMS.Utility.Enums.EnumsHelper.ClaimTypesEnum.company_id.ToString(), companyId),
+            new System.Security.Claims.Claim(Codeji.CMS.Utility.Enums.EnumsHelper.ClaimTypesEnum.user_id.ToString(), adminUserId)
+        };
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+        httpContextAccessor.Setup(h => h.HttpContext).Returns(context);
+
+        var policyRepo = new Mock<IMongoDbRepository<WorkFromHomePolicy>>();
+        policyRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomePolicy, bool>>>()))
+            .ReturnsAsync(new WorkFromHomePolicy
+            {
+                CompanyId = companyId,
+                IsEnabled = true,
+                FullDayMinimumHours = 8.0m,
+                HalfDayMinimumHours = 4.0m,
+                FullDayAttendanceStatusCode = "WFH",
+                TimeZoneId = "Asia/Kolkata"
+            });
+
+        var empRepo = new Mock<IMongoDbRepository<EmpUser>>();
+        empRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<EmpUser, bool>>>()))
+            .ReturnsAsync(new EmpUser
+            {
+                CompanyId = companyId,
+                UserId = targetUserId,
+                EmployeeId = "EMP1011",
+                FirstName = "Anaya",
+                LastName = "Sharma",
+                Email = "anaya@example.com",
+                DateOfJoining = "2025-01-01",
+                Status = true
+            });
+
+        var approvedRequest = new WorkFromHomeRequest
+        {
+            RequestId = "wfh-req-full-1",
+            CompanyId = companyId,
+            UserId = targetUserId,
+            Status = "Approved",
+            DurationType = "FullDay",
+            FromDate = date,
+            ToDate = date
+        };
+        var requestRepo = new Mock<IMongoDbRepository<WorkFromHomeRequest>>();
+        requestRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<WorkFromHomeRequest, bool>>>()))
+            .ReturnsAsync(approvedRequest);
+
+        var row = new AttendanceModel
+        {
+            AttendanceId = "att-full-1",
+            CompanyId = companyId,
+            UserId = targetUserId,
+            Date = date,
+            Status = "WFH",
+            SourceType = "WFH_REQUEST",
+            SourceId = "wfh-req-full-1",
+            Version = 1
+        };
+        AttendanceModel? updatedRow = null;
+        var attendanceCollection = new Mock<IMongoCollection<AttendanceModel>>();
+        attendanceCollection.Setup(x => x.ReplaceOneAsync(
+                It.IsAny<FilterDefinition<AttendanceModel>>(),
+                It.IsAny<AttendanceModel>(),
+                It.IsAny<ReplaceOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<FilterDefinition<AttendanceModel>, AttendanceModel, ReplaceOptions, CancellationToken>((_, r, _, _) => updatedRow = r)
+            .ReturnsAsync(new ReplaceOneResult.Acknowledged(1, 1, null));
+        var attendanceRepo = new Mock<IMongoDbRepository<AttendanceModel>>();
+        attendanceRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendanceModel, bool>>>()))
+            .ReturnsAsync(row);
+        attendanceRepo.Setup(x => x.GetCollection()).Returns(attendanceCollection.Object);
+
+        var exception = new AttendancePayrollException
+        {
+            Id = "exc-full-1",
+            CompanyId = companyId,
+            UserId = targetUserId,
+            EmployeeId = "EMP1011",
+            PayrollMonth = new DateTime(2026, 10, 1),
+            ExceptionType = "WFH_INSUFFICIENT_HOURS",
+            AttendanceDate = date,
+            ExistingAttendanceId = "att-full-1",
+            WorkFromHomeRequestId = "wfh-req-full-1",
+            Status = "PENDING_REVIEW",
+            Version = 1
+        };
+        AttendancePayrollException? updatedException = null;
+        var exceptionCollection = new Mock<IMongoCollection<AttendancePayrollException>>();
+        exceptionCollection.Setup(x => x.ReplaceOneAsync(
+                It.IsAny<FilterDefinition<AttendancePayrollException>>(),
+                It.IsAny<AttendancePayrollException>(),
+                It.IsAny<ReplaceOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<FilterDefinition<AttendancePayrollException>, AttendancePayrollException, ReplaceOptions, CancellationToken>((_, e, _, _) => updatedException = e)
+            .ReturnsAsync(new ReplaceOneResult.Acknowledged(1, 1, null));
+        var exceptionRepo = new Mock<IMongoDbRepository<AttendancePayrollException>>();
+        exceptionRepo.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<AttendancePayrollException, bool>>>()))
+            .ReturnsAsync(exception);
+        exceptionRepo.Setup(x => x.GetCollection()).Returns(exceptionCollection.Object);
+
+        var outboxRepo = new Mock<IMongoDbRepository<WorkFromHomeOutboxEvent>>();
+        var outboxCollection = new Mock<IMongoCollection<WorkFromHomeOutboxEvent>>();
+        outboxCollection.Setup(x => x.InsertManyAsync(
+                It.IsAny<IEnumerable<WorkFromHomeOutboxEvent>>(),
+                It.IsAny<InsertManyOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        outboxRepo.Setup(x => x.GetCollection()).Returns(outboxCollection.Object);
+
+        var scheduleService = new Mock<IEffectiveOfficeScheduleService>();
+        scheduleService.Setup(s => s.ResolveAsync(companyId, It.IsAny<EmpUser>(), date, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CompanyOfficeSchedule
+            {
+                CompanyId = companyId,
+                ScheduleId = "SCHED-1",
+                StartTime = new TimeSpan(9, 0, 0),
+                EndTime = new TimeSpan(18, 0, 0),
+                BreakMinutes = 60,
+                TimeZoneId = "Asia/Kolkata"
+            });
+
+        // Simulate Standalone MongoDB: session starts, but WithTransactionAsync throws MongoCommandException (code 20)
+        var mongoClient = new Mock<IMongoClient>();
+        var sessionMock = new Mock<IClientSessionHandle>();
+        sessionMock.Setup(x => x.WithTransactionAsync(
+                It.IsAny<Func<IClientSessionHandle, CancellationToken, Task<bool>>>(),
+                It.IsAny<TransactionOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(CreateStandaloneMongoException());
+        mongoClient.Setup(x => x.StartSessionAsync(It.IsAny<ClientSessionOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(sessionMock.Object);
+
+        var roles = new Mock<IRoleService>();
+        roles.Setup(r => r.IsModuleAccessibleForCompany(It.IsAny<string>(), companyId)).ReturnsAsync(true);
+        roles.Setup(r => r.VerifyUserAccess(It.IsAny<string>(), It.IsAny<string[]>(), adminUserId, companyId)).ReturnsAsync(true);
+
+        var service = new WorkFromHomeService(
+            httpContextAccessor.Object,
+            policyRepo.Object,
+            requestRepo.Object,
+            outboxRepo.Object,
+            Mock.Of<IMongoDbRepository<LeaveRequest>>(),
+            empRepo.Object,
+            Mock.Of<IMongoDbRepository<Department>>(),
+            Mock.Of<IMongoDbRepository<JobTitles>>(),
+            Mock.Of<IMongoDbRepository<AttendanceStatusSetting>>(),
+            attendanceRepo.Object,
+            Mock.Of<IMongoDbRepository<AttendanceDaySegment>>(),
+            exceptionRepo.Object,
+            Mock.Of<IMongoDbRepository<MonthlyAttendanceSummary>>(),
+            Mock.Of<IMongoDbRepository<WeeklyOffSetting>>(),
+            Mock.Of<IMongoDbRepository<CalendarEntity>>(),
+            Mock.Of<IMongoDbRepository<AttendanceRemarkOption>>(),
+            Mock.Of<IAttendanceEditGuard>(),
+            scheduleService.Object,
+            Mock.Of<IAttendanceInitializationService>(),
+            roles.Object,
+            Mock.Of<IMongoDbRepository<Roles>>(),
+            mongoClient.Object,
+            Mock.Of<ILeaveManagementService>(),
+            Mock.Of<ILeaveAttendanceReconciliationService>(),
+            new AttendanceStatusCalculationService()
+        );
+
+        var dto = new WorkFromHomeHoursCorrectionDto
+        {
+            // 09:00 IST to 18:00 IST = 03:30 UTC to 12:30 UTC (9 hours - 1 hour break = 8.0 hours >= 8.0h minimum)
+            CheckInTime = date.AddHours(3).AddMinutes(30),
+            CheckOutTime = date.AddHours(12).AddMinutes(30),
+            Remarks = "Full day punches verified",
+            ExceptionVersion = 1
+        };
+
+        var result = await service.CorrectInsufficientHours("exc-full-1", dto);
+
+        Assert.True(result.Success, $"Failed with: {result.ErrorCode} - {result.Message}");
+        Assert.Equal(200, result.StatusCode);
+        Assert.NotNull(updatedRow);
+        Assert.Equal("WFH", updatedRow.Status);
+        Assert.Equal(8.0m, updatedRow.TotalHours);
+
+        Assert.NotNull(updatedException);
+        Assert.Equal("RESOLVED", updatedException.Status);
+        Assert.Equal("wfh-req-full-1", updatedException.LeaveRequestId);
+        Assert.Equal(2, updatedException.Version);
+    }
 }
