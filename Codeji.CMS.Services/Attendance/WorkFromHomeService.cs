@@ -1511,38 +1511,87 @@ public sealed class WorkFromHomeService(
         catch (InvalidOperationException ex) { return Fail("WFH_ATTENDANCE_NOT_EDITABLE", ex.Message); }
 
         // Generic monthly exceptions do not carry the WFH request id. Resolve the
-        // source-owned attendance row first, then use its immutable SourceId to find
-        // the approved request. This keeps the correction tied to its WFH source.
-        var row = string.IsNullOrWhiteSpace(exception.ExistingAttendanceId)
-            ? null
-            : await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.AttendanceId == exception.ExistingAttendanceId && x.UserId == employee.UserId);
-        if (row is null || row.SourceType != "WFH_REQUEST" || string.IsNullOrWhiteSpace(row.SourceId) ||
-            (!string.IsNullOrWhiteSpace(exception.LeaveRequestId) && row.SourceId != exception.LeaveRequestId))
+        // source-owned attendance row or day segment, and match with the approved request.
+        var endOfAttendanceDate = dateToCorrect.AddDays(1);
+
+        // 1. Resolve approved WFH request
+        WorkFromHomeRequest? request = null;
+        var candidateRequestId = !string.IsNullOrWhiteSpace(exception.WorkFromHomeRequestId)
+            ? exception.WorkFromHomeRequestId
+            : exception.LeaveRequestId;
+        if (!string.IsNullOrWhiteSpace(candidateRequestId))
         {
-            var endOfAttendanceDate = dateToCorrect.AddDays(1);
-            row = await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.SourceType == "WFH_REQUEST" && x.Date >= dateToCorrect && x.Date < endOfAttendanceDate &&
-                (string.IsNullOrWhiteSpace(exception.LeaveRequestId) || x.SourceId == exception.LeaveRequestId));
+            request = await requests.FirstOrDefault(x => x.CompanyId == CompanyId && x.RequestId == candidateRequestId && x.UserId == employee.UserId && x.Status == "Approved");
         }
-        AttendanceDaySegment? segment = null;
-        if (row is null)
+        if (request is null)
         {
-            segment = string.IsNullOrWhiteSpace(exception.ExistingAttendanceId)
-                ? null
-                : await attendanceSegments.FirstOrDefault(x => x.CompanyId == CompanyId && x.AttendanceDaySegmentId == exception.ExistingAttendanceId && x.UserId == employee.UserId);
-            if (segment is null || segment.SourceType != "WFH_REQUEST" || string.IsNullOrWhiteSpace(segment.SourceId) ||
-                (!string.IsNullOrWhiteSpace(exception.LeaveRequestId) && segment.SourceId != exception.LeaveRequestId))
+            request = await requests.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.FromDate <= dateToCorrect && x.ToDate >= dateToCorrect && x.Status == "Approved");
+        }
+
+        // 2. Resolve target attendance row or segment
+        AttendanceModel? row = null;
+        AttendanceDaySegment? segment = null;
+
+        if (!string.IsNullOrWhiteSpace(exception.ExistingAttendanceId))
+        {
+            segment = await attendanceSegments.FirstOrDefault(x => x.CompanyId == CompanyId && x.AttendanceDaySegmentId == exception.ExistingAttendanceId && x.UserId == employee.UserId);
+            if (segment is null)
             {
-                var endOfAttendanceDate = dateToCorrect.AddDays(1);
-                segment = await attendanceSegments.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.SourceType == "WFH_REQUEST" && x.Date >= dateToCorrect && x.Date < endOfAttendanceDate &&
-                    (string.IsNullOrWhiteSpace(exception.LeaveRequestId) || x.SourceId == exception.LeaveRequestId));
+                row = await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.AttendanceId == exception.ExistingAttendanceId && x.UserId == employee.UserId);
             }
         }
-        if (row is null && (segment is null || segment.SourceType != "WFH_REQUEST" || string.IsNullOrWhiteSpace(segment.SourceId)))
+
+        if (segment is null && row is null)
+        {
+            if (request is not null && request.DurationType != "FullDay")
+            {
+                segment = await attendanceSegments.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.Date >= dateToCorrect && x.Date < endOfAttendanceDate &&
+                    (x.SourceType == "WFH_REQUEST" || (x.Status != null && x.Status.StartsWith("WFH")) || (!string.IsNullOrWhiteSpace(request.RequestId) && x.SourceId == request.RequestId)));
+            }
+
+            if (segment is null)
+            {
+                row = await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.Date >= dateToCorrect && x.Date < endOfAttendanceDate &&
+                    (x.SourceType == "WFH_REQUEST" || (x.Status != null && x.Status.StartsWith("WFH")) || (request != null && !string.IsNullOrWhiteSpace(request.RequestId) && x.SourceId == request.RequestId)));
+            }
+
+            if (segment is null && row is null)
+            {
+                segment = await attendanceSegments.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.Date >= dateToCorrect && x.Date < endOfAttendanceDate &&
+                    (x.SourceType == "WFH_REQUEST" || (x.Status != null && x.Status.StartsWith("WFH"))));
+                if (segment is null)
+                {
+                    row = await attendance.FirstOrDefault(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.Date >= dateToCorrect && x.Date < endOfAttendanceDate);
+                }
+            }
+        }
+
+        if (row is null && segment is null)
             return Fail("WFH_ATTENDANCE_CONFLICT", "No WFH-owned attendance record matches this employee and affected date. Refresh the exception list and verify the approved WFH request.");
 
-        var sourceId = row?.SourceId ?? segment!.SourceId;
-        var request = await requests.FirstOrDefault(x => x.CompanyId == CompanyId && x.RequestId == sourceId && x.UserId == employee.UserId && x.Status == "Approved");
+        // Priority 3 for request: check via row / segment SourceId if still not resolved
+        if (request is null)
+        {
+            var sourceId = !string.IsNullOrWhiteSpace(row?.SourceId) ? row?.SourceId : segment?.SourceId;
+            if (!string.IsNullOrWhiteSpace(sourceId))
+            {
+                request = await requests.FirstOrDefault(x => x.CompanyId == CompanyId && x.RequestId == sourceId && x.UserId == employee.UserId && x.Status == "Approved");
+            }
+        }
+
         if (request is null) return Fail("WFH_REQUEST_NOT_AVAILABLE", "The approved WFH request linked to the attendance record is no longer available.");
+
+        if (segment is not null)
+        {
+            if (string.IsNullOrWhiteSpace(segment.SourceType)) segment.SourceType = "WFH_REQUEST";
+            if (string.IsNullOrWhiteSpace(segment.SourceId)) segment.SourceId = request.RequestId;
+        }
+        if (row is not null)
+        {
+            if (string.IsNullOrWhiteSpace(row.SourceType)) row.SourceType = "WFH_REQUEST";
+            if (string.IsNullOrWhiteSpace(row.SourceId)) row.SourceId = request.RequestId;
+        }
+
         var policy = await ActivePolicy();
         if (policy is null) return Fail("WFH_POLICY_DISABLED", "WFH policy is disabled.");
         var schedule = await effectiveSchedules.ResolveAsync(CompanyId, employee, dateToCorrect);
@@ -1574,6 +1623,7 @@ public sealed class WorkFromHomeService(
             segment.CheckInTime = dto.CheckInTime; segment.CheckOutTime = dto.CheckOutTime; segment.TotalHours = totalHours;
             segment.Remarks = $"HR/Admin corrected WFH hours: {Clean(dto.Remarks)}"; segment.UpdatedAtUtc = DateTime.UtcNow; segment.Version++;
             exception.Status = "RESOLVED"; exception.Resolution = $"WFH hours corrected to {totalHours:0.##} hour(s) by HR/Admin.";
+            exception.LeaveRequestId = request.RequestId;
             exception.ReviewedBy = UserId; exception.ReviewedAt = DateTime.UtcNow; exception.UpdatedBy = UserId; exception.UpdatedDate = DateTime.UtcNow; exception.Version++;
             var auditEvent = BuildAuditOutboxEvent(request, request.Status, request.Status, "HoursCorrected", "WFH_HOURS_CORRECTED", dto.Remarks, UserId);
 
@@ -1596,7 +1646,7 @@ public sealed class WorkFromHomeService(
                 await session.WithTransactionAsync(async (transaction, cancellationToken) =>
                 {
                     var segmentWrite = await attendanceSegments.GetCollection().ReplaceOneAsync(transaction,
-                        Builders<AttendanceDaySegment>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.AttendanceDaySegmentId == segment.AttendanceDaySegmentId && x.SourceType == "WFH_REQUEST" && x.SourceId == request.RequestId && x.Version == originalSegmentVersion),
+                        Builders<AttendanceDaySegment>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.AttendanceDaySegmentId == segment.AttendanceDaySegmentId && x.Version == originalSegmentVersion),
                         segment, cancellationToken: cancellationToken);
                     if (segmentWrite.MatchedCount != 1) throw new InvalidOperationException("WFH_ATTENDANCE_UPDATE_FAILED");
                     if (dailyRow is not null)
@@ -1639,6 +1689,7 @@ public sealed class WorkFromHomeService(
         row.Version++;
         exception.Status = "RESOLVED";
         exception.Resolution = $"WFH hours corrected to {totalHours:0.##} hour(s) by HR/Admin.";
+        exception.LeaveRequestId = request.RequestId;
         exception.ReviewedBy = UserId;
         exception.ReviewedAt = DateTime.UtcNow;
         exception.UpdatedBy = UserId;
@@ -1651,7 +1702,7 @@ public sealed class WorkFromHomeService(
             await session.WithTransactionAsync(async (transaction, cancellationToken) =>
             {
                 var attendanceWrite = await attendance.GetCollection().ReplaceOneAsync(transaction,
-                    Builders<AttendanceModel>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.AttendanceId == row.AttendanceId && x.SourceType == "WFH_REQUEST" && x.SourceId == request.RequestId && x.Version == originalRowVersion), row, cancellationToken: cancellationToken);
+                    Builders<AttendanceModel>.Filter.Where(x => x.CompanyId == CompanyId && x.UserId == employee.UserId && x.AttendanceId == row.AttendanceId && x.Version == originalRowVersion), row, cancellationToken: cancellationToken);
                 if (attendanceWrite.MatchedCount != 1) throw new InvalidOperationException("WFH_ATTENDANCE_UPDATE_FAILED");
                 var exceptionWrite = await exceptions.GetCollection().ReplaceOneAsync(transaction,
                     Builders<AttendancePayrollException>.Filter.Where(x => x.Id == exception.Id && x.CompanyId == CompanyId && x.Status == "PENDING_REVIEW" && x.Version == dto.ExceptionVersion), exception, cancellationToken: cancellationToken);
