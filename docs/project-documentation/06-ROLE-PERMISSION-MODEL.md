@@ -81,7 +81,7 @@ When a new company registers or defaults are seeded (`RoleServices.DefaultRoleTe
 
 | Role Name | Enum ID | Default Role Title | Default Properties | Functional Responsibilities |
 |---|---|---|---|---|
-| **Administrator** | `1` | Company Administrator | `IsNotEditable: true`, `HasAppAccess: true` | Complete, unrestricted administrative control. Bypasses all granular permission checks across all modules. Reserved for client account owners. |
+| **Administrator** | `1` | Company Administrator | `IsNotEditable: true`, `HasAppAccess: true` | Complete administrative control across **all enabled modules**. Cannot bypass tenant module enablement: if a module is uninstalled/disabled for the tenant, all access to its endpoints and setting tabs is denied fail-closed for Administrators as well. Reserved for client account owners. |
 | **HR Manager** | `2` | HR Manager | `IsNotEditable: false`, `HasAppAccess: true` | Full operational authority over employee lifecycles, recruitment, leave policies, attendance locks, payroll execution, and separation cases. |
 | **HR Executive** | `4` | HR Executive | `IsNotEditable: false`, `HasAppAccess: true` | Operational peer to HR Manager for day-to-day HR workflows (candidate processing, attendance adjustments, employee data entry). |
 | **Employee** | `3` | Employee | `IsNotEditable: false`, `HasAppAccess: true` | Self-service access: personal profile, daily punch, personal leave/WFH requests, personal payslips, company notice board. |
@@ -211,5 +211,5 @@ flowchart TD
 ```
 
 1. **Client-Side Hiding is NOT Security**: If an employee inspects DOM elements and enables a hidden button or fires an API request directly via curl or Postman, the request is intercepted by `CompanyIdMiddleware`.
-2. **Authoritative Backend Rejection**: `RoleServices.VerifyUserAccess` resolves the user's assigned role from MongoDB in the current tenant scope. If the role lacks the specific module-permission pair, the request is aborted immediately with HTTP `403 Forbidden`.
+2. **Authoritative Backend Rejection**: `RoleServices.VerifyUserAccess` first checks if the target module is installed/accessible for the company via `IsModuleAccessibleForCompany`. If disabled, it immediately returns `false` (HTTP 403 Forbidden) before evaluating roles or Administrator status. Next, it resolves the user's assigned role in the current tenant scope; if the role lacks the specific module-permission pair, access is rejected.
 3. **Multi-Tenant Isolation**: Role permissions are scoped to `CompanyId`. A user granted Administrator privileges in Company A possesses zero permissions in Company B.

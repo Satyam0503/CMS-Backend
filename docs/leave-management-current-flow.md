@@ -46,7 +46,12 @@ These profile routes do not require Leave Management module permission. Every ro
 | Edit own pending request | `PATCH me/requests` | Current user; pending request only |
 | Withdraw own pending request | `DELETE me/requests/{leaveRequestId}` | Current user and current company only |
 
-The profile tab is always available in **My Profile**. It shows only the policies/balances assigned to that employee and their own request history. It does not grant policy configuration, balance allocation, decision, company request listing, or another employee's data. HR/Admin continue to do those actions through Leave Management with module permissions.
+The profile tab is available in **My Profile** **only when Leave Management is enabled for the company**. If Leave Management is uninstalled or disabled for the tenant:
+1. In the frontend, `profileTabs.ts` filters out the `Leave Tracker` tab, and `/profile/leave` route in `ProfileRoutes.tsx` redirects away to `/profile/about`.
+2. In the backend, all self-service endpoints (`me/balances`, `me/requests`, `me/policies`, `GetMyLeaveRequests`, `DeleteLeaveRequest`) enforce `IsModuleAccessibleForCompany(AppModule.LeaveManagement, companyId)`. If disabled, they immediately return `Result.Failure(ResultStatusCode.BadRequest, "MODULE_NOT_ACCESSIBLE")` or HTTP 403.
+3. Self-service profile operations cannot bypass tenant-level module disablement.
+
+**Decoupling from Payroll**: Leave Management is independent of the Payroll module. A tenant may operate Leave Management and Attendance tracking without enabling Payroll, and disabling Payroll does NOT cascade to Leave Management or Attendance.
 
 The older generic self endpoints remain module-permission protected for compatibility with management screens; the Profile Leave Tracker calls the `me/*` endpoints.
 

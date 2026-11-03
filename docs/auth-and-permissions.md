@@ -223,9 +223,11 @@ if (endpoint != null && !string.IsNullOrEmpty(userId) && !string.IsNullOrEmpty(c
 ```
 
 `IRoleService.VerifyUserAccess(module, permissions[], userId, companyId)`:
-1. Resolves the user's role.
-2. Joins `RolePermission → ModulePermission → Module + Permission`.
-3. Returns `true` if **any** required permission has `HasAccess == true`.
+0. **Module Accessibility Pre-check**: Calls `IsModuleAccessibleForCompany(module, companyId)`. If the module is disabled or uninstalled for the tenant, immediately returns `false` (fail-closed HTTP 403 Access Denied) — **Administrators CANNOT bypass uninstalled modules**.
+1. Resolves the user's role from MongoDB in the current tenant scope.
+2. If the user is an `Administrator` and the module is active, grants access.
+3. For other roles: Joins `RolePermission → ModulePermission → Module + Permission`.
+4. Returns `true` if **any** required permission has `HasAccess == true`.
 
 ---
 

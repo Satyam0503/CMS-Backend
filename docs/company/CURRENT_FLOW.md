@@ -1430,9 +1430,15 @@ The actor must also satisfy any company, ownership, relationship, state and conc
 1. Routing selects `CompanyMasterController.UpdateModuleAccess()`.
 2. ASP.NET Core applies authentication/authorization filters and binds the request.
 3. Parameters are bound from `string moduleId`.
-4. The controller executes/delegates to `string.IsNullOrEmpty()`.
-5. The service validates domain rules and resolves company-owned records.
-6. Repository operations read or mutate the applicable Mongo records.
+4. The controller delegates to `_companyMasterService.UpdateModuleAccess(moduleId)`.
+5. The service resolves the current company context and checks which module is targeted:
+   - **PayRoll**: Toggles both `PayRoll` and `PayrollSettings`. Does **not** cascade to `Leave_Management` or `Attendance`.
+   - **Leave Management**: Toggles `Leave_Management` independently.
+   - **Attendance**: Toggles `Attendance` independently.
+   - **Offboarding**: Toggles `Offboarding` independently.
+   - **Other modules**: Toggles `Calendar`, `Notice_Board`, `Policy`, `WorkFromHome`, `Recruitment` independently.
+6. Updates `RolePermission.IsAccessible` in MongoDB across all roles for the tenant.
+7. Any disabled module operates **fail-closed**: all its endpoints reject requests with HTTP 403 Forbidden (`Access Denied`) for all roles, including `Administrator`.
 7. Audit, notification, outbox or background effects occur only where the inspected implementation performs them.
 8. The result flows through the shared API response/error pipeline.
 

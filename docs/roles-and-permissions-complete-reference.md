@@ -9,6 +9,7 @@ Access is tenant-scoped and permission-based. A role name such as **HR** or **Ad
 ```text
 Authenticated EmpUser
   → role_id claim
+  → Module Accessibility Check: IsModuleAccessibleForCompany(module, companyId) [FAIL-CLOSED]
   → Roles document
   → RolePermission grant for the company
   → ModulePermission (module + permission)
@@ -22,7 +23,8 @@ Every protected service must obtain `CompanyId` and `UserId` from `CurrentContex
 | Layer | Source | Purpose | Failure |
 |---|---|---|---|
 | Authentication | JWT bearer middleware | Validates issuer, audience, expiry and signature | 401 |
-| ASP.NET policy | `[Authorize]`, `AdminOnly` | Restricts an action to a policy/role rule | 401/403 |
+| Module enablement | `IsModuleAccessibleForCompany` | Verifies tenant has installed/enabled the module before any role or admin evaluation | 403 Forbidden |
+| ASP.NET policy | `[Authorize]`, `AdminOnly` | Restricts an action to a policy/role rule (cannot bypass disabled modules) | 401/403 |
 | Module action | `ModulePermissionAttribute` | Checks a role grant for `AppModule` + `Permission` | 403 |
 | Tenant/ownership | service query and update filters | Ensures user/company owns the record or is the intended reviewer | generic business failure/403 |
 | Workflow state | service validation + optimistic version | Prevents invalid transitions/races | business failure |
@@ -49,7 +51,7 @@ The permission constants are declared in `Codeji.CMS.Utility/Constraints/Constra
 
 | Role type | Intended responsibility | Important limitation |
 |---|---|---|
-| Administrator | Company master data, roles, policies, high-risk HR/payroll operations | Must still hold the relevant `RolePermission`; tenant filter still applies. |
+| Administrator | Company master data, roles, policies, high-risk HR/payroll operations | Must still hold the relevant `RolePermission`; tenant filter still applies. **Cannot bypass uninstalled/disabled modules** (fail-closed across backend & frontend). |
 | HR | Employee lifecycle, attendance/leave/payroll/recruitment operations and WFH review | Must not rely on role name alone; policy configuration needs its module action grant. |
 | Employee | Own profile/self-service and employee-visible information | May never derive access to another employee by passing their identifier. |
 | Manager | Not a distinct built-in enum in this implementation | WFH team decisions require deliberate role-permission grant and assigned-approver relationship. |

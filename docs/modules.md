@@ -17,6 +17,7 @@ The catalog of every domain in the API. Each entry lists the controller, service
 | [Notice Board](#notice-board) | [NoticeBoardController.cs](../Codeji.CMS.API/Controllers/NoticeBoardController.cs) | `Notice_Board` |
 | [Job Vacancies](#job-vacancies) | [JobVacancyController.cs](../Codeji.CMS.API/Controllers/JobVacancyController.cs) | `Jobs` |
 | [Applicants](#applicants) | [ApplicantsController.cs](../Codeji.CMS.API/Controllers/ApplicantsController.cs) | `Applications` |
+| [Offboarding](#offboarding) | [OffboardingController.cs](../Codeji.CMS.API/Controllers/OffboardingController.cs) | `Offboarding` |
 | [Payroll](#payroll) | [PayRollController.cs](../Codeji.CMS.API/Controllers/PayRollController.cs), [AutoPayrollController.cs](../Codeji.CMS.API/Controllers/AutoPayrollController.cs) | `PayRoll` |
 | [Career Profile](#career-profile) | [CareerProfileController.cs](../Codeji.CMS.API/Controllers/CareerProfileController.cs) | `Career_Profile` |
 | [Salary](#salary) | [SalaryController.cs](../Codeji.CMS.API/Controllers/SalaryController.cs) | `Employees` |
@@ -317,6 +318,23 @@ Salary is not the same thing as monthly payroll:
 - payroll is the month-specific execution record generated from attendance and salary;
 - salary changes affect future payroll periods, not historical locked months.
 
+---
+
+## Offboarding
+
+**Purpose.** Separation lifecycle management: resignation submission, exit reason tracking, notice period policies and adjustments, multi-departmental clearance workflows, asset/document handover, full-and-final settlement handoff, and alumni transition.
+
+| What | Where |
+|---|---|
+| Controller | [OffboardingController.cs](../Codeji.CMS.API/Controllers/OffboardingController.cs) — route `api/offboarding` |
+| Service | [EmployeeExitService.cs](../Codeji.CMS.Services/Offboarding/EmployeeExitService.cs), [EmployeeExitClearanceService.cs](../Codeji.CMS.Services/Offboarding/EmployeeExitClearanceService.cs), [EmployeeExitPolicyService.cs](../Codeji.CMS.Services/Offboarding/EmployeeExitPolicyService.cs) |
+| Entities | [EmployeeExit.cs](../Codeji.CMS.Repository/Entities/Offboarding/EmployeeExit.cs), [EmployeeExitClearance.cs](../Codeji.CMS.Repository/Entities/Offboarding/EmployeeExitClearance.cs), [EmployeeExitPolicy.cs](../Codeji.CMS.Repository/Entities/Offboarding/EmployeeExitPolicy.cs) |
+| Notable DTOs | `EmployeeExitDto`, `ResignationRequestDto`, `ClearanceTaskDto`, `ExitPolicyDto` |
+| Key routes | Resignation submission, manager review, clearance management, settlement initiation, exit completion |
+| Permission gate | `[ModulePermission(Offboarding, ...)]` |
+
+---
+
 ## Career Profile
 
 **Purpose.** Public company profile content for the career portal: company branding, descriptions, mission/vision, social links, benefits, and related HTML content.
@@ -359,6 +377,25 @@ Notable endpoints:
 - `GET api/dashboard/GenderDetails` — pie-chart data
 - `GET api/dashboard/UpcomingHoliday`
 - `GET api/dashboard/UpcomingCelebrations` — birthdays + work anniversaries
+
+---
+
+---
+
+## Module Lifecycle, Independence & Fail-Closed Security Policy
+
+### 1. Granular Decoupling
+- **PayRoll, Leave Management, and Attendance are independent**:
+  - Toggling `PayRoll` (via `PATCH api/CompanyMaster/UpdateModuleAccess/{moduleId}`) only enables or disables `PayRoll` and `PayrollSettings`. It does **not** disable or cascade changes to `Leave_Management` or `Attendance`.
+  - `Leave_Management` and `Attendance` possess independent module entries and lifecycle toggles in both backend and frontend.
+  - A tenant company may operate Leave Management and Attendance tracking without enabling Payroll, or disable Payroll without impacting daily attendance or leave balances.
+
+### 2. Fail-Closed Enforcement for Disabled/Uninstalled Modules
+- When a module is toggled off (disabled) for a company:
+  - **No Administrator Bypass**: Administrators **cannot** bypass disabled modules. In `RoleServices.VerifyUserAccess`, module accessibility (`IsModuleAccessibleForCompany`) is evaluated **before** role resolution and before Administrator privilege checks. If the module is disabled for the tenant, requests fail immediately with HTTP 403 Forbidden (`Access Denied`).
+  - **Dynamic Permission Filtering**: `GetRolePermissionByRoleId` strips out all permissions corresponding to disabled modules.
+  - **Employee Self-Service Security**: Self-service endpoints in domain services (e.g. `LeaveManagementService.cs` endpoints `me/balances`, `me/requests`, `me/policies`, `GetMyLeaveRequests`, `DeleteLeaveRequest`) enforce `IsModuleAccessibleForCompany(AppModule.LeaveManagement, companyId)`. If disabled, they immediately return `Result.Failure(ResultStatusCode.BadRequest, "MODULE_NOT_ACCESSIBLE")`.
+  - **UI Tab & Route Guarding**: Uninstalled modules have their setting tabs (such as `Offboarding` and `Payroll configuration` in `CompanyDetails.tsx`) and sub-routes hidden and blocked from all users, including Administrators.
 
 ---
 

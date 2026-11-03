@@ -139,3 +139,22 @@ Employee Exit Completed (LWD reached & clearances approved)
        ├── 7. EmployeeExitOutbox enqueued (Separation confirmation emails)
        └── 8. FormerEmployeeAccessToken provisioned for alumni portal
 ```
+
+---
+
+## 4. Tenant Module Lifecycle & Independence Matrix
+
+Codeji HRMS decouples optional business modules so tenants can configure exactly the capabilities they require without unintended side effects:
+
+| Module | Independent Lifecycle | On Module Disablement / Uninstall |
+|---|---|---|
+| **PayRoll** | Independent | Disables Payroll processing and Payroll Settings tabs/routes. **Does NOT disable Leave Management or Attendance.** Profile "View Pay Slip" widget is hidden. |
+| **Leave Management** | Independent | Disables Leave Management HR routes and Profile Leave Tracker tab (`/profile/leave`). Self-service endpoints return `MODULE_NOT_ACCESSIBLE`. Dashboard `<EmpOnLeave />` is hidden. |
+| **Attendance** | Independent | Disables Attendance grid and clocking endpoints. Does not disable Leave Management or Payroll calculations. |
+| **Offboarding** | Independent | Disables separation flows and clearance checklists. Company Details "Offboarding" tab is removed for all roles. |
+| **Work From Home** | Independent | Disables WFH requests and clocking actions. |
+| **Recruitment** | Independent | Disables ATS vacancies, candidate pipeline, and interview scoring. |
+
+### Fail-Closed Security Policy
+- **No Administrator Bypass**: If a module is disabled for a company, all access to its endpoints and configuration tabs is blocked fail-closed for all roles, including `Administrator`.
+- **Dynamic Role Permission Stripping**: When module accessibility is toggled off, `RoleServices` strips out all module-permission grants for that module from all roles in that company.

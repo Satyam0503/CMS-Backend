@@ -21,7 +21,7 @@ Leave Management module (HR/Admin)
   └─ balances, summaries and leave-to-attendance reconciliation
 ```
 
-An employee can use the Profile Leave Tracker without being allowed into the Leave Management module. An employee who can view Attendance can see only their own grid; that does not grant employee-directory, company-grid, edit, policy, exception, or payroll access.
+An employee can use the Profile Leave Tracker without being allowed into the Leave Management module, provided the company has the Leave Management module enabled. If the company uninstalls/disables Leave Management, the Leave Tracker tab is hidden in the frontend and self-service endpoints fail closed with `MODULE_NOT_ACCESSIBLE`. An employee who can view Attendance can see only their own grid; that does not grant employee-directory, company-grid, edit, policy, exception, or payroll access.
 
 ## 2. Shared identity, tenant, and persistence rules
 
@@ -47,7 +47,7 @@ Role names alone are not authorization. The assigned module permission is evalua
 | Persona | Attendance | Leave Tracker in own profile | Leave Management |
 |---|---|---|---|
 | Employee with `Attendance.View` | `GET api/attendance/me/grid`; read-only monthly grid; correction requests | View own assigned balances, apply, view/edit/withdraw own pending request | No policy, company list, decisions, or other employee data |
-| Employee without `Attendance.View` | No self grid or correction route | Unchanged: own leave tracker remains available | No management access |
+| Employee without `Attendance.View` | No self grid or correction route | Own leave tracker remains available (provided Leave Management module is enabled for the company) | No management access |
 | HR/Admin with `Attendance.ViewAll` | Company employee grid, subject to further Create/Edit checks | Own tracker; selected employee tracker requires Leave Management View | Can view company leave information according to assigned actions |
 | HR/Admin with Attendance Create/Edit | Mark/edit attendance, review exceptions, validate/lock as permitted | Same as above | Separate permission set; attendance rights do not imply leave-policy rights |
 | HR/Admin with Leave Management View/Create/Edit | No automatic attendance edit grant | May use their own tracker | Policies, employee balances, lists and request decisions as action permits |

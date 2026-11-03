@@ -100,7 +100,13 @@ The declared parameters are: `[FromBody] CalendarFilters? filters`. Types and va
 
 ### Business rules and tenant boundary
 
-Business rules are service-owned. Verify the delegated method for company filters, actor ownership, relationship scope, status transitions, optimistic version predicates, date rules, and duplicate handling. If none are present, record that as a potential issue rather than assuming global middleware supplies them.
+- **Tenant Isolation**: Updates `RolePermission.IsAccessible` strictly for the current `CompanyId`.
+- **Granular Decoupling**:
+  - Toggling `PayRoll` updates `PayRoll` and `PayrollSettings`. It does **not** disable `Leave_Management` or `Attendance`.
+  - `Leave_Management` and `Attendance` are independently toggled.
+  - `Offboarding` is independently toggled.
+- **Fail-Closed Security**: When a module is turned off, `RoleServices.VerifyUserAccess` returns `false` (HTTP 403) before evaluating roles. **Administrators CANNOT bypass uninstalled modules**.
+- **Self-Service Endpoints**: Self-service endpoints in domain services (e.g. `me/balances`, `me/requests`, `me/policies` for Leave Management) verify module enablement on the tenant before servicing requests.
 
 ### Extracted implementation evidence
 
