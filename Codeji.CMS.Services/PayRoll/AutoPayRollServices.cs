@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.PayRoll;
@@ -16,6 +17,8 @@ namespace Codeji.CMS.Services.PayRoll
 {
     public class AutoPayrollServices : IAutoPayRollServices
     {
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> _payrollLocks = new();
+
         private readonly IPayRollServices _payRollServices;
         private readonly IMongoDbRepository<EmpUser> _employeeRepository;
         private readonly IMongoDbRepository<EmpPayRoll> _empPayRollRepository;
@@ -91,6 +94,12 @@ namespace Codeji.CMS.Services.PayRoll
             DateTime? plannedPaymentDate = null)
         {
             var monthStart = new DateTime(payMonth.Year, payMonth.Month, 1);
+            var lockKey = $"{companyId}:{monthStart:yyyy-MM}";
+            var sem = _payrollLocks.GetOrAdd(lockKey, _ => new SemaphoreSlim(1, 1));
+            if (!await sem.WaitAsync(TimeSpan.Zero))
+                return new Result { Success = false, Message = $"Payroll generation for {monthStart:MMMM yyyy} is already in progress." };
+            try
+            {
             // Payroll keys are calendar months. Use the canonical first-of-month value for
             // every read and write so a time component or client timezone cannot create a
             // second key for the same displayed month.
@@ -748,7 +757,7 @@ namespace Codeji.CMS.Services.PayRoll
                     {
                         EmployeeId = emp.EmployeeId,
                         PayMonth = monthStart,
-                        PaidDate = DateTime.UtcNow,
+                        PaidDate = tdsPaymentDate,
                         BasicPay = finalBasic,
                         HRA = hra,
                         LTA = lta,
@@ -892,6 +901,11 @@ namespace Codeji.CMS.Services.PayRoll
                     ? $"Generated payroll draft for {processedCount} of {consideredCount} employees. {skippedNoSalaryCount} employee(s) have no salary structure defined.{skippedIdentityText}"
                     : $"Generated payroll draft for {processedCount} employee(s). Review it and process the month to publish payslips."
             };
+            }
+            finally
+            {
+                sem.Release();
+            }
         }
 
         // This service currently writes through legacy repositories that do not expose a

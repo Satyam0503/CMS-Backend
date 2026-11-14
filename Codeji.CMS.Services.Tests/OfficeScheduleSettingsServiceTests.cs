@@ -5,6 +5,7 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Services.Attendance;
 using MongoDB.Driver;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -32,7 +33,7 @@ public sealed class OfficeScheduleSettingsServiceTests
         var employeeAssignments = new Mock<IMongoDbRepository<EmployeeScheduleAssignment>>();
         var departmentAssignments = new Mock<IMongoDbRepository<DepartmentScheduleAssignment>>();
 
-        var service = new OfficeScheduleSettingsService(schedulesRepo.Object, employeeAssignments.Object, departmentAssignments.Object);
+        var service = new OfficeScheduleSettingsService(schedulesRepo.Object, employeeAssignments.Object, departmentAssignments.Object, NullLogger<OfficeScheduleSettingsService>.Instance);
 
         var result = await service.EnsureDefaultScheduleAsync(companyId);
 
@@ -84,7 +85,7 @@ public sealed class OfficeScheduleSettingsServiceTests
         var employeeAssignments = new Mock<IMongoDbRepository<EmployeeScheduleAssignment>>();
         var departmentAssignments = new Mock<IMongoDbRepository<DepartmentScheduleAssignment>>();
 
-        var service = new OfficeScheduleSettingsService(schedulesRepo.Object, employeeAssignments.Object, departmentAssignments.Object);
+        var service = new OfficeScheduleSettingsService(schedulesRepo.Object, employeeAssignments.Object, departmentAssignments.Object, NullLogger<OfficeScheduleSettingsService>.Instance);
 
         var result = await service.EnsureDefaultScheduleAsync(companyId);
 
@@ -118,7 +119,7 @@ public sealed class OfficeScheduleSettingsServiceTests
         var employeeAssignments = new Mock<IMongoDbRepository<EmployeeScheduleAssignment>>();
         var departmentAssignments = new Mock<IMongoDbRepository<DepartmentScheduleAssignment>>();
 
-        var service = new OfficeScheduleSettingsService(schedulesRepo.Object, employeeAssignments.Object, departmentAssignments.Object);
+        var service = new OfficeScheduleSettingsService(schedulesRepo.Object, employeeAssignments.Object, departmentAssignments.Object, NullLogger<OfficeScheduleSettingsService>.Instance);
 
         var result = await service.GetAsync(companyId);
 
@@ -149,7 +150,7 @@ public sealed class OfficeScheduleSettingsServiceTests
         var employeeAssignments = new Mock<IMongoDbRepository<EmployeeScheduleAssignment>>();
         var departmentAssignments = new Mock<IMongoDbRepository<DepartmentScheduleAssignment>>();
 
-        var service = new OfficeScheduleSettingsService(schedulesRepo.Object, employeeAssignments.Object, departmentAssignments.Object);
+        var service = new OfficeScheduleSettingsService(schedulesRepo.Object, employeeAssignments.Object, departmentAssignments.Object, NullLogger<OfficeScheduleSettingsService>.Instance);
 
         var result = await service.GetAllAsync(companyId);
 
@@ -182,7 +183,7 @@ public sealed class OfficeScheduleSettingsServiceTests
         var service = new OfficeScheduleSettingsService(
             schedulesRepo.Object,
             new Mock<IMongoDbRepository<EmployeeScheduleAssignment>>().Object,
-            new Mock<IMongoDbRepository<DepartmentScheduleAssignment>>().Object);
+            new Mock<IMongoDbRepository<DepartmentScheduleAssignment>>().Object, NullLogger<OfficeScheduleSettingsService>.Instance);
 
         var result = await service.DeleteAsync(companyId, "admin-1", "def-shift");
 
@@ -226,7 +227,7 @@ public sealed class OfficeScheduleSettingsServiceTests
             .ReturnsAsync(Array.Empty<DepartmentScheduleAssignment>());
 
         var reconciliation = new Mock<IShiftAttendanceReconciliationService>();
-        var service = new OfficeScheduleSettingsService(schedulesRepo.Object, employeeAssignments.Object, departmentAssignments.Object, reconciliation.Object);
+        var service = new OfficeScheduleSettingsService(schedulesRepo.Object, employeeAssignments.Object, departmentAssignments.Object, NullLogger<OfficeScheduleSettingsService>.Instance, reconciliation.Object);
 
         var result = await service.DeleteAsync(companyId, "admin-1", "custom-shift");
 
@@ -272,7 +273,7 @@ public sealed class OfficeScheduleSettingsServiceTests
             .ReturnsAsync(new Result { Success = true });
 
         var reconciliation = new Mock<IShiftAttendanceReconciliationService>();
-        var service = new OfficeScheduleSettingsService(schedulesRepo.Object, employeeAssignments.Object, departmentAssignments.Object, reconciliation.Object);
+        var service = new OfficeScheduleSettingsService(schedulesRepo.Object, employeeAssignments.Object, departmentAssignments.Object, NullLogger<OfficeScheduleSettingsService>.Instance, reconciliation.Object);
 
         var result = await service.DeleteAsync(companyId, "admin-1", "custom-shift");
 
@@ -308,7 +309,7 @@ public sealed class OfficeScheduleSettingsServiceTests
         var service = new OfficeScheduleSettingsService(
             schedulesRepo.Object,
             new Mock<IMongoDbRepository<EmployeeScheduleAssignment>>().Object,
-            new Mock<IMongoDbRepository<DepartmentScheduleAssignment>>().Object);
+            new Mock<IMongoDbRepository<DepartmentScheduleAssignment>>().Object, NullLogger<OfficeScheduleSettingsService>.Instance);
 
         // Tenant B tries to delete Tenant A's shift
         var deleteResult = await service.DeleteAsync(tenantB, "attacker-user", "shift-alpha-1");
@@ -366,7 +367,7 @@ public sealed class OfficeScheduleSettingsServiceTests
         var service = new OfficeScheduleSettingsService(
             schedulesRepo.Object,
             new Mock<IMongoDbRepository<EmployeeScheduleAssignment>>().Object,
-            new Mock<IMongoDbRepository<DepartmentScheduleAssignment>>().Object);
+            new Mock<IMongoDbRepository<DepartmentScheduleAssignment>>().Object, NullLogger<OfficeScheduleSettingsService>.Instance);
 
         // Attempt duplicate name
         var dupeNameRequest = new OfficeScheduleSettingsDto

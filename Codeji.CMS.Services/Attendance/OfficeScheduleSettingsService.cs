@@ -2,6 +2,7 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Attendance;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Attendance;
+using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
 
 namespace Codeji.CMS.Services.Attendance;
@@ -19,6 +20,7 @@ public sealed class OfficeScheduleSettingsService(
     IMongoDbRepository<CompanyOfficeSchedule> schedules,
     IMongoDbRepository<EmployeeScheduleAssignment> employeeAssignments,
     IMongoDbRepository<DepartmentScheduleAssignment> departmentAssignments,
+    ILogger<OfficeScheduleSettingsService> logger,
     IShiftAttendanceReconciliationService? shiftReconciliation = null) : IOfficeScheduleSettingsService
 {
     public async Task<Result<OfficeScheduleSettingsDto>> EnsureDefaultScheduleAsync(string companyId, CancellationToken cancellationToken = default)
@@ -166,7 +168,7 @@ public sealed class OfficeScheduleSettingsService(
         if (shiftReconciliation != null)
         {
             try { await shiftReconciliation.ReconcileTodayShiftAttendanceAsync(companyId, cancellationToken); }
-            catch { /* Non-blocking */ }
+            catch (Exception ex) { logger.LogWarning(ex, "Shift reconciliation failed after schedule save for {CompanyId}", companyId); }
         }
         return new Result<OfficeScheduleSettingsDto> { Success = true, MethodResult = ToDto(entity), Message = "Office schedule saved." };
     }
@@ -244,7 +246,7 @@ public sealed class OfficeScheduleSettingsService(
         if (shiftReconciliation != null)
         {
             try { await shiftReconciliation.ReconcileTodayShiftAttendanceAsync(companyId, cancellationToken); }
-            catch { /* Non-blocking */ }
+            catch (Exception ex) { logger.LogWarning(ex, "Shift reconciliation failed after schedule delete for {CompanyId}", companyId); }
         }
 
         return new Result { Success = true, Message = "Office schedule deleted." };

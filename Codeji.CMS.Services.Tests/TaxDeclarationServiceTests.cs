@@ -254,7 +254,8 @@ public sealed class TaxDeclarationServiceTests
         Assert.Equal(225000m, result.MethodResult.TotalDeductions);
         Assert.Equal(975000m, result.MethodResult.NetTaxableIncome);
         Assert.Equal(111800m, result.MethodResult.TotalAnnualTax);
-        Assert.Equal(PayrollCalculationRules.RoundMoney(111800m / 12m), result.MethodResult.MonthlyTds);
+        Assert.InRange(result.MethodResult.RemainingMonths, 1, 12);
+        Assert.Equal(PayrollCalculationRules.RoundMoney(111800m / result.MethodResult.RemainingMonths), result.MethodResult.MonthlyTds);
     }
 
     [Fact]

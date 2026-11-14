@@ -313,8 +313,14 @@ public sealed class TaxDeclarationService(
 
         var cess = PayrollCalculationRules.RoundMoney(totalAnnualTax * 4m / 104m);
         var taxBeforeCess = totalAnnualTax - cess;
+        var tdsPeriod = PayrollTaxPeriod.ResolveIndiaSalaryPayment(DateTime.UtcNow);
+        var currentMonth = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+        int remainingMonths = ((tdsPeriod.EndDateExclusive.Year - currentMonth.Year) * 12) +
+                              (tdsPeriod.EndDateExclusive.Month - currentMonth.Month);
+        remainingMonths = Math.Clamp(remainingMonths, 1, 12);
+
         var remainingAnnualTax = Math.Max(0m, totalAnnualTax - previousEmployerTds);
-        var monthlyTds = PayrollCalculationRules.RoundMoney(remainingAnnualTax / 12m);
+        var monthlyTds = PayrollCalculationRules.RoundMoney(remainingAnnualTax / remainingMonths);
 
         return Ok(new TaxProjectionResultDto
         {
@@ -339,7 +345,7 @@ public sealed class TaxDeclarationService(
             TotalAnnualTax = totalAnnualTax,
             PreviousEmployerTds = previousEmployerTds,
             RemainingAnnualTax = remainingAnnualTax,
-            RemainingMonths = 12,
+            RemainingMonths = remainingMonths,
             MonthlyTds = monthlyTds
         });
     }
