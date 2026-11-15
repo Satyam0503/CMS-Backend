@@ -52,8 +52,16 @@ param(
     [string]$APIUrl,
 
     [Parameter(Mandatory=$true)]
-    [string]$AppUrl
+    [string]$AppUrl,
+
+    # Set => Codeji.CMS.Scheduler owns background jobs and the API only relays its notifications.
+    [Parameter(Mandatory=$false)]
+    [AllowEmptyString()]
+    [string]$InternalApiKey = ""
 )
+
+# An empty pipeline variable can arrive as its literal macro text.
+if ($InternalApiKey -like '$(*') { $InternalApiKey = "" }
 
 Write-Host "Generating appsettings.json"
 Write-Host "Output Path: $OutputPath"
@@ -103,6 +111,12 @@ $appsettings = @{
         }
     }
     AllowedHosts = "*"
+    BackgroundJobs = @{
+        RunInApi = [string]::IsNullOrWhiteSpace($InternalApiKey)
+    }
+    InternalApi = @{
+        Key = $InternalApiKey
+    }
 }
 
 $outputFile = Join-Path $OutputPath "appsettings.json"

@@ -90,6 +90,16 @@ stages:
               zipAfterPublish: false
               modifyOutputPath: false
 
+          - task: DotNetCoreCLI@2
+            displayName: "Publish Scheduler Service"
+            inputs:
+              command: "publish"
+              publishWebProjects: false
+              projects: "Codeji.CMS.Scheduler/Codeji.CMS.Scheduler.csproj"
+              arguments: "--configuration $(buildConfiguration) --runtime win-x64 --self-contained false --output $(Build.ArtifactStagingDirectory)/Codeji.CMS.Scheduler"
+              zipAfterPublish: false
+              modifyOutputPath: false
+
           - task: CopyFiles@2
             displayName: "Copy Deployment Scripts"
             inputs:
@@ -161,6 +171,19 @@ stages:
                           Write-Host "Resolved: ApiHost=$apiHost"
 
                     - task: PowerShell@2
+                      displayName: "Resolve scheduler key"
+                      inputs:
+                        targetType: "inline"
+                        script: |
+                          # Optional secret InternalApi.Key in variable group codeji-${{ env.name }}.
+                          # Unset => scheduler stays off and the API keeps running background jobs.
+                          $key = '$(InternalApi.Key)'
+                          if ($key -like '$(*') { $key = "" }
+                          if ($key -and $key.Length -lt 32) { throw "InternalApi.Key must be at least 32 characters." }
+                          Write-Host "##vso[task.setvariable variable=SchedulerKey;issecret=true]$key"
+                          Write-Host ("Scheduler: " + $(if ($key) { "enabled" } else { "disabled (InternalApi.Key not set)" }))
+
+                    - task: PowerShell@2
                       displayName: "Generate appsettings.${{ env.environment }}.json"
                       inputs:
                         targetType: "filePath"
@@ -182,6 +205,7 @@ stages:
                           -ReCaptchaSecretKey "$(ReCaptcha.SecretKey)"
                           -APIUrl "$(AppSettings.APIUrl)"
                           -AppUrl "$(AppSettings.AppUrl)"
+                          -InternalApiKey "$(SchedulerKey)"
 
                     - task: PowerShell@2
                       displayName: "Deploy API to ${{ env.name }} IIS"
@@ -206,6 +230,13 @@ stages:
                             -Port 80 `
                             -HostName "$(ApiHost)" `
                             -AppPoolName $siteName
+
+                          # Stop the scheduler with the app pool: it runs inside the API folder and
+                          # must not run jobs during migrations.
+                          $schedulerService = "CodejiCmsScheduler-${{ env.name }}"
+                          & "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/deploy-scheduler.ps1" `
+                            -Action Stop `
+                            -ServiceName $schedulerService
 
                           # Copy application files - preserve runtime Uploads folder on the server.
                           # Robocopy /E (incl. empty subdirs) /XD excludes the Uploads tree at any case.
@@ -246,6 +277,16 @@ stages:
 
                           # Start application pool
                           & "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/start-iis-apppool.ps1" -AppPoolName $siteName
+
+                          # Start the scheduler after the API is up, so its notification relay works from the first job.
+                          & "$(Pipeline.Workspace)/backend-drop/.pipelines/scripts/deploy-scheduler.ps1" `
+                            -Action Deploy `
+                            -ServiceName $schedulerService `
+                            -SourcePath "$(Pipeline.Workspace)\backend-drop\Codeji.CMS.Scheduler" `
+                            -InstallPath "$(DeployRoot)\crm-${{ env.name }}\backend\Codeji.CMS.Scheduler" `
+                            -ApiPath $deployPath `
+                            -ApiUrl "$(AppSettings.APIUrl)" `
+                            -InternalApiKey "$(SchedulerKey)"
 
                           Write-Host "=========================================="
                           Write-Host "${{ env.name }} deployment completed!"

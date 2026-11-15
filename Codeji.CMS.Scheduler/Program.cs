@@ -1,5 +1,7 @@
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Scheduler;
+using Codeji.CMS.Services.Employees;
+using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Registration;
 using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.FileProviders;
@@ -32,6 +34,9 @@ builder.Configuration.Sources.Insert(0, new JsonConfigurationSource
 
 builder.Services.AddCmsCore(builder.Configuration);
 builder.Services.AddCmsBackgroundJobs();
+// Default root is AppContext.BaseDirectory, i.e. this service's folder, which is replaced on every deploy.
+builder.Services.AddSingleton<IEmployeeExitEvidenceStorage>(
+    new PrivateEmployeeExitEvidenceStorage(Path.Combine(apiRoot, "App_Data", "EmployeeExitEvidence")));
 
 var relayKey = builder.Configuration["InternalApi:Key"];
 var apiBaseUrl = builder.Configuration["InternalApi:BaseUrl"];
