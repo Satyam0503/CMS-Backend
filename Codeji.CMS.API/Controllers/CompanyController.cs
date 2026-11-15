@@ -62,7 +62,7 @@ namespace Codeji.CMS.API.Controllers
         public async Task<IActionResult> GetCurrentCompanyTheme()
         {
             var result = await _companyService.GetCompanyDetails(CurrentContext.CompanyId(_httpContextAccessor));
-            return StatusCode(result.StatusCode, new { result.Success, result.Message, appTheme = result.MethodResult?.AppTheme ?? "glass" });
+            return StatusCode(result.StatusCode, new { result.Success, result.Message, appTheme = result.MethodResult?.AppTheme ?? "violet" });
         }
 
         [HttpPost]

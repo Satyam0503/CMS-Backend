@@ -43,8 +43,9 @@ public sealed class PublicCompanyProfileServiceTests
     [Theory]
     [InlineData("slate", "slate")]
     [InlineData(" SLATE ", "slate")]
-    [InlineData("unsupported", "glass")]
-    [InlineData(null, "glass")]
+    [InlineData("violet", "violet")]
+    [InlineData("unsupported", "violet")]
+    [InlineData(null, "violet")]
     public void NormalizeCareerTheme_AllowsOnlyPublicCareerThemes(string? value, string expected)
     {
         Assert.Equal(expected, PublicCompanyProfileService.NormalizeCareerTheme(value));
