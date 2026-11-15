@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using Codeji.CMS.Services.BackgroundTasks;
 using Codeji.CMS.Services.Attendance;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.PayRoll;
@@ -17,7 +17,7 @@ namespace Codeji.CMS.Services.PayRoll
 {
     public class AutoPayrollServices : IAutoPayRollServices
     {
-        private static readonly ConcurrentDictionary<string, SemaphoreSlim> _payrollLocks = new();
+        private readonly MongoJobLock? _jobLock;
 
         private readonly IPayRollServices _payRollServices;
         private readonly IMongoDbRepository<EmpUser> _employeeRepository;
@@ -62,8 +62,10 @@ namespace Codeji.CMS.Services.PayRoll
             IMongoDbRepository<PayrollAdjustment>? adjustments = null,
             IProfessionalTaxResolver? ptResolver = null,
             IMongoDbRepository<Company>? companyRepository = null,
-            IMongoDbRepository<EmployeeTaxDeclaration>? taxDeclarations = null)
+            IMongoDbRepository<EmployeeTaxDeclaration>? taxDeclarations = null,
+            MongoJobLock? jobLock = null)
         {
+            _jobLock = jobLock;
             _payRollServices = payRollServices;
             _employeeRepository = employeeRepository;
             _empPayRollRepository = empPayRollRepository;
@@ -95,8 +97,8 @@ namespace Codeji.CMS.Services.PayRoll
         {
             var monthStart = new DateTime(payMonth.Year, payMonth.Month, 1);
             var lockKey = $"{companyId}:{monthStart:yyyy-MM}";
-            var sem = _payrollLocks.GetOrAdd(lockKey, _ => new SemaphoreSlim(1, 1));
-            if (!await sem.WaitAsync(TimeSpan.Zero))
+            var payrollLock = _jobLock is null ? null : await _jobLock.TryAcquireAsync($"payroll:{lockKey}", TimeSpan.FromHours(2));
+            if (_jobLock is not null && payrollLock is null)
                 return new Result { Success = false, Message = $"Payroll generation for {monthStart:MMMM yyyy} is already in progress." };
             try
             {
@@ -904,7 +906,7 @@ namespace Codeji.CMS.Services.PayRoll
             }
             finally
             {
-                sem.Release();
+                if (payrollLock is not null) await payrollLock.DisposeAsync();
             }
         }
 

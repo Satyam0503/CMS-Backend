@@ -43,18 +43,6 @@ using Codeji.CMS.Services.Interface;
 using System.Threading.RateLimiting;
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-try
-{
-    BsonSerializer.RegisterSerializer(
-        new EnumSerializer<NotificationPreferenceType>(BsonType.String)
-    );
-}
-catch (BsonSerializationException)
-{
-    // Already registered - happens when multiple WebApplicationFactory instances re-run
-    // Program's top-level statements in the same test process; the registry is process-wide.
-}
-
 // Add services to the container
 builder.Services.AddControllers();
 builder.Services.AddRateLimiter(options =>
@@ -167,49 +155,13 @@ builder.Services.AddSingleton<IUserIdProvider, GetUserIdProvider>();
 builder.Services.AddSingleton<NotificationHub>();
 builder.Services.AddTransient<INotificationService, NotificationService>();
 builder.Services.AddSingleton<AntiforgeryMiddleware>();
-builder.Services.AddSingleton<IPriorityTaskQueue, PriorityTaskQueue>();
-builder.Services.AddHostedService<PriorityQueuedHostedService>();
-builder.Services.AddHostedService<BirthDayAndAnniversaryNotificationHostedServices>();
-builder.Services.AddHostedService<LeaveAccrualHostedService>();
-builder.Services.AddHostedService<Codeji.CMS.Services.CareerPortal.CareerNotificationWorker>();
-builder.Services.AddHostedService<Codeji.CMS.Services.Recruitments.RecruitmentEmailOutboxWorker>();
-builder.Services.AddHostedService<Codeji.CMS.Services.Recruitments.RecruitmentRetentionWorker>();
-builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceOutboxWorker>();
-builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.WorkFromHomeOutboxWorker>();
-builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.AttendanceReminderHostedService>();
-builder.Services.AddHostedService<EmployeeExitOutboxWorker>();
-builder.Services.AddHostedService<Codeji.CMS.Services.Attendance.LeaveAttendanceReconciliationHostedService>();
-builder.Services.AddHttpContextAccessor();
-// MongoDB Configuration
 ConfigurationManager configuration = builder.Configuration;
-var mongoConnection = configuration.GetConnectionString("mongodb")
-    ?? throw new Exception("ConnectionStrings:mongodb is not configured.");
-var mongoUrl = MongoUrl.Create(mongoConnection);
-if (string.IsNullOrEmpty(mongoUrl.DatabaseName))
-    throw new Exception("ConnectionStrings:mongodb must include the database name in the path.");
-
-builder.Services.AddSingleton<IMongoClient>(_ => new MongoDB.Driver.MongoClient(mongoConnection));
-builder.Services.AddScoped<IMongoDatabase>(sp =>
-    sp.GetRequiredService<IMongoClient>().GetDatabase(mongoUrl.DatabaseName));
-
-
-ConfigManager.Initialize(builder.Configuration);
-
-
-builder.Services.AddBusinessServices();
-
-builder.Services.AddHttpClient();
-
-builder.Services.AddRepositoryServices();
+builder.Services.AddCmsCore(configuration);
+// Set BackgroundJobs:RunInApi=false once Codeji.CMS.Scheduler is installed, otherwise both hosts run every job.
+if (configuration.GetValue("BackgroundJobs:RunInApi", true))
+    builder.Services.AddCmsBackgroundJobs();
 
 builder.Services.AddSingleton<IAuthorizationHandler, RoleHandler>();
-var mapsterConfig = TypeAdapterConfig.GlobalSettings;
-mapsterConfig.Scan(typeof(MapsterConfig).Assembly);
-builder.Services.AddSingleton(mapsterConfig);
-builder.Services.AddScoped<MapsterMapper.IMapper, ServiceMapper>();
-
-
-builder.Services.AddTransient<PdfService>();
 
 // Authentication and Authorization
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -280,84 +232,6 @@ builder.Services.AddSignalR(options =>
     options.EnableDetailedErrors = builder.Environment.IsDevelopment();
 });
 
-// to track users presence in application 
-builder.Services.AddSingleton<IEmployeePresenceService, EmployeePresenceService>();
-
-
-// mogodb repositories
-builder.Services.AddScoped<IMongoDbRepository<EmpUser>, MongoRepository<EmpUser>>();
-builder.Services.AddScoped<IMongoDbRepository<EmployeeLifecyclePolicy>, MongoRepository<EmployeeLifecyclePolicy>>();
-builder.Services.AddScoped<IMongoDbRepository<EmployeeLifecycleCase>, MongoRepository<EmployeeLifecycleCase>>();
-builder.Services.AddScoped<IEmployeeLifecycleCaseService, EmployeeLifecycleCaseService>();
-builder.Services.AddScoped<IEmployeeLifecyclePolicyService, EmployeeLifecyclePolicyService>();
-builder.Services.AddScoped<IMongoDbRepository<EmpPayRoll>, MongoRepository<EmpPayRoll>>();
-builder.Services.AddScoped<IMongoDbRepository<PayrollRun>, MongoRepository<PayrollRun>>();
-builder.Services.AddScoped<IMongoDbRepository<PayrollRunEmployee>, MongoRepository<PayrollRunEmployee>>();
-builder.Services.AddScoped<IMongoDbRepository<PayrollPaymentBatch>, MongoRepository<PayrollPaymentBatch>>();
-builder.Services.AddScoped<IMongoDbRepository<PayrollAdjustment>, MongoRepository<PayrollAdjustment>>();
-builder.Services.AddScoped<IMongoDbRepository<EmployeeTaxDeclaration>, MongoRepository<EmployeeTaxDeclaration>>();
-builder.Services.AddScoped<IMongoDbRepository<PayrollPolicyProfile>, MongoRepository<PayrollPolicyProfile>>();
-builder.Services.AddScoped<IMongoDbRepository<SalaryTemplate>, MongoRepository<SalaryTemplate>>();
-builder.Services.AddScoped<IMongoDbRepository<PayrollPayGroup>, MongoRepository<PayrollPayGroup>>();
-builder.Services.AddScoped<IMongoDbRepository<PayrollSalaryComponentDefinition>, MongoRepository<PayrollSalaryComponentDefinition>>();
-builder.Services.AddScoped<IMongoDbRepository<EmployeePayrollAssignment>, MongoRepository<EmployeePayrollAssignment>>();
-builder.Services.AddScoped<IMongoDbRepository<EmployeeSalaryStructure>, MongoRepository<EmployeeSalaryStructure>>();
-builder.Services.AddScoped<IMongoDbRepository<EmployeeSalaryImportBatch>, MongoRepository<EmployeeSalaryImportBatch>>();
-builder.Services.AddScoped<IMongoDbRepository<PayrollDivisorPolicy>, MongoRepository<PayrollDivisorPolicy>>();
-builder.Services.AddScoped<IMongoDbRepository<MonthlyAttendanceSummary>, MongoRepository<MonthlyAttendanceSummary>>();
-builder.Services.AddScoped<IMongoDbRepository<Codeji.CMS.Repository.Entities.Company.Company>, MongoRepository<Codeji.CMS.Repository.Entities.Company.Company>>();
-builder.Services.AddScoped<IMongoDbRepository<Codeji.CMS.Repository.Entities.Company.Department>, MongoRepository<Codeji.CMS.Repository.Entities.Company.Department>>();
-builder.Services.AddScoped<IMongoDbRepository<Codeji.CMS.Repository.Entities.Company.JobTitles>, MongoRepository<Codeji.CMS.Repository.Entities.Company.JobTitles>>();
-
-builder.Services.AddScoped<IMongoDbRepository<RefreshToken>, MongoRepository<RefreshToken>>();
-builder.Services.AddScoped<IMongoDbRepository<EmployeeExit>, MongoRepository<EmployeeExit>>();
-builder.Services.AddScoped<IMongoDbRepository<EmployeeExitPolicy>, MongoRepository<EmployeeExitPolicy>>();
-builder.Services.AddScoped<IMongoDbRepository<EmployeeExitClearanceTemplate>, MongoRepository<EmployeeExitClearanceTemplate>>();
-builder.Services.AddScoped<IMongoDbRepository<EmployeeFinalSettlement>, MongoRepository<EmployeeFinalSettlement>>();
-builder.Services.AddScoped<IMongoDbRepository<EmployeeExitAttendanceCutoff>, MongoRepository<EmployeeExitAttendanceCutoff>>();
-builder.Services.AddScoped<IMongoDbRepository<EmployeeExitOutbox>, MongoRepository<EmployeeExitOutbox>>();
-builder.Services.AddScoped<IMongoDbRepository<FormerEmployeeAccessToken>, MongoRepository<FormerEmployeeAccessToken>>();
-builder.Services.AddSingleton<IEmployeeExitEvidenceStorage, PrivateEmployeeExitEvidenceStorage>();
-builder.Services.AddScoped<IFormerEmployeePortalService, FormerEmployeePortalService>();
-builder.Services.AddScoped<IMongoDbRepository<LeaveRequest>, MongoRepository<LeaveRequest>>();
-builder.Services.AddScoped<IMongoDbRepository<WorkFromHomeRequest>, MongoRepository<WorkFromHomeRequest>>();
-// salary 
-builder.Services.AddScoped<MongoDbContext>();
-builder.Services.AddScoped<ISalaryRepository, SalaryRepository>();
-builder.Services.AddScoped<ISalaryService, SalaryService>();
-
-
-// Payroll Services
-builder.Services.AddScoped<IPayRollServices, PayRollServices>();
-builder.Services.AddSingleton<IProfessionalTaxResolver, ProfessionalTaxResolver>();
-builder.Services.AddScoped<ITaxDeclarationService, TaxDeclarationService>();
-builder.Services.AddScoped<IPayrollReadinessService, PayrollReadinessService>();
-builder.Services.AddScoped<IPayrollTemplateService, PayrollTemplateService>();
-builder.Services.AddScoped<IPayrollConfigurationService, PayrollConfigurationService>();
-builder.Services.AddScoped<IEmployeeSalaryStructureService, EmployeeSalaryStructureService>();
-builder.Services.AddScoped<IEmployeeSalaryImportService, EmployeeSalaryImportService>();
-builder.Services.AddScoped<IPayrollRunService, PayrollRunService>();
-builder.Services.AddScoped<IPayrollRunWorkflowService, PayrollRunWorkflowService>();
-builder.Services.AddScoped<IPayrollRunCalculationService, PayrollRunCalculationService>();
-builder.Services.AddScoped<IPayrollRunReviewService, PayrollRunReviewService>();
-
-//attendance 
-// builder.Services.AddScoped<IAttendanceService, IAttendanceService>();
-// Register Attendance Repository
-builder.Services.AddScoped<IAttendanceRepository, AttendanceRepository>();
-
-// Register Service Layer
-builder.Services.AddScoped<IAdminAttendanceService, AdminAttendanceService>();
-
-// builder.Services.AddScoped<IAttendanceService, IAttendanceService>();
-// Auto Payroll Services
-builder.Services.AddScoped<IAutoPayRollServices, AutoPayrollServices>();
-
-// Hosted Services
-builder.Services.AddHostedService<PayrollHostedService>();
-
-//company Services 
-builder.Services.AddScoped<ICompanyService, CompanyService>();
 
 // Configure IIS Integration
 builder.WebHost.UseIISIntegration();
@@ -430,6 +304,7 @@ if (!app.Environment.IsDevelopment())
 // This must precede rate limiting and authentication so both use the client IP
 // supplied by a configured trusted proxy.
 app.UseForwardedHeaders();
+app.MapInternalNotificationRelay();
 app.UseRateLimiter();
 app.UseAuthentication();
 // Establish the authenticated tenant before any policy handler performs a
