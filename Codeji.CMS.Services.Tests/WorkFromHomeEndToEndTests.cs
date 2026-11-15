@@ -30,6 +30,14 @@ namespace Codeji.CMS.Services.Tests;
 
 public class WorkFromHomeEndToEndTests
 {
+    // Future weekday so weekly-off and backdating rules never depend on the day the suite runs.
+    private static DateTime NextWeekdayUtc(int daysAhead = 7)
+    {
+        var date = DateTime.UtcNow.Date.AddDays(daysAhead);
+        while (date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) date = date.AddDays(1);
+        return date;
+    }
+
     private static MongoCommandException CreateStandaloneMongoException()
     {
         var connectionId = new ConnectionId(
@@ -148,7 +156,7 @@ public class WorkFromHomeEndToEndTests
     {
         const string companyId = "c1";
         const string userId = "u1";
-        var futureDate = DateTime.UtcNow.Date.AddDays(7);
+        var futureDate = NextWeekdayUtc();
         var targetDateOnly = DateOnly.FromDateTime(futureDate);
 
         var httpContextAccessor = new Mock<IHttpContextAccessor>();
@@ -312,7 +320,7 @@ public class WorkFromHomeEndToEndTests
         const string companyId = "c1";
         const string managerId = "manager-1";
         const string employeeId = "u1";
-        var targetDate = DateTime.UtcNow.Date.AddDays(7);
+        var targetDate = NextWeekdayUtc();
 
         var httpContextAccessor = new Mock<IHttpContextAccessor>();
         var context = new DefaultHttpContext();
@@ -472,7 +480,7 @@ public class WorkFromHomeEndToEndTests
     {
         const string companyId = "c1";
         const string userId = "u1";
-        var targetDate = DateTime.UtcNow.Date.AddDays(7);
+        var targetDate = NextWeekdayUtc();
 
         var httpContextAccessor = new Mock<IHttpContextAccessor>();
         var context = new DefaultHttpContext();
@@ -973,7 +981,7 @@ public class WorkFromHomeEndToEndTests
     {
         var companyId = "company-audit-test";
         var userId = "user-audit-emp-01";
-        var date = new DateOnly(2026, 11, 2);
+        var date = DateOnly.FromDateTime(NextWeekdayUtc());
 
         var httpContextAccessor = new Mock<IHttpContextAccessor>();
         var context = new DefaultHttpContext();
