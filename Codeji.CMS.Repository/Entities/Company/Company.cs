@@ -18,7 +18,7 @@ namespace Codeji.CMS.Repository.Entities.Company
         /// <summary>Company-wide master switch for former-employee self-service access.</summary>
         public bool FormerEmployeePortalEnabled { get; set; } = true;
         // Company-owned visual identity for both authenticated and public surfaces.
-        public string AppTheme { get; set; } = "glass";
+        public string AppTheme { get; set; } = "violet";
         public string PublicCompanyCode { get; set; } = string.Empty;
         public string EmployeeIdPrefix { get; set; } = string.Empty;
         public bool AutoGenerateEmployeeId { get; set; } = true;

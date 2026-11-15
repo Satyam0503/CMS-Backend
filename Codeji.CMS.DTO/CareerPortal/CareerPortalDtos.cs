@@ -26,7 +26,7 @@ public sealed class PublicCompanyProfileDto
     public string? WorkCultureHtml { get; init; }
     public string? HiringProcessHtml { get; init; }
     public string? DiversityStatementHtml { get; init; }
-    public string CareerTheme { get; init; } = "glass";
+    public string CareerTheme { get; init; } = "violet";
     public bool IsPublished { get; init; }
 }
 

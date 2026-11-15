@@ -254,7 +254,7 @@ public sealed class PublicCompanyProfileService : IPublicCompanyProfileService
     internal static string NormalizeCareerTheme(string? value)
     {
         var theme = value?.Trim().ToLowerInvariant();
-        return theme is "glass" or "slate" or "dawn" or "blush" ? theme : "glass";
+        return theme is "violet" or "glass" or "slate" or "dawn" or "blush" ? theme : "violet";
     }
 
     public async Task<Result> UpdateCompanyTheme(string companyId, string userId, string? appTheme)

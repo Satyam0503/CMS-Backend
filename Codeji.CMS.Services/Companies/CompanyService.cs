@@ -552,7 +552,7 @@ namespace Codeji.CMS.Services
         private static string NormalizeAppTheme(string? value)
         {
             var theme = value?.Trim().ToLowerInvariant();
-            return theme is "glass" or "slate" or "dawn" or "blush" ? theme : "glass";
+            return theme is "violet" or "glass" or "slate" or "dawn" or "blush" ? theme : "violet";
         }
 
         private async Task EnsureCareerPortal(Company company)
