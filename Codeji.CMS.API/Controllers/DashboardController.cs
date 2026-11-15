@@ -4,6 +4,7 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Dashboard;
 using Codeji.CMS.DTO.RolePermissions;
 using Codeji.CMS.Services.BackgroundTasks;
+using Codeji.CMS.Services.Dashboard;
 using Codeji.CMS.Services.Employees;
 using Codeji.CMS.Services.Employees.Interface;
 using Codeji.CMS.Services.Interface;
@@ -77,6 +78,18 @@ namespace Codeji.CMS.API.Controllers
                 TotalRecords = data.Count,
             };
 
+        }
+
+        [HttpGet]
+        [Route("GetDashboardOverview")]
+        [ModulePermission(AppModule.Dashboard, Permission.ViewAll)]
+        public async Task<Result<DashboardOverviewDto>> GetDashboardOverview([FromServices] DashboardOverviewService overviewService)
+        {
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            return new Result<DashboardOverviewDto>
+            {
+                MethodResult = await overviewService.GetOverviewAsync(companyId)
+            };
         }
 
         [HttpGet]

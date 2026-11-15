@@ -62,6 +62,7 @@ public static class ServicesRegistration
         services.AddScoped<IJobVacancy, JobVacancyService>();
         services.AddScoped<ICompanyMasterService, CompanyMasterService>();
         services.AddScoped<IDashboardService, DashboardServices>();
+        services.AddScoped<DashboardOverviewService>();
         services.AddScoped<INoticeBoardService, NoticeBoardServices>();
         services.AddScoped<ICalendarServices, CalendarServices>();
         services.AddScoped<ILeaveManagementService, LeaveManagementService>();
