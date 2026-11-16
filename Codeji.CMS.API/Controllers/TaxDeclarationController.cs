@@ -48,7 +48,10 @@ public sealed class TaxDeclarationController(
             }
         }
 
-        var result = await service.GetDeclaration(companyId, employeeId, financialYear);
+        var targetEmployeeId = isSelf && !string.IsNullOrWhiteSpace(currentEmployee?.EmployeeId)
+            ? currentEmployee.EmployeeId
+            : employeeId;
+        var result = await service.GetDeclaration(companyId, targetEmployeeId, financialYear);
         return Ok(result);
     }
 
@@ -79,7 +82,10 @@ public sealed class TaxDeclarationController(
             }
         }
 
-        var result = await service.SubmitDeclaration(companyId, employeeId, request, currentUserId);
+        var targetEmployeeId = isSelf && !string.IsNullOrWhiteSpace(currentEmployee?.EmployeeId)
+            ? currentEmployee.EmployeeId
+            : employeeId;
+        var result = await service.SubmitDeclaration(companyId, targetEmployeeId, request, currentUserId);
         return Ok(result);
     }
 
@@ -92,10 +98,21 @@ public sealed class TaxDeclarationController(
 
     [HttpGet("company/{financialYear}")]
     [ModulePermission(AppModule.PayRoll, Permission.View)]
-    public Task<Result<List<EmployeeTaxDeclarationDto>>> GetCompanyDeclarations(
+    public async Task<ActionResult<Result<List<EmployeeTaxDeclarationDto>>>> GetCompanyDeclarations(
         string financialYear,
-        [FromQuery] string? status = null) =>
-        service.GetCompanyDeclarations(CurrentContext.CompanyId(context), financialYear, status);
+        [FromQuery] string? status,
+        [FromServices] IRoleService roleService)
+    {
+        var companyId = CurrentContext.CompanyId(context);
+        var roleId = CurrentContext.UserRoleId(context);
+        var canReviewPayroll = await roleService.IsRoleTypeMatch(roleId, Codeji.CMS.Utility.Enums.EnumsHelper.Roles.Administrator, companyId)
+            || await roleService.IsRoleTypeMatch(roleId, Codeji.CMS.Utility.Enums.EnumsHelper.Roles.HR, companyId)
+            || await roleService.IsRoleTypeMatch(roleId, Codeji.CMS.Utility.Enums.EnumsHelper.Roles.HRExecutive, companyId);
+        if (!canReviewPayroll)
+            return Forbid();
+
+        return Ok(await service.GetCompanyDeclarations(companyId, financialYear, status));
+    }
 
     [HttpPost("employee/{employeeId}/projection")]
     [ModulePermission(AppModule.PayRoll, Permission.View)]

@@ -12,10 +12,12 @@ public sealed class PayrollAdjustmentServiceTests
     [Fact]
     public async Task GetAll_ReturnsOnlyTenantAdjustmentsNewestFirst()
     {
+        var latest = Adjustment("new", "tenant-a", new DateTime(2026, 9, 2));
+        latest.IncludeInEsiWage = true;
         var records = new[]
         {
             Adjustment("old", "tenant-a", new DateTime(2026, 9, 1)),
-            Adjustment("new", "tenant-a", new DateTime(2026, 9, 2)),
+            latest,
             Adjustment("foreign", "tenant-b", new DateTime(2026, 9, 3))
         };
         var service = new PayrollAdjustmentService(Repo(records).Object, Repo<PayrollRun>().Object, Repo<PayrollRunEmployee>().Object);
@@ -24,6 +26,7 @@ public sealed class PayrollAdjustmentServiceTests
 
         Assert.True(result.Success);
         Assert.Equal(new[] { "new", "old" }, result.MethodResult!.Select(x => x.Id));
+        Assert.True(result.MethodResult[0].IncludeInEsiWage);
     }
 
     [Fact]
@@ -84,8 +87,8 @@ public sealed class PayrollAdjustmentServiceTests
         adjustmentRepository.Setup(x => x.AddOne(It.IsAny<PayrollAdjustment>()))
             .Callback<PayrollAdjustment>(value => saved = value).ReturnsAsync(new Result { Success = true });
         var service = new PayrollAdjustmentService(adjustmentRepository.Object, Repo(run).Object,
-            Repo(employee).Object, Repo(Component("c", name: "Bonus v3", taxable: true, version: 3,
-                effectiveFrom: new DateTime(2026, 9, 1))).Object);
+            Repo(employee).Object, Repo(Component("c", name: "Bonus v3", taxable: false, version: 3,
+                effectiveFrom: new DateTime(2026, 9, 1), includeInEsiWage: true)).Object);
 
         var result = await service.Create("c", "actor", new CreatePayrollAdjustmentRequestDto
         {
@@ -98,9 +101,52 @@ public sealed class PayrollAdjustmentServiceTests
         Assert.Equal("BONUS", saved!.ComponentCode);
         Assert.Equal("Bonus v3", saved.ComponentName);
         Assert.Equal("EARNING", saved.ComponentKind);
-        Assert.True(saved.IsTaxable);
+        Assert.False(saved.IsTaxable);
+        Assert.True(saved.IncludeInEsiWage);
+        Assert.False(saved.IncludeInPfWage);
+        Assert.False(saved.IncludeInPtWage);
         Assert.Equal(3, saved.ComponentVersion);
         Assert.Equal(new DateTime(2026, 10, 1), saved.TargetPeriod);
+    }
+
+    [Fact]
+    public async Task Create_RejectsAdjustmentKindsWithoutCompleteCorrectionCalculationSupport()
+    {
+        var run = Run("r", "c", "PAID");
+        var employee = new PayrollRunEmployee { CompanyId = "c", PayrollRunId = "r", EmployeeId = "e" };
+        var service = new PayrollAdjustmentService(Repo<PayrollAdjustment>().Object, Repo(run).Object,
+            Repo(employee).Object, Repo(Component("c", taxable: true)).Object);
+
+        var result = await service.Create("c", "actor", new CreatePayrollAdjustmentRequestDto
+        {
+            OriginalPayrollRunId = "r", EmployeeId = "e", ComponentCode = "BONUS",
+            TargetPeriod = new DateTime(2026, 9, 1), Type = "ARREARS", Amount = 100m, Reason = "taxable arrears"
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal(400, result.StatusCode);
+        Assert.Contains("non-taxable earnings", result.Message);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Create_RejectsEarningsThatChangeUnsupportedPfOrPtBases(bool includeInPf, bool includeInPt)
+    {
+        var run = Run("r", "c", "PAID");
+        var employee = new PayrollRunEmployee { CompanyId = "c", PayrollRunId = "r", EmployeeId = "e" };
+        var service = new PayrollAdjustmentService(Repo<PayrollAdjustment>().Object, Repo(run).Object,
+            Repo(employee).Object, Repo(Component("c", includeInPfWage: includeInPf, includeInPtWage: includeInPt)).Object);
+
+        var result = await service.Create("c", "actor", new CreatePayrollAdjustmentRequestDto
+        {
+            OriginalPayrollRunId = "r", EmployeeId = "e", ComponentCode = "BONUS",
+            TargetPeriod = new DateTime(2026, 9, 1), Type = "ARREARS", Amount = 100m, Reason = "unsupported basis"
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal(400, result.StatusCode);
+        Assert.Contains("PF/PT-included", result.Message);
     }
 
     [Fact]
@@ -293,7 +339,8 @@ public sealed class PayrollAdjustmentServiceTests
         var correction = Run("correction", "c", "CALCULATED"); correction.RunType = "CORRECTION";
         var row = new PayrollRunEmployee
         {
-            CompanyId = "c", PayrollRunId = "correction", EmployeeId = "e", Status = "CALCULATED", NetAmount = 5000m
+            CompanyId = "c", PayrollRunId = "correction", EmployeeId = "e", Status = "CALCULATED", NetAmount = 5000m,
+            AppliedAdjustmentIds = ["a"]
         };
         var adjustmentRepository = Repo(adjustment);
         var service = new PayrollAdjustmentService(adjustmentRepository.Object, Repo(correction).Object, Repo(row).Object);
@@ -302,7 +349,7 @@ public sealed class PayrollAdjustmentServiceTests
 
         Assert.False(result.Success);
         Assert.Equal(409, result.StatusCode);
-        Assert.Contains("gross-to-net", result.Message);
+        Assert.Contains("does not contain", result.Message);
         Assert.Equal("APPROVED", adjustment.Status);
         Assert.Null(adjustment.CorrectionPayrollRunId);
         adjustmentRepository.Verify(x => x.Update(It.IsAny<MongoDB.Driver.FilterDefinition<PayrollAdjustment>>(), It.IsAny<PayrollAdjustment>()), Times.Never);
@@ -314,12 +361,13 @@ public sealed class PayrollAdjustmentServiceTests
         var adjustment = new PayrollAdjustment
         {
             Id = "a", CompanyId = "c", OriginalPayrollRunId = "original", EmployeeId = "e",
-            Status = "APPROVED", Amount = 1250m, Reason = "approved arrears"
+            Status = "APPROVED", Amount = 1250m, Reason = "approved arrears", CorrectionPayrollRunId = "correction"
         };
-        var correction = Run("correction", "c", "PROCESSED"); correction.RunType = "CORRECTION";
+        var correction = Run("correction", "c", "PROCESSED"); correction.RunType = "CORRECTION"; correction.ParentRunId = "original";
         var row = new PayrollRunEmployee
         {
-            CompanyId = "c", PayrollRunId = "correction", EmployeeId = "e", Status = "CALCULATED", NetAmount = 5000m
+            CompanyId = "c", PayrollRunId = "correction", EmployeeId = "e", Status = "CALCULATED", NetAmount = 5000m,
+            AppliedAdjustmentIds = ["a"]
         };
         var adjustmentRepository = Repo(adjustment);
         var service = new PayrollAdjustmentService(adjustmentRepository.Object, Repo(correction).Object, Repo(row).Object);
@@ -335,6 +383,32 @@ public sealed class PayrollAdjustmentServiceTests
         adjustmentRepository.Verify(x => x.Update(It.IsAny<MongoDB.Driver.FilterDefinition<PayrollAdjustment>>(), It.IsAny<PayrollAdjustment>()), Times.Once);
     }
 
+    [Fact]
+    public async Task Process_RequiresAdjustmentToBeIncludedInFinalizedMatchingCorrectionRun()
+    {
+        var adjustment = new PayrollAdjustment
+        {
+            Id = "a", CompanyId = "c", OriginalPayrollRunId = "original", EmployeeId = "e",
+            Status = "APPROVED", Amount = 1250m, Reason = "approved arrears"
+        };
+        var correction = Run("correction", "c", "PROCESSED"); correction.RunType = "CORRECTION"; correction.ParentRunId = "original";
+        var row = new PayrollRunEmployee
+        {
+            CompanyId = "c", PayrollRunId = "correction", EmployeeId = "e", Status = "CALCULATED", NetAmount = 5000m,
+            AppliedAdjustmentIds = ["different-adjustment"]
+        };
+        var adjustmentRepository = Repo(adjustment);
+        var service = new PayrollAdjustmentService(adjustmentRepository.Object, Repo(correction).Object, Repo(row).Object);
+
+        var result = await service.Process("c", "actor", "a", new PayrollAdjustmentActionDto { CorrectionPayrollRunId = "correction" });
+
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Equal("APPROVED", adjustment.Status);
+        Assert.Null(adjustment.CorrectionPayrollRunId);
+        adjustmentRepository.Verify(x => x.Update(It.IsAny<MongoDB.Driver.FilterDefinition<PayrollAdjustment>>(), It.IsAny<PayrollAdjustment>()), Times.Never);
+    }
+
     private static PayrollRun Run(string id, string companyId, string status) => new()
     {
         Id = id, CompanyId = companyId, PeriodStart = DateTime.Today,
@@ -348,10 +422,12 @@ public sealed class PayrollAdjustmentServiceTests
     };
 
     private static PayrollSalaryComponentDefinition Component(string companyId, string code = "BONUS", string name = "Bonus",
-        bool taxable = false, int version = 1, DateTime? effectiveFrom = null) => new()
+        bool taxable = false, int version = 1, DateTime? effectiveFrom = null, bool includeInEsiWage = false,
+        bool includeInPfWage = false, bool includeInPtWage = false) => new()
     {
         CompanyId = companyId, Code = code, Name = name, Kind = "EARNING", IsTaxable = taxable,
-        Version = version, EffectiveFrom = effectiveFrom ?? new DateTime(2026, 1, 1), IsActive = true
+        Version = version, EffectiveFrom = effectiveFrom ?? new DateTime(2026, 1, 1), IsActive = true,
+        IncludeInEsiWage = includeInEsiWage, IncludeInPfWage = includeInPfWage, IncludeInPtWage = includeInPtWage
     };
 
     private static Mock<IMongoDbRepository<TEntity>> Repo<TEntity>(params TEntity[] items)

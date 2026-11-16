@@ -23,6 +23,7 @@ namespace Codeji.CMS.DTO.Salary
         public decimal? HealthInsurance { get; set; }
         public List<SalaryDeductionComponent> OtherDeductions { get; set; } = [];
         public List<SalaryEarningComponent> OtherEarnings { get; set; } = [];
+        public List<SalaryWageComponent> WageComponents { get; set; } = [];
 
         public decimal GrossSalary { get; set; }
         public decimal? TotalDeductions { get; set; }
@@ -52,5 +53,14 @@ namespace Codeji.CMS.DTO.Salary
         public string Code { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
         public decimal Amount { get; set; }
+    }
+
+    public sealed class SalaryWageComponent
+    {
+        public string Code { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+        public bool IncludeInPfWage { get; set; }
+        public bool IncludeInEsiWage { get; set; }
+        public bool IncludeInPtWage { get; set; }
     }
 }

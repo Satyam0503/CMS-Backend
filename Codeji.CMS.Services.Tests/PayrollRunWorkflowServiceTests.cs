@@ -378,13 +378,20 @@ public sealed class PayrollRunWorkflowServiceTests
         };
         var emp1 = new PayrollRunEmployee { Id = "e1", CompanyId = "c", PayrollRunId = "run-paid", EmployeeId = "emp-1", Status = "CALCULATED" };
         var emp2 = new PayrollRunEmployee { Id = "e2", CompanyId = "c", PayrollRunId = "run-paid", EmployeeId = "emp-2", Status = "SKIPPED", ExclusionReason = "On sabbatical" };
+        var adjustment = new PayrollAdjustment
+        {
+            Id = "adj-1", CompanyId = "c", OriginalPayrollRunId = "run-paid", EmployeeId = "emp-1",
+            TargetPeriod = original.PeriodStart, Status = "APPROVED", Amount = 500m, Reason = "Approved arrears",
+            ComponentKind = "EARNING", IsTaxable = false
+        };
         var runs = CreateRepo(original);
         var employees = CreateRepo(emp1, emp2);
+        var adjustmentRepository = CreateRepo(adjustment);
         PayrollRun? addedRun = null;
         var addedMembers = new List<PayrollRunEmployee>();
-        runs.Setup(x => x.AddOne(It.IsAny<PayrollRun>())).Callback<PayrollRun>(r => addedRun = r).ReturnsAsync(new Result { Success = true });
+        runs.Setup(x => x.AddOne(It.IsAny<PayrollRun>())).Callback<PayrollRun>(r => { r.Id = "correction-created"; addedRun = r; }).ReturnsAsync(new Result { Success = true });
         employees.Setup(x => x.AddOne(It.IsAny<PayrollRunEmployee>())).Callback<PayrollRunEmployee>(m => addedMembers.Add(m)).ReturnsAsync(new Result { Success = true });
-        var service = new PayrollRunWorkflowService(runs.Object, employees.Object);
+        var service = new PayrollRunWorkflowService(runs.Object, employees.Object, adjustments: adjustmentRepository.Object);
 
         var result = await service.CreateCorrectionRun("c", "run-paid", "admin-1", "Retroactive incentive adjustment");
 
@@ -394,12 +401,178 @@ public sealed class PayrollRunWorkflowServiceTests
         Assert.Equal("CORRECTION", addedRun!.RunType);
         Assert.Equal("run-paid", addedRun.ParentRunId);
         Assert.Equal("DRAFT", addedRun.Status);
-        Assert.Equal(2, addedRun.EmployeeCount);
+        Assert.Equal(1, addedRun.EmployeeCount);
         Assert.Equal(1, addedRun.ReadyCount);
-        Assert.Equal(1, addedRun.SkippedCount);
-        Assert.Equal(2, addedMembers.Count);
+        Assert.Equal(0, addedRun.SkippedCount);
+        Assert.Single(addedMembers);
         Assert.Contains(addedMembers, m => m.EmployeeId == "emp-1" && m.Status == "READY");
-        Assert.Contains(addedMembers, m => m.EmployeeId == "emp-2" && m.Status == "SKIPPED");
+        Assert.Equal("correction-created", adjustment.CorrectionPayrollRunId);
+    }
+
+    [Fact]
+    public async Task CreateCorrectionRun_FreezesOnlyApprovedUnassignedParentAdjustments()
+    {
+        var original = new PayrollRun
+        {
+            Id = "run-paid", CompanyId = "c", PeriodStart = new DateTime(2026, 9, 1),
+            PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 5), Status = "PAID"
+        };
+        var member = new PayrollRunEmployee { Id = "e1", CompanyId = "c", PayrollRunId = "run-paid", EmployeeId = "emp-1", Status = "CALCULATED" };
+        var eligible = new PayrollAdjustment
+        {
+            Id = "adj-1", CompanyId = "c", OriginalPayrollRunId = "run-paid", EmployeeId = "emp-1", TargetPeriod = original.PeriodStart,
+            Reason = "Approved reimbursement correction",
+            Status = "APPROVED", ComponentCode = "REIMBURSEMENT", ComponentName = "Reimbursement", ComponentKind = "EARNING",
+            Amount = 500m, IsTaxable = false, IsStatutory = false, IsEmployerContribution = false,
+            IncludeInEsiWage = true, ComponentVersion = 2
+        };
+        var otherEmployee = new PayrollAdjustment { Id = "adj-2", CompanyId = "c", OriginalPayrollRunId = "run-paid", EmployeeId = "emp-2", TargetPeriod = new DateTime(2026, 10, 1), Status = "APPROVED", Reason = "other month" };
+        var consumed = new PayrollAdjustment { Id = "adj-3", CompanyId = "c", OriginalPayrollRunId = "run-paid", EmployeeId = "emp-1", TargetPeriod = original.PeriodStart, Status = "APPROVED", CorrectionPayrollRunId = "old-correction", Reason = "already linked" };
+        var wrongStatus = new PayrollAdjustment { Id = "adj-4", CompanyId = "c", OriginalPayrollRunId = "run-paid", EmployeeId = "emp-1", TargetPeriod = original.PeriodStart, Status = "DRAFT", Reason = "not approved" };
+        var runs = CreateRepo(original);
+        var employees = CreateRepo(member);
+        var adjustmentRepository = CreateRepo(eligible, otherEmployee, consumed, wrongStatus);
+        PayrollRun? addedRun = null;
+        var addedMembers = new List<PayrollRunEmployee>();
+        runs.Setup(x => x.AddOne(It.IsAny<PayrollRun>())).Callback<PayrollRun>(r => { r.Id = "run-correction"; addedRun = r; }).ReturnsAsync(new Result { Success = true });
+        employees.Setup(x => x.AddOne(It.IsAny<PayrollRunEmployee>())).Callback<PayrollRunEmployee>(m => addedMembers.Add(m)).ReturnsAsync(new Result { Success = true });
+        var service = new PayrollRunWorkflowService(runs.Object, employees.Object, adjustments: adjustmentRepository.Object);
+
+        var result = await service.CreateCorrectionRun("c", "run-paid", "admin", "Correct prior payroll");
+
+        Assert.True(result.Success, result.Message);
+        var correctionEmployee = Assert.Single(addedMembers);
+        var frozenAdjustment = Assert.Single(correctionEmployee.InputSnapshot.Adjustments);
+        Assert.Equal("adj-1", frozenAdjustment.Id);
+        Assert.Equal("REIMBURSEMENT", frozenAdjustment.ComponentCode);
+        Assert.Equal(500m, frozenAdjustment.Amount);
+        Assert.True(frozenAdjustment.IncludeInEsiWage);
+        Assert.Equal("run-correction", eligible.CorrectionPayrollRunId);
+    }
+
+    [Fact]
+    public async Task CreateCorrectionRun_WhenEmployeeSnapshotWriteThrows_CompensatesReservationsAndCancelsDraft()
+    {
+        var original = new PayrollRun
+        {
+            Id = "run-paid", CompanyId = "c", PeriodStart = new DateTime(2026, 9, 1),
+            PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 5), Status = "PAID"
+        };
+        var member = new PayrollRunEmployee
+        {
+            Id = "employee-line", CompanyId = "c", PayrollRunId = "run-paid", EmployeeId = "emp-1", Status = "CALCULATED"
+        };
+        var adjustment = new PayrollAdjustment
+        {
+            Id = "adj-1", CompanyId = "c", OriginalPayrollRunId = "run-paid", EmployeeId = "emp-1",
+            TargetPeriod = original.PeriodStart, Status = "APPROVED", Amount = 500m, Reason = "Approved arrears",
+            ComponentKind = "EARNING", IsTaxable = false, IsStatutory = false, IsEmployerContribution = false
+        };
+        var runs = CreateRepo(original);
+        runs.Setup(x => x.AddOne(It.IsAny<PayrollRun>()))
+            .Callback<PayrollRun>(run => run.Id = "correction-created")
+            .ReturnsAsync(new Result { Success = true });
+        var employees = CreateRepo(member);
+        employees.Setup(x => x.AddOne(It.IsAny<PayrollRunEmployee>()))
+            .ThrowsAsync(new InvalidOperationException("simulated persistence failure"));
+        var adjustmentRepository = CreateRepo(adjustment);
+        var service = new PayrollRunWorkflowService(runs.Object, employees.Object, adjustments: adjustmentRepository.Object);
+
+        var result = await service.CreateCorrectionRun("c", "run-paid", "admin", "Correct prior payroll");
+
+        Assert.False(result.Success);
+        Assert.Equal(500, result.StatusCode);
+        Assert.Contains("draft was cancelled", result.Message);
+        Assert.Equal("CANCELLED", runs.Invocations
+            .Where(call => call.Method.Name == nameof(IMongoDbRepository<PayrollRun>.AddOne))
+            .Select(call => call.Arguments[0]).Cast<PayrollRun>().Single().Status);
+        Assert.Null(adjustment.CorrectionPayrollRunId);
+        Assert.Contains(adjustment.AuditHistory, entry => entry.Action == "CorrectionRunReservationReleased");
+        runs.Verify(x => x.Update(It.IsAny<FilterDefinition<PayrollRun>>(), It.IsAny<PayrollRun>()), Times.Once);
+        adjustmentRepository.Verify(x => x.Update(It.IsAny<FilterDefinition<PayrollAdjustment>>(), adjustment), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task CreateCorrectionRun_RejectsWhenThereAreNoApprovedAdjustments()
+    {
+        var original = new PayrollRun
+        {
+            Id = "run-paid", CompanyId = "c", PeriodStart = new DateTime(2026, 9, 1),
+            PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 5), Status = "PAID"
+        };
+        var runs = CreateRepo(original);
+        var service = new PayrollRunWorkflowService(runs.Object, CreateRepo<PayrollRunEmployee>().Object,
+            adjustments: CreateRepo<PayrollAdjustment>().Object);
+
+        var result = await service.CreateCorrectionRun("c", "run-paid", "admin", "Correction without requests");
+
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Contains("No approved", result.Message);
+        runs.Verify(x => x.AddOne(It.IsAny<PayrollRun>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("DRAFT")]
+    [InlineData("CALCULATED")]
+    [InlineData("APPROVED")]
+    public async Task Cancel_CorrectionRunReleasesApprovedAdjustmentReservation(string status)
+    {
+        var correction = new PayrollRun
+        {
+            Id = "correction-1", CompanyId = "c", ParentRunId = "run-paid", RunType = "CORRECTION",
+            Status = status, IsActive = true, PeriodStart = new DateTime(2026, 9, 1),
+            PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 10)
+        };
+        var adjustment = new PayrollAdjustment
+        {
+            Id = "adj-1", CompanyId = "c", OriginalPayrollRunId = "run-paid", EmployeeId = "emp-1",
+            CorrectionPayrollRunId = "correction-1", Status = "APPROVED", Amount = 500m, Reason = "approved arrears"
+        };
+        var adjustmentRepository = CreateRepo(adjustment);
+        var service = new PayrollRunWorkflowService(CreateRepo(correction).Object, CreateRepo<PayrollRunEmployee>().Object,
+            adjustments: adjustmentRepository.Object);
+
+        var result = await service.Cancel("c", correction.Id, "admin", "No longer needed");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("CANCELLED", correction.Status);
+        Assert.False(correction.IsActive);
+        Assert.Null(adjustment.CorrectionPayrollRunId);
+        Assert.Contains(adjustment.AuditHistory, e => e.Action == "CorrectionRunReservationReleased");
+    }
+
+    [Fact]
+    public async Task Process_SynchronizesApprovedAdjustmentStatusAfterCorrectionRunIsFinalized()
+    {
+        var run = new PayrollRun
+        {
+            Id = "correction-1", CompanyId = "c", ParentRunId = "original-1", RunType = "CORRECTION",
+            Status = "PROCESSED", PeriodStart = new DateTime(2026, 9, 1), PeriodEnd = new DateTime(2026, 9, 30),
+            PayDate = new DateTime(2026, 10, 10), LegacyPayrollRowsSynchronizedAtUtc = DateTime.UtcNow
+        };
+        var adjustment = new PayrollAdjustment
+        {
+            Id = "adj-1", CompanyId = "c", OriginalPayrollRunId = "original-1", EmployeeId = "emp-1",
+            Status = "APPROVED", Amount = 500m, Reason = "approved correction", CorrectionPayrollRunId = "correction-1"
+        };
+        var line = new PayrollRunEmployee
+        {
+            CompanyId = "c", PayrollRunId = run.Id, EmployeeId = "emp-1", Status = "CALCULATED",
+            AppliedAdjustmentIds = ["adj-1"]
+        };
+        var adjustmentRepository = CreateRepo(adjustment);
+        var service = new PayrollRunWorkflowService(CreateRepo(run).Object, CreateRepo(line).Object,
+            adjustments: adjustmentRepository.Object);
+
+        var result = await service.Process("c", run.Id, "processor");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("PROCESSED", adjustment.Status);
+        Assert.Equal(run.Id, adjustment.CorrectionPayrollRunId);
+        Assert.Equal("processor", adjustment.ProcessedBy);
+        Assert.Contains(adjustment.AuditHistory, item => item.Action == "Processed" && item.Notes == $"Included in correction payroll run {run.Id}");
+        adjustmentRepository.Verify(x => x.Update(It.IsAny<FilterDefinition<PayrollAdjustment>>(), adjustment), Times.Once);
     }
 
     [Fact]

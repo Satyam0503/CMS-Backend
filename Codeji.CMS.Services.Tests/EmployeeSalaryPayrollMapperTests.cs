@@ -67,6 +67,29 @@ public sealed class EmployeeSalaryPayrollMapperTests
     }
 
     [Fact]
+    public void Preserves_company_configured_statutory_wage_classifications()
+    {
+        var structure = new EmployeeSalaryStructure
+        {
+            Id = "22222222-2222-2222-2222-222222222222", CompanyId = "company-1", EmployeeId = "employee-1",
+            Status = "ACTIVE", ApprovalStatus = "APPROVED", EffectiveFrom = new DateTime(2026, 10, 1),
+            Components =
+            [
+                Component("BASIC", "Basic", "EARNING", 20000m, includeInEsi: true, includeInPf: true),
+                Component("HRA", "HRA", "EARNING", 5000m, includeInEsi: true),
+                Component("LTA", "LTA", "EARNING", 3000m),
+                Component("CUSTOM_ALLOWANCE", "Custom allowance", "EARNING", 1000m, includeInEsi: true)
+            ]
+        };
+
+        var payrollSalary = EmployeeSalaryPayrollMapper.Map(structure);
+
+        Assert.Equal(4, payrollSalary.WageComponents.Count);
+        Assert.Equal(26000m, payrollSalary.WageComponents.Where(x => x.IncludeInEsiWage).Sum(x => x.Amount));
+        Assert.DoesNotContain(payrollSalary.WageComponents, x => x.Code == "LTA" && x.IncludeInEsiWage);
+    }
+
+    [Fact]
     public void Rejects_salary_structure_with_invalid_identifier_instead_of_inventing_a_new_id()
     {
         var structure = new EmployeeSalaryStructure
@@ -116,9 +139,10 @@ public sealed class EmployeeSalaryPayrollMapperTests
     }
 
     private static EmployeeSalaryComponentValue Component(string code, string name, string kind, decimal amount,
-        bool recurring = true, bool employer = false, bool statutory = false) => new()
+        bool recurring = true, bool employer = false, bool statutory = false, bool includeInEsi = false, bool includeInPf = false) => new()
     {
         ComponentCode = code, ComponentName = name, Kind = kind, Value = amount, CalculationType = "FIXED",
-        IsRecurring = recurring, IsEmployerContribution = employer, IsStatutory = statutory
+        IsRecurring = recurring, IsEmployerContribution = employer, IsStatutory = statutory,
+        IncludeInEsiWage = includeInEsi, IncludeInPfWage = includeInPf
     };
 }

@@ -37,6 +37,11 @@ public sealed class PayrollAdjustmentListItemDto
     public string? ComponentName { get; set; }
     public string? ComponentKind { get; set; }
     public bool? IsTaxable { get; set; }
+    public bool? IsStatutory { get; set; }
+    public bool? IsEmployerContribution { get; set; }
+    public bool? IncludeInEsiWage { get; set; }
+    public bool? IncludeInPfWage { get; set; }
+    public bool? IncludeInPtWage { get; set; }
     public int? ComponentVersion { get; set; }
     public DateTime? TargetPeriod { get; set; }
     public required string Type { get; set; }
@@ -78,7 +83,8 @@ public sealed class PayrollAdjustmentService(
             Id = x.Id, OriginalPayrollRunId = x.OriginalPayrollRunId, CorrectionPayrollRunId = x.CorrectionPayrollRunId,
             EmployeeId = x.EmployeeId, Type = x.Type, Status = x.Status, Amount = x.Amount, Reason = x.Reason,
             ComponentCode = x.ComponentCode, ComponentName = x.ComponentName, ComponentKind = x.ComponentKind,
-            IsTaxable = x.IsTaxable, ComponentVersion = x.ComponentVersion, TargetPeriod = x.TargetPeriod,
+            IsTaxable = x.IsTaxable, IsStatutory = x.IsStatutory, IsEmployerContribution = x.IsEmployerContribution,
+            IncludeInEsiWage = x.IncludeInEsiWage, IncludeInPfWage = x.IncludeInPfWage, IncludeInPtWage = x.IncludeInPtWage, ComponentVersion = x.ComponentVersion, TargetPeriod = x.TargetPeriod,
             CreatedBy = x.CreatedBy, CreatedAtUtc = x.CreatedAtUtc, ApprovedBy = x.ApprovedBy,
             ApprovedAtUtc = x.ApprovedAtUtc, RejectedBy = x.RejectedBy, RejectedAtUtc = x.RejectedAtUtc,
             RejectionReason = x.RejectionReason, ProcessedBy = x.ProcessedBy, ProcessedAtUtc = x.ProcessedAtUtc
@@ -96,10 +102,13 @@ public sealed class PayrollAdjustmentService(
         var definitions = (await componentDefinitions.GetAll(x => x.CompanyId == companyId)).ToList();
         var options = definitions.Select(x => PayrollComponentDefinitionResolver.Resolve(definitions, companyId, x.Code, effectiveDate))
             .Where(x => x is not null).DistinctBy(x => x!.Code, StringComparer.OrdinalIgnoreCase)
+            .Where(x => string.Equals(x!.Kind, "EARNING", StringComparison.OrdinalIgnoreCase) && !x.IsTaxable && !x.IsStatutory && !x.IsEmployerContribution && !x.IncludeInPfWage && !x.IncludeInPtWage)
             .Select(x => new PayrollSalaryComponentDto
             {
                 Id = x!.Id, Code = x.Code, Name = x.Name, Kind = x.Kind, CalculationType = x.CalculationType,
-                BaseComponentCode = x.BaseComponentCode, IsTaxable = x.IsTaxable, EffectiveFrom = x.EffectiveFrom,
+                BaseComponentCode = x.BaseComponentCode, IsTaxable = x.IsTaxable, IsStatutory = x.IsStatutory,
+                IsEmployerContribution = x.IsEmployerContribution, IncludeInEsiWage = x.IncludeInEsiWage,
+                IncludeInPfWage = x.IncludeInPfWage, IncludeInPtWage = x.IncludeInPtWage, EffectiveFrom = x.EffectiveFrom,
                 EffectiveTo = x.EffectiveTo, IsActive = x.IsActive, Version = x.Version
             }).OrderBy(x => x.Name).ToList();
         return new Result<List<PayrollSalaryComponentDto>> { Success = true, MethodResult = options };
@@ -110,7 +119,7 @@ public sealed class PayrollAdjustmentService(
         if (request is null || string.IsNullOrWhiteSpace(request.EmployeeId) ||
             string.IsNullOrWhiteSpace(request.Reason) || request.Amount == 0 ||
             string.IsNullOrWhiteSpace(request.ComponentCode) || request.TargetPeriod == default || request.TargetPeriod.Day != 1 ||
-            request.Type is not ("ARREARS" or "CORRECTION" or "REVERSAL"))
+            request.Type is not ("ARREARS" or "CORRECTION"))
             return Fail<PayrollAdjustment>(400, "Adjustment type, reason, employee, component, target payroll month and non-zero amount are required.");
 
         if (componentDefinitions is null) return Fail<PayrollAdjustment>(503, "Payroll component storage is unavailable.");
@@ -118,6 +127,8 @@ public sealed class PayrollAdjustmentService(
         var component = PayrollComponentDefinitionResolver.Resolve(componentRows, companyId, request.ComponentCode, request.TargetPeriod);
         if (component is null)
             return Fail<PayrollAdjustment>(400, "The selected salary component is not active for the target payroll month.");
+        if (!string.Equals(component.Kind, "EARNING", StringComparison.OrdinalIgnoreCase) || component.IsTaxable || component.IsStatutory || component.IsEmployerContribution || component.IncludeInPfWage || component.IncludeInPtWage || request.Amount <= 0m)
+            return Fail<PayrollAdjustment>(400, "This correction workflow currently accepts positive, non-taxable earnings excluded from PF and professional-tax wages. Taxable earnings, PF/PT-included components, deductions, and reversals are blocked until complete recalculation rules are supported.");
 
         var run = await runs.FirstOrDefault(x => x.CompanyId == companyId && x.Id == request.OriginalPayrollRunId);
         if (run is null) return Fail<PayrollAdjustment>(404, "Original payroll run was not found.");
@@ -131,7 +142,10 @@ public sealed class PayrollAdjustmentService(
             CompanyId = companyId, OriginalPayrollRunId = request.OriginalPayrollRunId,
             EmployeeId = request.EmployeeId, Type = request.Type, Amount = request.Amount,
             ComponentCode = component.Code, ComponentName = component.Name, ComponentKind = component.Kind,
-            IsTaxable = component.IsTaxable, ComponentVersion = component.Version, TargetPeriod = request.TargetPeriod.Date,
+            IsTaxable = component.IsTaxable, IsStatutory = component.IsStatutory, IsEmployerContribution = component.IsEmployerContribution,
+            IncludeInEsiWage = component.IncludeInEsiWage,
+            IncludeInPfWage = component.IncludeInPfWage, IncludeInPtWage = component.IncludeInPtWage,
+            ComponentVersion = component.Version, TargetPeriod = request.TargetPeriod.Date,
             Reason = request.Reason.Trim(), CreatedBy = actor, CreatedAtUtc = DateTime.UtcNow
         };
         adjustment.AuditHistory.Add(new PayrollAdjustmentAuditEvent
@@ -217,6 +231,12 @@ public sealed class PayrollAdjustmentService(
         if (employeeRunRow is null || employeeRunRow.Status != "CALCULATED")
             return Fail(409, "The employee was not calculated in the specified correction payroll run.");
 
+        if (!string.Equals(run.RunType, "CORRECTION", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(run.ParentRunId, adjustment.OriginalPayrollRunId, StringComparison.Ordinal) ||
+            adjustment.CorrectionPayrollRunId != runId ||
+            !employeeRunRow.AppliedAdjustmentIds.Contains(adjustment.Id, StringComparer.Ordinal))
+            return Fail(409, "The finalized correction run does not contain this adjustment. The adjustment remains approved and unprocessed.");
+
         if (run.Status is not ("PROCESSED" or "PAID" or "CLOSED"))
             return Fail(409,
                 "Adjustment processing is unavailable until the approved amount is included in a processed correction-run gross-to-net and statutory calculations. The adjustment remains approved.");
@@ -236,7 +256,8 @@ public sealed class PayrollAdjustmentService(
         var updated = await adjustments.Update(
             Builders<PayrollAdjustment>.Filter.Eq(x => x.CompanyId, companyId) &
             Builders<PayrollAdjustment>.Filter.Eq(x => x.Id, id) &
-            Builders<PayrollAdjustment>.Filter.Eq(x => x.Status, "APPROVED"),
+            Builders<PayrollAdjustment>.Filter.Eq(x => x.Status, "APPROVED") &
+            Builders<PayrollAdjustment>.Filter.Eq(x => x.CorrectionPayrollRunId, runId),
             adjustment);
 
         return !updated.Success && updated.StatusCode == 400

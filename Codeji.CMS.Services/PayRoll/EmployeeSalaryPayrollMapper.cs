@@ -20,7 +20,9 @@ public static class EmployeeSalaryPayrollMapper
             Code = x.ComponentCode, Name = x.ComponentName, Kind = x.Kind,
             CalculationType = x.CalculationType, BaseComponentCode = x.BaseComponentCode,
             Value = x.Percentage ?? x.Value, IsTaxable = x.IsTaxable, IsRecurring = x.IsRecurring,
-            IsStatutory = x.IsStatutory, IsEmployerContribution = x.IsEmployerContribution, SortOrder = index
+            IsStatutory = x.IsStatutory, IsEmployerContribution = x.IsEmployerContribution,
+            IncludeInPfWage = x.IncludeInPfWage, IncludeInEsiWage = x.IncludeInEsiWage,
+            IncludeInPtWage = x.IncludeInPtWage, SortOrder = index
         }).ToList();
         var calculation = components.Count == 0
             ? new PayrollComponentCalculationOutcome { Success = true }
@@ -78,6 +80,14 @@ public static class EmployeeSalaryPayrollMapper
             HealthInsurance = healthInsurance,
             OtherDeductions = otherDeductions,
             OtherEarnings = otherEarnings,
+            WageComponents = recurringEarnings.Select(x => new SalaryWageComponent
+            {
+                Code = x.ComponentCode,
+                Amount = Value(x.ComponentCode),
+                IncludeInPfWage = x.IncludeInPfWage,
+                IncludeInEsiWage = x.IncludeInEsiWage,
+                IncludeInPtWage = x.IncludeInPtWage
+            }).ToList(),
             TotalDeductions = deductions,
             GrossSalary = gross,
             NetSalary = Math.Max(0m, gross - deductions),

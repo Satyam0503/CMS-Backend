@@ -37,6 +37,13 @@ The separate payroll-settings flows use:
 - `Payroll_Settings.Create`
 - `Payroll_Settings.Edit`
 
+### 3.1 Module Lifecycle Decoupling & Fail-Closed Enforcement
+
+- **Independent Module Lifecycle**: Toggling `PayRoll` (via `PATCH api/CompanyMaster/UpdateModuleAccess/{moduleId}`) only enables or disables `PayRoll` and `PayrollSettings`. It does **not** cascade to or disable `Leave Management` or `Attendance`.
+- **Fail-Closed Enforcement**: When `PayRoll` is disabled for a tenant, all endpoints under `api/payroll` and `api/autopayroll` immediately reject requests with HTTP 403 Forbidden (`Access Denied`).
+- **No Administrator Bypass**: Administrators cannot access or manage payroll endpoints or settings if the module is disabled for the company.
+- **Frontend Protection**: The `Payroll` and `Payroll Settings` sidebar navigation, the Company Details `Payroll configuration` tab, and Profile `View Pay Slip` widget are completely removed and blocked when Payroll is disabled.
+
 ## 4. Primary data flow
 
 ### 4.1 View employee payroll data

@@ -167,7 +167,7 @@ namespace Codeji.CMS.Repository.Repositories
                 res.StatusCode = StatusCodes.Status200OK;
                 return res;
             }
-            catch (MongoWriteException mwe) when (IsDuplicateKeyOnId(mwe))
+            catch (MongoWriteException mwe) when (mwe.WriteError?.Category == ServerErrorCategory.DuplicateKey)
             {
                 // The insert can genuinely succeed on the server while the driver never
                 // receives the acknowledgement (e.g. a dropped connection), causing it to
@@ -182,8 +182,8 @@ namespace Codeji.CMS.Repository.Repositories
                     return res;
                 }
 
-                res.StatusCode = StatusCodes.Status500InternalServerError;
-                res.Message = HelperService.NotifyException("AddOne", "Exception adding one " + typeof(TEntity).Name, mwe);
+                res.StatusCode = StatusCodes.Status409Conflict;
+                res.Message = "A record with the same unique key already exists.";
                 return res;
             }
             catch (Exception ex)
@@ -192,14 +192,6 @@ namespace Codeji.CMS.Repository.Repositories
                 res.Message = HelperService.NotifyException("AddOne", "Exception adding one " + typeof(TEntity).Name, ex);
                 return res;
             }
-        }
-
-        // only trusts a duplicate-key error when it's on the primary key (_id) specifically -
-        // never on any other unique index (e.g. a real duplicate email must still fail normally)
-        private static bool IsDuplicateKeyOnId(MongoWriteException mwe)
-        {
-            return mwe.WriteError?.Category == ServerErrorCategory.DuplicateKey
-                && (mwe.WriteError.Message?.Contains("index: _id_") ?? false);
         }
 
         private async Task<bool> OwnDocumentExists(TEntity item)

@@ -27,6 +27,7 @@ The current implementation emphasizes:
 - shared validation through `IAttendanceMutationValidator`
 - monthly locking as the payroll stability boundary
 - UI rendering of persisted attendance codes rather than inferred absence status
+- **Independent Module Lifecycle & Fail-Closed Security**: While daily attendance data feeds downstream monthly summaries, Attendance is an independent module. A company can enable or disable Attendance independently of Payroll or Leave Management. Disabling Payroll does **not** disable Attendance. When Attendance is disabled for a company, all Attendance endpoints reject requests fail-closed with HTTP 403 Forbidden for all roles (including Administrator).
 
 ### Production hardening highlights
 

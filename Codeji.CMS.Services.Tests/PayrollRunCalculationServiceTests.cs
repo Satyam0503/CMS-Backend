@@ -178,6 +178,179 @@ public sealed class PayrollRunCalculationServiceTests
     }
 
     [Fact]
+    public async Task SyncCalculatedRows_AppliesFrozenNonTaxableEsiEarningAdjustmentToCorrectionOnly()
+    {
+        var run = new PayrollRun
+        {
+            Id = "correction-1", CompanyId = "company-1", PeriodStart = new DateTime(2026, 9, 1),
+            PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 10), Status = "DRAFT",
+            RunType = "CORRECTION", ParentRunId = "original-1"
+        };
+        var member = new PayrollRunEmployee
+        {
+            Id = "correction-line-1", CompanyId = run.CompanyId, PayrollRunId = run.Id, EmployeeId = "employee-1",
+            InputSnapshot = new PayrollEmployeeInputSnapshot
+            {
+                Adjustments = [new PayrollAdjustmentSnapshot
+                {
+                    Id = "adjustment-1", ComponentCode = "REIMBURSEMENT", ComponentName = "Reimbursement",
+                    ComponentKind = "EARNING", Amount = 5000m, IsTaxable = false, IncludeInEsiWage = true, ComponentVersion = 2
+                }]
+            }
+        };
+        var row = new EmpPayRoll
+        {
+            Id = "original-row", CompanyId = run.CompanyId, UserId = "user-1", EmployeeId = member.EmployeeId,
+            PayMonth = run.PeriodStart, PaidDate = new DateTime(2026, 10, 5), BasicPay = 18000m, PaidDays = 30,
+            Deduction = new Deduction { ESIC = 135m },
+            CalculationSnapshot = new PayrollCalculationSnapshot
+            {
+                EsicMode = "STATUTORY", EsicWageCeiling = 21000m, EsicEmployeeRatePercent = 0.75m,
+                EsicEmployerRatePercent = 3.25m, EsicWages = 18000m, EsicCoverageEligible = true
+            }
+        };
+        var service = new PayrollRunCalculationService(Repository(run).Object, Repository(member).Object, Repository(row).Object);
+
+        var result = await service.SyncCalculatedRows(run.CompanyId, run.Id, "calculator");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("CALCULATED", member.Status);
+        Assert.Equal(5000m, member.GrossAmount);
+        Assert.Equal(38m, member.DeductionAmount);
+        Assert.Equal(4962m, member.NetAmount);
+        Assert.Equal(5000m, member.StatutorySnapshot.EsicWages);
+        Assert.Equal(38m, member.StatutorySnapshot.EmployeeEsic);
+        Assert.Equal(163m, member.StatutorySnapshot.EmployerEsic);
+        Assert.Equal(0m, member.StatutorySnapshot.IncomeTax);
+        Assert.Equal(0m, member.StatutorySnapshot.EmployeeEpf);
+        Assert.Equal(0m, member.StatutorySnapshot.ProfessionalTax);
+        Assert.Equal(new[] { "adjustment-1" }, member.AppliedAdjustmentIds);
+        Assert.Equal(18000m, row.BasicPay);
+        Assert.Equal(135m, row.Deduction.ESIC);
+    }
+
+    [Fact]
+    public async Task SyncCalculatedRows_LeavesEsiUnchangedWhenCompanyExcludesAdjustmentFromEsiWages()
+    {
+        var run = new PayrollRun
+        {
+            Id = "correction-excluded-esi", CompanyId = "company-1", PeriodStart = new DateTime(2026, 9, 1),
+            PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 10), Status = "DRAFT",
+            RunType = "CORRECTION", ParentRunId = "original-1"
+        };
+        var member = new PayrollRunEmployee
+        {
+            Id = "correction-line-excluded-esi", CompanyId = run.CompanyId, PayrollRunId = run.Id, EmployeeId = "employee-1",
+            InputSnapshot = new PayrollEmployeeInputSnapshot
+            {
+                Adjustments = [new PayrollAdjustmentSnapshot
+                {
+                    Id = "adjustment-excluded-esi", ComponentCode = "REIMBURSEMENT", ComponentName = "Reimbursement",
+                    ComponentKind = "EARNING", Amount = 5000m, IsTaxable = false, IncludeInEsiWage = false, ComponentVersion = 2
+                }]
+            }
+        };
+        var row = new EmpPayRoll
+        {
+            Id = "original-row-excluded-esi", CompanyId = run.CompanyId, UserId = "user-1", EmployeeId = member.EmployeeId,
+            PayMonth = run.PeriodStart, PaidDate = new DateTime(2026, 10, 5), BasicPay = 18000m, PaidDays = 30,
+            Deduction = new Deduction { ESIC = 135m },
+            CalculationSnapshot = new PayrollCalculationSnapshot
+            {
+                EsicMode = "STATUTORY", EsicWageCeiling = 21000m, EsicEmployeeRatePercent = 0.75m,
+                EsicEmployerRatePercent = 3.25m, EsicWages = 18000m, EsicCoverageEligible = true
+            }
+        };
+        var service = new PayrollRunCalculationService(Repository(run).Object, Repository(member).Object, Repository(row).Object);
+
+        var result = await service.SyncCalculatedRows(run.CompanyId, run.Id, "calculator");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(5000m, member.GrossAmount);
+        Assert.Equal(0m, member.DeductionAmount);
+        Assert.Equal(5000m, member.NetAmount);
+        Assert.Equal(0m, member.StatutorySnapshot!.EsicWages);
+        Assert.Equal(0m, member.StatutorySnapshot.EmployeeEsic);
+        Assert.Equal(0m, member.StatutorySnapshot.EmployerEsic);
+        Assert.Equal(new[] { "adjustment-excluded-esi" }, member.AppliedAdjustmentIds);
+        Assert.Equal(135m, row.Deduction.ESIC);
+    }
+
+    [Fact]
+    public async Task SyncCalculatedRows_BlocksTaxableCorrectionAdjustmentUntilTdsRecalculationIsSupported()
+    {
+        var run = new PayrollRun
+        {
+            Id = "correction-taxable", CompanyId = "company-1", PeriodStart = new DateTime(2026, 9, 1),
+            PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 10), Status = "DRAFT", RunType = "CORRECTION"
+        };
+        var member = new PayrollRunEmployee
+        {
+            Id = "correction-line-taxable", CompanyId = run.CompanyId, PayrollRunId = run.Id, EmployeeId = "employee-1",
+            InputSnapshot = new PayrollEmployeeInputSnapshot
+            {
+                Adjustments = [new PayrollAdjustmentSnapshot { Id = "taxable-adjustment", ComponentKind = "EARNING", Amount = 1000m, IsTaxable = true }]
+            }
+        };
+        var row = new EmpPayRoll
+        {
+            Id = "original-taxable-row", CompanyId = run.CompanyId, UserId = "user-1", EmployeeId = member.EmployeeId,
+            PayMonth = run.PeriodStart, PaidDate = run.PayDate, BasicPay = 18000m, PaidDays = 30
+        };
+        var service = new PayrollRunCalculationService(Repository(run).Object, Repository(member).Object, Repository(row).Object);
+
+        var result = await service.SyncCalculatedRows(run.CompanyId, run.Id, "calculator");
+
+        Assert.False(result.Success);
+        Assert.Equal("BLOCKED", member.Status);
+        Assert.Equal("PAYROLL_ADJUSTMENT_TREATMENT_UNSUPPORTED", member.ErrorCode);
+        Assert.Empty(member.AppliedAdjustmentIds);
+        Assert.Equal(0m, member.GrossAmount);
+    }
+
+    [Fact]
+    public async Task SyncCalculatedRows_IncludesProfessionalTaxAndAdditionalDeductionsExactlyOnce()
+    {
+        var run = new PayrollRun
+        {
+            Id = "run-pt", CompanyId = "company-1", PeriodStart = new DateTime(2026, 9, 1),
+            PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 1), Status = "DRAFT"
+        };
+        var member = new PayrollRunEmployee
+        {
+            Id = "line-pt", CompanyId = run.CompanyId, PayrollRunId = run.Id, EmployeeId = "employee-1"
+        };
+        var row = new EmpPayRoll
+        {
+            Id = "row-pt", CompanyId = run.CompanyId, UserId = "user-1", EmployeeId = member.EmployeeId,
+            PayMonth = run.PeriodStart, PaidDate = run.PayDate, BasicPay = 2000m, PaidDays = 30,
+            Deduction = new Deduction
+            {
+                LossOfPay = 100m, IncomeTax = 200m, HealthInsurance = 50m,
+                EPF = 100m, ESIC = 30m, ProfessionalTax = 60m
+            },
+            DeductionLines =
+            [
+                new() { Code = "LOAN", Description = "Loan repayment", Amount = 40m },
+                new() { Code = "PT", Description = "Professional Tax", Amount = 60m },
+                new() { Code = "LHD_ED_POLICY", Description = "LOP audit detail", Amount = 100m }
+            ]
+        };
+        var service = new PayrollRunCalculationService(
+            Repository(run).Object, Repository(member).Object, Repository(row).Object);
+
+        var result = await service.SyncCalculatedRows(run.CompanyId, run.Id, "actor-1");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(2000m, member.GrossAmount);
+        Assert.Equal(580m, member.DeductionAmount);
+        Assert.Equal(1420m, member.NetAmount);
+        Assert.Equal(60m, member.StatutorySnapshot!.ProfessionalTax);
+        Assert.Equal(580m, run.DeductionTotal);
+        Assert.Equal(1420m, run.NetTotal);
+    }
+
+    [Fact]
     public async Task SyncCalculatedRows_BlocksWhenSourcePayrollRowContainsNegativeDeductionLine()
     {
         var run = new PayrollRun { Id = "run-1", CompanyId = "company-1", PeriodStart = new DateTime(2026, 9, 1), PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 1), Status = "DRAFT" };
@@ -390,7 +563,7 @@ public sealed class PayrollRunCalculationServiceTests
         var expectedSalary = new PayrollSalaryStructureSnapshot
         {
             SalaryStructureId = "salary-v1", Version = 1, EffectiveFrom = new DateTime(2026, 9, 1),
-            Components = [new() { Code = "BASIC", Name = "Basic", Kind = "EARNING", Value = 50000m }]
+            Components = [new() { Code = "BASIC", Name = "Basic", Kind = "EARNING", Value = 50000m, IncludeInEsiWage = true }]
         };
         var member = new PayrollRunEmployee
         {
@@ -404,7 +577,7 @@ public sealed class PayrollRunCalculationServiceTests
             CalculationSnapshot = new PayrollCalculationSnapshot
             {
                 SalaryRevisions = [new() { SalaryStructureId = "salary-v1", Version = 1 }],
-                SalaryStructures = [new() { SalaryStructureId = "salary-v1", Version = 1, EffectiveFrom = new DateTime(2026, 9, 1), Components = [new() { Code = "BASIC", Name = "Basic", Kind = "EARNING", Value = 52000m }] }]
+                SalaryStructures = [new() { SalaryStructureId = "salary-v1", Version = 1, EffectiveFrom = new DateTime(2026, 9, 1), Components = [new() { Code = "BASIC", Name = "Basic", Kind = "EARNING", Value = 50000m, IncludeInEsiWage = false }] }]
             }
         };
         var service = new PayrollRunCalculationService(Repository(run).Object, Repository(member).Object, Repository(row).Object);

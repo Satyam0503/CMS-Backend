@@ -230,7 +230,8 @@ public sealed class PayrollRunService(
                 DivisorPolicy = divisorPolicy?.DivisorPolicy ?? "CALENDAR_DAYS",
                 LopCalculationBase = divisorPolicy?.LopCalculationBase ?? "FIXED_GROSS",
                 EpfMode = divisorPolicy?.EpfMode ?? "CAPPED_CEILING",
-                EpfWageCeiling = divisorPolicy?.EpfWageCeiling ?? 15000m,
+                EpfWageCeiling = PayrollCalculationRules.ResolveIndiaEpfRules(end).WageCeiling,
+                EpfStatutoryRuleSetId = PayrollCalculationRules.ResolveIndiaEpfRules(end).RuleSetId,
                 EpfEmployeeRatePercent = divisorPolicy?.EpfEmployeeRatePercent ?? 12m,
                 EpfEmployerRatePercent = divisorPolicy?.EpfEmployerRatePercent ?? 12m,
                 EsicMode = divisorPolicy?.EsicMode ?? "STATUTORY",
@@ -463,7 +464,8 @@ public sealed class PayrollRunService(
                         salaryForSnapshot,
                         overlappingSalaryRows,
                         legacyRows ?? [],
-                        divisorPolicy
+                        divisorPolicy,
+                        end
                     ),
                 };
             })
@@ -558,6 +560,7 @@ public sealed class PayrollRunService(
                     PolicyProfileId = x.InputSnapshot.PolicyProfileId,
                     PolicyProfileVersion = x.InputSnapshot.PolicyProfileVersion,
                     EpfMode = x.InputSnapshot.EpfMode,
+                    EpfStatutoryRuleSetId = x.InputSnapshot.EpfStatutoryRuleSetId,
                     EpfWageCeiling = x.InputSnapshot.EpfWageCeiling,
                     EpfEmployeeRatePercent = x.InputSnapshot.EpfEmployeeRatePercent,
                     EpfEmployerRatePercent = x.InputSnapshot.EpfEmployerRatePercent,
@@ -577,6 +580,10 @@ public sealed class PayrollRunService(
                     EmployerEpf = x.StatutorySnapshot.EmployerEpf,
                     EmployeeEsic = x.StatutorySnapshot.EmployeeEsic,
                     EmployerEsic = x.StatutorySnapshot.EmployerEsic,
+                    EsicWages = x.StatutorySnapshot.EsicWages,
+                    EsicCoverageEligible = x.StatutorySnapshot.EsicCoverageEligible,
+                    EsicContributionPeriodStart = x.StatutorySnapshot.EsicContributionPeriodStart,
+                    EsicContributionPeriodEnd = x.StatutorySnapshot.EsicContributionPeriodEnd,
                     IncomeTax = x.StatutorySnapshot.IncomeTax,
                     ProfessionalTax = x.StatutorySnapshot.ProfessionalTax,
                 },
@@ -626,7 +633,8 @@ public sealed class PayrollRunService(
         EmployeeSalaryStructure? employeeSalary,
         IReadOnlyCollection<EmployeeSalaryStructure> overlappingSalaries,
         IReadOnlyCollection<SalaryModel> legacySalaries,
-        PayrollDivisorPolicy? companyPolicy
+        PayrollDivisorPolicy? companyPolicy,
+        DateTime periodEnd
     )
     {
         var components =
@@ -647,6 +655,9 @@ public sealed class PayrollRunService(
                                 IsRecurring = x.IsRecurring,
                                 IsStatutory = x.IsStatutory,
                                 IsEmployerContribution = x.IsEmployerContribution,
+                                IncludeInPfWage = x.IncludeInPfWage,
+                                IncludeInEsiWage = x.IncludeInEsiWage,
+                                IncludeInPtWage = x.IncludeInPtWage,
                                 SortOrder = index,
                             }
                     )
@@ -701,6 +712,9 @@ public sealed class PayrollRunService(
                                             IsRecurring = c.IsRecurring,
                                             IsStatutory = c.IsStatutory,
                                             IsEmployerContribution = c.IsEmployerContribution,
+                                            IncludeInPfWage = c.IncludeInPfWage,
+                                            IncludeInEsiWage = c.IncludeInEsiWage,
+                                            IncludeInPtWage = c.IncludeInPtWage,
                                             SortOrder = index,
                                         }
                                 )
@@ -719,7 +733,8 @@ public sealed class PayrollRunService(
             EpfMode = !string.IsNullOrWhiteSpace(employeeSalary?.EpfModeOverride)
                 ? employeeSalary.EpfModeOverride
                 : (policy?.EpfMode ?? companyPolicy?.EpfMode ?? "CAPPED_CEILING"),
-            EpfWageCeiling = policy?.EpfWageCeiling ?? companyPolicy?.EpfWageCeiling ?? 15000m,
+            EpfStatutoryRuleSetId = PayrollCalculationRules.ResolveIndiaEpfRules(periodEnd).RuleSetId,
+            EpfWageCeiling = PayrollCalculationRules.ResolveIndiaEpfRules(periodEnd).WageCeiling,
             EpfEmployeeRatePercent =
                 policy?.EpfEmployeeRatePercent ?? companyPolicy?.EpfEmployeeRatePercent ?? 12m,
             EpfEmployerRatePercent =
@@ -754,6 +769,9 @@ public sealed class PayrollRunService(
             IsRecurring = c.IsRecurring,
             IsStatutory = c.IsStatutory,
             IsEmployerContribution = c.IsEmployerContribution,
+            IncludeInPfWage = c.IncludeInPfWage,
+            IncludeInEsiWage = c.IncludeInEsiWage,
+            IncludeInPtWage = c.IncludeInPtWage,
             SortOrder = c.SortOrder,
         };
 

@@ -1,4 +1,5 @@
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.PayRoll;
 public class PayrollCalculationRulesTests
 {
     [Fact]
@@ -80,8 +81,9 @@ public class PayrollCalculationRulesTests
 
     [Theory]
     [InlineData("CAPPED_CEILING", 15000, 10, 1500)]
-    [InlineData("ACTUAL_BASIC_12", 12345.67, 10.5, 1296.30)]
-    public void Calculates_epf_from_configured_rate_without_intermediate_rounding(
+    [InlineData("ACTUAL_BASIC_12", 12345.67, 10.5, 1296)]
+    [InlineData("ACTUAL_BASIC_12", 12345.67, 10, 1235)]
+    public void Calculates_epf_from_configured_rate_and_rounds_contribution_to_rupees(
         string epfMode,
         decimal earnedBasicAfterLop,
         decimal ratePercent,
@@ -121,6 +123,79 @@ public class PayrollCalculationRulesTests
         var esic = PayrollCalculationRules.CalculateMonthlyEsic("STATUTORY", contractualGross, contractualGross, wageCeiling);
         Assert.Equal(expectedEsic, esic);
     }
+
+    [Fact]
+    public void Uses_configured_esi_components_and_preserves_legacy_basis_when_not_classified()
+    {
+        var configuredComponents = new[]
+        {
+            new Codeji.CMS.DTO.Salary.SalaryWageComponent { Code = "BASIC", Amount = 20000m, IncludeInEsiWage = true },
+            new Codeji.CMS.DTO.Salary.SalaryWageComponent { Code = "LTA", Amount = 3000m, IncludeInEsiWage = false },
+            new Codeji.CMS.DTO.Salary.SalaryWageComponent { Code = "CUSTOM", Amount = 1000m, IncludeInEsiWage = true }
+        };
+
+        Assert.Equal(21000m, PayrollCalculationRules.ResolveEsicWageBasis(configuredComponents, 24000m));
+        Assert.Equal(24000m, PayrollCalculationRules.ResolveEsicWageBasis(
+            [new Codeji.CMS.DTO.Salary.SalaryWageComponent { Code = "BASIC", Amount = 20000m }], 24000m));
+        Assert.Equal(24000m, PayrollCalculationRules.ResolveEsicWageBasis([], 24000m));
+    }
+
+    [Theory]
+    [InlineData("2026-09-01", "2026-04-01", "2026-09-30")]
+    [InlineData("2026-10-01", "2026-10-01", "2027-03-31")]
+    [InlineData("2027-03-01", "2026-10-01", "2027-03-31")]
+    [InlineData("2027-04-01", "2027-04-01", "2027-09-30")]
+    public void Resolves_india_esi_contribution_period_boundaries(string month, string expectedStart, string expectedEnd)
+    {
+        var period = PayrollCalculationRules.ResolveIndiaEsicContributionPeriod(DateTime.Parse(month));
+
+        Assert.Equal(DateTime.Parse(expectedStart), period.Start);
+        Assert.Equal(DateTime.Parse(expectedEnd), period.End);
+    }
+
+    [Fact]
+    public void Esi_eligibility_carries_through_same_contribution_period_after_wage_crosses_ceiling()
+    {
+        var payroll = new EmpPayRoll
+        {
+            CompanyId = "company-1", UserId = "user-1", EmployeeId = "employee-1", PayMonth = new DateTime(2026, 4, 1),
+            PaidDate = new DateTime(2026, 5, 1), BasicPay = 20000m, PaidDays = 30,
+            CalculationSnapshot = new PayrollCalculationSnapshot
+            {
+                EsicMode = "STATUTORY", EsicCoverageEligible = true, EsicWages = 20000m
+            }
+        };
+
+        var eligible = PayrollCalculationRules.ResolveEsicCoverageEligibility(
+            "STATUTORY", 28000m, 21000m, new DateTime(2026, 5, 1), [payroll]);
+
+        Assert.True(eligible);
+        Assert.Equal(210m, PayrollCalculationRules.CalculateMonthlyEsic(
+            "STATUTORY", 28000m, 28000m, 21000m, 0.75m, eligible));
+        Assert.Equal(910m, PayrollCalculationRules.CalculateEmployerMonthlyEsic(
+            "STATUTORY", 28000m, 28000m, 21000m, 3.25m, eligible));
+    }
+
+    [Fact]
+    public void Esi_eligibility_does_not_carry_from_previous_period_or_when_exempt()
+    {
+        var oldPeriodPayroll = new EmpPayRoll
+        {
+            CompanyId = "company-1", UserId = "user-1", EmployeeId = "employee-1", PayMonth = new DateTime(2026, 3, 1),
+            PaidDate = new DateTime(2026, 4, 1), BasicPay = 20000m, PaidDays = 31,
+            CalculationSnapshot = new PayrollCalculationSnapshot
+            {
+                EsicMode = "STATUTORY", EsicCoverageEligible = true, EsicWages = 20000m
+            }
+        };
+
+        Assert.False(PayrollCalculationRules.ResolveEsicCoverageEligibility(
+            "STATUTORY", 28000m, 21000m, new DateTime(2026, 4, 1), [oldPeriodPayroll]));
+        Assert.False(PayrollCalculationRules.ResolveEsicCoverageEligibility(
+            "EXEMPT", 18000m, 21000m, new DateTime(2026, 5, 1), []));
+        Assert.Equal(0m, PayrollCalculationRules.CalculateMonthlyEsic(
+            "STATUTORY", 28000m, 28000m, 21000m, 0.75m, false));
+    }
     [Theory]
     [InlineData(1200000, "AUTO_NEW_REGIME", 0)]        // Gross 12.00L -> Taxable 11.25L -> ₹0 (Section 87A Rebate)
     [InlineData(1275000, "AUTO_NEW_REGIME", 0)]        // Gross 12.75L -> Taxable 12.00L -> ₹0 (Section 87A Rebate + ₹75k Std Ded)
@@ -134,6 +209,32 @@ public class PayrollCalculationRulesTests
     {
         var annualTax = PayrollCalculationRules.CalculateAnnualIncomeTaxWithCess(annualGrossIncome, tdsMode);
         Assert.Equal(expectedAnnualTax, annualTax);
+    }
+
+    [Theory]
+    [InlineData("2025-26", "INCOME_TAX_ACT_1961", 124800)]
+    [InlineData("2026-27", "INCOME_TAX_ACT_2025", 124800)]
+    public void Annual_tax_uses_the_explicit_effective_year_ruleset(string financialYear, string expectedAct, decimal expectedTax)
+    {
+        var period = PayrollTaxPeriod.TryResolveFinancialYear(financialYear);
+        Assert.NotNull(period?.TaxRuleSet);
+        Assert.Equal(expectedAct, period.TaxRuleSet.IncomeTaxAct);
+
+        var tax = PayrollCalculationRules.CalculateAnnualIncomeTaxWithCess(
+            1675000m, "AUTO_NEW_REGIME", taxRules: period.TaxRuleSet);
+
+        Assert.Equal(expectedTax, tax);
+    }
+
+    [Fact]
+    public void Custom_rule_copy_changes_tax_without_mutating_catalogued_rules()
+    {
+        var rules = PayrollTaxPeriod.TryResolveFinancialYear("2026-27")!.TaxRuleSet!;
+        var testRules = rules with { NewRegimeStandardDeduction = 100000m };
+
+        Assert.Equal(124800m, PayrollCalculationRules.CalculateAnnualIncomeTaxWithCess(1675000m, taxRules: rules));
+        Assert.Equal(120900m, PayrollCalculationRules.CalculateAnnualIncomeTaxWithCess(1675000m, taxRules: testRules));
+        Assert.Equal(75000m, rules.NewRegimeStandardDeduction);
     }
 
     [Fact]
@@ -231,9 +332,9 @@ public class PayrollCalculationRulesTests
         Assert.Equal(expected, PayrollCalculationRules.RoundMoney(value));
 
     [Theory]
-    [InlineData("CAPPED_CEILING", 30000, 550.50, 1249.50, 75.00, 75.00)]
-    [InlineData("CAPPED_CEILING", 15000, 550.50, 1249.50, 75.00, 75.00)]
-    [InlineData("CAPPED_CEILING", 10000, 367.00, 833.00, 50.00, 50.00)]
+    [InlineData("CAPPED_CEILING", 30000, 550, 1250, 75, 0)]
+    [InlineData("CAPPED_CEILING", 15000, 550, 1250, 75, 0)]
+    [InlineData("CAPPED_CEILING", 10000, 367, 833, 50, 0)]
     [InlineData("EXEMPT", 30000, 0, 0, 0, 0)]
     public void Calculates_employer_monthly_epf_breakdown(
         string epfMode,
@@ -251,6 +352,50 @@ public class PayrollCalculationRulesTests
     }
 
     [Fact]
+    public void EmployerEpfBreakdown_UsesConfiguredEmployerRateAndStatutoryEpsCeiling()
+    {
+        var breakdown = PayrollCalculationRules.CalculateEmployerMonthlyEpf(
+            "CAPPED_CEILING", earnedBasicAfterLop: 19500m, wageCeiling: 15000m,
+            employerContributionRatePercent: 10m);
+
+        Assert.Equal(250m, breakdown.EmployerEpf);
+        Assert.Equal(1250m, breakdown.EmployerEps);
+        Assert.Equal(75m, breakdown.Edli);
+        Assert.Equal(0m, breakdown.AdminCharges);
+    }
+
+    [Theory]
+    [InlineData("2026-09-16", "IN-EPF-2025-15000", 15000)]
+    [InlineData("2026-09-17", "IN-EPF-2026-25000", 25000)]
+    [InlineData("2026-09-30", "IN-EPF-2026-25000", 25000)]
+    public void India_Epf_rules_resolve_by_statutory_effective_date(string date, string ruleSetId, decimal ceiling)
+    {
+        var rules = PayrollCalculationRules.ResolveIndiaEpfRules(DateTime.Parse(date));
+        Assert.Equal(ruleSetId, rules.RuleSetId);
+        Assert.Equal(ceiling, rules.WageCeiling);
+        Assert.Equal(ceiling, rules.EpsWageCeiling);
+        Assert.Equal(ceiling, rules.EdliWageCeiling);
+    }
+
+    [Fact]
+    public void EmployerEpfBreakdown_UsesUpdatedEpsMaximumAfterCeilingEffectiveDate()
+    {
+        var rules = PayrollCalculationRules.ResolveIndiaEpfRules(new DateTime(2026, 9, 30));
+        var breakdown = PayrollCalculationRules.CalculateEmployerMonthlyEpf(
+            "CAPPED_CEILING", 30000m, rules.WageCeiling, rules.EpsWageCeiling);
+        Assert.Equal(2083m, breakdown.EmployerEps);
+        Assert.Equal(125m, breakdown.Edli);
+    }
+
+    [Theory]
+    [InlineData("CAPPED_CEILING", 30000, 25000, 25000)]
+    [InlineData("ACTUAL_BASIC_12", 30000, 25000, 30000)]
+    [InlineData("EXEMPT", 30000, 25000, 0)]
+    public void Epf_contribution_wage_base_follows_mode_and_effective_ceiling(
+        string mode, decimal earnedBasic, decimal ceiling, decimal expected) =>
+        Assert.Equal(expected, PayrollCalculationRules.ResolveEpfContributionWageBase(mode, earnedBasic, ceiling));
+
+    [Fact]
     public void CalculateGratuity_ReturnsZero_WhenTenureLessThanFiveYears()
     {
         var doj = new DateTime(2022, 1, 1);
@@ -258,6 +403,15 @@ public class PayrollCalculationRulesTests
         var gratuity = PayrollCalculationRules.CalculateGratuity(50000m, doj, lwd);
         Assert.Equal(0m, gratuity);
     }
+
+    [Theory]
+    [InlineData(12000, 1, 30, 11600)]
+    [InlineData(12000, 3, 30, 10800)]
+    [InlineData(12000, 40, 30, 0)]
+    [InlineData(12000, 0, 0, 12000)]
+    public void Lop_adjusts_statutory_wage_base_by_the_frozen_divisor(
+        decimal monthlyWageBase, decimal lossOfPayDays, decimal divisor, decimal expected) =>
+        Assert.Equal(expected, PayrollCalculationRules.CalculateLopAdjustedWageBase(monthlyWageBase, lossOfPayDays, divisor));
 
     [Fact]
     public void CalculateGratuity_CalculatesCorrectStatutoryAmount_WhenTenureExceedsFiveYears()

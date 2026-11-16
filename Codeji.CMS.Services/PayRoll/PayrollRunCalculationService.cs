@@ -228,6 +228,8 @@ public sealed class PayrollRunCalculationService(
             if (hasFrozenPolicySettings && (calculatedSnapshot is null ||
                 !string.Equals(member.InputSnapshot.EpfMode, calculatedSnapshot.EpfMode, StringComparison.OrdinalIgnoreCase) ||
                 member.InputSnapshot.EpfWageCeiling != calculatedSnapshot.EpfWageCeiling ||
+                (!string.IsNullOrWhiteSpace(member.InputSnapshot.EpfStatutoryRuleSetId) &&
+                 !string.Equals(member.InputSnapshot.EpfStatutoryRuleSetId, calculatedSnapshot.EpfStatutoryRuleSetId, StringComparison.Ordinal)) ||
                 member.InputSnapshot.EpfEmployeeRatePercent != calculatedSnapshot.EpfEmployeeRatePercent ||
                 member.InputSnapshot.EpfEmployerRatePercent != calculatedSnapshot.EpfEmployerRatePercent ||
                 !string.Equals(member.InputSnapshot.EsicMode, calculatedSnapshot.EsicMode, StringComparison.OrdinalIgnoreCase) ||
@@ -262,12 +264,83 @@ public sealed class PayrollRunCalculationService(
                 continue;
             }
 
+            var adjustments = member.InputSnapshot.Adjustments;
+            var isCorrectionRun = string.Equals(run.RunType, "CORRECTION", StringComparison.OrdinalIgnoreCase);
+            if (isCorrectionRun && adjustments.Count == 0)
+            {
+                Block(member, "PAYROLL_CORRECTION_ADJUSTMENT_MISSING", "A correction employee must have at least one approved adjustment. Original payroll amounts are not recalculated or paid again in a correction run.");
+                missing++;
+                if (await SaveLine(companyId, member) is { } missingAdjustmentError) return missingAdjustmentError;
+                continue;
+            }
+            if (adjustments.Any(x => x.Amount <= 0m || !string.Equals(x.ComponentKind, "EARNING", StringComparison.OrdinalIgnoreCase) || x.IsTaxable || x.IsStatutory || x.IsEmployerContribution || x.IncludeInPfWage || x.IncludeInPtWage))
+            {
+                Block(member, "PAYROLL_ADJUSTMENT_TREATMENT_UNSUPPORTED",
+                    "This correction contains a deduction, reversal, taxable, statutory, employer-contribution, PF-included, or professional-tax-included adjustment. Its complete gross-to-net statutory treatment is not supported; no adjustment was applied.");
+                missing++;
+                if (await SaveLine(companyId, member) is { } adjustmentError) return adjustmentError;
+                continue;
+            }
+
+            if (adjustments.Any(x => string.IsNullOrWhiteSpace(x.Id)) ||
+                adjustments.Select(x => x.Id).Distinct(StringComparer.Ordinal).Count() != adjustments.Count)
+            {
+                Block(member, "PAYROLL_ADJUSTMENT_SNAPSHOT_INVALID", "The correction contains missing or duplicate adjustment IDs. Refresh the correction run before retrying.");
+                missing++;
+                if (await SaveLine(companyId, member) is { } adjustmentSnapshotError) return adjustmentSnapshotError;
+                continue;
+            }
+
             // Payroll rows already include attendance proration, LOP, and statutory deductions.
-            // Frozen component snapshots validate inputs; they do not replace payroll row totals.
-            var earning = row.BasicPay + row.Bonus + row.Allowance.HRA + row.Allowance.LTA + row.Allowance.OtherAllowance;
-            var deduction = row.Deduction.LossOfPay + row.Deduction.IncomeTax + row.Deduction.HealthInsurance + row.Deduction.EPF + row.Deduction.ESIC + PayrollDeductionLineTotals.AdditionalAmount(row.DeductionLines);
-            member.GrossAmount = PayrollCalculationRules.RoundMoney(Math.Max(0m, earning));
-            member.DeductionAmount = PayrollCalculationRules.RoundMoney(Math.Max(0m, deduction));
+            // Correction amounts remain separate from the original row so the original payslip
+            // is never rewritten. Taxable/deduction/reversal cases fail closed above.
+            var totals = PayrollRowTotalsResolver.Resolve(row);
+            var adjustmentGross = PayrollCalculationRules.RoundMoney(adjustments.Sum(x => x.Amount));
+            var esiAdjustmentWages = PayrollCalculationRules.RoundMoney(adjustments.Where(x => x.IncludeInEsiWage).Sum(x => x.Amount));
+            var baselineEsicWages = row.CalculationSnapshot?.EsicWages ?? 0m;
+            var esicCoverageEligible = row.CalculationSnapshot?.EsicCoverageEligible;
+            if (esiAdjustmentWages > 0m && (row.CalculationSnapshot?.EsicWages is null || !esicCoverageEligible.HasValue))
+            {
+                Block(member, "PAYROLL_ADJUSTMENT_ESI_SNAPSHOT_MISSING", "The source payroll row has no frozen ESI wage and coverage snapshot. Rebuild this correction from a payroll row with complete statutory snapshots.");
+                missing++;
+                if (await SaveLine(companyId, member) is { } esiSnapshotError) return esiSnapshotError;
+                continue;
+            }
+            var snapshot = row.CalculationSnapshot;
+            var revisedEsicWages = baselineEsicWages;
+            var revisedEmployeeEsic = row.Deduction.ESIC;
+            var revisedEmployerEsic = 0m;
+            var baselineEmployerEsic = 0m;
+            var esicDeductionDelta = 0m;
+            if (esiAdjustmentWages > 0m)
+            {
+                revisedEsicWages = PayrollCalculationRules.RoundMoney(baselineEsicWages + esiAdjustmentWages);
+                revisedEmployeeEsic = PayrollCalculationRules.CalculateMonthlyEsic(
+                    snapshot?.EsicMode, totals.Gross, revisedEsicWages,
+                    snapshot?.EsicWageCeiling ?? member.InputSnapshot.EsicWageCeiling,
+                    snapshot?.EsicEmployeeRatePercent ?? member.InputSnapshot.EsicEmployeeRatePercent,
+                    esicCoverageEligible);
+                revisedEmployerEsic = PayrollCalculationRules.CalculateEmployerMonthlyEsic(
+                    snapshot?.EsicMode, totals.Gross, revisedEsicWages,
+                    snapshot?.EsicWageCeiling ?? member.InputSnapshot.EsicWageCeiling,
+                    snapshot?.EsicEmployerRatePercent ?? member.InputSnapshot.EsicEmployerRatePercent,
+                    esicCoverageEligible);
+                baselineEmployerEsic = PayrollCalculationRules.CalculateEmployerMonthlyEsic(
+                    snapshot?.EsicMode, totals.Gross, baselineEsicWages,
+                    snapshot?.EsicWageCeiling ?? member.InputSnapshot.EsicWageCeiling,
+                    snapshot?.EsicEmployerRatePercent ?? member.InputSnapshot.EsicEmployerRatePercent,
+                    esicCoverageEligible);
+                esicDeductionDelta = revisedEmployeeEsic - row.Deduction.ESIC;
+            }
+
+            // A correction run pays only the incremental amount. The original payroll row is
+            // the baseline for statutory deltas and must never be added to a second payment.
+            member.GrossAmount = isCorrectionRun
+                ? adjustmentGross
+                : PayrollCalculationRules.RoundMoney(totals.Gross + adjustmentGross);
+            member.DeductionAmount = isCorrectionRun
+                ? PayrollCalculationRules.RoundMoney(esicDeductionDelta)
+                : PayrollCalculationRules.RoundMoney(totals.Deductions + esicDeductionDelta);
             if (member.DeductionAmount > member.GrossAmount)
             {
                 Block(member, "PAYROLL_NET_NEGATIVE", "Employee deductions exceed gross pay. Review salary, attendance, and deduction inputs before retrying this payroll run.");
@@ -281,6 +354,31 @@ public sealed class PayrollRunCalculationService(
             member.NetAmount = PayrollCalculationRules.RoundMoney(member.GrossAmount - member.DeductionAmount);
 
             member.StatutorySnapshot = BuildStatutorySnapshot(member, componentResult, row);
+            if (isCorrectionRun)
+            {
+                member.StatutorySnapshot.EmployeeEpf = 0m;
+                member.StatutorySnapshot.EmployerEpf = 0m;
+                member.StatutorySnapshot.EmployerEps = 0m;
+                member.StatutorySnapshot.EmployerEdli = 0m;
+                member.StatutorySnapshot.EpfWages = 0m;
+                member.StatutorySnapshot.EpsWages = 0m;
+                member.StatutorySnapshot.EdliWages = 0m;
+                member.StatutorySnapshot.IncomeTax = 0m;
+                member.StatutorySnapshot.ProfessionalTax = 0m;
+                member.StatutorySnapshot.EsicWages = 0m;
+                member.StatutorySnapshot.EmployeeEsic = 0m;
+                member.StatutorySnapshot.EmployerEsic = 0m;
+                member.StatutorySnapshot.EsicCoverageEligible = esicCoverageEligible;
+                member.StatutorySnapshot.EsicContributionPeriodStart = snapshot?.EsicContributionPeriodStart;
+                member.StatutorySnapshot.EsicContributionPeriodEnd = snapshot?.EsicContributionPeriodEnd;
+                if (esiAdjustmentWages > 0m)
+                {
+                    member.StatutorySnapshot.EsicWages = esicCoverageEligible == true ? esiAdjustmentWages : 0m;
+                    member.StatutorySnapshot.EmployeeEsic = PayrollCalculationRules.RoundMoney(revisedEmployeeEsic - row.Deduction.ESIC);
+                    member.StatutorySnapshot.EmployerEsic = PayrollCalculationRules.RoundMoney(revisedEmployerEsic - baselineEmployerEsic);
+                }
+                member.AppliedAdjustmentIds = adjustments.Select(x => x.Id).ToList();
+            }
             member.AttendanceSnapshot = BuildAttendanceSnapshot(lockedAttendance.GetValueOrDefault(member.EmployeeId), row);
             if (await SaveLine(companyId, member) is { } calculatedSaveError) return calculatedSaveError;
             gross += member.GrossAmount;
@@ -356,19 +454,57 @@ public sealed class PayrollRunCalculationService(
             PolicyProfileVersion = member.InputSnapshot.PolicyProfileVersion
         };
         var contractualBasic = Math.Max(0m, legacyRow.BasicPay);
-        var contractualGross = Math.Max(0m, legacyRow.BasicPay + legacyRow.Bonus + legacyRow.Allowance.HRA + legacyRow.Allowance.LTA + legacyRow.Allowance.OtherAllowance);
+        var contractualGross = Math.Max(0m, member.GrossAmount);
         var earnedGross = Math.Max(0m, contractualGross - legacyRow.Deduction.LossOfPay);
-        var earnedBasic = Math.Max(0m, contractualBasic - Math.Min(contractualBasic, legacyRow.Deduction.LossOfPay));
+        var earnedBasic = legacyRow.CalculationSnapshot?.Divisor > 0m
+            ? PayrollCalculationRules.CalculateLopAdjustedWageBase(
+                contractualBasic, legacyRow.CalculationSnapshot.LossOfPayDays, legacyRow.CalculationSnapshot.Divisor)
+            : Math.Max(0m, contractualBasic - Math.Min(contractualBasic, legacyRow.Deduction.LossOfPay));
+        var epfMode = legacyRow.CalculationSnapshot?.EpfMode;
+        var periodEnd = new DateTime(legacyRow.PayMonth.Year, legacyRow.PayMonth.Month,
+            DateTime.DaysInMonth(legacyRow.PayMonth.Year, legacyRow.PayMonth.Month));
+        var resolvedEpfRules = PayrollCalculationRules.ResolveIndiaEpfRules(periodEnd);
+        var frozenRuleSetId = legacyRow.CalculationSnapshot?.EpfStatutoryRuleSetId;
+        var hasKnownFrozenRuleSet = frozenRuleSetId is PayrollCalculationRules.IndiaEpfRulesBefore2026_09_17
+            or PayrollCalculationRules.IndiaEpfRulesFrom2026_09_17;
+        var epfRules = frozenRuleSetId == PayrollCalculationRules.IndiaEpfRulesBefore2026_09_17
+            ? (RuleSetId: PayrollCalculationRules.IndiaEpfRulesBefore2026_09_17, WageCeiling: 15000m, EpsWageCeiling: 15000m, EdliWageCeiling: 15000m)
+            : frozenRuleSetId == PayrollCalculationRules.IndiaEpfRulesFrom2026_09_17
+                ? (RuleSetId: PayrollCalculationRules.IndiaEpfRulesFrom2026_09_17, WageCeiling: 25000m, EpsWageCeiling: 25000m, EdliWageCeiling: 25000m)
+                : resolvedEpfRules;
+        var epfCeiling = hasKnownFrozenRuleSet
+            ? epfRules.WageCeiling
+            : legacyRow.CalculationSnapshot?.EpfWageCeiling > 0m
+            ? legacyRow.CalculationSnapshot.EpfWageCeiling
+            : epfRules.WageCeiling;
+        var epfEmployerRate = legacyRow.CalculationSnapshot?.EpfEmployerRatePercent ?? 12m;
+        var employerEpf = PayrollCalculationRules.CalculateEmployerMonthlyEpf(
+            epfMode, earnedBasic, epfCeiling, epfRules.EpsWageCeiling, epfEmployerRate);
+        var esicMode = legacyRow.CalculationSnapshot?.EsicMode;
+        var esicCeiling = legacyRow.CalculationSnapshot?.EsicWageCeiling ?? 21000m;
+        var frozenEsicEligibility = legacyRow.CalculationSnapshot?.EsicCoverageEligible;
+        var frozenEsicWages = legacyRow.CalculationSnapshot?.EsicWages;
+        var isEsicEligible = frozenEsicEligibility ??
+            (!string.Equals(esicMode, "EXEMPT", StringComparison.OrdinalIgnoreCase) &&
+             contractualGross <= (esicCeiling > 0m ? esicCeiling : 21000m));
+        var earnedEsicWages = frozenEsicWages ?? earnedGross;
         snapshot.EmployeeEpf = PayrollCalculationRules.RoundMoney(Math.Max(0m, legacyRow.Deduction.EPF));
-        snapshot.EmployerEpf = PayrollCalculationRules.CalculateMonthlyEpf(
-            legacyRow.CalculationSnapshot?.EpfMode, earnedBasic,
-            legacyRow.CalculationSnapshot?.EpfWageCeiling ?? 15000m,
-            legacyRow.CalculationSnapshot?.EpfEmployerRatePercent ?? 12m);
+        snapshot.EpfWages = PayrollCalculationRules.ResolveEpfContributionWageBase(epfMode, earnedBasic, epfCeiling);
+        snapshot.EpsWages = Math.Min(earnedBasic, epfRules.EpsWageCeiling);
+        snapshot.EdliWages = Math.Min(earnedBasic, epfRules.EdliWageCeiling);
+        snapshot.EmployerEpf = employerEpf.EmployerEpf;
+        snapshot.EmployerEps = employerEpf.EmployerEps;
+        snapshot.EmployerEdli = employerEpf.Edli;
         snapshot.EmployeeEsic = PayrollCalculationRules.RoundMoney(Math.Max(0m, legacyRow.Deduction.ESIC));
         snapshot.EmployerEsic = PayrollCalculationRules.CalculateEmployerMonthlyEsic(
-            legacyRow.CalculationSnapshot?.EsicMode, contractualGross, earnedGross,
-            legacyRow.CalculationSnapshot?.EsicWageCeiling ?? 21000m,
-            legacyRow.CalculationSnapshot?.EsicEmployerRatePercent ?? 3.25m);
+            isEsicEligible ? esicMode : "EXEMPT", contractualGross, earnedEsicWages,
+            esicCeiling,
+            legacyRow.CalculationSnapshot?.EsicEmployerRatePercent ?? 3.25m,
+            isEsicEligible);
+        snapshot.EsicWages = isEsicEligible ? earnedEsicWages : 0m;
+        snapshot.EsicCoverageEligible = isEsicEligible;
+        snapshot.EsicContributionPeriodStart = legacyRow.CalculationSnapshot?.EsicContributionPeriodStart;
+        snapshot.EsicContributionPeriodEnd = legacyRow.CalculationSnapshot?.EsicContributionPeriodEnd;
         snapshot.IncomeTax = PayrollCalculationRules.RoundMoney(Math.Max(0m, legacyRow.Deduction.IncomeTax));
         snapshot.ProfessionalTax = legacyRow.Deduction.ProfessionalTax > 0m
             ? legacyRow.Deduction.ProfessionalTax
@@ -474,7 +610,11 @@ public sealed class PayrollRunCalculationService(
                     !string.Equals(leftComponent.BaseComponentCode, rightComponent.BaseComponentCode, StringComparison.OrdinalIgnoreCase) ||
                     leftComponent.Value != rightComponent.Value || leftComponent.IsTaxable != rightComponent.IsTaxable ||
                     leftComponent.IsRecurring != rightComponent.IsRecurring || leftComponent.IsStatutory != rightComponent.IsStatutory ||
-                    leftComponent.IsEmployerContribution != rightComponent.IsEmployerContribution || leftComponent.SortOrder != rightComponent.SortOrder)
+                    leftComponent.IsEmployerContribution != rightComponent.IsEmployerContribution ||
+                    leftComponent.IncludeInPfWage != rightComponent.IncludeInPfWage ||
+                    leftComponent.IncludeInEsiWage != rightComponent.IncludeInEsiWage ||
+                    leftComponent.IncludeInPtWage != rightComponent.IncludeInPtWage ||
+                    leftComponent.SortOrder != rightComponent.SortOrder)
                     return false;
             }
         }

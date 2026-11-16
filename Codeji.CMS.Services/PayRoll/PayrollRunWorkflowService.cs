@@ -15,7 +15,7 @@ public interface IPayrollRunWorkflowService
  Task<Result> Reopen(string companyId,string runId,string actorId,string reason);
  Task<Result> CreateCorrectionRun(string companyId,string runId,string actorId,string reason,DateTime? payDate=null);
 }
-public sealed class PayrollRunWorkflowService(IMongoDbRepository<PayrollRun> runs,IMongoDbRepository<PayrollRunEmployee> employees,IMongoDbRepository<EmpPayRoll>? payrolls=null):IPayrollRunWorkflowService
+public sealed class PayrollRunWorkflowService(IMongoDbRepository<PayrollRun> runs,IMongoDbRepository<PayrollRunEmployee> employees,IMongoDbRepository<EmpPayRoll>? payrolls=null,IMongoDbRepository<PayrollAdjustment>? adjustments=null):IPayrollRunWorkflowService
 {
  public async Task<Result> Validate(string c,string id,string actor)
  {
@@ -35,10 +35,18 @@ public sealed class PayrollRunWorkflowService(IMongoDbRepository<PayrollRun> run
   if(normalizedReason.Length>500)return Fail(400,"Cancellation reason cannot exceed 500 characters.");
   var run=await runs.FirstOrDefault(x=>x.CompanyId==c&&x.Id==id);
   if(run is null)return Fail(404,"Payroll run was not found.");
+  if(run.Status=="CANCELLED"&&string.Equals(run.RunType,"CORRECTION",StringComparison.OrdinalIgnoreCase))
+   return await ReleaseRunAdjustments(c,run,actor,"Cancelled correction run reservation cleanup retry.");
+  if(string.Equals(run.RunType,"CORRECTION",StringComparison.OrdinalIgnoreCase)&&adjustments is null)
+   return Fail(503,"Adjustment storage is unavailable; correction run cannot be cancelled safely until its reserved adjustments can be released.");
   var previousStatus=run.Status;
   var previousVersion=run.Version;
-  if(previousStatus is not ("DRAFT" or "BLOCKED"))
-   return Fail(409,"Only a draft or blocked payroll run can be cancelled and recreated. Calculated or later runs must use the controlled correction workflow.");
+  var isCorrection=string.Equals(run.RunType,"CORRECTION",StringComparison.OrdinalIgnoreCase);
+  var cancellable=isCorrection
+   ? previousStatus is "DRAFT" or "BLOCKED" or "CALCULATED" or "APPROVED"
+   : previousStatus is "DRAFT" or "BLOCKED";
+  if(!cancellable)
+   return Fail(409,"This payroll run cannot be cancelled in its current state. Processed payroll must be corrected through a separate correction run.");
   run.Status="CANCELLED";
   run.IsActive=false;
   run.Version++;
@@ -54,9 +62,13 @@ public sealed class PayrollRunWorkflowService(IMongoDbRepository<PayrollRun> run
    Builders<PayrollRun>.Filter.Eq(x=>x.Id,id)&
    Builders<PayrollRun>.Filter.Eq(x=>x.Status,previousStatus)&
    Builders<PayrollRun>.Filter.Eq(x=>x.Version,previousVersion),run);
-  return saved.Success
-   ?new Result{Success=true,Message="Draft payroll run cancelled; its snapshots and audit history were retained. Create a new run to recalculate.",ResourceId=id}
-   :Fail(409,"Payroll run changed before cancellation; reload before retrying.");
+  if(!saved.Success)return Fail(409,"Payroll run changed before cancellation; reload before retrying.");
+  if(string.Equals(run.RunType,"CORRECTION",StringComparison.OrdinalIgnoreCase))
+  {
+   var released=await ReleaseRunAdjustments(c,run,actor,normalizedReason);
+   if(!released.Success)return released;
+  }
+  return new Result{Success=true,Message="Draft payroll run cancelled; its snapshots and audit history were retained. Create a new run to recalculate.",ResourceId=id};
  }
  public async Task<Result> ExcludeEmployee(string c, string id, string employeeId, string actor, string reason)
  {
@@ -186,7 +198,10 @@ public sealed class PayrollRunWorkflowService(IMongoDbRepository<PayrollRun> run
    return Fail(409,"Only an approved payroll run can be processed, or a processed run can be retried to finish payroll-row synchronization.");
 
   if(run.LegacyPayrollRowsSynchronizedAtUtc.HasValue)
-   return new Result{Success=true,Message="Payroll run and payroll rows are already synchronized.",ResourceId=id};
+  {
+   var adjustmentSync = await MarkRunAdjustmentsProcessed(c, run, actor);
+   return adjustmentSync ?? new Result{Success=true,Message="Payroll run and payroll rows are already synchronized.",ResourceId=id};
+  }
   if(payrolls is null)
    return Fail(503,"Payroll run is processed, but payroll-row synchronization is unavailable. Configure the payroll repository, then retry Process.");
 
@@ -219,12 +234,44 @@ public sealed class PayrollRunWorkflowService(IMongoDbRepository<PayrollRun> run
      return Fail(503,$"Payroll run is processed, but payroll rows are not synchronized for {incomplete.Length} employee(s). Resolve missing or duplicate monthly payroll rows, then retry Process.");
    }
 
-   return await MarkLegacyRowsSynchronized(c,run,actor,$"Synchronized {targetEmployeeIds.Count} employee payroll row(s) from Payroll Run {id}.");
+   var syncResult = await MarkLegacyRowsSynchronized(c,run,actor,$"Synchronized {targetEmployeeIds.Count} employee payroll row(s) from Payroll Run {id}.");
+   if(!syncResult.Success)return syncResult;
+   return await MarkRunAdjustmentsProcessed(c, run, actor) ?? syncResult;
   }
   catch(Exception)
   {
    return Fail(503,"Payroll run is processed, but payroll-row synchronization could not be verified. Retry Process to resume safely.");
   }
+ }
+ private async Task<Result?> MarkRunAdjustmentsProcessed(string c,PayrollRun run,string actor)
+ {
+  if(!string.Equals(run.RunType,"CORRECTION",StringComparison.OrdinalIgnoreCase))return null;
+  var lines=(await employees.GetAll(x=>x.CompanyId==c&&x.PayrollRunId==run.Id&&x.Status=="CALCULATED")).ToList();
+  var adjustmentIds=lines.SelectMany(x=>x.AppliedAdjustmentIds??[]).Distinct(StringComparer.Ordinal).ToList();
+  if(adjustmentIds.Count==0)return null;
+  if(adjustments is null)return Fail(503,"Correction payroll was processed, but adjustment status storage is unavailable. Retry processing after payroll adjustment storage is configured.");
+  foreach(var adjustmentId in adjustmentIds)
+  {
+   var adjustment=await adjustments.FirstOrDefault(x=>x.CompanyId==c&&x.Id==adjustmentId);
+   if(adjustment is null)return Fail(409,$"Correction payroll was processed, but adjustment {adjustmentId} could not be verified.");
+   if(adjustment.Status=="PROCESSED"&&adjustment.CorrectionPayrollRunId==run.Id)continue;
+   if(adjustment.Status!="APPROVED"||adjustment.OriginalPayrollRunId!=run.ParentRunId||
+      adjustment.EmployeeId!=lines.FirstOrDefault(x=>(x.AppliedAdjustmentIds??[]).Contains(adjustmentId,StringComparer.Ordinal))?.EmployeeId||
+      adjustment.CorrectionPayrollRunId != run.Id)
+    return Fail(409,$"Correction payroll was processed, but adjustment {adjustmentId} no longer matches its approved source. Resolve the audit state before retrying.");
+   adjustment.Status="PROCESSED";
+   adjustment.CorrectionPayrollRunId=run.Id;
+   adjustment.ProcessedBy=actor;
+   adjustment.ProcessedAtUtc=DateTime.UtcNow;
+   adjustment.AuditHistory.Add(new PayrollAdjustmentAuditEvent{Action="Processed",ActorId=actor,OccurredAtUtc=DateTime.UtcNow,Notes=$"Included in correction payroll run {run.Id}"});
+   var saved=await adjustments.Update(
+    Builders<PayrollAdjustment>.Filter.Eq(x=>x.CompanyId,c)&
+    Builders<PayrollAdjustment>.Filter.Eq(x=>x.Id,adjustmentId)&
+    Builders<PayrollAdjustment>.Filter.Eq(x=>x.Status,"APPROVED")&
+    Builders<PayrollAdjustment>.Filter.Eq(x=>x.CorrectionPayrollRunId,run.Id),adjustment);
+   if(!saved.Success)return Fail(503,$"Correction payroll was processed, but adjustment {adjustmentId} status could not be synchronized. Retry processing to finish the audit update.");
+  }
+  return null;
  }
  private static bool IsLegacyRowSynchronized(EmpPayRoll row)=>(row.IsProcessed&&string.Equals(row.WorkflowStatus,"PROCESSED",StringComparison.OrdinalIgnoreCase))||string.Equals(row.PaymentStatus,"PAID",StringComparison.OrdinalIgnoreCase)||string.Equals(row.PaymentStatus,"CLOSED",StringComparison.OrdinalIgnoreCase)||string.Equals(row.WorkflowStatus,"PAID",StringComparison.OrdinalIgnoreCase)||string.Equals(row.WorkflowStatus,"CLOSED",StringComparison.OrdinalIgnoreCase);
  private async Task<Result> MarkLegacyRowsSynchronized(string c,PayrollRun run,string actor,string note)
@@ -313,6 +360,15 @@ public sealed class PayrollRunWorkflowService(IMongoDbRepository<PayrollRun> run
    return Fail(409, $"An active correction run ({existingCorrection.Id}) already exists for this payroll run.");
 
   var originalMembers = (await employees.GetAll(x => x.CompanyId == c && x.PayrollRunId == id)).ToList();
+  List<PayrollAdjustment> approvedAdjustments = adjustments is null
+   ? []
+   : (await adjustments.GetAll(x => x.CompanyId == c && x.OriginalPayrollRunId == id && x.Status == "APPROVED" && x.CorrectionPayrollRunId == null && x.TargetPeriod == original.PeriodStart)).ToList();
+  if (approvedAdjustments.Count == 0)
+   return Fail(409, "No approved, unassigned adjustments exist for this original payroll run and month.");
+  var adjustmentEmployeeIds = approvedAdjustments.Select(x => x.EmployeeId).ToHashSet(StringComparer.Ordinal);
+  if (approvedAdjustments.Any(x => !originalMembers.Any(m => m.EmployeeId == x.EmployeeId && m.Status != "SKIPPED")))
+   return Fail(409, "An approved adjustment does not match an eligible employee in the original payroll run.");
+  var correctionMembers = originalMembers.Where(m => adjustmentEmployeeIds.Contains(m.EmployeeId) && m.Status != "SKIPPED").ToList();
 
   var correction = new PayrollRun
   {
@@ -327,9 +383,9 @@ public sealed class PayrollRunWorkflowService(IMongoDbRepository<PayrollRun> run
    DepartmentId = original.DepartmentId,
    PayGroupId = original.PayGroupId,
    ConfigurationSnapshot = original.ConfigurationSnapshot,
-   EmployeeCount = originalMembers.Count,
-   ReadyCount = originalMembers.Count(m => m.Status != "SKIPPED"),
-   SkippedCount = originalMembers.Count(m => m.Status == "SKIPPED"),
+   EmployeeCount = correctionMembers.Count,
+   ReadyCount = correctionMembers.Count,
+   SkippedCount = 0,
    BlockedCount = 0,
    CreatedBy = actor,
    CreatedAtUtc = DateTime.UtcNow,
@@ -345,29 +401,160 @@ public sealed class PayrollRunWorkflowService(IMongoDbRepository<PayrollRun> run
    ]
   };
 
-  await runs.AddOne(correction);
+  var runInsert = await runs.AddOne(correction);
+  if (!runInsert.Success) return Fail(500, "Correction payroll run could not be created.");
 
-  foreach (var m in originalMembers)
+  try
   {
-   var correctionMember = new PayrollRunEmployee
+   foreach (var adjustment in approvedAdjustments)
    {
+    adjustment.CorrectionPayrollRunId = correction.Id;
+    adjustment.AuditHistory.Add(new PayrollAdjustmentAuditEvent
+    {
+     Action = "CorrectionRunReserved", ActorId = actor, OccurredAtUtc = DateTime.UtcNow,
+     Notes = $"Reserved by correction payroll run {correction.Id}; no payment has occurred."
+    });
+    var reservation = await adjustments!.Update(
+     Builders<PayrollAdjustment>.Filter.Eq(x => x.CompanyId, c) &
+     Builders<PayrollAdjustment>.Filter.Eq(x => x.Id, adjustment.Id) &
+     Builders<PayrollAdjustment>.Filter.Eq(x => x.Status, "APPROVED") &
+     Builders<PayrollAdjustment>.Filter.Eq(x => x.CorrectionPayrollRunId, null), adjustment);
+    if (!reservation.Success)
+     return await AbortCorrectionRunCreation(c, correction, actor, 409,
+      "An adjustment was reserved by another correction run. Refresh and create a new correction draft.");
+   }
+
+   foreach (var m in correctionMembers)
+   {
+    var employeeAdjustments = approvedAdjustments.Where(x => x.EmployeeId == m.EmployeeId).ToList();
+    var correctionMember = new PayrollRunEmployee
+    {
     CompanyId = c,
     PayrollRunId = correction.Id,
     EmployeeId = m.EmployeeId,
-    Status = m.Status == "SKIPPED" ? "SKIPPED" : "READY",
+    Status = "READY",
     ExclusionReason = m.ExclusionReason,
     InclusionReason = m.InclusionReason,
-    InputSnapshot = m.InputSnapshot,
+    InputSnapshot = new PayrollEmployeeInputSnapshot
+    {
+     AssignmentId = m.InputSnapshot.AssignmentId,
+     AssignmentVersion = m.InputSnapshot.AssignmentVersion,
+     SalaryStructureId = m.InputSnapshot.SalaryStructureId,
+     SalaryStructureVersion = m.InputSnapshot.SalaryStructureVersion,
+     SalaryStructures = m.InputSnapshot.SalaryStructures,
+     SalaryTemplateId = m.InputSnapshot.SalaryTemplateId,
+     SalaryTemplateVersion = m.InputSnapshot.SalaryTemplateVersion,
+     PayGroupId = m.InputSnapshot.PayGroupId,
+     PayGroupVersion = m.InputSnapshot.PayGroupVersion,
+     PolicyProfileId = m.InputSnapshot.PolicyProfileId,
+     PolicyProfileVersion = m.InputSnapshot.PolicyProfileVersion,
+     EpfMode = m.InputSnapshot.EpfMode,
+     EpfStatutoryRuleSetId = m.InputSnapshot.EpfStatutoryRuleSetId,
+     EpfWageCeiling = m.InputSnapshot.EpfWageCeiling,
+     EpfEmployeeRatePercent = m.InputSnapshot.EpfEmployeeRatePercent,
+     EpfEmployerRatePercent = m.InputSnapshot.EpfEmployerRatePercent,
+     EsicMode = m.InputSnapshot.EsicMode,
+     EsicWageCeiling = m.InputSnapshot.EsicWageCeiling,
+     EsicEmployeeRatePercent = m.InputSnapshot.EsicEmployeeRatePercent,
+     EsicEmployerRatePercent = m.InputSnapshot.EsicEmployerRatePercent,
+     TdsMode = m.InputSnapshot.TdsMode,
+     RequireAttendanceLock = m.InputSnapshot.RequireAttendanceLock,
+     Components = m.InputSnapshot.Components,
+     Adjustments = employeeAdjustments.Select(x => new PayrollAdjustmentSnapshot
+     {
+      Id = x.Id, ComponentCode = x.ComponentCode ?? string.Empty, ComponentName = x.ComponentName ?? string.Empty,
+      ComponentKind = x.ComponentKind ?? string.Empty, Amount = x.Amount, IsTaxable = x.IsTaxable ?? true,
+      IsStatutory = x.IsStatutory ?? true, IsEmployerContribution = x.IsEmployerContribution ?? true,
+      IncludeInEsiWage = x.IncludeInEsiWage ?? false,
+      IncludeInPfWage = x.IncludeInPfWage ?? false, IncludeInPtWage = x.IncludeInPtWage ?? false,
+      ComponentVersion = x.ComponentVersion ?? 0
+     }).ToList()
+    },
     StatutorySnapshot = m.StatutorySnapshot,
     AttendanceSnapshot = m.AttendanceSnapshot,
     GrossAmount = 0m,
     DeductionAmount = 0m,
     NetAmount = 0m
-   };
-   await employees.AddOne(correctionMember);
+    };
+    var memberInsert = await employees.AddOne(correctionMember);
+    if (!memberInsert.Success)
+     return await AbortCorrectionRunCreation(c, correction, actor, 500,
+      "Correction employee rows could not be created.");
+   }
+  }
+  catch
+  {
+   return await AbortCorrectionRunCreation(c, correction, actor, 500,
+    "Correction run creation failed while reserving adjustments or writing employee snapshots.");
   }
 
-  return new Result { Success = true, StatusCode = 201, Message = "Correction run created in draft with employee members.", ResourceId = correction.Id };
+  return new Result { Success = true, StatusCode = 201, Message = "Correction run created in draft with only employees who have approved adjustments. The run contains adjustment deltas, not the original payroll amounts.", ResourceId = correction.Id };
+ }
+
+ private async Task<Result> AbortCorrectionRunCreation(string companyId, PayrollRun run, string actor, int failureCode, string message)
+ {
+  var released = false;
+  var cancelled = false;
+  try
+  {
+   released = (await ReleaseRunAdjustments(companyId, run, actor, message)).Success;
+  }
+  catch
+  {
+   // The persisted run remains available for the correction cancellation retry path.
+  }
+  try
+  {
+   cancelled = (await CancelCorrectionDraft(companyId, run, actor, message)).Success;
+  }
+  catch
+  {
+   // Report incomplete cleanup below; never claim that a failed draft was cancelled.
+  }
+
+  if (released && cancelled)
+   return Fail(failureCode, $"{message} The correction draft was cancelled and its reservations were released.");
+  return Fail(503, $"{message} Automatic cleanup is incomplete (reservations released: {released}; draft cancelled: {cancelled}). Retry cancellation for correction run {run.Id} before creating another correction.");
+ }
+
+ private async Task<Result> ReleaseRunAdjustments(string companyId, PayrollRun run, string actor, string reason)
+ {
+  if(adjustments is null)return Fail(503,"Adjustment storage is unavailable; correction reservations could not be released.");
+  var items=(await adjustments.GetAll(x=>x.CompanyId==companyId&&x.CorrectionPayrollRunId==run.Id&&x.Status=="APPROVED")).ToList();
+  foreach (var item in items)
+  {
+   item.CorrectionPayrollRunId = null;
+   item.AuditHistory.Add(new PayrollAdjustmentAuditEvent
+   {
+    Action = "CorrectionRunReservationReleased", ActorId = actor, OccurredAtUtc = DateTime.UtcNow,
+    Notes = $"Reservation for cancelled correction run {run.Id} was released: {reason}"
+   });
+   var released=await adjustments.Update(
+    Builders<PayrollAdjustment>.Filter.Eq(x => x.CompanyId, companyId) &
+    Builders<PayrollAdjustment>.Filter.Eq(x => x.Id, item.Id) &
+    Builders<PayrollAdjustment>.Filter.Eq(x => x.Status, "APPROVED") &
+    Builders<PayrollAdjustment>.Filter.Eq(x => x.CorrectionPayrollRunId, run.Id), item);
+   if(!released.Success)return Fail(503,$"Correction run was cancelled, but reservation for adjustment {item.Id} could not be released. Retry cancellation to resume cleanup.");
+  }
+  return new Result{Success=true,Message="Correction adjustment reservations were released.",ResourceId=run.Id};
+ }
+
+ private async Task<Result> CancelCorrectionDraft(string companyId, PayrollRun run, string actor, string reason)
+ {
+  run.Status = "CANCELLED";
+  run.IsActive = false;
+  run.Version++;
+  run.AuditHistory.Add(new PayrollRunAuditEvent
+  {
+   Action = "CorrectionRunCreationFailed", ActorId = actor, OccurredAtUtc = DateTime.UtcNow, Notes = reason
+  });
+  var saved = await runs.Update(
+   Builders<PayrollRun>.Filter.Eq(x => x.CompanyId, companyId) &
+   Builders<PayrollRun>.Filter.Eq(x => x.Id, run.Id) &
+   Builders<PayrollRun>.Filter.Eq(x => x.Status, "DRAFT"), run);
+  return saved.Success
+   ? new Result { Success = true, Message = "Correction draft cancelled.", ResourceId = run.Id }
+   : Fail(503, $"Correction run {run.Id} could not be marked cancelled; retry cleanup before proceeding.");
  }
 
  private async Task<Result> Transition(string c,string id,string actor,string from,string to,string message)

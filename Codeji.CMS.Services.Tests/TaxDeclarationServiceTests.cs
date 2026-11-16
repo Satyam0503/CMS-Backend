@@ -8,6 +8,9 @@ using Codeji.CMS.DTO.PayRoll;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.PayRoll;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
+using MongoDB.Driver;
 using Moq;
 using Xunit;
 
@@ -50,6 +53,73 @@ public sealed class TaxDeclarationServiceTests
     }
 
     [Fact]
+    public async Task SubmitDeclaration_WhenConcurrentVersionInsertConflicts_Returns409()
+    {
+        var repo = Repo<EmployeeTaxDeclaration>();
+        repo.Setup(x => x.AddOne(It.IsAny<EmployeeTaxDeclaration>()))
+            .ReturnsAsync(new Result { Success = false, StatusCode = 409 });
+        var service = new TaxDeclarationService(repo.Object);
+
+        var result = await service.SubmitDeclaration(TenantId, EmpId,
+            new SubmitTaxDeclarationRequestDto { FinancialYear = FY }, Actor);
+
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Contains("version already exists", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SubmitDeclaration_UsesVersionAndStatusCompareAndSwapForRejectedRevision()
+    {
+        var existing = new EmployeeTaxDeclaration
+        {
+            Id = "decl-1", CompanyId = TenantId, EmployeeId = EmpId, FinancialYear = FY,
+            Status = "REJECTED", Version = 4
+        };
+        var repo = Repo(existing);
+        MongoDB.Driver.FilterDefinition<EmployeeTaxDeclaration>? attemptedFilter = null;
+        repo.Setup(x => x.Update(It.IsAny<MongoDB.Driver.FilterDefinition<EmployeeTaxDeclaration>>(), It.IsAny<EmployeeTaxDeclaration>()))
+            .Callback<MongoDB.Driver.FilterDefinition<EmployeeTaxDeclaration>, EmployeeTaxDeclaration>((filter, _) => attemptedFilter = filter)
+            .ReturnsAsync(new Result { Success = false, StatusCode = 400 });
+        var service = new TaxDeclarationService(repo.Object);
+
+        var result = await service.SubmitDeclaration(TenantId, EmpId,
+            new SubmitTaxDeclarationRequestDto { FinancialYear = FY }, Actor);
+
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        var filter = Render(attemptedFilter!);
+        Assert.Contains("Version", filter.ToJson(), StringComparison.Ordinal);
+        Assert.Contains("Status", filter.ToJson(), StringComparison.Ordinal);
+        Assert.Contains("REJECTED", filter.ToJson(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReviewDeclaration_WhenCompareAndSwapLosesRace_Returns409()
+    {
+        var submitted = new EmployeeTaxDeclaration
+        {
+            Id = "decl-1", CompanyId = TenantId, EmployeeId = EmpId, FinancialYear = FY,
+            Status = "SUBMITTED", Version = 2, SubmittedBy = "employee-1"
+        };
+        var repo = Repo(submitted);
+        MongoDB.Driver.FilterDefinition<EmployeeTaxDeclaration>? attemptedFilter = null;
+        repo.Setup(x => x.Update(It.IsAny<MongoDB.Driver.FilterDefinition<EmployeeTaxDeclaration>>(), It.IsAny<EmployeeTaxDeclaration>()))
+            .Callback<MongoDB.Driver.FilterDefinition<EmployeeTaxDeclaration>, EmployeeTaxDeclaration>((filter, _) => attemptedFilter = filter)
+            .ReturnsAsync(new Result { Success = false, StatusCode = 400 });
+        var service = new TaxDeclarationService(repo.Object);
+
+        var result = await service.ReviewDeclaration(TenantId, "decl-1",
+            new ReviewTaxDeclarationRequestDto { Decision = "APPROVE" }, "reviewer-1");
+
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        var filter = Render(attemptedFilter!);
+        Assert.Contains("Version", filter.ToJson(), StringComparison.Ordinal);
+        Assert.Contains("SUBMITTED", filter.ToJson(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SubmitDeclaration_UpdatesExistingDeclaration_IncrementsVersion()
     {
         var existing = new EmployeeTaxDeclaration
@@ -59,7 +129,7 @@ public sealed class TaxDeclarationServiceTests
             EmployeeId = EmpId,
             FinancialYear = FY,
             Regime = "NEW_115BAC",
-            Status = "SUBMITTED",
+            Status = "REJECTED",
             Version = 1
         };
         var repo = Repo(existing);
@@ -81,6 +151,29 @@ public sealed class TaxDeclarationServiceTests
     }
 
     [Fact]
+    public async Task SubmitDeclaration_RevisionClearsPreviousReviewAndEvidenceVerification()
+    {
+        var existing = new EmployeeTaxDeclaration
+        {
+            Id = "decl-1", CompanyId = TenantId, EmployeeId = EmpId, FinancialYear = FY,
+            Status = "REJECTED", Version = 1, ApprovedSection80C = 10000m,
+            ReviewedBy = "reviewer", RejectionReason = "Missing document",
+            ProofAttachments = [new TaxProofAttachment { Id = "old", IsVerified = true }]
+        };
+        var repo = Repo(existing);
+        var service = new TaxDeclarationService(repo.Object);
+
+        var result = await service.SubmitDeclaration(TenantId, EmpId,
+            new SubmitTaxDeclarationRequestDto { FinancialYear = FY }, Actor);
+
+        Assert.True(result.Success);
+        Assert.Equal(0m, result.MethodResult!.ApprovedSection80C);
+        Assert.Null(result.MethodResult.ReviewedBy);
+        Assert.Null(result.MethodResult.RejectionReason);
+        Assert.Empty(result.MethodResult.ProofAttachments);
+    }
+
+    [Fact]
     public async Task SubmitDeclaration_RejectsInvalidRegime()
     {
         var repo = Repo<EmployeeTaxDeclaration>();
@@ -96,6 +189,79 @@ public sealed class TaxDeclarationServiceTests
 
         Assert.False(result.Success);
         Assert.Equal(400, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task SubmitDeclaration_RejectsNegativeAmountsInsteadOfSilentlyClamping()
+    {
+        var repo = Repo<EmployeeTaxDeclaration>();
+        var service = new TaxDeclarationService(repo.Object);
+
+        var result = await service.SubmitDeclaration(TenantId, EmpId, new SubmitTaxDeclarationRequestDto
+        {
+            FinancialYear = FY,
+            DeclaredSection80C = -1m
+        }, Actor);
+
+        Assert.False(result.Success);
+        Assert.Equal(400, result.StatusCode);
+        repo.Verify(x => x.AddOne(It.IsAny<EmployeeTaxDeclaration>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitDeclaration_RejectsInvalidFinancialYearRange()
+    {
+        var repo = Repo<EmployeeTaxDeclaration>();
+        var service = new TaxDeclarationService(repo.Object);
+
+        var result = await service.SubmitDeclaration(TenantId, EmpId,
+            new SubmitTaxDeclarationRequestDto { FinancialYear = "2025-29" }, Actor);
+
+        Assert.False(result.Success);
+        Assert.Equal(400, result.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("SUBMITTED")]
+    public async Task SubmitDeclaration_RequiresReviewBeforeRevision(string status)
+    {
+        var existing = new EmployeeTaxDeclaration
+        {
+            Id = "decl-1", CompanyId = TenantId, EmployeeId = EmpId, FinancialYear = FY, Status = status
+        };
+        var repo = Repo(existing);
+        var service = new TaxDeclarationService(repo.Object);
+
+        var result = await service.SubmitDeclaration(TenantId, EmpId,
+            new SubmitTaxDeclarationRequestDto { FinancialYear = FY }, Actor);
+
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        repo.Verify(x => x.Update(It.IsAny<MongoDB.Driver.FilterDefinition<EmployeeTaxDeclaration>>(), It.IsAny<EmployeeTaxDeclaration>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitDeclaration_AfterApprovalCreatesLinkedVersionAndPreservesPayrollApproval()
+    {
+        var approved = new EmployeeTaxDeclaration
+        {
+            Id = "approved-1", CompanyId = TenantId, EmployeeId = EmpId, FinancialYear = FY,
+            Status = "APPROVED", Version = 1, ApprovedSection80C = 50000m
+        };
+        var repo = Repo(approved);
+        var service = new TaxDeclarationService(repo.Object);
+
+        var result = await service.SubmitDeclaration(TenantId, EmpId,
+            new SubmitTaxDeclarationRequestDto { FinancialYear = FY, DeclaredSection80C = 70000m }, Actor);
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.MethodResult!.Version);
+        Assert.Equal("approved-1", result.MethodResult.PreviousVersionId);
+        Assert.Equal("SUBMITTED", result.MethodResult.Status);
+        Assert.Equal("APPROVED", approved.Status);
+        Assert.Equal(50000m, approved.ApprovedSection80C);
+        repo.Verify(x => x.AddOne(It.Is<EmployeeTaxDeclaration>(d => d.Version == 2 && d.PreviousVersionId == "approved-1")), Times.Once);
+        repo.Verify(x => x.Update(It.IsAny<MongoDB.Driver.FilterDefinition<EmployeeTaxDeclaration>>(), It.IsAny<EmployeeTaxDeclaration>()), Times.Never);
     }
 
     [Fact]
@@ -154,6 +320,46 @@ public sealed class TaxDeclarationServiceTests
         Assert.Equal(50000m, result.MethodResult.ApprovedSection80Ccd1B);
         Assert.Equal(100000m, result.MethodResult.ApprovedSection80D);
         Assert.Equal(200000m, result.MethodResult.ApprovedSection24HomeLoanInterest);
+    }
+
+    [Fact]
+    public async Task ReviewDeclaration_CannotApproveMoreThanTheEmployeeDeclared()
+    {
+        var existing = new EmployeeTaxDeclaration
+        {
+            Id = "decl-1", CompanyId = TenantId, EmployeeId = EmpId, FinancialYear = FY,
+            Regime = "OLD_REGIME", Status = "SUBMITTED", SubmittedBy = "employee-1",
+            DeclaredSection80C = 10000m
+        };
+        var repo = Repo(existing);
+        var service = new TaxDeclarationService(repo.Object);
+
+        var result = await service.ReviewDeclaration(TenantId, "decl-1", new ReviewTaxDeclarationRequestDto
+        {
+            Decision = "APPROVE", ApprovedSection80C = 50000m
+        }, Actor);
+
+        Assert.True(result.Success);
+        Assert.Equal(10000m, result.MethodResult!.ApprovedSection80C);
+    }
+
+    [Fact]
+    public async Task ReviewDeclaration_SubmitterCannotApproveOwnDeclaration()
+    {
+        var existing = new EmployeeTaxDeclaration
+        {
+            Id = "decl-1", CompanyId = TenantId, EmployeeId = EmpId, FinancialYear = FY,
+            Status = "SUBMITTED", SubmittedBy = Actor
+        };
+        var repo = Repo(existing);
+        var service = new TaxDeclarationService(repo.Object);
+
+        var result = await service.ReviewDeclaration(TenantId, "decl-1",
+            new ReviewTaxDeclarationRequestDto { Decision = "APPROVE" }, Actor);
+
+        Assert.False(result.Success);
+        Assert.Equal(403, result.StatusCode);
+        repo.Verify(x => x.Update(It.IsAny<MongoDB.Driver.FilterDefinition<EmployeeTaxDeclaration>>(), It.IsAny<EmployeeTaxDeclaration>()), Times.Never);
     }
 
     [Fact]
@@ -259,6 +465,36 @@ public sealed class TaxDeclarationServiceTests
     }
 
     [Fact]
+    public async Task CalculateTaxProjection_UsesLastApprovedVersionWhileNewRevisionIsPending()
+    {
+        var declarations = new[]
+        {
+            new EmployeeTaxDeclaration
+            {
+                Id = "approved-v1", CompanyId = TenantId, EmployeeId = EmpId, FinancialYear = FY,
+                Regime = "OLD_REGIME", Status = "APPROVED", Version = 1,
+                ApprovedSection80C = 50000m
+            },
+            new EmployeeTaxDeclaration
+            {
+                Id = "pending-v2", CompanyId = TenantId, EmployeeId = EmpId, FinancialYear = FY,
+                Regime = "NEW_115BAC", Status = "SUBMITTED", Version = 2,
+                PreviousVersionId = "approved-v1", DeclaredSection80C = 150000m
+            }
+        };
+        var repo = Repo(declarations);
+        var service = new TaxDeclarationService(repo.Object);
+
+        var result = await service.CalculateTaxProjection(TenantId, EmpId, FY, 1200000m);
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.MethodResult);
+        Assert.Equal("OLD_REGIME", result.MethodResult.Regime);
+        Assert.Equal(50000m, result.MethodResult.Section80C);
+        Assert.Equal(100000m, result.MethodResult.TotalDeductions); // standard deduction + approved 80C
+    }
+
+    [Fact]
     public async Task CalculateTaxProjection_CalculatesAccurateNewRegimeTaxWithRebate()
     {
         var existing = new EmployeeTaxDeclaration
@@ -284,6 +520,20 @@ public sealed class TaxDeclarationServiceTests
         Assert.Equal(1125000m, result.MethodResult.NetTaxableIncome);
         Assert.Equal(0m, result.MethodResult.TotalAnnualTax);
         Assert.Equal(0m, result.MethodResult.MonthlyTds);
+    }
+
+    [Fact]
+    public async Task CalculateTaxProjection_RefusesUncataloguedTaxYear()
+    {
+        var repo = Repo<EmployeeTaxDeclaration>();
+        var service = new TaxDeclarationService(repo.Object);
+
+        var result = await service.CalculateTaxProjection(TenantId, EmpId, "2027-28", 1200000m);
+
+        Assert.False(result.Success);
+        Assert.Equal(422, result.StatusCode);
+        Assert.Contains("rules for 2027-28 are not available", result.Message, StringComparison.OrdinalIgnoreCase);
+        repo.Verify(x => x.GetAll(It.IsAny<Expression<Func<EmployeeTaxDeclaration, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()), Times.Never);
     }
 
     [Fact]
@@ -331,4 +581,9 @@ public sealed class TaxDeclarationServiceTests
             .ReturnsAsync(new Result { Success = true });
         return m;
     }
+
+    private static BsonDocument Render(FilterDefinition<EmployeeTaxDeclaration> filter) =>
+        filter.Render(new RenderArgs<EmployeeTaxDeclaration>(
+            BsonSerializer.SerializerRegistry.GetSerializer<EmployeeTaxDeclaration>(),
+            BsonSerializer.SerializerRegistry));
 }

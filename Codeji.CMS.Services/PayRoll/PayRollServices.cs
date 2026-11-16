@@ -171,21 +171,10 @@ public class PayRollServices : IPayRollServices
             salarySlipModel.OtherDeductions = PayrollDeductionLineTotals.AdditionalAmount(
                 payRoll.DeductionLines
             );
-            salarySlipModel.GrossPay =
-                payRoll.BasicPay
-                + payRoll.Allowance.HRA
-                + payRoll.Allowance.LTA
-                + payRoll.Bonus
-                + payRoll.Allowance.OtherAllowance;
-            salarySlipModel.TotalDeduction =
-                payRoll.Deduction.IncomeTax
-                + payRoll.Deduction.HealthInsurance
-                + payRoll.Deduction.LossOfPay
-                + payRoll.Deduction.EPF
-                + payRoll.Deduction.ESIC
-                + payRoll.Deduction.ProfessionalTax
-                + salarySlipModel.OtherDeductions;
-            salarySlipModel.NetSalary = salarySlipModel.GrossPay - salarySlipModel.TotalDeduction;
+            var rowTotals = PayrollRowTotalsResolver.Resolve(payRoll);
+            salarySlipModel.GrossPay = rowTotals.Gross;
+            salarySlipModel.TotalDeduction = rowTotals.Deductions;
+            salarySlipModel.NetSalary = rowTotals.Net;
             salarySlipModel.NetSalaryInWords = IndianCurrencyWords.ToWords(
                 salarySlipModel.NetSalary
             );
@@ -748,6 +737,7 @@ public class PayRollServices : IPayRollServices
                                 Code = x.Code,
                                 Description = x.Description,
                                 Amount = x.Amount,
+                                IncludeInEsiWage = x.IncludeInEsiWage,
                             })
                             .ToList()
                         ?? [],
@@ -954,7 +944,7 @@ public class PayRollServices : IPayRollServices
                 && r.PeriodStart == model.PayMonth
                 && r.RunType == "REGULAR"
                 && r.IsActive
-                
+
                 && r.Status != "CANCELLED");
 
             if (activeRun != null && (activeRun.Status is "APPROVED" or "PROCESSED" or "PAID" or "CLOSED"))
@@ -1133,7 +1123,7 @@ public class PayRollServices : IPayRollServices
                     && r.PeriodStart == model.PayMonth
                     && r.RunType == "REGULAR"
                     && r.IsActive
-                    
+
                     && r.Status != "CANCELLED"
                     && (r.Status == "DRAFT" || r.Status == "PENDING_APPROVAL"));
 
@@ -1144,9 +1134,10 @@ public class PayRollServices : IPayRollServices
                         && x.PayrollRunId == matchingRun.Id
                         && x.EmployeeId == empUser.EmployeeId);
 
-                    var gross = model.BasicPay + (model.Bonus ?? 0) + (model.HRA ?? 0) + (model.LTA ?? 0) + (model.OtherAllowance ?? 0);
-                    var deductions = (model.LossOfPay ?? 0) + (model.IncomeTax ?? 0) + (model.HealthInsurance ?? 0) + (model.EPF ?? 0) + (model.ESIC ?? 0) + (model.ProfessionalTax ?? 0);
-                    var net = gross - deductions;
+                    var rowTotals = PayrollRowTotalsResolver.Resolve(payRoll);
+                    var gross = rowTotals.Gross;
+                    var deductions = rowTotals.Deductions;
+                    var net = rowTotals.Net;
 
                     if (runEmployee != null)
                     {
@@ -1661,6 +1652,7 @@ public class PayRollServices : IPayRollServices
                 Code = x.Code.Trim().ToUpperInvariant(),
                 Description = x.Description.Trim(),
                 Amount = RoundAmount(x.Amount),
+                IncludeInEsiWage = x.IncludeInEsiWage,
             })
             .ToList();
 
@@ -1678,6 +1670,7 @@ public class PayRollServices : IPayRollServices
                 TdsPolicyProfileId = x.TdsPolicyProfileId,
                 TdsPolicyProfileVersion = x.TdsPolicyProfileVersion,
                 TdsStatutoryRuleVersion = x.TdsStatutoryRuleVersion,
+                TdsTaxRuleSetId = x.TdsTaxRuleSetId,
                 TdsCalculationEngineVersion = x.TdsCalculationEngineVersion,
                 TdsEstimateStatus = x.TdsEstimateStatus,
                 TdsCurrentYearTaxableSalaryYtd = x.TdsCurrentYearTaxableSalaryYtd,
@@ -1710,6 +1703,7 @@ public class PayRollServices : IPayRollServices
                 ResolvedPolicyProfileId = x.ResolvedPolicyProfileId,
                 ResolvedPolicyVersion = x.ResolvedPolicyVersion,
                 EpfMode = x.EpfMode,
+                EpfStatutoryRuleSetId = x.EpfStatutoryRuleSetId,
                 EpfWageCeiling = x.EpfWageCeiling,
                 EpfEmployeeRatePercent = x.EpfEmployeeRatePercent,
                 EpfEmployerRatePercent = x.EpfEmployerRatePercent,
@@ -1717,6 +1711,10 @@ public class PayRollServices : IPayRollServices
                 EsicWageCeiling = x.EsicWageCeiling,
                 EsicEmployeeRatePercent = x.EsicEmployeeRatePercent,
                 EsicEmployerRatePercent = x.EsicEmployerRatePercent,
+                EsicWages = x.EsicWages,
+                EsicCoverageEligible = x.EsicCoverageEligible,
+                EsicContributionPeriodStart = x.EsicContributionPeriodStart,
+                EsicContributionPeriodEnd = x.EsicContributionPeriodEnd,
                 TdsMode = x.TdsMode,
                 ProfessionalTax = x.ProfessionalTax,
                 PtJurisdiction = x.PtJurisdiction,
@@ -1769,6 +1767,9 @@ public class PayRollServices : IPayRollServices
                                 IsRecurring = c.IsRecurring,
                                 IsStatutory = c.IsStatutory,
                                 IsEmployerContribution = c.IsEmployerContribution,
+                                IncludeInPfWage = c.IncludeInPfWage,
+                                IncludeInEsiWage = c.IncludeInEsiWage,
+                                IncludeInPtWage = c.IncludeInPtWage,
                                 SortOrder = c.SortOrder,
                             })
                             .ToList(),

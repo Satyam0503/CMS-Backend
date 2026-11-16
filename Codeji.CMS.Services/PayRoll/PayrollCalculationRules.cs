@@ -1,8 +1,24 @@
 using System;
+using Codeji.CMS.DTO.Salary;
 using Codeji.CMS.Repository.Entities.Employees;
+using Codeji.CMS.Services.PayRoll;
 
 public static class PayrollCalculationRules
 {
+    public const string IndiaEpfRulesBefore2026_09_17 = "IN-EPF-2025-15000";
+    public const string IndiaEpfRulesFrom2026_09_17 = "IN-EPF-2026-25000";
+    private static readonly DateTime IndiaEpfCeilingEffectiveDate = new(2026, 9, 17);
+
+    public static (string RuleSetId, decimal WageCeiling, decimal EpsWageCeiling, decimal EdliWageCeiling)
+        ResolveIndiaEpfRules(DateTime payrollPeriodEnd)
+    {
+        // Statutory ceiling is selected by the contribution period, not by today's date.
+        // Company policy continues to supply contribution rates and membership mode.
+        return payrollPeriodEnd.Date >= IndiaEpfCeilingEffectiveDate
+            ? (IndiaEpfRulesFrom2026_09_17, 25000m, 25000m, 25000m)
+            : (IndiaEpfRulesBefore2026_09_17, 15000m, 15000m, 15000m);
+    }
+
     private static readonly HashSet<string> SupportedTdsModes = new(StringComparer.Ordinal)
     {
         "AUTO_NEW_REGIME", "AUTO_OLD_REGIME", "MANUAL_ONLY", "NEW_115BAC", "OLD_REGIME"
@@ -68,6 +84,14 @@ public static class PayrollCalculationRules
         return Math.Min(earnedFixedGross, rawLop);
     }
 
+    public static decimal CalculateLopAdjustedWageBase(decimal monthlyWageBase, decimal lossOfPayDays, decimal divisor)
+    {
+        if (monthlyWageBase <= 0m || lossOfPayDays <= 0m) return Math.Max(0m, monthlyWageBase);
+        if (divisor <= 0m) return 0m;
+        var unpaidFraction = Math.Clamp(lossOfPayDays / divisor, 0m, 1m);
+        return RoundMoney(Math.Max(0m, monthlyWageBase) * (1m - unpaidFraction));
+    }
+
     public static decimal CalculateMonthlyEpf(
         string? epfMode,
         decimal earnedBasicAfterLop,
@@ -77,21 +101,29 @@ public static class PayrollCalculationRules
         var cleanBasic = Math.Max(0m, earnedBasicAfterLop);
         if (cleanBasic <= 0m) return 0m;
 
-        var mode = string.IsNullOrWhiteSpace(epfMode) ? "CAPPED_CEILING" : epfMode.ToUpperInvariant();
-        var contributionBase = mode switch
+        var contributionBase = ResolveEpfContributionWageBase(epfMode, cleanBasic, wageCeiling);
+        // EPF Scheme, paragraph 29(4): round each member contribution to the nearest rupee.
+        return Math.Round(contributionBase * contributionRatePercent / 100m, 0, MidpointRounding.AwayFromZero);
+    }
+
+    public static decimal ResolveEpfContributionWageBase(string? epfMode, decimal earnedBasic, decimal wageCeiling)
+    {
+        var cleanBasic = Math.Max(0m, earnedBasic);
+        var mode = string.IsNullOrWhiteSpace(epfMode) ? "CAPPED_CEILING" : epfMode.Trim().ToUpperInvariant();
+        return mode switch
         {
             "EXEMPT" => 0m,
             "ACTUAL_BASIC_12" => cleanBasic,
-            _ => Math.Min(cleanBasic, wageCeiling <= 0m ? 15000m : wageCeiling)
+            _ => Math.Min(cleanBasic, wageCeiling > 0m ? wageCeiling : 15000m)
         };
-        return RoundMoney(contributionBase * contributionRatePercent / 100m);
     }
 
     public static (decimal EmployerEpf, decimal EmployerEps, decimal Edli, decimal AdminCharges) CalculateEmployerMonthlyEpf(
         string? epfMode,
         decimal earnedBasicAfterLop,
         decimal wageCeiling = 15000m,
-        decimal epsCeiling = 15000m)
+        decimal epsCeiling = 15000m,
+        decimal employerContributionRatePercent = 12m)
     {
         var cleanBasic = Math.Max(0m, earnedBasicAfterLop);
         if (cleanBasic <= 0m) return (0m, 0m, 0m, 0m);
@@ -109,11 +141,13 @@ public static class PayrollCalculationRules
         };
 
         var epsWage = Math.Min(cleanBasic, effectiveEpsCeiling);
-        var eps = RoundMoney(Math.Min(epsWage * 8.33m / 100m, 1250m));
-        var totalEmployerPf = RoundMoney(pfWage * 12m / 100m);
+        var eps = Math.Round(Math.Min(epsWage * 8.33m / 100m, effectiveEpsCeiling * 8.33m / 100m), 0, MidpointRounding.AwayFromZero);
+        var totalEmployerPf = Math.Round(pfWage * employerContributionRatePercent / 100m, 0, MidpointRounding.AwayFromZero);
         var epf = Math.Max(0m, totalEmployerPf - eps);
-        var edli = RoundMoney(Math.Min(pfWage, 15000m) * 0.50m / 100m);
-        var admin = RoundMoney(pfWage * 0.50m / 100m);
+        var edli = Math.Round(Math.Min(pfWage, effectiveEpsCeiling) * 0.50m / 100m, 0, MidpointRounding.AwayFromZero);
+        // EPF administration charges are assessed at establishment level (including minimums),
+        // so they must not be multiplied into an individual employee contribution snapshot.
+        const decimal admin = 0m;
 
         return (epf, eps, edli, admin);
     }
@@ -123,14 +157,74 @@ public static class PayrollCalculationRules
         decimal contractualFixedGross,
         decimal earnedMonthlyGrossAfterLop,
         decimal wageCeiling = 21000m,
-        decimal contributionRatePercent = 0.75m)
+        decimal contributionRatePercent = 0.75m,
+        bool? contributionPeriodCoverageEligible = null)
     {
         var mode = string.IsNullOrWhiteSpace(esicMode) ? "STATUTORY" : esicMode.ToUpperInvariant();
         if (mode == "EXEMPT") return 0m;
-        if (contractualFixedGross > (wageCeiling <= 0m ? 21000m : wageCeiling) || earnedMonthlyGrossAfterLop <= 0m) return 0m;
+        var isCovered = contributionPeriodCoverageEligible ?? contractualFixedGross <= (wageCeiling <= 0m ? 21000m : wageCeiling);
+        if (!isCovered || earnedMonthlyGrossAfterLop <= 0m) return 0m;
 
         // Statutory ESIC employee contribution is 0.75% of gross wages, rounded up to the next rupee.
         return Math.Ceiling(earnedMonthlyGrossAfterLop * contributionRatePercent / 100m);
+    }
+
+    public static decimal ResolveEsicWageBasis(IEnumerable<SalaryWageComponent>? components, decimal legacyWageBasis)
+    {
+        var classifiedComponents = components?.ToArray() ?? [];
+        var includedWages = classifiedComponents
+            .Where(component => component.IncludeInEsiWage)
+            .Sum(component => Math.Max(0m, component.Amount));
+
+        // Older salary structures have no wage classification metadata. Preserve their
+        // historical basis when metadata is absent or no component is classified yet.
+        return includedWages > 0m ? includedWages : Math.Max(0m, legacyWageBasis);
+    }
+
+    public static (DateTime Start, DateTime End) ResolveIndiaEsicContributionPeriod(DateTime payrollMonth)
+    {
+        var month = new DateTime(payrollMonth.Year, payrollMonth.Month, 1);
+        var start = month.Month >= 4 && month.Month <= 9
+            ? new DateTime(month.Year, 4, 1)
+            : month.Month >= 10
+                ? new DateTime(month.Year, 10, 1)
+                : new DateTime(month.Year - 1, 10, 1);
+        return (start, start.AddMonths(6).AddDays(-1));
+    }
+
+    public static bool ResolveEsicCoverageEligibility(
+        string? esicMode,
+        decimal wagesAtCoverageStart,
+        decimal wageCeiling,
+        DateTime payrollMonth,
+        IEnumerable<EmpPayRoll>? previousContributionPeriodRows)
+    {
+        if (string.Equals(esicMode, "EXEMPT", StringComparison.OrdinalIgnoreCase)) return false;
+
+        var period = ResolveIndiaEsicContributionPeriod(payrollMonth);
+        var monthStart = new DateTime(payrollMonth.Year, payrollMonth.Month, 1);
+        var ceiling = wageCeiling > 0m ? wageCeiling : 21000m;
+        var wasCoveredDuringPeriod = (previousContributionPeriodRows ?? [])
+            .Where(row => row.PayMonth.Date >= period.Start && row.PayMonth.Date < monthStart)
+            .Any(row =>
+            {
+                if (string.Equals(row.CalculationSnapshot?.EsicMode, "EXEMPT", StringComparison.OrdinalIgnoreCase))
+                    return false;
+                if (row.CalculationSnapshot?.EsicCoverageEligible == true)
+                    return true;
+                if (row.CalculationSnapshot?.EsicCoverageEligible == false)
+                    return false;
+                if (row.CalculationSnapshot?.EsicWages > 0m || row.Deduction?.ESIC > 0m)
+                    return true;
+
+                // Legacy payroll rows did not persist the coverage decision. Their fixed wage
+                // fields provide a conservative evidence path for previous covered months.
+                var legacyWages = Math.Max(0m, row.BasicPay + row.Bonus +
+                    (row.Allowance?.HRA ?? 0m) + (row.Allowance?.OtherAllowance ?? 0m));
+                return legacyWages > 0m && legacyWages <= ceiling;
+            });
+
+        return wasCoveredDuringPeriod || (wagesAtCoverageStart > 0m && wagesAtCoverageStart <= ceiling);
     }
 
     /// <summary>
@@ -177,10 +271,11 @@ public static class PayrollCalculationRules
         return RoundMoney((monthlyGross / effectiveDivisor) * shortfallDays);
     }
 
-    public static decimal CalculateEmployerMonthlyEsic(string? esicMode, decimal contractualGross, decimal earnedMonthlyGrossAfterLop, decimal wageCeiling = 21000m, decimal contributionRatePercent = 3.25m)
+    public static decimal CalculateEmployerMonthlyEsic(string? esicMode, decimal contractualGross, decimal earnedMonthlyGrossAfterLop, decimal wageCeiling = 21000m, decimal contributionRatePercent = 3.25m, bool? contributionPeriodCoverageEligible = null)
     {
         var mode = string.IsNullOrWhiteSpace(esicMode) ? "STATUTORY" : esicMode.ToUpperInvariant();
-        if (mode == "EXEMPT" || contractualGross > (wageCeiling <= 0m ? 21000m : wageCeiling) || earnedMonthlyGrossAfterLop <= 0m) return 0m;
+        var isCovered = contributionPeriodCoverageEligible ?? contractualGross <= (wageCeiling <= 0m ? 21000m : wageCeiling);
+        if (mode == "EXEMPT" || !isCovered || earnedMonthlyGrossAfterLop <= 0m) return 0m;
         return Math.Ceiling(earnedMonthlyGrossAfterLop * contributionRatePercent / 100m);
     }
 
@@ -194,8 +289,10 @@ public static class PayrollCalculationRules
         decimal approved80D = 0m,
         decimal approvedSection24Loss = 0m,
         decimal approvedHraExemption = 0m,
-        decimal otherApprovedDeductions = 0m)
+        decimal otherApprovedDeductions = 0m,
+        IndiaSalaryTdsRuleSet? taxRules = null)
     {
+        var rules = taxRules ?? IndiaSalaryTdsRuleSet.ResolveOrDefault();
         var rawMode = string.IsNullOrWhiteSpace(tdsMode) ? "AUTO_NEW_REGIME" : tdsMode.Trim().ToUpperInvariant();
         if (!SupportedTdsModes.Contains(rawMode))
             throw new ArgumentOutOfRangeException(nameof(tdsMode), tdsMode, "Unsupported TDS mode. Choose AUTO_NEW_REGIME, AUTO_OLD_REGIME, or MANUAL_ONLY.");
@@ -218,78 +315,40 @@ public static class PayrollCalculationRules
 
         if (mode == "AUTO_OLD_REGIME")
         {
-            const decimal oldRegimeStandardDeduction = 50000m;
-            var capped80C = Math.Min(150000m, Math.Max(0m, approved80C));
-            var capped80Ccd1B = Math.Min(50000m, Math.Max(0m, approved80Ccd1B));
-            var capped80D = Math.Min(100000m, Math.Max(0m, approved80D));
-            var cappedSection24 = Math.Min(200000m, Math.Max(0m, approvedSection24Loss));
+            var capped80C = Math.Min(rules.Section80CCap, Math.Max(0m, approved80C));
+            var capped80Ccd1B = Math.Min(rules.Section80Ccd1BCap, Math.Max(0m, approved80Ccd1B));
+            var capped80D = Math.Min(rules.Section80DCap, Math.Max(0m, approved80D));
+            var cappedSection24 = Math.Min(rules.Section24LossCap, Math.Max(0m, approvedSection24Loss));
             var hraExemption = Math.Max(0m, approvedHraExemption);
             var otherDeductions = Math.Max(0m, otherApprovedDeductions);
 
-            var totalDeductions = oldRegimeStandardDeduction + capped80C + capped80Ccd1B + capped80D + cappedSection24 + hraExemption + otherDeductions;
+            var totalDeductions = rules.OldRegimeStandardDeduction + capped80C + capped80Ccd1B + capped80D + cappedSection24 + hraExemption + otherDeductions;
             taxableIncome = Math.Max(0m, totalGrossIncome - totalDeductions);
 
-            if (taxableIncome <= 500000m)
+            if (taxableIncome <= rules.OldRegimeRebateThreshold)
                 return 0m; // Full rebate u/s 87A under Old Regime up to ₹5,00,000
 
-            if (taxableIncome <= 1000000m)
-                tax = (250000m * 0.05m) + ((taxableIncome - 500000m) * 0.20m);
-            else
-                tax = (250000m * 0.05m) + (500000m * 0.20m) + ((taxableIncome - 1000000m) * 0.30m);
+            tax = CalculateSlabTax(taxableIncome, rules.OldRegimeSlabs);
 
-            // Surcharge under Old Regime
-            if (taxableIncome > 50000000m)
-                tax += tax * 0.37m;
-            else if (taxableIncome > 20000000m)
-                tax += tax * 0.25m;
-            else if (taxableIncome > 10000000m)
-                tax += tax * 0.15m;
-            else if (taxableIncome > 5000000m)
-                tax += tax * 0.10m;
+            tax = ApplySurcharge(tax, taxableIncome, rules.OldRegimeSurcharges);
         }
         else
         {
-            // Section 115BAC New Tax Regime (FY 2025-26 / FY 2026-27)
-            // Standard Deduction u/s 16(ia): ₹75,000
-            const decimal newRegimeStandardDeduction = 75000m;
-            const decimal section87ARebateThreshold = 1200000m;
-            taxableIncome = Math.Max(0m, totalGrossIncome - newRegimeStandardDeduction);
+            taxableIncome = Math.Max(0m, totalGrossIncome - rules.NewRegimeStandardDeduction);
 
-            // Full Section 87A tax rebate up to ₹12,00,000 taxable income (₹12,75,000 gross salary)
-            if (taxableIncome <= section87ARebateThreshold)
+            if (taxableIncome <= rules.NewRegimeRebateThreshold)
                 return 0m;
 
-            decimal slabTax = 0m;
-            if (taxableIncome <= 400000m)
-                slabTax = 0m;
-            else if (taxableIncome <= 800000m)
-                slabTax = (taxableIncome - 400000m) * 0.05m;
-            else if (taxableIncome <= 1200000m)
-                slabTax = 20000m + ((taxableIncome - 800000m) * 0.10m);
-            else if (taxableIncome <= 1600000m)
-                slabTax = 60000m + ((taxableIncome - 1200000m) * 0.15m);
-            else if (taxableIncome <= 2000000m)
-                slabTax = 120000m + ((taxableIncome - 1600000m) * 0.20m);
-            else if (taxableIncome <= 2400000m)
-                slabTax = 200000m + ((taxableIncome - 2000000m) * 0.25m);
-            else
-                slabTax = 300000m + ((taxableIncome - 2400000m) * 0.30m);
+            var slabTax = CalculateSlabTax(taxableIncome, rules.NewRegimeSlabs);
 
             // Marginal Relief u/s 87A: tax payable cannot exceed the income exceeding ₹12,00,000
-            decimal excessIncomeOverRebateThreshold = taxableIncome - section87ARebateThreshold;
+            decimal excessIncomeOverRebateThreshold = taxableIncome - rules.NewRegimeRebateThreshold;
             tax = Math.Min(slabTax, excessIncomeOverRebateThreshold);
 
-            // Surcharge under New Regime (capped at 25% for > 2Cr)
-            if (taxableIncome > 20000000m)
-                tax += tax * 0.25m;
-            else if (taxableIncome > 10000000m)
-                tax += tax * 0.15m;
-            else if (taxableIncome > 5000000m)
-                tax += tax * 0.10m;
+            tax = ApplySurcharge(tax, taxableIncome, rules.NewRegimeSurcharges, rules.NewRegimeSurchargeMaximum);
         }
 
-        // 4% Health & Education Cess
-        decimal totalAnnualTax = tax + (tax * 0.04m);
+        decimal totalAnnualTax = tax + (tax * rules.CessRate);
         return RoundMoney(totalAnnualTax);
     }
 
@@ -306,7 +365,8 @@ public static class PayrollCalculationRules
         decimal approved80D = 0m,
         decimal approvedSection24Loss = 0m,
         decimal approvedHraExemption = 0m,
-        decimal otherApprovedDeductions = 0m)
+        decimal otherApprovedDeductions = 0m,
+        IndiaSalaryTdsRuleSet? taxRules = null)
     {
         var annualTax = CalculateAnnualIncomeTaxWithCess(
             annualGrossIncome,
@@ -318,7 +378,8 @@ public static class PayrollCalculationRules
             approved80D,
             approvedSection24Loss,
             approvedHraExemption,
-            otherApprovedDeductions);
+            otherApprovedDeductions,
+            taxRules);
 
         if (annualTax <= 0m) return 0m;
 
@@ -326,6 +387,21 @@ public static class PayrollCalculationRules
         var remainingTax = Math.Max(0m, annualTax - totalTaxAlreadyDeducted);
         var divisorMonths = Math.Clamp(remainingMonthsInFy, 1, 12);
         return RoundMoney(remainingTax / divisorMonths);
+    }
+
+    private static decimal CalculateSlabTax(decimal taxableIncome, IReadOnlyList<IndiaIncomeTaxSlab> slabs) =>
+        slabs.Sum(slab =>
+        {
+            var upper = slab.UpperBound.HasValue ? Math.Min(taxableIncome, slab.UpperBound.Value) : taxableIncome;
+            return upper <= slab.LowerBound ? 0m : (upper - slab.LowerBound) * slab.Rate;
+        });
+
+    private static decimal ApplySurcharge(decimal tax, decimal taxableIncome,
+        IReadOnlyList<IndiaIncomeTaxSurcharge> surcharges, decimal maximumRate = decimal.MaxValue)
+    {
+        var rate = surcharges.Where(x => taxableIncome > x.IncomeThreshold)
+            .Select(x => x.Rate).DefaultIfEmpty(0m).Max();
+        return tax + tax * Math.Min(rate, maximumRate);
     }
 
     /// <summary>

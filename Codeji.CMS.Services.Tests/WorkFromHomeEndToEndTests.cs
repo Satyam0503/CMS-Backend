@@ -981,6 +981,8 @@ public class WorkFromHomeEndToEndTests
     {
         var companyId = "company-audit-test";
         var userId = "user-audit-emp-01";
+        // Keep this fixture future-dated so the backdated-request guard does not
+        // mask the half-day/multi-day validation this test is asserting.
         var date = DateOnly.FromDateTime(NextWeekdayUtc());
 
         var httpContextAccessor = new Mock<IHttpContextAccessor>();

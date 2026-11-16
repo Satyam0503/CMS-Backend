@@ -52,6 +52,12 @@ This allows the system to distinguish manual edits from generated leave or WFH a
 | Frontend | `CMS-React/src/app/modules/attendance/*` | attendance UI, company grid, employee mode |
 
 
+### 2.3 Module Lifecycle & Independence
+
+Attendance is an independently controlled system module:
+- **Decoupling from Payroll**: Disabling Payroll does **not** disable Attendance tracking, shift management, or attendance settings.
+- **Fail-Closed Enforcement**: If Attendance is disabled for a company, all Attendance endpoints fail-closed with HTTP 403 Forbidden for all roles, including Administrator.
+
 ## 3. Core data model
 
 ### 3.1 `AttendanceModel`

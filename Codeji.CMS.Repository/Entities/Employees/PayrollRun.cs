@@ -50,6 +50,7 @@ public sealed class PayrollConfigurationSnapshot
     public string DivisorPolicy { get; set; } = "CALENDAR_DAYS";
     public string LopCalculationBase { get; set; } = "FIXED_GROSS";
     public string EpfMode { get; set; } = "CAPPED_CEILING";
+    public string? EpfStatutoryRuleSetId { get; set; }
     public decimal EpfWageCeiling { get; set; }
     public decimal EpfEmployeeRatePercent { get; set; } = 12m;
     public decimal EpfEmployerRatePercent { get; set; } = 12m;
@@ -82,6 +83,7 @@ public sealed class PayrollRunEmployee
     public decimal DeductionAmount { get; set; }
     public decimal NetAmount { get; set; }
     public PayrollEmployeeInputSnapshot InputSnapshot { get; set; } = new();
+    public List<string> AppliedAdjustmentIds { get; set; } = [];
     public PayrollStatutorySnapshot StatutorySnapshot { get; set; } = new();
     public PayrollAttendanceSnapshot AttendanceSnapshot { get; set; } = new();
 }
@@ -131,6 +133,7 @@ public sealed class PayrollEmployeeInputSnapshot
     public string? PolicyProfileId { get; set; }
     public int PolicyProfileVersion { get; set; }
     public string EpfMode { get; set; } = string.Empty;
+    public string? EpfStatutoryRuleSetId { get; set; }
     public decimal EpfWageCeiling { get; set; } = 15000m;
     public decimal EpfEmployeeRatePercent { get; set; } = 12m;
     public decimal EpfEmployerRatePercent { get; set; } = 12m;
@@ -141,6 +144,24 @@ public sealed class PayrollEmployeeInputSnapshot
     public string TdsMode { get; set; } = string.Empty;
     public bool? RequireAttendanceLock { get; set; }
     public List<PayrollComponentSnapshot> Components { get; set; } = [];
+    public List<PayrollAdjustmentSnapshot> Adjustments { get; set; } = [];
+}
+
+[BsonIgnoreExtraElements]
+public sealed class PayrollAdjustmentSnapshot
+{
+    public string Id { get; set; } = string.Empty;
+    public string ComponentCode { get; set; } = string.Empty;
+    public string ComponentName { get; set; } = string.Empty;
+    public string ComponentKind { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public bool IsTaxable { get; set; }
+    public bool IsStatutory { get; set; }
+    public bool IsEmployerContribution { get; set; }
+    public bool IncludeInEsiWage { get; set; }
+    public bool IncludeInPfWage { get; set; }
+    public bool IncludeInPtWage { get; set; }
+    public int ComponentVersion { get; set; }
 }
 
 public sealed class PayrollStatutorySnapshot
@@ -149,8 +170,17 @@ public sealed class PayrollStatutorySnapshot
     public int PolicyProfileVersion { get; set; }
     public decimal EmployeeEpf { get; set; }
     public decimal EmployerEpf { get; set; }
+    public decimal EmployerEps { get; set; }
+    public decimal EmployerEdli { get; set; }
+    public decimal? EpfWages { get; set; }
+    public decimal? EpsWages { get; set; }
+    public decimal? EdliWages { get; set; }
     public decimal EmployeeEsic { get; set; }
     public decimal EmployerEsic { get; set; }
+    public decimal? EsicWages { get; set; }
+    public bool? EsicCoverageEligible { get; set; }
+    public DateTime? EsicContributionPeriodStart { get; set; }
+    public DateTime? EsicContributionPeriodEnd { get; set; }
     public decimal IncomeTax { get; set; }
     public decimal ProfessionalTax { get; set; }
 }

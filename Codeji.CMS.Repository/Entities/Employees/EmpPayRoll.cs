@@ -65,6 +65,7 @@ public class PayrollEarningLine
     public required string Code { get; set; }
     public required string Description { get; set; }
     public decimal Amount { get; set; }
+    public bool? IncludeInEsiWage { get; set; }
 }
 
 [BsonIgnoreExtraElements]
@@ -79,7 +80,8 @@ public class PayrollCalculationSnapshot
     public string? TdsPolicyProfileId { get; set; }
     public int TdsPolicyProfileVersion { get; set; }
     public string? TdsStatutoryRuleVersion { get; set; }
-    public string TdsCalculationEngineVersion { get; set; } = "INDIA-TDS-2026.1";
+    public string? TdsTaxRuleSetId { get; set; }
+    public string TdsCalculationEngineVersion { get; set; } = "INDIA-TDS-2026.2";
     public string TdsEstimateStatus { get; set; } = "NOT_AVAILABLE";
     public decimal TdsCurrentYearTaxableSalaryYtd { get; set; }
     public decimal TdsCurrentMonthlyTaxableSalaryBasis { get; set; }
@@ -131,6 +133,7 @@ public class PayrollCalculationSnapshot
     public string? ResolvedPolicyProfileId { get; set; }
     public int ResolvedPolicyVersion { get; set; }
     public string EpfMode { get; set; } = "CAPPED_CEILING";
+    public string? EpfStatutoryRuleSetId { get; set; }
     public decimal EpfWageCeiling { get; set; } = 15000m;
     public decimal EpfEmployeeRatePercent { get; set; } = 12m;
     public decimal EpfEmployerRatePercent { get; set; } = 12m;
@@ -138,6 +141,10 @@ public class PayrollCalculationSnapshot
     public decimal EsicWageCeiling { get; set; } = 21000m;
     public decimal EsicEmployeeRatePercent { get; set; } = 0.75m;
     public decimal EsicEmployerRatePercent { get; set; } = 3.25m;
+    public decimal? EsicWages { get; set; }
+    public bool? EsicCoverageEligible { get; set; }
+    public DateTime? EsicContributionPeriodStart { get; set; }
+    public DateTime? EsicContributionPeriodEnd { get; set; }
     public string TdsMode { get; set; } = "AUTO_NEW_REGIME";
     public decimal ProfessionalTax { get; set; }
     public string? PtJurisdiction { get; set; }

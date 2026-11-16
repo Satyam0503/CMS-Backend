@@ -128,6 +128,94 @@ public sealed class PayrollRunCalculationPersistenceTests
         Assert.Equal(0m, run.NetTotal);
     }
 
+    [Fact]
+    public async Task Calculation_FreezesConfiguredEmployerStatutorySplitAndWageBases()
+    {
+        var run = Run();
+        var member = Member("employee-1");
+        member.InputSnapshot.EpfMode = "CAPPED_CEILING";
+        member.InputSnapshot.EpfWageCeiling = 25000m;
+        member.InputSnapshot.EpfEmployeeRatePercent = 12m;
+        member.InputSnapshot.EpfEmployerRatePercent = 10m;
+        member.InputSnapshot.EsicMode = "STATUTORY";
+        member.InputSnapshot.EsicWageCeiling = 21000m;
+        member.InputSnapshot.EsicEmployeeRatePercent = 0.75m;
+        member.InputSnapshot.EsicEmployerRatePercent = 3.25m;
+        member.InputSnapshot.TdsMode = "AUTO_NEW_REGIME";
+        var row = Row(member.EmployeeId);
+        row.BasicPay = 12000m;
+        row.Deduction.LossOfPay = 500m;
+        row.Deduction.LossOfPayDays = 1f;
+        row.Deduction.EPF = 1392m;
+        row.Deduction.ESIC = 87m;
+        row.CalculationSnapshot = new PayrollCalculationSnapshot
+        {
+            Divisor = 30m, LossOfPayDays = 1m,
+            EpfMode = "CAPPED_CEILING", EpfStatutoryRuleSetId = PayrollCalculationRules.IndiaEpfRulesFrom2026_09_17, EpfWageCeiling = 25000m,
+            EpfEmployeeRatePercent = 12m, EpfEmployerRatePercent = 10m,
+            EsicMode = "STATUTORY", EsicWageCeiling = 21000m,
+            EsicWages = 22000m, EsicCoverageEligible = true,
+            EsicContributionPeriodStart = new DateTime(2026, 4, 1), EsicContributionPeriodEnd = new DateTime(2026, 9, 30),
+            EsicEmployeeRatePercent = 0.75m, EsicEmployerRatePercent = 3.25m,
+            TdsMode = "AUTO_NEW_REGIME"
+        };
+        var service = new PayrollRunCalculationService(
+            Repository(run).Object, Repository(member).Object, Repository(row).Object);
+
+        var result = await service.SyncCalculatedRows(run.CompanyId, run.Id, "calculator");
+
+        Assert.True(result.Success);
+        Assert.Equal(194m, member.StatutorySnapshot.EmployerEpf);
+        Assert.Equal(966m, member.StatutorySnapshot.EmployerEps);
+        Assert.Equal(58m, member.StatutorySnapshot.EmployerEdli);
+        Assert.Equal(11600m, member.StatutorySnapshot.EpfWages);
+        Assert.Equal(11600m, member.StatutorySnapshot.EpsWages);
+        Assert.Equal(11600m, member.StatutorySnapshot.EdliWages);
+        Assert.Equal(22000m, member.StatutorySnapshot.EsicWages);
+        Assert.True(member.StatutorySnapshot.EsicCoverageEligible);
+        Assert.Equal(715m, member.StatutorySnapshot.EmployerEsic);
+    }
+
+    [Fact]
+    public async Task Calculation_UsesFrozenSeptember2026EpfRuleForEmployerLiability()
+    {
+        var run = Run();
+        var member = Member("employee-1");
+        member.InputSnapshot.EpfMode = "CAPPED_CEILING";
+        member.InputSnapshot.EpfWageCeiling = 25000m;
+        member.InputSnapshot.EpfEmployeeRatePercent = 12m;
+        member.InputSnapshot.EpfEmployerRatePercent = 12m;
+        member.InputSnapshot.EsicMode = "STATUTORY";
+        member.InputSnapshot.EsicWageCeiling = 21000m;
+        member.InputSnapshot.EsicEmployeeRatePercent = 0.75m;
+        member.InputSnapshot.EsicEmployerRatePercent = 3.25m;
+        member.InputSnapshot.TdsMode = "MANUAL_ONLY";
+        var row = Row(member.EmployeeId);
+        row.BasicPay = 30000m;
+        row.Deduction.EPF = 3000m;
+        row.CalculationSnapshot = new PayrollCalculationSnapshot
+        {
+            PayrollMonth = new DateTime(2026, 9, 1), Divisor = 30m,
+            EpfMode = "CAPPED_CEILING", EpfStatutoryRuleSetId = PayrollCalculationRules.IndiaEpfRulesFrom2026_09_17,
+            EpfWageCeiling = 25000m, EpfEmployeeRatePercent = 12m, EpfEmployerRatePercent = 12m,
+            EsicMode = "STATUTORY", EsicWageCeiling = 21000m,
+            EsicEmployeeRatePercent = 0.75m, EsicEmployerRatePercent = 3.25m,
+            TdsMode = "MANUAL_ONLY"
+        };
+        var service = new PayrollRunCalculationService(Repository(run).Object, Repository(member).Object, Repository(row).Object);
+
+        var result = await service.SyncCalculatedRows(run.CompanyId, run.Id, "calculator");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(3000m, member.StatutorySnapshot.EmployeeEpf);
+        Assert.Equal(2083m, member.StatutorySnapshot.EmployerEps);
+        Assert.Equal(917m, member.StatutorySnapshot.EmployerEpf);
+        Assert.Equal(125m, member.StatutorySnapshot.EmployerEdli);
+        Assert.Equal(25000m, member.StatutorySnapshot.EpfWages);
+        Assert.Equal(25000m, member.StatutorySnapshot.EpsWages);
+        Assert.Equal(25000m, member.StatutorySnapshot.EdliWages);
+    }
+
     [Theory]
     [InlineData(false, 1, 1, false, "PAYROLL_ATTENDANCE_NOT_LOCKED")]
     [InlineData(true, 2, 1, false, "PAYROLL_ATTENDANCE_SNAPSHOT_MISMATCH")]

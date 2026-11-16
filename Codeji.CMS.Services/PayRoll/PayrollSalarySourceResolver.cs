@@ -18,11 +18,11 @@ public static class PayrollSalarySourceResolver
         EffectiveFrom = salary.EffectiveFrom, EffectiveTo = salary.EffectiveTo,
         Components = new List<PayrollComponentSnapshot>
         {
-            new() { Code = "BASIC_PAY", Name = "Basic Pay", Kind = "EARNING", Value = salary.BasicPay, IsTaxable = true },
-            new() { Code = "HRA", Name = "House Rent Allowance", Kind = "EARNING", Value = salary.Hra ?? 0m, IsTaxable = true, SortOrder = 1 },
-            new() { Code = "LTA", Name = "Leave Travel Allowance", Kind = "EARNING", Value = salary.Lta ?? 0m, IsTaxable = true, SortOrder = 2 },
-            new() { Code = "OTHER_ALLOWANCE", Name = "Other Allowance", Kind = "EARNING", Value = salary.OtherAllowances ?? 0m, IsTaxable = true, SortOrder = 3 },
-            new() { Code = "BONUS", Name = "Bonus", Kind = "EARNING", Value = salary.Bonus ?? 0m, IsTaxable = true, SortOrder = 4 },
+            new() { Code = "BASIC_PAY", Name = "Basic Pay", Kind = "EARNING", Value = salary.BasicPay, IsTaxable = true, IncludeInEsiWage = true },
+            new() { Code = "HRA", Name = "House Rent Allowance", Kind = "EARNING", Value = salary.Hra ?? 0m, IsTaxable = true, IncludeInEsiWage = true, SortOrder = 1 },
+            new() { Code = "LTA", Name = "Leave Travel Allowance", Kind = "EARNING", Value = salary.Lta ?? 0m, IsTaxable = true, IncludeInEsiWage = false, SortOrder = 2 },
+            new() { Code = "OTHER_ALLOWANCE", Name = "Other Allowance", Kind = "EARNING", Value = salary.OtherAllowances ?? 0m, IsTaxable = true, IncludeInEsiWage = true, SortOrder = 3 },
+            new() { Code = "BONUS", Name = "Bonus", Kind = "EARNING", Value = salary.Bonus ?? 0m, IsTaxable = true, IncludeInEsiWage = true, SortOrder = 4 },
             new() { Code = "HEALTH_INSURANCE", Name = "Health Insurance", Kind = "DEDUCTION", Value = salary.HealthInsurance ?? 0m, SortOrder = 5 }
         }.Concat((salary.OtherDeductions ?? []).OrderBy(x => x.Code, StringComparer.OrdinalIgnoreCase)
             .Select((x, index) => new PayrollComponentSnapshot
@@ -42,7 +42,7 @@ public static class PayrollSalarySourceResolver
             Components = snapshot.Components.Select(x => new PayrollComponentSnapshotDto
             {
                 Code = x.Code, Name = x.Name, Kind = x.Kind, Value = x.Value,
-                IsTaxable = x.IsTaxable, IsRecurring = x.IsRecurring, SortOrder = x.SortOrder
+                IsTaxable = x.IsTaxable, IsRecurring = x.IsRecurring, IncludeInEsiWage = x.IncludeInEsiWage, SortOrder = x.SortOrder
             }).ToList()
         };
     }

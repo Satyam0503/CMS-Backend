@@ -200,6 +200,12 @@ public class PayrollRunStateSyncTests
             OtherAllowance = 5000m,
             LossOfPay = 0m,
             IncomeTax = 5000m,
+            ProfessionalTax = 1000m,
+            DeductionLines =
+            [
+                new PayrollDeductionLineDto { Code = "LOAN", Description = "Loan repayment", Amount = 250m },
+                new PayrollDeductionLineDto { Code = "PT", Description = "Professional Tax", Amount = 1000m }
+            ],
             PaidDays = 30,
             PaidDate = new DateTime(2026, 10, 31)
         };
@@ -209,11 +215,12 @@ public class PayrollRunStateSyncTests
 
         // Assert
         Assert.True(result.Success);
-        // Gross: 60k + 10k + 5k = 75k. Deduction: 5k. Net: 70k.
+        // PT comes from the statutory field (the PT detail line is not counted twice);
+        // the additional loan line is included in gross-to-net.
         Assert.Equal(75000m, runEmployee.GrossAmount);
-        Assert.Equal(5000m, runEmployee.DeductionAmount);
-        Assert.Equal(70000m, runEmployee.NetAmount);
+        Assert.Equal(6250m, runEmployee.DeductionAmount);
+        Assert.Equal(68750m, runEmployee.NetAmount);
         Assert.Equal(75000m, draftRun.GrossTotal);
-        Assert.Equal(70000m, draftRun.NetTotal);
+        Assert.Equal(68750m, draftRun.NetTotal);
     }
 }

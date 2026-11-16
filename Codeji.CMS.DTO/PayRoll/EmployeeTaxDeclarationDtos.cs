@@ -12,6 +12,7 @@ public sealed class EmployeeTaxDeclarationDto
     public string Regime { get; set; } = "NEW_115BAC";
     public string Status { get; set; } = "DRAFT";
     public int Version { get; set; } = 1;
+    public string? PreviousVersionId { get; set; }
 
     // Previous Employer Income
     public decimal PreviousEmployerGrossSalary { get; set; }

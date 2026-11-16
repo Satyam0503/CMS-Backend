@@ -132,12 +132,15 @@ public sealed class PayrollReportsServiceTests
             {
                 Id = "line-1", CompanyId = "company-1", PayrollRunId = "run-1", EmployeeId = "EMP001",
                 Status = "CALCULATED", GrossAmount = 25000m,
-                InputSnapshot = new PayrollEmployeeInputSnapshot { EpfWageCeiling = 15000m },
+                InputSnapshot = new PayrollEmployeeInputSnapshot { EpfWageCeiling = 25000m },
                 StatutorySnapshot = new PayrollStatutorySnapshot
                 {
-                    PolicyProfileId = "epf-policy",
-                    EmployeeEpf = 1800m,
-                    EmployerEpf = 1800m
+                    EpfWages = 25000m,
+                    EpsWages = 25000m,
+                    EdliWages = 25000m,
+                    EmployeeEpf = 3000m,
+                    EmployerEpf = 917m,
+                    EmployerEps = 2083m
                 }
             });
 
@@ -156,7 +159,7 @@ public sealed class PayrollReportsServiceTests
         Assert.True(result.Success);
         Assert.Equal(1, result.TotalRecords);
         var text = System.Text.Encoding.UTF8.GetString(result.MethodResult).Trim();
-        Assert.Equal("100987654321#~#RAJESH KUMAR#~#25000#~#15000#~#15000#~#15000#~#1800#~#1250#~#550#~#0#~#0", text);
+        Assert.Equal("100987654321#~#RAJESH KUMAR#~#25000#~#25000#~#25000#~#25000#~#3000#~#2083#~#917#~#0#~#0", text);
     }
 
     [Fact]
@@ -177,6 +180,7 @@ public sealed class PayrollReportsServiceTests
                 InputSnapshot = new PayrollEmployeeInputSnapshot { EsicWageCeiling = 21000m },
                 StatutorySnapshot = new PayrollStatutorySnapshot
                 {
+                    EsicWages = 17500m,
                     EmployeeEsic = 135m,
                     EmployerEsic = 585m
                 }
@@ -199,7 +203,65 @@ public sealed class PayrollReportsServiceTests
         var csv = System.Text.Encoding.UTF8.GetString(result.MethodResult);
 
         Assert.Contains("IPNumber,IPName,NoOfDaysWorked,TotalMonthlyWages,IPContribution,ReasonForZeroWorkingDays", csv);
-        Assert.Contains("31000554433,Anita Sharma,30,18000.00,135.00", csv);
+        Assert.Contains("31000554433,Anita Sharma,30,17500.00,135.00", csv);
+    }
+
+    [Fact]
+    public async Task ExportEsicReturnCsv_IncludesEmployeeCoveredEarlierInContributionPeriodAfterWageCrossesCeiling()
+    {
+        var runs = Repository(new PayrollRun
+        {
+            Id = "run-1", CompanyId = "company-1", PeriodStart = new DateTime(2026, 5, 1),
+            PeriodEnd = new DateTime(2026, 5, 31), PayDate = new DateTime(2026, 6, 1),
+            Status = "CALCULATED", RunType = "REGULAR"
+        });
+        var employees = Repository(new PayrollRunEmployee
+        {
+            Id = "line-1", CompanyId = "company-1", PayrollRunId = "run-1", EmployeeId = "EMP003",
+            Status = "CALCULATED", GrossAmount = 28000m,
+            InputSnapshot = new PayrollEmployeeInputSnapshot { EsicWageCeiling = 21000m },
+            StatutorySnapshot = new PayrollStatutorySnapshot
+            {
+                EsicWages = 28000m, EsicCoverageEligible = true,
+                EsicContributionPeriodStart = new DateTime(2026, 4, 1),
+                EsicContributionPeriodEnd = new DateTime(2026, 9, 30),
+                EmployeeEsic = 210m, EmployerEsic = 910m
+            }
+        });
+        var service = new PayrollReportsService(runs.Object, employees.Object);
+
+        var result = await service.ExportEsicReturnCsv("company-1", new PayrollReportQueryDto());
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.TotalRecords);
+        Assert.Contains("EMP003,EMP003,30,28000.00,210.00", System.Text.Encoding.UTF8.GetString(result.MethodResult));
+    }
+
+    [Fact]
+    public async Task StatutoryExports_BlockWhenLegacyContributionsHaveNoFrozenWageBase()
+    {
+        var runs = Repository(new PayrollRun
+        {
+            Id = "run-1", CompanyId = "company-1", PeriodStart = new DateTime(2026, 9, 1),
+            PeriodEnd = new DateTime(2026, 9, 30), PayDate = new DateTime(2026, 10, 1), Status = "CALCULATED"
+        });
+        var employees = Repository(new PayrollRunEmployee
+        {
+            Id = "line-1", CompanyId = "company-1", PayrollRunId = "run-1", EmployeeId = "EMP001",
+            Status = "CALCULATED", GrossAmount = 25000m,
+            StatutorySnapshot = new PayrollStatutorySnapshot { EmployeeEpf = 1800m, EmployeeEsic = 135m }
+        });
+        var service = new PayrollReportsService(runs.Object, employees.Object);
+
+        var epf = await service.ExportEpfoEcrText("company-1", new PayrollReportQueryDto());
+        var esic = await service.ExportEsicReturnCsv("company-1", new PayrollReportQueryDto());
+
+        Assert.False(epf.Success);
+        Assert.Equal(422, epf.StatusCode);
+        Assert.Contains("frozen EPF/EPS/EDLI wage base", epf.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(esic.Success);
+        Assert.Equal(422, esic.StatusCode);
+        Assert.Contains("frozen ESI wage base", esic.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private static Mock<IMongoDbRepository<TEntity>> Repository<TEntity>(params TEntity[] items)

@@ -102,6 +102,7 @@ public sealed class PayrollEmployeeInputSnapshotDto
     public string? PolicyProfileId { get; set; }
     public int PolicyProfileVersion { get; set; }
     public string EpfMode { get; set; } = string.Empty;
+    public string? EpfStatutoryRuleSetId { get; set; }
     public decimal EpfWageCeiling { get; set; }
     public decimal EpfEmployeeRatePercent { get; set; }
     public decimal EpfEmployerRatePercent { get; set; }
@@ -132,6 +133,10 @@ public sealed class PayrollStatutorySnapshotDto
     public decimal EmployerEpf { get; set; }
     public decimal EmployeeEsic { get; set; }
     public decimal EmployerEsic { get; set; }
+    public decimal? EsicWages { get; set; }
+    public bool? EsicCoverageEligible { get; set; }
+    public DateTime? EsicContributionPeriodStart { get; set; }
+    public DateTime? EsicContributionPeriodEnd { get; set; }
     public decimal IncomeTax { get; set; }
     public decimal ProfessionalTax { get; set; }
 }

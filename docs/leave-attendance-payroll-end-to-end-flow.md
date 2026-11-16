@@ -69,6 +69,20 @@ The important distinction is:
 - **Process payroll** publishes that saved record to employees.
 - An employee cannot see an unprocessed payroll record.
 
+## 2.1 Module Decoupling and Independent Tenant Lifecycles
+
+While the operational calculation pipeline connects approved leaves to daily attendance and locked monthly attendance to payroll execution, **the modules themselves are decoupled at the tenant configuration layer**:
+
+1. **Independent Module Toggling**:
+   - `Attendance`, `Leave Management`, and `PayRoll` are separately configured in `CompanyMasterService.UpdateModuleAccess` and `ApplicationModules.tsx`.
+   - Disabling `PayRoll` disables Payroll execution and Payroll Settings tabs/routes. It does **not** disable `Leave Management` or `Attendance`.
+   - Disabling `Leave Management` disables leave policy configuration, balances, and request workflows, but does **not** disable `Attendance` or `PayRoll`.
+   - Disabling `Attendance` disables attendance tracking, while `Leave Management` and `PayRoll` can remain enabled.
+2. **Fail-Closed Security**:
+   - When any of these modules is turned off for a tenant, all associated API endpoints reject requests with HTTP 403 Forbidden (`Access Denied`).
+   - **No Administrator Bypass**: Administrators cannot access or view tabs, routes, or endpoints for disabled modules.
+   - Self-service endpoints (e.g. `me/balances`, `me/requests`, `me/policies` for Leave Management) verify tenant enablement and fail-closed with `MODULE_NOT_ACCESSIBLE` if the module is disabled.
+
 ## 3. Identity, tenant, and permission model
 
 ### 3.1 Identity fields

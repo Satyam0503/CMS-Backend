@@ -16,6 +16,7 @@ public sealed class EmployeeTaxDeclaration
     public string Regime { get; set; } = "NEW_115BAC"; // "NEW_115BAC" or "OLD_REGIME"
     public string Status { get; set; } = "DRAFT"; // "DRAFT", "SUBMITTED", "APPROVED", "REJECTED"
     public int Version { get; set; } = 1;
+    public string? PreviousVersionId { get; set; }
 
     // Previous Employer Income
     public decimal PreviousEmployerGrossSalary { get; set; }

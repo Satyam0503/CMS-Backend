@@ -191,14 +191,25 @@ public sealed class PayrollReportsService(
             .Where(x => x.Status == "CALCULATED")
             .ToList();
 
+        var missingEpfBase = runEmployees.FirstOrDefault(x =>
+            ((x.StatutorySnapshot?.EmployeeEpf ?? 0m) > 0m ||
+             (x.StatutorySnapshot?.EmployerEpf ?? 0m) > 0m ||
+             (x.StatutorySnapshot?.EmployerEps ?? 0m) > 0m ||
+             (x.StatutorySnapshot?.EmployerEdli ?? 0m) > 0m) &&
+            (x.StatutorySnapshot?.EpfWages is null || x.StatutorySnapshot.EpsWages is null || x.StatutorySnapshot.EdliWages is null));
+        if (missingEpfBase is not null)
+            return new Result<byte[]> { Success = false, StatusCode = 422, Message = $"EPF ECR export is blocked because employee {missingEpfBase.EmployeeId} has contribution amounts without a frozen EPF/EPS/EDLI wage base. Reconcile the historical payroll data before filing." };
+
         var users = userRepo is null ? [] : (await userRepo.GetAll(x => x.CompanyId == companyId)).ToDictionary(x => x.EmployeeId, StringComparer.OrdinalIgnoreCase);
 
         var builder = new StringBuilder();
+        var exportedRecords = 0;
         foreach (var member in runEmployees)
         {
             var statutory = member.StatutorySnapshot;
             var eeShare = Round(statutory?.EmployeeEpf ?? 0m);
-            if (eeShare <= 0m && (statutory?.EmployerEpf ?? 0m) <= 0m)
+            if (eeShare <= 0m && (statutory?.EmployerEpf ?? 0m) <= 0m &&
+                (statutory?.EmployerEps ?? 0m) <= 0m && (statutory?.EmployerEdli ?? 0m) <= 0m)
                 continue;
 
             users.TryGetValue(member.EmployeeId, out var user);
@@ -210,28 +221,27 @@ public sealed class PayrollReportsService(
                       ?? member.EmployeeId;
 
             var grossWages = Round(member.GrossAmount);
-            var ceiling = member.InputSnapshot?.EpfWageCeiling is > 0m ? member.InputSnapshot.EpfWageCeiling : 15000m;
-            var epfWages = Round(Math.Min(grossWages, ceiling));
-            var epsWages = epfWages;
-            var edliWages = epfWages;
-
-            var (_, employerEpsRaw, _, _) = PayrollCalculationRules.CalculateEmployerMonthlyEpf(
-                statutory?.PolicyProfileId,
-                epfWages,
-                ceiling);
+            // New payroll runs persist the statutory wage bases and employer split used by
+            // calculation. Historical rows without these fields were rejected above.
+            var epfWages = Round(statutory?.EpfWages ?? 0m);
+            var epsWages = Round(statutory?.EpsWages ?? 0m);
+            var edliWages = Round(statutory?.EdliWages ?? 0m);
+            var employerEpsRaw = statutory?.EmployerEps ?? 0m;
+            var employerEpfRaw = statutory?.EmployerEpf ?? 0m;
 
             var eeShareInt = Math.Round(eeShare, 0, MidpointRounding.AwayFromZero);
             var employerEpsInt = Math.Round(employerEpsRaw, 0, MidpointRounding.AwayFromZero);
-            var employerEpfInt = Math.Max(0m, eeShareInt - employerEpsInt);
+            var employerEpfInt = Math.Round(employerEpfRaw, 0, MidpointRounding.AwayFromZero);
 
             builder.AppendLine($"{uan}#~#{memberName}#~#{grossWages:F0}#~#{epfWages:F0}#~#{epsWages:F0}#~#{edliWages:F0}#~#{eeShareInt:F0}#~#{employerEpsInt:F0}#~#{employerEpfInt:F0}#~#0#~#0");
+            exportedRecords++;
         }
 
         return new Result<byte[]>
         {
             Success = true,
             MethodResult = Encoding.UTF8.GetBytes(builder.ToString()),
-            TotalRecords = runEmployees.Count
+            TotalRecords = exportedRecords
         };
     }
 
@@ -247,6 +257,12 @@ public sealed class PayrollReportsService(
             .Where(x => x.Status == "CALCULATED")
             .ToList();
 
+        var missingEsicBase = runEmployees.FirstOrDefault(x =>
+            ((x.StatutorySnapshot?.EmployeeEsic ?? 0m) > 0m || (x.StatutorySnapshot?.EmployerEsic ?? 0m) > 0m) &&
+            x.StatutorySnapshot?.EsicWages is null);
+        if (missingEsicBase is not null)
+            return new Result<byte[]> { Success = false, StatusCode = 422, Message = $"ESI return export is blocked because employee {missingEsicBase.EmployeeId} has contribution amounts without a frozen ESI wage base. Reconcile the historical payroll data before filing." };
+
         var users = userRepo is null ? [] : (await userRepo.GetAll(x => x.CompanyId == companyId)).ToDictionary(x => x.EmployeeId, StringComparer.OrdinalIgnoreCase);
 
         var builder = new StringBuilder();
@@ -257,7 +273,7 @@ public sealed class PayrollReportsService(
             var statutory = member.StatutorySnapshot;
             var eeShare = Round(statutory?.EmployeeEsic ?? 0m);
             var esicCeiling = member.InputSnapshot?.EsicWageCeiling is > 0m ? member.InputSnapshot.EsicWageCeiling : 21000m;
-            if (eeShare <= 0m && member.GrossAmount > esicCeiling)
+            if (eeShare <= 0m && member.GrossAmount > esicCeiling && statutory?.EsicCoverageEligible != true)
                 continue;
 
             users.TryGetValue(member.EmployeeId, out var user);
@@ -268,7 +284,7 @@ public sealed class PayrollReportsService(
             var esicIpNumber = user?.CustomAttributeList?.FirstOrDefault(x => string.Equals(x.CustomAttributeId, "ESIC", StringComparison.OrdinalIgnoreCase) || string.Equals(x.CustomAttributeId, "IPNumber", StringComparison.OrdinalIgnoreCase))?.CustomAttributeValueId
                                ?? member.EmployeeId;
 
-            var grossWages = Round(member.GrossAmount);
+            var grossWages = Round(statutory?.EsicWages ?? 0m);
             var daysWorked = 30;
             var reasonCode = daysWorked == 0 ? "LEAVE_WITHOUT_PAY" : "";
 
