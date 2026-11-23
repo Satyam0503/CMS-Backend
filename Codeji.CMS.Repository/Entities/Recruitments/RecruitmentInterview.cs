@@ -15,6 +15,8 @@ public sealed class RecruitmentInterview : BaseClass
     public string Status { get; set; } = RecruitmentInterviewStatus.Draft;
     public string? Location { get; set; }
     public string? MeetingUrl { get; set; }
+    public string MeetingProvider { get; set; } = "GoogleMeet";
+    public string? CalendarSyncProvider { get; set; } = "GoogleCalendar";
     public string? CalendarItemId { get; set; }
     public string CalendarSyncStatus { get; set; } = "NotScheduled";
     public string[] PanelistUserIds { get; set; } = [];

@@ -67,6 +67,19 @@ public class AdminAttendanceController : ControllerBase
         }
     }
 
+    [HttpPost("biometric-sync")]
+    [ModulePermission(AppModule.Attendance, Permission.CreateForEmployee)]
+    public async Task<IActionResult> BiometricSync([FromBody] BiometricSyncRequestDto request)
+    {
+        if (request == null || request.Punches == null)
+            return BadRequest(new { success = false, message = "Punches payload is required." });
+
+        var companyId = CurrentContext.CompanyId(_context);
+        var actorUserId = CurrentContext.UserId(_context);
+        var result = await _service.IngestBiometricPunches(companyId, actorUserId, request);
+        return Ok(result);
+    }
+
     [HttpGet("{userId}")]
     [ModulePermission(AppModule.Attendance, Permission.ViewAll)]
     public async Task<IActionResult> GetByUser(string userId)

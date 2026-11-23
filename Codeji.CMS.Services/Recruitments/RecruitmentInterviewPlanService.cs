@@ -12,7 +12,8 @@ namespace Codeji.CMS.Services.Recruitments;
 public sealed class RecruitmentInterviewPlanService(
     IMongoDbRepository<RecruitmentInterviewPlan> plans,
     IMongoDbRepository<JobVacancy> vacancies,
-    IHttpContextAccessor context) : IRecruitmentInterviewPlanService
+    IHttpContextAccessor context,
+    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null) : IRecruitmentInterviewPlanService
 {
     public async Task<Result<RecruitmentInterviewPlan>> Get(string? vacancyId)
     {
@@ -48,6 +49,7 @@ public sealed class RecruitmentInterviewPlanService(
     public async Task<Result<string>> Upsert(RecruitmentInterviewPlanCommand command, string actorUserId)
     {
         var companyId = CurrentContext.CompanyId(context);
+        if (!string.IsNullOrWhiteSpace(companyId)) { var gate = await RecruitmentFeatureGate.Require<string>(configs, companyId, c => c.Scorecards, "Interview scorecard plans"); if (gate is not null) return gate; }
         var key = command.IdempotencyKey?.Trim();
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(command.Name) || command.Stages is null || command.Stages.Count == 0)
             return Fail(400, RecruitmentErrorCodes.InvalidRequest, "Company, plan name, stages, and idempotency key are required.");

@@ -8,7 +8,10 @@ using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.Services.Recruitments;
 
-public sealed class RecruitmentEmailOutboxProcessor(IMongoDbRepository<RecruitmentEmailOutbox> repository, IMiddlewareService mail) : IRecruitmentEmailOutboxProcessor
+public sealed class RecruitmentEmailOutboxProcessor(
+    IMongoDbRepository<RecruitmentEmailOutbox> repository,
+    IMongoDbRepository<Applicant> applicants,
+    IMiddlewareService mail) : IRecruitmentEmailOutboxProcessor
 {
     private const int MaxAttempts = 5;
     public async Task ProcessNext(CancellationToken cancellationToken)
@@ -21,9 +24,30 @@ public sealed class RecruitmentEmailOutboxProcessor(IMongoDbRepository<Recruitme
                 Builders<RecruitmentEmailOutbox>.Filter.And(Builders<RecruitmentEmailOutbox>.Filter.Eq(x => x.Status, "Processing"), Builders<RecruitmentEmailOutbox>.Filter.Lt(x => x.ProcessingStartedAtUtc, now.AddMinutes(-10)))));
         var item = await repository.GetCollection().FindOneAndUpdateAsync(claimable, Builders<RecruitmentEmailOutbox>.Update.Set(x => x.Status, "Processing").Set(x => x.ProcessingStartedAtUtc, now).Inc(x => x.AttemptCount, 1), new FindOneAndUpdateOptions<RecruitmentEmailOutbox> { Sort = Builders<RecruitmentEmailOutbox>.Sort.Ascending(x => x.AvailableAtUtc), ReturnDocument = ReturnDocument.After }, cancellationToken);
         if (item is null) return;
+        if (!string.IsNullOrWhiteSpace(item.RelatedApplicantId))
+        {
+            bool candidateCanReceiveRecruitmentEmail = await applicants.GetCollection().Find(x =>
+                    x.CompanyId == item.CompanyId && x.ApplicantId == item.RelatedApplicantId &&
+                    !x.IsDeleted && x.ConsentStatus != "Anonymized")
+                .AnyAsync(cancellationToken);
+            if (!candidateCanReceiveRecruitmentEmail)
+            {
+                await repository.GetCollection().UpdateOneAsync(
+                    x => x.OutboxId == item.OutboxId && x.Status == "Processing",
+                    Builders<RecruitmentEmailOutbox>.Update.Set(x => x.Status, "Redacted")
+                        .Set(x => x.RelatedApplicantId, null)
+                        .Set(x => x.RecipientEmail, "redacted@invalid.local")
+                        .Set(x => x.RecipientUserId, null)
+                        .Set(x => x.Subject, "Redacted candidate notification")
+                        .Set(x => x.HtmlBody, string.Empty)
+                        .Set(x => x.LastError, null)
+                        .Set(x => x.UpdatedDate, DateTime.UtcNow), cancellationToken: cancellationToken);
+                return;
+            }
+        }
         try
         {
-            var sent = await mail.EmailSendAndSaveWithResult(new EmpEmailLogs { CompanyId = item.CompanyId, UserTo = item.RecipientUserId ?? "recruitment-external", UserFrom = "recruitment", Email = item.RecipientEmail, Subject = item.Subject, Body = item.HtmlBody, EmailLogType = MailType.CareerPortal });
+            var sent = await mail.EmailSendAndSaveWithResult(new EmpEmailLogs { CompanyId = item.CompanyId, UserTo = item.RelatedApplicantId ?? item.RecipientUserId ?? "recruitment-external", UserFrom = "recruitment", Email = item.RecipientEmail, Subject = item.Subject, Body = item.HtmlBody, EmailLogType = MailType.CareerPortal });
             if (!sent.IsSent) throw new InvalidOperationException(sent.Error);
             await repository.GetCollection().UpdateOneAsync(x => x.OutboxId == item.OutboxId && x.Status == "Processing", Builders<RecruitmentEmailOutbox>.Update.Set(x => x.Status, "Sent").Set(x => x.SentAtUtc, DateTime.UtcNow).Set(x => x.LastError, null).Set(x => x.UpdatedDate, DateTime.UtcNow), cancellationToken: cancellationToken);
         }

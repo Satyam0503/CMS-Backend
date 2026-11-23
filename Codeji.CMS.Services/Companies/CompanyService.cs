@@ -1,4 +1,4 @@
-using System.Linq.Expressions;
+﻿using System.Linq.Expressions;
 using MapsterMapper;
 using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.Company;
@@ -18,6 +18,8 @@ using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Constraints;
 using Codeji.CMS.Utility.Enums;
 using Codeji.CMS.Utility.Helpers;
+using Codeji.CMS.Repository.Entities.Leave;
+using Codeji.CMS.Services.PayRoll;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
@@ -49,6 +51,8 @@ namespace Codeji.CMS.Services
         private readonly IMongoClient _mongoClient;
         private readonly IMongoDbRepository<RecruitmentEnterpriseConfig> _recruitmentConfigRepo;
         private readonly IOfficeScheduleSettingsService? _officeScheduleSettings;
+        private readonly IMongoDbRepository<LeavePolicy>? _leavePolicyRepo;
+        private readonly IPayrollTemplateService? _payrollTemplateService;
 
 
         public CompanyService(
@@ -71,7 +75,9 @@ namespace Codeji.CMS.Services
             IMongoClient mongoClient,
             ILogger<CompanyService> logger,
             IMongoDbRepository<RecruitmentEnterpriseConfig> recruitmentConfigRepo,
-            IOfficeScheduleSettingsService? officeScheduleSettings = null)
+            IOfficeScheduleSettingsService? officeScheduleSettings = null,
+            IMongoDbRepository<LeavePolicy>? leavePolicyRepo = null,
+            IPayrollTemplateService? payrollTemplateService = null)
         {
             _roleService = roleService;
             _companyRepo = companyRepo;
@@ -93,6 +99,8 @@ namespace Codeji.CMS.Services
             _logger = logger;
             _recruitmentConfigRepo = recruitmentConfigRepo;
             _officeScheduleSettings = officeScheduleSettings;
+            _leavePolicyRepo = leavePolicyRepo;
+            _payrollTemplateService = payrollTemplateService;
         }
 
         public async Task<Result> Register(CompanyRequestModel companyModel)
@@ -360,6 +368,24 @@ namespace Codeji.CMS.Services
                     {
                         await _jobTitleRepo.AddOne(jt);
                     }
+                }
+
+                if (_leavePolicyRepo is not null)
+                {
+                    bool hasLeavePolicies = await _leavePolicyRepo.FirstOrDefault(lp => lp.CompanyId == company.CompanyId, WithDeletedObjects: false, withDefaultFilter: false) is not null;
+                    if (!hasLeavePolicies)
+                    {
+                        var defaultPolicies = DefaultCompanySeeds.BuildDefaultLeavePolicies(company.CompanyId, createdBy);
+                        foreach (var policy in defaultPolicies)
+                        {
+                            await _leavePolicyRepo.AddOne(policy);
+                        }
+                    }
+                }
+
+                if (_payrollTemplateService is not null)
+                {
+                    await _payrollTemplateService.SeedStandardComponents(company.CompanyId, createdBy);
                 }
             }
             catch (Exception ex)

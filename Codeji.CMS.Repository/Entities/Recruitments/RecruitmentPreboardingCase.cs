@@ -18,8 +18,15 @@ public sealed class RecruitmentPreboardingTask
     public string Code { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string Status { get; set; } = "Pending";
+    public string? SkipReason { get; set; }
     public string? AssigneeUserId { get; set; }
     public DateTime? CompletedAtUtc { get; set; }
+}
+
+public static class RecruitmentPreboardingTaskRules
+{
+    public static bool IsResolved(RecruitmentPreboardingTask task) =>
+        task.Status == "Completed" || (task.Status == "Skipped" && !string.IsNullOrWhiteSpace(task.SkipReason));
 }
 public static class RecruitmentPreboardingStatus
 {
@@ -27,4 +34,5 @@ public static class RecruitmentPreboardingStatus
     public const string InProgress = "InProgress";
     public const string ReadyForOnboarding = "ReadyForOnboarding";
     public const string Completed = "Completed";
+    public const string Cancelled = "Cancelled";
 }

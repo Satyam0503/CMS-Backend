@@ -24,6 +24,7 @@ public sealed class AttendanceImportControllerContractTests
     [InlineData("DownloadImportTemplate")]
     [InlineData("ValidateImport")]
     [InlineData("CommitImport")]
+    [InlineData("BiometricSync")]
     public void Attendance_import_endpoints_require_create_for_employee_permission(string methodName)
     {
         var controller = typeof(AdminAttendanceController);
@@ -47,6 +48,14 @@ public sealed class AttendanceImportControllerContractTests
     public void CommitImport_RequiresHttpPostAttribute()
     {
         var method = typeof(AdminAttendanceController).GetMethod("CommitImport", BindingFlags.Instance | BindingFlags.Public);
+        Assert.NotNull(method);
+        Assert.NotEmpty(method!.GetCustomAttributes<HttpPostAttribute>());
+    }
+
+    [Fact]
+    public void BiometricSync_RequiresHttpPostAttribute()
+    {
+        var method = typeof(AdminAttendanceController).GetMethod("BiometricSync", BindingFlags.Instance | BindingFlags.Public);
         Assert.NotNull(method);
         Assert.NotEmpty(method!.GetCustomAttributes<HttpPostAttribute>());
     }

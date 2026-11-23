@@ -38,7 +38,7 @@ public sealed class RecruitmentDelegatedApprovalTests
             .ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
         var configs = new Mock<IMongoDbRepository<RecruitmentEnterpriseConfig>>();
         configs.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentEnterpriseConfig, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
-            .ReturnsAsync(new RecruitmentEnterpriseConfig { CompanyId = "company-1", OfferApproval = true, RecruitmentMode = "Standard" });
+            .ReturnsAsync(new RecruitmentEnterpriseConfig { CompanyId = "company-1", OfferApproval = true, RecruitmentMode = "Standard", CandidateEmailActions = false });
         var policies = new Mock<IMongoDbRepository<RecruitmentOfferApprovalPolicy>>();
         policies.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentOfferApprovalPolicy, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
             .ReturnsAsync((RecruitmentOfferApprovalPolicy?)null);
@@ -87,7 +87,7 @@ public sealed class RecruitmentDelegatedApprovalTests
             .ReturnsAsync(new RecruitmentOfferApprovalPolicy { CompanyId = "company-1", VacancyId = "v-1", ApproverRoleId = "role-director", ApprovalThreshold = 10000, Currency = "INR" });
         var configs = new Mock<IMongoDbRepository<RecruitmentEnterpriseConfig>>();
         configs.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentEnterpriseConfig, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
-            .ReturnsAsync(new RecruitmentEnterpriseConfig { CompanyId = "company-1", OfferApproval = true, RecruitmentMode = "Standard" });
+            .ReturnsAsync(new RecruitmentEnterpriseConfig { CompanyId = "company-1", OfferApproval = true, RecruitmentMode = "Standard", CandidateEmailActions = false });
 
         var service = new RecruitmentOfferService(
             applicants.Object,

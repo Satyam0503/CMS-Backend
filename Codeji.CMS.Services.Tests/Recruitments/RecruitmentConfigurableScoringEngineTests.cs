@@ -29,7 +29,7 @@ public sealed class RecruitmentConfigurableScoringEngineTests
     {
         var plans = new Mock<IMongoDbRepository<RecruitmentInterviewPlan>>();
         var vacancies = new Mock<IMongoDbRepository<JobVacancy>>();
-        var service = new RecruitmentInterviewPlanService(plans.Object, vacancies.Object, MockTenantContext("c-1"));
+        var service = new RecruitmentInterviewPlanService(plans.Object, vacancies.Object, MockTenantContext("c-1"), EnabledScorecardConfig().Object);
 
         var command = new RecruitmentInterviewPlanCommand
         {
@@ -56,7 +56,7 @@ public sealed class RecruitmentConfigurableScoringEngineTests
     {
         var plans = new Mock<IMongoDbRepository<RecruitmentInterviewPlan>>();
         var vacancies = new Mock<IMongoDbRepository<JobVacancy>>();
-        var service = new RecruitmentInterviewPlanService(plans.Object, vacancies.Object, MockTenantContext("c-1"));
+        var service = new RecruitmentInterviewPlanService(plans.Object, vacancies.Object, MockTenantContext("c-1"), EnabledScorecardConfig().Object);
 
         var command = new RecruitmentInterviewPlanCommand
         {
@@ -87,7 +87,7 @@ public sealed class RecruitmentConfigurableScoringEngineTests
     {
         var plans = new Mock<IMongoDbRepository<RecruitmentInterviewPlan>>();
         var vacancies = new Mock<IMongoDbRepository<JobVacancy>>();
-        var service = new RecruitmentInterviewPlanService(plans.Object, vacancies.Object, MockTenantContext("c-1"));
+        var service = new RecruitmentInterviewPlanService(plans.Object, vacancies.Object, MockTenantContext("c-1"), EnabledScorecardConfig().Object);
 
         var command = new RecruitmentInterviewPlanCommand
         {
@@ -302,7 +302,8 @@ public sealed class RecruitmentConfigurableScoringEngineTests
             new Mock<IMongoDbRepository<ApplicantLogs>>().Object,
             MockTenantContext("c-1"),
             null,
-            plans.Object);
+            plans.Object,
+            EnabledScorecardConfig().Object);
 
         // Rating 8.5 is valid on 1-10 scale (would have failed on legacy 1-5 scale)
         var validCmd = new RecruitmentScorecardCommand
@@ -332,5 +333,13 @@ public sealed class RecruitmentConfigurableScoringEngineTests
         var invalidResult = await service.Upsert(invalidCmd, "rev-1");
         Assert.False(invalidResult.Success);
         Assert.Equal(RecruitmentErrorCodes.ScorecardInvalid, invalidResult.ErrorCode);
+    }
+
+    private static Mock<IMongoDbRepository<RecruitmentEnterpriseConfig>> EnabledScorecardConfig()
+    {
+        var repository = new Mock<IMongoDbRepository<RecruitmentEnterpriseConfig>>();
+        repository.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentEnterpriseConfig, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new RecruitmentEnterpriseConfig { CompanyId = "c-1", Scorecards = true });
+        return repository;
     }
 }

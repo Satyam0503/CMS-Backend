@@ -10,6 +10,7 @@ public static class RecruitmentErrorCodes
     public const string DuplicateApplication = "REC_DUPLICATE_APPLICATION";
     public const string InvalidTransition = "REC_INVALID_TRANSITION";
     public const string ConcurrencyConflict = "REC_CONCURRENCY_CONFLICT";
+    public const string StageSyncPending = "REC_STAGE_SYNC_PENDING";
     public const string IdempotencyConflict = "REC_IDEMPOTENCY_CONFLICT";
     public const string UploadTokenInvalid = "REC_UPLOAD_TOKEN_INVALID";
     public const string InvalidResume = "REC_INVALID_RESUME";
@@ -20,6 +21,8 @@ public static class RecruitmentErrorCodes
     public const string HeadcountInvalid = "REC_HEADCOUNT_INVALID";
     public const string ScorecardInvalid = "REC_SCORECARD_INVALID";
     public const string TalentPoolInvalid = "REC_TALENT_POOL_INVALID";
+    public const string FeatureDisabled = "REC_FEATURE_DISABLED";
+    public const string WriteFailed = "REC_WRITE_FAILED";
 }
 
 

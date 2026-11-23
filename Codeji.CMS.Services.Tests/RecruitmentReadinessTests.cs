@@ -15,6 +15,7 @@ public sealed class RecruitmentReadinessTests
         Assert.False(readiness.ReadyToPublishJobs);
         Assert.True(readiness.Recommended.Single(item => item.Code == "sla").Complete);
         Assert.True(readiness.Recommended.Single(item => item.Code == "automation").Complete);
+        Assert.False(readiness.Recommended.Single(item => item.Code == "candidate-privacy").Complete);
     }
 
     [Fact]
@@ -30,7 +31,9 @@ public sealed class RecruitmentReadinessTests
             EnableSla = false,
             EnableAutomation = false,
             OfferApproval = true,
-            Scorecards = true
+            Scorecards = true,
+            CandidatePrivacyNoticeText = "Applicants' data is used to assess their application.",
+            CandidatePrivacyNoticeVersion = "policy-1"
         });
 
         Assert.True(readiness.ReadyToPublishJobs);

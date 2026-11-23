@@ -80,6 +80,8 @@ namespace Codeji.CMS.API.Controllers
         [Route("UploadResume")]
         [AllowAnonymous]
         [EnableRateLimiting("career-sensitive")]
+        [RequestSizeLimit(6 * 1024 * 1024)]
+        [RequestFormLimits(MultipartBodyLengthLimit = 6 * 1024 * 1024, ValueCountLimit = 8, MultipartHeadersCountLimit = 16, MultipartHeadersLengthLimit = 8192)]
         [Obsolete("Use the application-bound public upload flow, or UploadResume/{applicantId} for authenticated recruiters.")]
         public Task<Result> UploadResume([FromForm] ResumeApplicantModel model, string email) =>
             Task.FromResult(new Result { Success = false, StatusCode = StatusCodes.Status410Gone, Message = "Email-based resume uploads are retired. Use the application-bound upload flow." });
@@ -87,6 +89,8 @@ namespace Codeji.CMS.API.Controllers
         [HttpPost]
         [Route("UploadResume/{applicantId}")]
         [ModulePermission(AppModule.Applications, Permission.Edit)]
+        [RequestSizeLimit(6 * 1024 * 1024)]
+        [RequestFormLimits(MultipartBodyLengthLimit = 6 * 1024 * 1024, ValueCountLimit = 8, MultipartHeadersCountLimit = 16, MultipartHeadersLengthLimit = 8192)]
         public async Task<Result> UploadResumeForApplicant(string applicantId, [FromForm] ResumeApplicantModel model)
         {
             if (model?.File is null) return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Resume is required." };
@@ -101,23 +105,16 @@ namespace Codeji.CMS.API.Controllers
             if (string.IsNullOrWhiteSpace(applicantId))
                 return BadRequest(new { success = false, message = "Applicant ID is required." });
 
-            var applicantResult = await _applicantsService.ApplicantById(applicantId);
-            if (!applicantResult.Success || applicantResult.MethodResult is null)
-                return NotFound(new { success = false, message = "Applicant was not found." });
+            var actorUserId = CurrentContext.UserId(_httpContextAccessor);
+            var download = await _applicantsService.GetScannedResumeForDownload(applicantId, actorUserId);
+            if (!download.Success || download.MethodResult is null)
+                return StatusCode(download.StatusCode is >= 400 and <= 599 ? download.StatusCode : StatusCodes.Status503ServiceUnavailable,
+                    new { success = false, message = download.Message });
 
-            var applicant = applicantResult.MethodResult;
-            if (string.IsNullOrWhiteSpace(applicant.ResumeUrl))
-                return NotFound(new { success = false, message = "No resume uploaded for this applicant." });
-
-            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Resume");
-            string fileName = Path.GetFileName(applicant.ResumeUrl);
-            string filePath = Path.Combine(uploadFolder, fileName);
-
-            if (!System.IO.File.Exists(filePath))
-                return NotFound(new { success = false, message = "Resume file not found on server." });
-
-            var fileBytes = await System.IO.File.ReadAllBytesAsync(filePath);
-            return File(fileBytes, "application/pdf", $"{applicant.FirstName}_{applicant.LastName}_Resume.pdf");
+            Response.Headers["Cache-Control"] = "private, no-store";
+            Response.Headers["X-Content-Type-Options"] = "nosniff";
+            Response.Headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+            return File(download.MethodResult.Content, "application/pdf", download.MethodResult.FileName);
         }
         [HttpPost]
         [Route("HandoffToPreboarding")]
@@ -156,16 +153,10 @@ namespace Codeji.CMS.API.Controllers
         [Route("AddComment")]
         [HttpPost]
         [ModulePermission(AppModule.Applications, Permission.Edit)]
-        public async Task<Result> AddComment(CommentRequestModel model)
+        public Task<Result> AddComment([FromBody] CommentRequestModel model)
         {
             string userId = CurrentContext.UserId(_httpContextAccessor);
-            await _applicantsService.AddComment(userId, model);
-            Result result = new Result()
-            {
-                Success = true,
-                StatusCode = StatusCodes.Status200OK,
-            };
-            return result;
+            return _applicantsService.AddComment(userId, model);
         }
 
         [Route("GetAllComment/{applicantId}")]

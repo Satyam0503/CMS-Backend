@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Security.Claims;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Recruitments;
@@ -44,6 +45,32 @@ public sealed class RecruitmentVacancyTenantTests
                 !predicate.Compile()(otherTenant)),
             It.IsAny<bool>(),
             It.IsAny<bool>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Vacancy_creation_requires_an_assigned_manager_when_company_review_is_enabled()
+    {
+        var vacancies = new Mock<IMongoDbRepository<JobVacancy>>();
+        var configs = new Mock<IMongoDbRepository<RecruitmentEnterpriseConfig>>();
+        configs.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentEnterpriseConfig, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new RecruitmentEnterpriseConfig { CompanyId = "company-1", HiringManagerReview = true });
+        var httpContext = new DefaultHttpContext();
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("company_id", "company-1")], "test"));
+        var service = new JobVacancyService(
+            vacancies.Object,
+            new Mock<IMongoDbRepository<Applicant>>().Object,
+            new Mock<IMapper>().Object,
+            new Mock<ICareerNotificationService>().Object,
+            new HttpContextAccessor { HttpContext = httpContext },
+            new Mock<IMongoDbRepository<Codeji.CMS.Repository.Entities.Employees.EmpUser>>().Object,
+            configs.Object);
+
+        var result = await service.AddJobVacancy(new JobVacancyModel { Title = "QA Engineer", Description = "Test role", Vacancies = 1 });
+
+        Assert.False(result.Success);
+        Assert.Equal(400, result.StatusCode);
+        Assert.Contains("Assign an active hiring manager", result.Message, StringComparison.OrdinalIgnoreCase);
+        vacancies.Verify(x => x.AddOne(It.IsAny<JobVacancy>()), Times.Never);
     }
 
     private static JobVacancyService CreateService(

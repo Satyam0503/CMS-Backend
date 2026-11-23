@@ -884,29 +884,59 @@ public class RoleServices : IRoleService
 
     public async Task<bool> IsModuleAccessibleForCompany(string moduleConstant, string companyId)
     {
-        if (string.IsNullOrWhiteSpace(moduleConstant) || string.IsNullOrWhiteSpace(companyId))
-            return false;
+        var availability = await GetModuleAvailabilityForCompany(companyId, [moduleConstant]);
+        return availability.GetValueOrDefault(moduleConstant);
+    }
 
-        var allModules = await _moduleRepository.GetAll();
-        var module = allModules?.FirstOrDefault(x => string.Equals(x.ModuleConstant, moduleConstant, StringComparison.OrdinalIgnoreCase));
-        if (module == null)
-            return false;
+    /// <summary>
+    /// Returns the company's enabled module switches in one repository pass. Module
+    /// switches are distinct from the requesting user's role permission; callers must
+    /// still authorize the user separately before returning any report data.
+    /// </summary>
+    public async Task<Dictionary<string, bool>> GetModuleAvailabilityForCompany(
+        string companyId,
+        IReadOnlyCollection<string> moduleConstants)
+    {
+        var requested = (moduleConstants ?? [])
+            .Where(module => !string.IsNullOrWhiteSpace(module))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var result = requested.ToDictionary(module => module, _ => false, StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(companyId) || requested.Count == 0)
+            return result;
 
-        var allModulePermissions = await _modulePermissionRepository.GetAll();
-        var modulePermissionIds = allModulePermissions?
-            .Where(x => x.ModuleId == module.ModuleId)
-            .Select(x => x.ModulePermissionId)
+        var modules = (await _moduleRepository.GetAll())?.ToList() ?? [];
+        var targetModules = modules
+            .Where(module => requested.Contains(module.ModuleConstant, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+        if (targetModules.Count == 0)
+            return result;
+
+        var targetModuleIds = targetModules.Select(module => module.ModuleId).Distinct().ToList();
+        var modulePermissions = (await _modulePermissionRepository.GetAll())?
+            .Where(permission => targetModuleIds.Contains(permission.ModuleId))
             .ToList() ?? [];
+        if (modulePermissions.Count == 0)
+            return result;
 
-        if (modulePermissionIds.Count == 0)
-            return false;
+        var permissionIds = modulePermissions.Select(permission => permission.ModulePermissionId).Distinct().ToList();
+        var rolePermissions = _rolePermissionRepository.Get(permission =>
+            permission.CompanyId == companyId &&
+            permission.IsAccessible &&
+            permissionIds.Contains(permission.ModulePermissionId));
+        var enabledPermissionIds = rolePermissions?
+            .Select(permission => permission.ModulePermissionId)
+            .ToHashSet() ?? [];
 
-        var rolePermissions = _rolePermissionRepository.Get(x =>
-            x.CompanyId == companyId &&
-            modulePermissionIds.Contains(x.ModulePermissionId) &&
-            x.IsAccessible);
+        foreach (var module in targetModules)
+        {
+            var enabled = modulePermissions
+                .Where(permission => permission.ModuleId == module.ModuleId)
+                .Any(permission => enabledPermissionIds.Contains(permission.ModulePermissionId));
+            result[module.ModuleConstant] = enabled;
+        }
 
-        return rolePermissions != null && rolePermissions.Any();
+        return result;
     }
 
 }

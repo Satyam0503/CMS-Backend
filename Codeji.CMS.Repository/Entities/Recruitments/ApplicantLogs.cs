@@ -16,5 +16,6 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         public string? EventType { get; set; }
         public string? PreviousStage { get; set; }
         public string? CurrentStage { get; set; }
+        public string? IdempotencyKey { get; set; }
     }
 }

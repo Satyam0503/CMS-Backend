@@ -305,4 +305,42 @@ public class LeaveManagementController : BaseApiController
         string company_id = CurrentContext.CompanyId(_httpContextAccessor);
         return await _leaveManagementService.GetAllEmployeeLeaveBalances(filter, company_id);
     }
+
+    [Route("EvaluateSandwichPreview")]
+    [HttpGet]
+    [ModulePermission(AppModule.LeaveManagement, Permission.View)]
+    public async Task<Result<SandwichEvaluationResult>> EvaluateSandwichPreview([FromQuery] string leavePolicyId, [FromQuery] DateTime startDate, [FromQuery] DateTime endDate)
+    {
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        return await _leaveManagementService.EvaluateSandwichPreview(companyId, leavePolicyId, startDate, endDate);
+    }
+
+    [Route("RequestCompOffCredit")]
+    [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Create)]
+    public async Task<Result<string>> RequestCompOffCredit([FromBody] CompOffCreditRequestDto dto)
+    {
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        string userId = CurrentContext.UserId(_httpContextAccessor);
+        return await _leaveManagementService.RequestCompOffCredit(dto, userId, companyId);
+    }
+
+    [Route("GetCompOffRequests")]
+    [HttpGet]
+    [ModulePermission(AppModule.LeaveManagement, Permission.View)]
+    public async Task<Result<List<CompOffCreditResponseDto>>> GetCompOffRequests([FromQuery] string? userId = null)
+    {
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        return await _leaveManagementService.GetCompOffCreditRequests(companyId, userId);
+    }
+
+    [Route("ReviewCompOffCredit")]
+    [HttpPost]
+    [ModulePermission(AppModule.LeaveManagement, Permission.Edit)]
+    public async Task<Result<string>> ReviewCompOffCredit([FromBody] ReviewCompOffCreditDto dto)
+    {
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        string reviewerUserId = CurrentContext.UserId(_httpContextAccessor);
+        return await _leaveManagementService.ReviewCompOffCredit(dto, reviewerUserId, companyId);
+    }
 }

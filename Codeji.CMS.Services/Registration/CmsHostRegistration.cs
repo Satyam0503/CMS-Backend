@@ -52,6 +52,10 @@ public static class CmsHostRegistration
         services.AddSingleton<IMongoClient>(_ => new MongoClient(mongoConnection));
         services.AddScoped<IMongoDatabase>(sp => sp.GetRequiredService<IMongoClient>().GetDatabase(mongoUrl.DatabaseName));
 
+        // Public application idempotency must be backed by a database uniqueness
+        // guarantee before background workers or API requests start processing.
+        services.AddHostedService<RecruitmentIndexInitializer>();
+
         ConfigManager.Initialize(configuration);
 
         services.AddSingleton<IPriorityTaskQueue, PriorityTaskQueue>();
@@ -139,7 +143,11 @@ public static class CmsHostRegistration
         services.AddHostedService<LeaveAccrualHostedService>();
         services.AddHostedService<CareerNotificationWorker>();
         services.AddHostedService<RecruitmentEmailOutboxWorker>();
+        services.AddHostedService<RecruitmentScreeningStageSyncWorker>();
+        services.AddHostedService<RecruitmentHiringDecisionStageSyncWorker>();
         services.AddHostedService<RecruitmentRetentionWorker>();
+        services.AddHostedService<RecruitmentResumeOrphanCleanupWorker>();
+        services.AddHostedService<RecruitmentResumeScanMigrationWorker>();
         services.AddHostedService<AttendanceOutboxWorker>();
         services.AddHostedService<WorkFromHomeOutboxWorker>();
         services.AddHostedService<AttendanceReminderHostedService>();

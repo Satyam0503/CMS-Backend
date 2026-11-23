@@ -1,128 +1,88 @@
-# DASHBOARD & ANALYTICS MODULE (`ANALYTICS.md`)
+# Dashboard analytics
 
-## 1. Module Overview
-The **Dashboard & Analytics Module** aggregates key operational metrics into real-time visual dashboards (`DashboardController`, `DashboardServices`). It surfaces workforce headcounts, recruitment funnel progression, monthly attendance compliance percentages, leave balances, payroll cost rollups, and career analytics.
+**Contract version:** `dashboard-overview.v4` (attendance definition: `attendance-breakdown.v1`)\
+**Current date convention:** `Asia/Kolkata`\
+**Primary route:** `GET /api/Dashboard/GetDashboardOverview`
 
----
+## Current product behavior
 
-## 2. Real-World Business Scenario
-1. **Executive Morning Overview**:
-   - CEO logs into the Codeji CMS portal.
-   - `GET /api/dashboard/summary` loads executive KPI cards:
-     - Total Active Headcount: `142`
-     - Today's Present: `131` (`92.2%`)
-     - On Leave: `8` (`5.6%`)
-     - WFH: `3` (`2.1%`)
-     - Active Open Job Positions: `6`
-     - Total In-Flight Candidates: `48`
-     - Estimated Current Month Payroll: `₹1,18,50,000`
+The overview is assembled from live operational records when the endpoint is called. It is a tenant-scoped summary for users who pass authentication and the `Dashboard.ViewAll` module permission. The dashboard UI displays the company overview to administrators, HR managers and HR executives, or users with the dashboard `ViewAll` permission. Other users see the dashboard's personal/notice-board experience and do not request this overview.
 
----
+This route does not provide a general report builder, arbitrary date filters, CSV export, saved views, group-company roll-up, payroll cost reporting or a manager-specific team aggregate. Recruiting analytics and payroll reports remain in their respective modules.
 
-## 3. Actors
-| Actor | Capabilities |
+The recruitment analytics `GET` is also read-only. When a canonical application is absent, it falls back to the applicant profile's current stage for its counts; repairing that data is a separate write workflow.
+
+## Response metadata
+
+The response includes the fields below so a caller can identify the definition and the time at which the answer was calculated.
+
+| Field | Meaning |
 |---|---|
-| **Executive / Super Admin / HR Admin** | Views organization-wide KPI tiles, hiring funnels, attendance trends, and payroll expense charts. |
-| **Department Manager** | Views team-specific attendance, leave, and headcount metrics. |
-| **Employee** | Views personal statistics (leaves remaining, monthly attendance percentages, upcoming holidays). |
+| `definitionVersion` | Version of the current overview metric rules (`dashboard-overview.v4`). |
+| `asOfDate` | Local calendar date used for today's workforce, attendance and current-month trend metrics. |
+| `timeZone` | The application date convention used by this endpoint (`Asia/Kolkata`). |
+| `generatedAtUtc` | UTC time at which the service assembled the response. This is a query time, not a source-system watermark or a guarantee of source completeness. |
 
----
+The definition version must change when a shipped metric's population, formula, date boundary or interpretation changes. The UI accepts older responses without metadata for backward compatibility.
 
-## 4. Frontend Implementation
-| File | Responsibility | Calls | Used By |
-|---|---|---|---|
-| `src/app/modules/dashboard/pages/AdminDashboardPage.tsx` | Main HR/Admin dashboard with KPI widgets, attendance pie charts, hiring pipeline cards, and payroll rollups. | `GET /api/dashboard/admin` | HR / Admin |
-| `src/app/modules/dashboard/pages/EmployeeDashboardPage.tsx` | Self-service employee dashboard with personal leave balances, quick punch button, and announcements. | `GET /api/dashboard/employee` | All Employees |
+The React boundary validates scalar metric counts as non-negative integers before presenting them; malformed, fractional, negative, or non-finite counts normalize to zero. Percentage changes may be fractional but must be finite; invalid values normalize to `null`. This is a defensive client contract and does not replace server-side calculation and response validation.
 
----
+The dashboard labels `generatedAtUtc` as response-generation time and discloses that source update times are not included in the report. No per-source watermark or completeness state is currently returned, so a recent response timestamp must not be read as proof that every source record is current.
 
-## 5. Backend Implementation
-| Backend File | Responsibility | Dependencies |
+### Source module availability
+
+`sourceAvailability` reports whether each company-level source module (Employees, Attendance, Leave Management, Jobs and Offboarding) is enabled. This is a data-availability signal, not a user permission or subscription entitlement; endpoint authentication and per-user authorization still apply separately. The server skips source-domain queries when their module is disabled and returns empty/zero values for dependent analytics. The attendance composition is omitted (`null`) unless Employees, Attendance and Leave Management are all enabled, because those sources are required to interpret its buckets. Clients that receive a legacy response without `sourceAvailability` retain the historical display behavior; a present but malformed availability object fails closed in the React dashboard.
+
+### Query failure behavior
+
+The overview service does not convert repository, calendar, or source-query failures into a successful response with zero metrics. Outside debug mode, exceptions reach the API exception handler, which returns the established error envelope and HTTP status (including `504` for a timeout and a generic `500` message for unexpected failures). Error responses include an `X-Correlation-ID` response header; the same request trace ID is written with the server error log so operators can locate the failure without exposing connection or query details to the client. The client should treat an error response as unavailable analytics and offer its normal retry path, never as an empty workforce result.
+
+## Metric definitions
+
+| Metric | Definition in `dashboard-overview.v4` | Date and population rules |
 |---|---|---|
-| `Controllers/DashboardController.cs` | Exposes aggregated metrics endpoints for admin and employee dashboards. | `IDashboardServices` |
-| `Services/DashboardServices.cs` | Performs high-performance MongoDB aggregation pipelines across `EmpUser`, `Attendance`, `Leave`, `Applicant`, and `PayrollEntity`. | `IMongoRepository<EmpUser>`, `IMongoRepository<Attendance>`, `IMongoRepository<Leave>`, `IMongoRepository<Applicant>` |
+| `totalEmployees` | Count of company employee records that satisfy the current-employee rule and `EmploymentPeriod.WasEmployedOn` on the as-of date. | `Status` must be true. A missing lifecycle or lifecycle status, `Active`, `NoticePeriod` and `Suspended` are included. Future joiners are excluded. |
+| `totalEmployeesChangePercent` | `(current as-of headcount - previous month-end headcount) / previous month-end headcount × 100`, rounded to one decimal place. | `null` when previous month-end headcount is zero. |
+| `presentToday` | Distinct current-employee IDs with a same-day attendance record that has a check-in time or a recognized worked status (`P`, `WFH`, `WFH+WFO`, `WFH-HD`, `LHD`, `LHD+ED`, `ED`, `WFH+SL`, `WFH+CL`). Plain `HD` is not proof of work because the default status does not require time and is leave-eligible. | Attendance date is bounded by local midnight and the next local midnight. |
+| `onLeaveToday` | Distinct current-employee IDs with an accepted leave request overlapping the as-of date. | The leave interval uses inclusive `StartDate`/`EndDate` date comparisons. |
+| `absentToday` | Current employees expected to attend who have no recognized presence and no accepted overlapping leave. This legacy KPI includes employees with no attendance row and should be read as a missing-presence count, not an explicit `A` status count. | Zero on a non-working day. Attendance expectation uses employment dates and existing `EmploymentPeriod` rules. |
+| `attendanceBreakdown` | Mutually exclusive buckets for expected employee-days: `presentOnly`, `leaveOnly`, `presentAndOnLeave`, `explicitlyAbsent`, `otherStatus`, and `unreported`. | Versioned independently as `attendance-breakdown.v1`; all buckets sum to `expectedEmployees`. A company-calendar non-working date has an expected denominator of zero. Employee-specific shift/weekly-off overrides are not incorporated yet. Only `A` is classified as explicitly absent; an unknown/custom status remains `otherStatus`. |
+| `isWorkingDay` | Result from the tenant working-calendar service for the as-of date. | Calendar service owns weekend, holiday and company schedule rules. |
+| `openPositions` | Count of non-deleted company vacancies whose `Status` is true. | Soft-deleted vacancies are excluded; this remains an active vacancy count and does not inspect applicant deadline/expiry dates. |
+| `headcountTrend` | Twelve monthly values, oldest first: eleven closed month-end snapshots and the current partial month at the as-of date. Closed months use `EmploymentPeriod.WasEmployedOn`; the current month uses the as-of date plus the `totalEmployees` current-employee rule. | The current month value reconciles to `totalEmployees`. The dashboard labels it partial through the response `asOfDate`; it must not be compared as a completed month. |
+| `workforceMovementTrend` | Twelve monthly event counts, oldest first, for initial hires, explicit rejoin events, and completed departures. `netChange` is hires minus exits. | Initial hires use a parseable `DateOfJoining` (records without it are omitted; account creation is not treated as a hire), rehires use lifecycle history with `ReasonCode=REJOIN`, and exits use completed `EmployeeExit` records on `LastWorkingDate`. The current month is partial through `asOfDate`. Historical events outside the retained employee/lifecycle/exit records cannot be recovered. |
+| `leaveRequestCohortTrend` | Twelve submission-month cohorts with total request count and current status counts (`pending`, `approved`, `rejected`, `withdrawn`, `otherStatus`). | Cohort month is the India-local month of `CreatedDate`. Status is the record's current status at query time, not an immutable decision event; changing a request later moves it between status buckets in the original cohort. It is request workload, not approved leave taken, leave days, or utilization. Requests without `CreatedDate` are omitted. |
+| `recentActivities` | Up to eight events, newest first; the UI renders up to five. | Event dates are limited to the last 30 calendar days including the as-of date. Future-dated events and older events are excluded. |
 
----
+### Attendance interpretation limit
 
-## 6. API Documentation
-| Method | URL | Purpose | Auth / Permission | Request / Response | Side Effects |
-|---|---|---|---|---|---|
-| `GET` | `/api/dashboard/admin` | Returns high-level company analytics and KPIs for HR/Admin. | JWT (`dashboard:read`) | `AdminDashboardDto` | None |
-| `GET` | `/api/dashboard/employee` | Returns personalized metrics (leave balances, attendance status) for logged-in user. | JWT | `EmployeeDashboardDto` | None |
+The legacy KPI fields remain employee counts, not scheduled-hour equivalents. `presentToday` and `onLeaveToday` can overlap, and `absentToday` still combines explicit absence with employees who have no attendance row. The new breakdown exists specifically for composition charts: it exposes overlap and separates explicitly absent, other-status, and unreported employees, while its categories reconcile to the expected employee count. It does not claim a scheduled-hours denominator and does not fractionally allocate half-day leave.
 
----
+## Activity feed sources
 
-## 7. Database Model
-Aggregates live operational collections using MongoDB aggregation pipelines (`$match`, `$group`, `$facet`, `$count`). No standalone materialized entity is required.
+The feed combines recent employee joining dates, approved leave reviews, initiated exits and created vacancies. The API and client normalization allow only the documented `joined`, `leaveApproved`, `exitInitiated` and `jobPosted` event types; unknown types are omitted. Compensation changes are omitted because this feed is protected by the broader `Dashboard.ViewAll` permission; salary history remains in payroll-protected workflows. Joining dates are synthesized as UTC midnight from the stored local date. Other event timestamps use their stored timestamps. A missing name/title/policy is shown as an empty detail rather than failing the entire overview.
 
----
+## Data access and performance
 
-## 8. Business Rules
-- **Role-Based Aggregation Scoping**:
-  - Super Admin / HR Admin: Aggregates whole tenant.
-  - Reporting Manager: Aggregates direct and indirect reports.
-  - Employee: Aggregates only personal records.
-- **Tenant Isolation**: Every aggregation pipeline stages `$match: { CompanyId: companyId, IsDeleted: false }` as its first operation.
+The service applies the current company ID to each repository query and cross-checks attendance and leave employee IDs against that company's employee set. Dashboard authorization is enforced on the API, not only by the React visibility check. Tests cover tenant isolation and dashboard permission cases.
 
----
+The service now requests explicit employee, attendance, leave-request, recent-exit, vacancy activity, workforce-movement exit and activity-lookup projections. Employee fields are limited to headcount, attendance eligibility, movement events and recent-activity labels; credentials, contact, tax, banking and custom profile fields are excluded, and rejoin history is reduced to required event fields. The current attendance query selects only employee ID, check-in time and status; remarks, source data and operator/audit metadata are excluded. Leave queries select only employee/policy IDs, current status, relevant period dates, cohort date and review timestamp; request reasons, comments, evidence, assigned reviewer and reconciliation details are excluded. Exit activity selects only employee ID, exit type and initiation time; case reasons, notes, discussion, evidence, clearances, finance, and exit documents are excluded. Recent job activity selects only creator ID, vacancy title and creation date; descriptions, salary ranges, recruiter contact details, screening criteria and other recruiting details are excluded. Workforce movement exit reads select only status, effective last-working date, completion timestamp and deletion state; employee identity and case data are excluded. Activity labels use only job-title IDs/localized labels and leave-policy IDs/names, excluding unused job metadata and policy configuration. Calculations and joins still run in memory. Rendered Mongo projection contract tests validate projection documents but are not Mongo integration or query-plan evidence. No query-plan, transfer-volume, 10,000-employee or concurrency benchmark has been completed, so do not treat the endpoint as scale-validated or as an enterprise analytics warehouse.
 
-## 9. Complete Workflow
-```mermaid
-flowchart LR
-    Client["React Dashboard Page"] --> API["GET /api/dashboard/admin"]
-    API --> Service["DashboardServices.GetAdminDashboardAsync()"]
-    Service --> Mongo["MongoDB Parallel Aggregation Pipelines:\n1. EmpUser Count\n2. Today Attendance Grouping\n3. Applicant Funnel\n4. Payroll Summary"]
-    Mongo --> DTO["Assemble AdminDashboardDto"]
-    DTO --> Render["Render MUI Charts & KPI Cards"]
-```
+The separate recruitment analytics endpoint also uses narrow reads: applicant ID, activity stage, creation date and merge/deletion state; canonical application ID, current stage and update date; and accepted offer applicant ID and response time. Candidate contact/resume fields, application history/snapshots, and offer compensation/approval data are excluded from its funnel and time-to-hire calculations. This reduces fields loaded but does not validate database query plans or establish a supported recruitment-report scale.
 
----
+## Implementation references
 
-## 10. State Machine
-Read-only real-time aggregation queries.
+- API: `Codeji.CMS.API/Controllers/DashboardController.cs`
+- Calculation: `Codeji.CMS.Services/Dashboard/DashboardOverviewService.cs`
+- Contract: `Codeji.CMS.DTO/Dashboard/DashboardOverviewDto.cs`
+- React normalization and view: `CMS-React/src/app/modules/dashboard/`
+- Test coverage: `Codeji.CMS.Services.Tests/DashboardOverviewServiceTests.cs`, `Codeji.CMS.Services.Tests/DashboardOverviewProjectionTests.cs`, `Codeji.CMS.Services.Tests/DashboardSecurityAndTenantIsolationTests.cs`, API contract tests, and dashboard Vitest tests.
 
----
+## Next production gates
 
-## 11. Permissions
-- `dashboard:read` — View organizational dashboard metrics.
-
----
-
-## 12. Dependencies
-- **Upstream**: `EMPLOYEE`, `ATTENDANCE`, `LEAVE`, `RECRUITMENT`, `PAYROLL`.
-- **Downstream**: Frontend dashboard visualization components.
-
----
-
-## 13. Cross-Module Events
-- Real-time punches, leave approvals, and applicant stage changes immediately reflect upon the next dashboard fetch.
-
----
-
-## 14. Failure Scenarios
-- **Zero Data State**: Handled gracefully with zero-count defaults so new tenants see empty states rather than calculation crashes.
-
----
-
-## 15. Edge Cases
-- **Timezone Shifts on 'Today' Attendance**: Normalized to tenant local office timezone before aggregating check-ins.
-
----
-
-## 16. Current Strengths
-- Lean, on-demand MongoDB aggregation pipelines eliminate out-of-sync caching discrepancies.
-
----
-
-## 17. Current Gaps
-- Long-term multi-year trend analytics (e.g., year-over-year attrition comparison) are computed on-demand rather than pre-aggregated into monthly warehouse buckets.
-
----
-
-## 18. Recommended Improvements
-- Add a nightly aggregation worker storing monthly KPI snapshots in a `MonthlyAnalyticsSnapshot` collection for instant multi-year trend charts.
-
----
-
-## 19. Future Scope
-- Predictive AI turnover risk forecasting based on attendance irregularity and leave patterns.
+1. Agree a scheduled-hours attendance definition before reporting fractional present/leave/absence shares; the current composition chart is an employee-count view with explicit overlap.
+2. Move expensive overview calculation to bounded projections/aggregation after measuring query plans and indexes.
+3. Make date/timezone configuration tenant-specific before supporting tenants outside the current date convention.
+4. Add documented freshness/completeness states based on source watermarks and failure behavior.
+5. Deliver standard workforce, attendance, leave and recruiting reports behind a server-side scope/entitlement matrix, with export tests.
+6. Complete desktop, tablet, mobile, accessibility, performance, backup/recovery and staged-rollout evidence before declaring the analytics program production-ready.

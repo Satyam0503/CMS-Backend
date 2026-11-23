@@ -29,6 +29,11 @@ public sealed class RecruitmentPlanningController(
     public Task<Result<string>> UpsertRequisition([FromBody] RecruitmentRequisitionCommand command) =>
         requisitionService.Upsert(command, CurrentContext.UserId(context));
 
+    [HttpGet("Requisition/{vacancyId}")]
+    [ModulePermission(AppModule.Jobs, Permission.View)]
+    public Task<Result<RecruitmentRequisition>> GetRequisition(string vacancyId) =>
+        requisitionService.GetByVacancy(vacancyId);
+
     [HttpPost("UpsertScreening")]
     [ModulePermission(AppModule.Applications, Permission.Edit)]
     public Task<Result<string>> UpsertScreening([FromBody] RecruitmentScreeningReviewCommand command) =>
@@ -79,4 +84,9 @@ public sealed class RecruitmentPlanningController(
     [ModulePermission(AppModule.Applications, Permission.Edit)]
     public Task<Result<string>> UpsertTalentPoolMember([FromBody] RecruitmentTalentPoolCommand command) =>
         talentPoolService.Upsert(command, CurrentContext.UserId(context));
+
+    [HttpGet("TalentPoolMembers")]
+    [ModulePermission(AppModule.Applications, Permission.View)]
+    public Task<Result<List<RecruitmentTalentPoolMember>>> GetTalentPoolMembers([FromQuery] string? poolName, [FromQuery] string? status) =>
+        talentPoolService.GetMembers(poolName, status);
 }

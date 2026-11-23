@@ -37,6 +37,11 @@ public class LeavePolicy : BaseClass
     public bool HalfDayAllowed { get; set; } = false;
     public bool WeekendInclusive { get; set; } = false;
     public bool HolidayInclusive { get; set; } = false;
+    public bool EnableSandwichRules { get; set; } = false;
+    public bool IncludeWeekendsInSandwich { get; set; } = false;
+    public bool IncludeHolidaysInSandwich { get; set; } = false;
+    public bool EnableCompOffEarning { get; set; } = false;
+    public int CompOffValidityDays { get; set; } = 60;
     // For WFH this records the selected employee user IDs. An empty list means
     // all active employees, matching the existing leave-policy convention.
     public List<string>? ApplicableTo { get; set; } = [];

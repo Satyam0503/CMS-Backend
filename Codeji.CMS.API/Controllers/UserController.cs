@@ -37,6 +37,7 @@ public class UserController : BaseApiController
     private readonly IEmployeeExitEvidenceStorage _employeeExitEvidenceStorage;
     private readonly IFormerEmployeePortalService _formerEmployeePortalService;
     private readonly IRoleService _roleService;
+    private readonly IOrgChartService _orgChartService;
 
     public UserController(
         IHttpContextAccessor httpContextAccessor,
@@ -46,7 +47,8 @@ public class UserController : BaseApiController
         IOfficeScheduleSettingsService officeScheduleSettings,
         IEmployeeExitEvidenceStorage employeeExitEvidenceStorage,
         IFormerEmployeePortalService formerEmployeePortalService,
-        IRoleService roleService)
+        IRoleService roleService,
+        IOrgChartService orgChartService)
     {
         _httpContextAccessor = httpContextAccessor;
         _employeeService = employeeService;
@@ -56,6 +58,7 @@ public class UserController : BaseApiController
         _employeeExitEvidenceStorage = employeeExitEvidenceStorage;
         _formerEmployeePortalService = formerEmployeePortalService;
         _roleService = roleService;
+        _orgChartService = orgChartService;
     }
 
     private async Task<bool> IsUserInSameCompany(string targetUserId)
@@ -126,6 +129,24 @@ public class UserController : BaseApiController
     {
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
         return await _employeeService.GetNextEmployeeId(companyId);
+    }
+
+    [Route("GetOrganizationChart")]
+    [HttpGet]
+    [ModulePermission(AppModule.Employees, Permission.View)]
+    public async Task<Result<OrgChartResponseDto>> GetOrganizationChart([FromQuery] string? departmentId = null, [FromQuery] string? search = null)
+    {
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        return await _orgChartService.GetOrganizationChartAsync(companyId, departmentId, search);
+    }
+
+    [Route("GetReportingChain")]
+    [HttpGet]
+    [ModulePermission(AppModule.Employees, Permission.View)]
+    public async Task<Result<List<OrgChartNodeDto>>> GetReportingChain([FromQuery] string userId)
+    {
+        string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+        return await _orgChartService.GetReportingChainAsync(companyId, userId);
     }
 
     [Route("EditEmployees")]

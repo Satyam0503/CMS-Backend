@@ -1,5 +1,7 @@
 using Codeji.CMS.DTO.ResponseModel;
 using Codeji.CMS.GenericRepository.Interfaces;
+using Codeji.CMS.Services.Recruitments;
+using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Services.Registration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,7 +42,13 @@ public class CmsHostRegistrationTests
 
         using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
 
-        // 11 scheduled/outbox jobs + the in-process priority queue worker.
-        Assert.Equal(12, provider.GetServices<IHostedService>().Count());
+        // Scheduled/outbox jobs plus the priority queue, recruitment stage recovery/indexes, and private resume cleanup workers.
+        Assert.Equal(17, provider.GetServices<IHostedService>().Count());
+        Assert.Contains(provider.GetServices<IHostedService>(), worker => worker is RecruitmentScreeningStageSyncWorker);
+        Assert.Contains(provider.GetServices<IHostedService>(), worker => worker is RecruitmentHiringDecisionStageSyncWorker);
+        Assert.Contains(provider.GetServices<IHostedService>(), worker => worker is RecruitmentResumeScanMigrationWorker);
+        Assert.IsType<ClamAvRecruitmentResumeScanner>(provider.GetRequiredService<IRecruitmentResumeScanner>());
+        Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IPublicCareerService) &&
+            descriptor.ImplementationType == typeof(PublicCareerService));
     }
 }

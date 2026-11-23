@@ -15,6 +15,9 @@ public sealed class RecruitmentInterviewCommand
     public string TimeZoneId { get; set; } = "Asia/Kolkata";
     public string? Location { get; set; }
     public string? MeetingUrl { get; set; }
+    public string? MeetingProvider { get; set; }
+    public string? CalendarSyncProvider { get; set; }
+    public bool AutoGenerateMeetingLink { get; set; } = false;
     public string[] PanelistUserIds { get; set; } = [];
     [Required] public string IdempotencyKey { get; set; } = string.Empty;
     public int? ExpectedVersion { get; set; }

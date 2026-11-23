@@ -15,12 +15,14 @@ public sealed class RecruitmentScorecardService(
     IMongoDbRepository<ApplicantLogs> applicantLogs,
     IHttpContextAccessor context,
     IMongoDbRepository<RecruitmentInterview>? interviews = null,
-    IMongoDbRepository<RecruitmentInterviewPlan>? plans = null) : IRecruitmentScorecardService
+    IMongoDbRepository<RecruitmentInterviewPlan>? plans = null,
+    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null) : IRecruitmentScorecardService
 {
     public async Task<Result<string>> Upsert(RecruitmentScorecardCommand command, string actorUserId)
     {
         var result = new Result<string> { Success = false, StatusCode = StatusCodes.Status400BadRequest };
         var companyId = CurrentContext.CompanyId(context);
+        if (!string.IsNullOrWhiteSpace(companyId)) { var gate = await RecruitmentFeatureGate.Require<string>(configs, companyId, c => c.Scorecards, "Interview scorecards"); if (gate is not null) return gate; }
         var key = command.IdempotencyKey?.Trim();
         var reviewerUserId = string.IsNullOrWhiteSpace(command.ReviewerUserId) ? actorUserId : command.ReviewerUserId.Trim();
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(reviewerUserId))
@@ -150,6 +152,7 @@ public sealed class RecruitmentScorecardService(
     public async Task<Result<List<RecruitmentScorecard>>> GetByApplicant(string applicantId, string vacancyId)
     {
         var companyId = CurrentContext.CompanyId(context);
+        if (!string.IsNullOrWhiteSpace(companyId)) { var gate = await RecruitmentFeatureGate.Require<List<RecruitmentScorecard>>(configs, companyId, c => c.Scorecards, "Interview scorecards"); if (gate is not null) return gate; }
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(applicantId) || string.IsNullOrWhiteSpace(vacancyId))
             return new Result<List<RecruitmentScorecard>> { Success = false, StatusCode = 400, Message = "Applicant and vacancy are required." };
 
@@ -164,6 +167,7 @@ public sealed class RecruitmentScorecardService(
     public async Task<Result<RecruitmentFinalScoreResult>> GetFinalInterviewScore(string applicantId)
     {
         var companyId = CurrentContext.CompanyId(context);
+        if (!string.IsNullOrWhiteSpace(companyId)) { var gate = await RecruitmentFeatureGate.Require<RecruitmentFinalScoreResult>(configs, companyId, c => c.Scorecards, "Interview scorecards"); if (gate is not null) return gate; }
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(applicantId))
             return new Result<RecruitmentFinalScoreResult> { Success = false, StatusCode = 400, Message = "Applicant ID is required." };
 

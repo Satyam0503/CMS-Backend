@@ -11,6 +11,7 @@ public sealed class RecruitmentJobApplication : BaseClass
     public string PipelineSnapshot { get; set; } = string.Empty;
     public List<RecruitmentApplicationStageEvent> StageHistory { get; set; } = [];
     public string? LastCommandIdempotencyKey { get; set; }
+    public string? PublicSubmissionIdempotencyKey { get; set; }
     public int Version { get; set; } = 1;
 }
 public sealed class RecruitmentApplicationStageEvent

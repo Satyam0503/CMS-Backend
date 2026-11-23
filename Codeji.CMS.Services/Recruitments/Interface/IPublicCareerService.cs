@@ -12,5 +12,6 @@ public interface IPublicCareerService
     Task<Result<PublicJobDetailsDto>> GetJobByPublicId(string publicJobId);
     Task<Result<PublicJobDetailsDto>> GetJobBySlug(string jobSlug);
     Task<Result<PublicJobApplicationResponse>> Apply(string publicJobId, PublicJobApplicationRequest request);
+    Task<Result<PublicApplicationStatusDto>> GetApplicationStatus(PublicApplicationStatusRequest request);
     Task<Result<PublicResumeUploadResult>> UploadResume(string applicationReference, string token, IFormFile resume);
 }

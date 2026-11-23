@@ -3,6 +3,7 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.Utility.Exceptions;
 using Codeji.CMS.Utility.Helpers;
 using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.Extensions.Configuration;
 using Newtonsoft.Json;
 using Task = System.Threading.Tasks.Task;
 
@@ -38,6 +39,10 @@ namespace Codeji.CMS.API.App_Start
             {
                 await _next(context);
             }
+            catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+            {
+                // The caller has gone away; do not turn a normal HTTP cancellation into a 500 response.
+            }
             catch (Exception ex)
             {
                 await HandleExceptionAsync(context, ex);
@@ -49,7 +54,12 @@ namespace Codeji.CMS.API.App_Start
             // In dev mode, let unexpected exceptions bubble up to the developer page so the
             // full stack is visible. AppException + AntiforgeryValidationException are
             // intentional flow-control, so we still translate those normally.
-            bool isForDebug = ConfigManager.AppSettings?.IsForDebug ?? false;
+            // Unit-level middleware tests (and a few host edge cases) may not attach
+            // a request service provider. Fall back to the process setting in that case.
+            var configuration = context.RequestServices?.GetService<IConfiguration>();
+            bool isForDebug = bool.TryParse(configuration?["AppSettings:isForDebug"], out var configuredDebugMode)
+                ? configuredDebugMode
+                : ConfigManager.AppSettings?.IsForDebug ?? false;
             if (isForDebug && ex is not AppException && ex is not AntiforgeryValidationException)
             {
                 ExceptionDispatchInfo.Capture(ex).Throw();
@@ -57,19 +67,19 @@ namespace Codeji.CMS.API.App_Start
             }
 
             var (statusCode, message) = ResolveStatus(ex);
+            var correlationId = context.TraceIdentifier;
 
             if (statusCode >= StatusCodes.Status500InternalServerError)
             {
-                _logger.LogError(ex, "Unhandled exception (status {Status}) on {Method} {Path}",
-                    statusCode, context.Request.Method, context.Request.Path);
+                TryLogError(ex, statusCode, context, correlationId);
             }
             else
             {
-                _logger.LogWarning(ex, "Handled exception (status {Status}) on {Method} {Path}: {Message}",
-                    statusCode, context.Request.Method, context.Request.Path, message);
+                TryLogWarning(ex, statusCode, context, message, correlationId);
             }
 
             context.Response.ContentType = "application/json";
+            context.Response.Headers["X-Correlation-ID"] = correlationId;
 
             // Antiforgery: keep existing contract — HTTP 200 with body StatusCode 512.
             context.Response.StatusCode = ex is AntiforgeryValidationException
@@ -84,6 +94,36 @@ namespace Codeji.CMS.API.App_Start
             };
 
             await context.Response.WriteAsync(JsonConvert.SerializeObject(result));
+        }
+
+        // A broken logging provider must not prevent the error response from reaching the
+        // caller (for example, Windows Event Log may be unavailable to a service account).
+        private void TryLogError(Exception ex, int statusCode, HttpContext context, string correlationId)
+        {
+            try
+            {
+                _logger.LogError(ex,
+                    "Unhandled exception (status {Status}) on {Method} {Path}. CorrelationId: {CorrelationId}",
+                    statusCode, context.Request.Method, context.Request.Path, correlationId);
+            }
+            catch
+            {
+                // Preserve the safe HTTP response; operational logging health is monitored separately.
+            }
+        }
+
+        private void TryLogWarning(Exception ex, int statusCode, HttpContext context, string message, string correlationId)
+        {
+            try
+            {
+                _logger.LogWarning(ex,
+                    "Handled exception (status {Status}) on {Method} {Path}: {Message}. CorrelationId: {CorrelationId}",
+                    statusCode, context.Request.Method, context.Request.Path, message, correlationId);
+            }
+            catch
+            {
+                // Preserve the safe HTTP response; operational logging health is monitored separately.
+            }
         }
 
         private static (int StatusCode, string Message) ResolveStatus(Exception ex) => ex switch

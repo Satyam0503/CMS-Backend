@@ -264,6 +264,56 @@ public sealed class PayrollReportsServiceTests
         Assert.Contains("frozen ESI wage base", esic.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Form16_GeneratesCertificatesAndExportsCsv()
+    {
+        var runs = Repository(new PayrollRun
+        {
+            Id = "run-fy1", CompanyId = "company-1", PeriodStart = new DateTime(2026, 4, 1),
+            PeriodEnd = new DateTime(2026, 4, 30), PayDate = new DateTime(2026, 5, 1), Status = "APPROVED"
+        });
+        var employees = Repository(new PayrollRunEmployee
+        {
+            Id = "line-1", CompanyId = "company-1", PayrollRunId = "run-fy1", EmployeeId = "EMP001",
+            Status = "APPROVED", GrossAmount = 100000m,
+            StatutorySnapshot = new PayrollStatutorySnapshot { IncomeTax = 10000m, ProfessionalTax = 200m }
+        });
+        var users = Repository(new EmpUser
+        {
+            UserId = "user-1", CompanyId = "company-1", EmployeeId = "EMP001",
+            FirstName = "Rahul", LastName = "Sharma", Email = "rahul@example.com",
+            PanNumber = "ABCDE1234F"
+        });
+        var declarations = Repository(new EmployeeTaxDeclaration
+        {
+            Id = "decl-1", CompanyId = "company-1", EmployeeId = "EMP001", FinancialYear = "2026-27",
+            Status = "APPROVED", Regime = "NEW_115BAC", Version = 1
+        });
+
+        var service = new PayrollReportsService(runs.Object, employees.Object, users.Object, declarations.Object);
+
+        var result = await service.GetForm16Certificates("company-1", "2026-27");
+        Assert.True(result.Success);
+        Assert.Single(result.MethodResult);
+        var cert = result.MethodResult[0];
+        Assert.Equal("EMP001", cert.EmployeeId);
+        Assert.Equal("Rahul Sharma", cert.EmployeeName);
+        Assert.Equal("ABCDE1234F", cert.Pan);
+        Assert.Equal("2026-27", cert.FinancialYear);
+        Assert.Equal("2027-28", cert.AssessmentYear);
+        Assert.Equal("NEW_115BAC", cert.Regime);
+        Assert.Equal(100000m, cert.TotalGrossSalary);
+        Assert.Equal(10000m, cert.TotalTdsDeducted);
+        Assert.Equal(75000m, cert.StandardDeductionSection16_ia);
+
+        var csv = await service.ExportForm16SummaryCsv("company-1", "2026-27");
+        Assert.True(csv.Success);
+        var csvContent = System.Text.Encoding.UTF8.GetString(csv.MethodResult);
+        Assert.Contains("ABCDE1234F", csvContent);
+        Assert.Contains("Rahul Sharma", csvContent);
+        Assert.Contains("100000.00", csvContent);
+    }
+
     private static Mock<IMongoDbRepository<TEntity>> Repository<TEntity>(params TEntity[] items)
     {
         var repository = new Mock<IMongoDbRepository<TEntity>>();

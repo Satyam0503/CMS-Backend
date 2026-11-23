@@ -22,6 +22,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="Fixtures/dashboard-overview.v4.synthetic.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Codeji.CMS.API\Codeji.CMS.API.csproj" />
     <ProjectReference Include="..\Codeji.CMS.DTO\Codeji.CMS.DTO.csproj" />
     <ProjectReference Include="..\Codeji.CMS.Services\Codeji.CMS.Services.csproj" />

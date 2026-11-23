@@ -7,11 +7,12 @@ using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
 namespace Codeji.CMS.Services.Recruitments;
-public sealed class RecruitmentOfferApprovalPolicyService(IMongoDbRepository<RecruitmentOfferApprovalPolicy> policies, IHttpContextAccessor context, IMongoDbRepository<Codeji.CMS.Repository.Entities.Employees.EmpUser>? employees = null) : IRecruitmentOfferApprovalPolicyService
+public sealed class RecruitmentOfferApprovalPolicyService(IMongoDbRepository<RecruitmentOfferApprovalPolicy> policies, IHttpContextAccessor context, IMongoDbRepository<Codeji.CMS.Repository.Entities.Employees.EmpUser>? employees = null, IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null) : IRecruitmentOfferApprovalPolicyService
 {
     public async Task<Result<RecruitmentOfferApprovalPolicy>> Get(string? vacancyId)
     {
         var company = CurrentContext.CompanyId(context); if (string.IsNullOrWhiteSpace(company)) return Fail<RecruitmentOfferApprovalPolicy>(400, "REC_INVALID_REQUEST", "Company context is required.");
+        var gate = await RecruitmentFeatureGate.Require<RecruitmentOfferApprovalPolicy>(configs, company, c => c.OfferApproval, "Offer approval policies"); if (gate is not null) return gate;
         RecruitmentOfferApprovalPolicy? policy = null;
         if (!string.IsNullOrWhiteSpace(vacancyId)) policy = await policies.FirstOrDefault(x => x.CompanyId == company && x.VacancyId == vacancyId.Trim() && !x.IsDeleted);
         policy ??= await policies.FirstOrDefault(x => x.CompanyId == company && string.IsNullOrEmpty(x.VacancyId) && !x.IsDeleted);
@@ -21,6 +22,7 @@ public sealed class RecruitmentOfferApprovalPolicyService(IMongoDbRepository<Rec
     public async Task<Result<string>> Upsert(RecruitmentOfferApprovalPolicyCommand command, string actorUserId)
     {
         var company = CurrentContext.CompanyId(context); var key = command.IdempotencyKey?.Trim(); if (string.IsNullOrWhiteSpace(company) || string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(command.Currency)) return Fail<string>(400, "REC_INVALID_REQUEST", "Company, currency, and idempotency key are required.");
+        var gate = await RecruitmentFeatureGate.Require<string>(configs, company, c => c.OfferApproval, "Offer approval policies"); if (gate is not null) return gate;
         var currency = command.Currency.Trim().ToUpperInvariant(); if (currency.Length != 3 || command.ApprovalThreshold < 0) return Fail<string>(400, "REC_INVALID_REQUEST", "Currency and threshold are invalid."); var delegatedUserId = command.DelegatedApproverUserId?.Trim(); if (command.DelegationExpiresAtUtc.HasValue && command.DelegationExpiresAtUtc.Value <= DateTime.UtcNow) return Fail<string>(400, "REC_INVALID_REQUEST", "Delegation expiry must be in the future."); if (!string.IsNullOrWhiteSpace(delegatedUserId) && employees is not null && await employees.FirstOrDefault(x => x.CompanyId == company && x.UserId == delegatedUserId && x.Status && !x.IsDeleted) is null) return Fail<string>(404, "REC_INVALID_REQUEST", "Delegated approver must be an active user in the current company.");
         var existing = string.IsNullOrWhiteSpace(command.PolicyId) ? await policies.FirstOrDefault(x => x.CompanyId == company && x.VacancyId == command.VacancyId && !x.IsDeleted) : await policies.FirstOrDefault(x => x.CompanyId == company && x.PolicyId == command.PolicyId && !x.IsDeleted);
         if (existing is not null && existing.LastCommandIdempotencyKey == key) return Ok(existing.PolicyId, "Approval policy command already applied.");

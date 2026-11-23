@@ -24,18 +24,20 @@ public sealed class RecruitmentUnifiedAnalyticsAndQueueTests
         };
 
     [Fact]
-    public async Task Analytics_returns_all_active_applicants_when_canonical_applications_are_desynchronized()
+    public async Task Analytics_returns_all_active_applicants_without_writing_when_canonical_applications_are_desynchronized()
     {
         const string companyId = "tenant-codeji";
 
         // 5 active candidates with ActivityType = Selected (matching the exact user screenshot)
         var activeApplicants = new List<Applicant>
         {
-            new() { ApplicantId = "app-1", CompanyId = companyId, FirstName = "gaurav", LastName = "negi", Email = "gaurav1@yopmail.com", Phone = "111", ActivityType = ActivityType.Selected },
-            new() { ApplicantId = "app-2", CompanyId = companyId, FirstName = "Satyam", LastName = "Dubey", Email = "satyam1@yopmail.com", Phone = "222", ActivityType = ActivityType.Selected },
-            new() { ApplicantId = "app-3", CompanyId = companyId, FirstName = "Vivek", LastName = "singh", Email = "vivek1@yopmail.com", Phone = "333", ActivityType = ActivityType.Selected },
+            new() { ApplicantId = "app-1", CompanyId = companyId, FirstName = "gaurav", LastName = "negi", Email = "gaurav1@yopmail.com", Phone = "111", CandidateReportedSource = "Employee referral", ActivityType = ActivityType.Selected, CreatedDate = new DateTime(2026, 10, 1) },
+            new() { ApplicantId = "app-2", CompanyId = companyId, FirstName = "Satyam", LastName = "Dubey", Email = "satyam1@yopmail.com", Phone = "222", CandidateReportedSource = "Career site", ActivityType = ActivityType.Selected, CreatedDate = new DateTime(2026, 10, 2) },
+            new() { ApplicantId = "app-3", CompanyId = companyId, FirstName = "Vivek", LastName = "singh", Email = "vivek1@yopmail.com", Phone = "333", CandidateReportedSource = "untrusted-value@example.com", ActivityType = ActivityType.Selected },
             new() { ApplicantId = "app-4", CompanyId = companyId, FirstName = "sahil", LastName = "Negi", Email = "sahilnegi@yopmail.com", Phone = "444", ActivityType = ActivityType.Selected },
             new() { ApplicantId = "app-5", CompanyId = companyId, FirstName = "rohan", LastName = "Singh", Email = "rohan@yopmail.com", Phone = "555", ActivityType = ActivityType.Selected },
+            new() { ApplicantId = "merged-app", CompanyId = companyId, Phone = "000", ActivityType = ActivityType.Selected, MergeStatus = "Merged", IsDeleted = true },
+            new() { ApplicantId = "foreign-app", CompanyId = "tenant-other", Phone = "999", ActivityType = ActivityType.Selected },
         };
 
         // Only 1 canonical job application exists in the database
@@ -44,19 +46,17 @@ public sealed class RecruitmentUnifiedAnalyticsAndQueueTests
             new() { ApplicationId = "can-1", ApplicantId = "app-1", CompanyId = companyId, CurrentStage = "Selected", VacancyId = "v-1" }
         };
 
-        var applicantRepo = new Mock<IMongoDbRepository<Applicant>>();
-        applicantRepo.Setup(x => x.GetAll(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
-            .ReturnsAsync((Expression<Func<Applicant, bool>> filter, bool _, bool __) => activeApplicants.AsQueryable().Where(filter).ToList());
-
-        var canonicalRepo = new Mock<IMongoDbRepository<RecruitmentJobApplication>>();
-        canonicalRepo.Setup(x => x.GetAll(It.IsAny<Expression<Func<RecruitmentJobApplication, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
-            .ReturnsAsync((Expression<Func<RecruitmentJobApplication, bool>> filter, bool _, bool __) => canonicalApplications.AsQueryable().Where(filter).ToList());
+        var applicantRepo = AnalyticsRepo(activeApplicants);
+        var canonicalRepo = AnalyticsRepo(canonicalApplications);
         canonicalRepo.Setup(x => x.AddOne(It.IsAny<RecruitmentJobApplication>()))
             .ReturnsAsync(new Result { Success = true });
 
-        var offerRepo = new Mock<IMongoDbRepository<RecruitmentOffer>>();
-        offerRepo.Setup(x => x.GetAll(It.IsAny<Expression<Func<RecruitmentOffer, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
-            .ReturnsAsync((Expression<Func<RecruitmentOffer, bool>> _, bool __, bool ___) => []);
+        var offerRepo = AnalyticsRepo(new List<RecruitmentOffer>
+        {
+            new() { OfferId = "offer-1", CompanyId = companyId, ApplicantId = "app-1", Status = RecruitmentOfferStatus.Accepted, RespondedAtUtc = new DateTime(2026, 10, 11), Salary = 90000m, TotalCtc = 1400000m },
+            new() { OfferId = "offer-2", CompanyId = companyId, ApplicantId = "app-2", Status = RecruitmentOfferStatus.Accepted, RespondedAtUtc = new DateTime(2026, 10, 17), Salary = 100000m, TotalCtc = 1600000m },
+            new() { OfferId = "foreign-offer", CompanyId = "tenant-other", ApplicantId = "app-1", Status = RecruitmentOfferStatus.Accepted, RespondedAtUtc = new DateTime(2026, 10, 20), Salary = 400000m, TotalCtc = 5000000m },
+        });
 
         var service = new RecruitmentEnterpriseService(
             applicantRepo.Object,
@@ -85,15 +85,26 @@ public sealed class RecruitmentUnifiedAnalyticsAndQueueTests
 
         // Total tracked applicants must be 5 (all active candidates), not 1!
         Assert.Equal(5, analytics.TotalApplicants);
+        Assert.Equal(2, analytics.TimeToHireSampleSize);
+        Assert.Equal(12.5m, analytics.AverageTimeToHireDays);
         Assert.Equal(5, analytics.ActiveApplicants);
         Assert.Equal(0, analytics.RejectedApplicants);
+        Assert.Equal(1, analytics.MergedApplicants);
+        applicantRepo.Verify(x => x.Count(It.IsAny<Expression<Func<Applicant, bool>>>(), true), Times.Once);
 
         // Stage breakdown for Selected must be 5
         Assert.True(analytics.ByStage.ContainsKey("Selected"));
         Assert.Equal(5, analytics.ByStage["Selected"]);
+        Assert.Equal(1, analytics.ByCandidateReportedSource["Employee referral"]);
+        Assert.Equal(1, analytics.ByCandidateReportedSource["Career site"]);
+        Assert.Equal(1, analytics.ByCandidateReportedSource["Unclassified"]);
+        Assert.Equal(2, analytics.ByCandidateReportedSource["Not reported"]);
 
-        // The 4 missing canonical applications must be backfilled
-        canonicalRepo.Verify(x => x.AddOne(It.IsAny<RecruitmentJobApplication>()), Times.Exactly(4));
+        // GET analytics uses the applicant profile as a read fallback; it never repairs canonical data.
+        canonicalRepo.Verify(x => x.AddOne(It.IsAny<RecruitmentJobApplication>()), Times.Never());
+        applicantRepo.Verify(x => x.GetAll(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()), Times.Never);
+        canonicalRepo.Verify(x => x.GetAll(It.IsAny<Expression<Func<RecruitmentJobApplication, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()), Times.Never);
+        offerRepo.Verify(x => x.GetAll(It.IsAny<Expression<Func<RecruitmentOffer, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()), Times.Never);
     }
 
     [Fact]
@@ -113,17 +124,9 @@ public sealed class RecruitmentUnifiedAnalyticsAndQueueTests
             new() { ApplicationId = "can-2", ApplicantId = "app-2", CompanyId = companyId, CurrentStage = "Hired", VacancyId = "v-1" },
         };
 
-        var applicantRepo = new Mock<IMongoDbRepository<Applicant>>();
-        applicantRepo.Setup(x => x.GetAll(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
-            .ReturnsAsync((Expression<Func<Applicant, bool>> filter, bool _, bool __) => activeApplicants.AsQueryable().Where(filter).ToList());
-
-        var canonicalRepo = new Mock<IMongoDbRepository<RecruitmentJobApplication>>();
-        canonicalRepo.Setup(x => x.GetAll(It.IsAny<Expression<Func<RecruitmentJobApplication, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
-            .ReturnsAsync((Expression<Func<RecruitmentJobApplication, bool>> filter, bool _, bool __) => canonicalApplications.AsQueryable().Where(filter).ToList());
-
-        var offerRepo = new Mock<IMongoDbRepository<RecruitmentOffer>>();
-        offerRepo.Setup(x => x.GetAll(It.IsAny<Expression<Func<RecruitmentOffer, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
-            .ReturnsAsync((Expression<Func<RecruitmentOffer, bool>> _, bool __, bool ___) => []);
+        var applicantRepo = AnalyticsRepo(activeApplicants);
+        var canonicalRepo = AnalyticsRepo(canonicalApplications);
+        var offerRepo = AnalyticsRepo(new List<RecruitmentOffer>());
 
         var service = new RecruitmentEnterpriseService(
             applicantRepo.Object,
@@ -156,6 +159,154 @@ public sealed class RecruitmentUnifiedAnalyticsAndQueueTests
         Assert.Equal(1, analytics.ByStage["Preboarding"]);
         Assert.Equal(1, analytics.ByStage["Hired"]);
         Assert.Equal(2, analytics.ByStage["Selected"]);
+    }
+
+    private static Mock<IMongoDbRepository<T>> AnalyticsRepo<T>(List<T> rows) where T : class
+    {
+        var repository = new Mock<IMongoDbRepository<T>>();
+        repository.Setup(x => x.Count(It.IsAny<Expression<Func<T, bool>>>(), It.IsAny<bool>()))
+            .ReturnsAsync((Expression<Func<T, bool>> filter, bool _) => rows.Count(filter.Compile()));
+        repository.Setup(x => x.GetAggregateDataAsync<T>(
+                It.IsAny<Expression<Func<T, bool>>>(),
+                It.IsAny<MongoDB.Driver.ProjectionDefinition<T, T>>(),
+                It.IsAny<bool>(), It.IsAny<bool?>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<string>()))
+            .ReturnsAsync((Expression<Func<T, bool>> filter,
+                MongoDB.Driver.ProjectionDefinition<T, T>? _, bool _, bool? ascending, string? orderedKey, int? pageNo, int? pageSize, string? _) =>
+            {
+                var result = rows.Where(filter.Compile()).ToList();
+                if (!string.IsNullOrWhiteSpace(orderedKey))
+                {
+                    var property = typeof(T).GetProperty(orderedKey);
+                    if (property is not null) result = result.OrderBy(item => property.GetValue(item)).ToList();
+                    if (ascending == false) result.Reverse();
+                }
+                if (pageNo.HasValue && pageSize.HasValue)
+                    result = result.Skip(Math.Max(0, (pageNo.Value - 1) * pageSize.Value)).Take(pageSize.Value).ToList();
+                return result;
+            });
+        return repository;
+    }
+
+    [Fact]
+    public async Task Analytics_reads_applicants_in_bounded_ordered_batches()
+    {
+        const string companyId = "company-large";
+        var records = Enumerable.Range(1, 1001)
+            .Select(index => new Applicant
+            {
+                ApplicantId = $"candidate-{index:D4}",
+                CompanyId = companyId,
+                Phone = "redacted",
+                ActivityType = ActivityType.Selected,
+                CreatedDate = new DateTime(2026, 1, 1)
+            }).ToList();
+        var applicantRepo = AnalyticsRepo(records);
+        var service = new RecruitmentEnterpriseService(
+            applicantRepo.Object,
+            new Mock<IMongoDbRepository<ApplicantLogs>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentInterview>>().Object,
+            AnalyticsRepo(new List<RecruitmentOffer>()).Object,
+            new Mock<IMongoDbRepository<RecruitmentOfferVersion>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentOfferCounterRequest>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentScorecard>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentTalentPoolMember>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentHandoff>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentExternalActionToken>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentStageSlaPolicy>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentEnterpriseConfig>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentAutomationOutboxEvent>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentRelationshipLink>>().Object,
+            TenantContext(companyId),
+            AnalyticsRepo(new List<RecruitmentJobApplication>()).Object);
+
+        var response = await service.Analytics(null);
+
+        Assert.True(response.Success);
+        Assert.Equal(1001, response.MethodResult!.TotalApplicants);
+        Assert.Equal(1001, response.MethodResult.ByStage["Selected"]);
+        applicantRepo.Verify(x => x.GetAggregateDataAsync<Applicant>(
+            It.IsAny<Expression<Func<Applicant, bool>>>(),
+            It.IsAny<MongoDB.Driver.ProjectionDefinition<Applicant, Applicant>>(),
+            It.IsAny<bool>(), It.IsAny<bool?>(), nameof(Applicant.ApplicantId), 1, 500, It.IsAny<string>()), Times.Once);
+        applicantRepo.Verify(x => x.GetAggregateDataAsync<Applicant>(
+            It.IsAny<Expression<Func<Applicant, bool>>>(),
+            It.IsAny<MongoDB.Driver.ProjectionDefinition<Applicant, Applicant>>(),
+            It.IsAny<bool>(), It.IsAny<bool?>(), nameof(Applicant.ApplicantId), 2, 500, It.IsAny<string>()), Times.Once);
+        applicantRepo.Verify(x => x.GetAggregateDataAsync<Applicant>(
+            It.IsAny<Expression<Func<Applicant, bool>>>(),
+            It.IsAny<MongoDB.Driver.ProjectionDefinition<Applicant, Applicant>>(),
+            It.IsAny<bool>(), It.IsAny<bool?>(), nameof(Applicant.ApplicantId), 3, 500, It.IsAny<string>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Analytics_pages_large_canonical_and_accepted_offer_batches()
+    {
+        const string companyId = "company-large";
+        var applicants = AnalyticsRepo(new List<Applicant>
+        {
+            new() { ApplicantId = "candidate-1", CompanyId = companyId, Phone = "redacted", ActivityType = ActivityType.Selected, CreatedDate = new DateTime(2026, 1, 1) }
+        });
+        var canonicalApplications = Enumerable.Range(1, 501)
+            .Select(index => new RecruitmentJobApplication
+            {
+                ApplicationId = $"application-{index:D4}",
+                ApplicantId = "candidate-1",
+                CompanyId = companyId,
+                CurrentStage = index == 501 ? "Hired" : "Interview",
+                UpdatedDate = new DateTime(2026, 1, 1).AddMinutes(index)
+            }).ToList();
+        var canonical = AnalyticsRepo(canonicalApplications);
+        var acceptedOfferRecords = Enumerable.Range(1, 501)
+            .Select(index => new RecruitmentOffer
+            {
+                OfferId = $"offer-{index:D4}",
+                ApplicantId = "candidate-1",
+                CompanyId = companyId,
+                Status = RecruitmentOfferStatus.Accepted,
+                RespondedAtUtc = new DateTime(2026, 1, 2)
+            }).ToList();
+        var offerRepo = AnalyticsRepo(acceptedOfferRecords);
+        var service = new RecruitmentEnterpriseService(
+            applicants.Object,
+            new Mock<IMongoDbRepository<ApplicantLogs>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentInterview>>().Object,
+            offerRepo.Object,
+            new Mock<IMongoDbRepository<RecruitmentOfferVersion>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentOfferCounterRequest>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentScorecard>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentTalentPoolMember>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentHandoff>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentExternalActionToken>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentStageSlaPolicy>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentEnterpriseConfig>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentAutomationOutboxEvent>>().Object,
+            new Mock<IMongoDbRepository<RecruitmentRelationshipLink>>().Object,
+            TenantContext(companyId),
+            canonical.Object);
+
+        var response = await service.Analytics(null);
+
+        Assert.True(response.Success);
+        Assert.Equal(1, response.MethodResult!.ByStage["Hired"]);
+        Assert.Equal(1, response.MethodResult.ByStage["Selected"]);
+        Assert.Equal(501, response.MethodResult.TimeToHireSampleSize);
+        Assert.Equal(1m, response.MethodResult.AverageTimeToHireDays);
+        canonical.Verify(x => x.GetAggregateDataAsync<RecruitmentJobApplication>(
+            It.IsAny<Expression<Func<RecruitmentJobApplication, bool>>>(),
+            It.IsAny<MongoDB.Driver.ProjectionDefinition<RecruitmentJobApplication, RecruitmentJobApplication>>(),
+            It.IsAny<bool>(), It.IsAny<bool?>(), nameof(RecruitmentJobApplication.UpdatedDate), 1, 500, It.IsAny<string>()), Times.Once);
+        canonical.Verify(x => x.GetAggregateDataAsync<RecruitmentJobApplication>(
+            It.IsAny<Expression<Func<RecruitmentJobApplication, bool>>>(),
+            It.IsAny<MongoDB.Driver.ProjectionDefinition<RecruitmentJobApplication, RecruitmentJobApplication>>(),
+            It.IsAny<bool>(), It.IsAny<bool?>(), nameof(RecruitmentJobApplication.UpdatedDate), 2, 500, It.IsAny<string>()), Times.Once);
+        offerRepo.Verify(x => x.GetAggregateDataAsync<RecruitmentOffer>(
+            It.IsAny<Expression<Func<RecruitmentOffer, bool>>>(),
+            It.IsAny<MongoDB.Driver.ProjectionDefinition<RecruitmentOffer, RecruitmentOffer>>(),
+            It.IsAny<bool>(), It.IsAny<bool?>(), nameof(RecruitmentOffer.OfferId), 1, 500, It.IsAny<string>()), Times.Once);
+        offerRepo.Verify(x => x.GetAggregateDataAsync<RecruitmentOffer>(
+            It.IsAny<Expression<Func<RecruitmentOffer, bool>>>(),
+            It.IsAny<MongoDB.Driver.ProjectionDefinition<RecruitmentOffer, RecruitmentOffer>>(),
+            It.IsAny<bool>(), It.IsAny<bool?>(), nameof(RecruitmentOffer.OfferId), 2, 500, It.IsAny<string>()), Times.Once);
     }
 
     [Fact]

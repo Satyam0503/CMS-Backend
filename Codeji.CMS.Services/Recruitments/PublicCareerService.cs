@@ -10,8 +10,6 @@ using Codeji.CMS.Repository.Entities.CareerPortal;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Repository.Entities.RolePermissions;
-using Codeji.CMS.Services.BackgroundTasks;
-using Codeji.CMS.Services.Interface;
 using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility;
 using Codeji.CMS.Utility.Enums;
@@ -36,9 +34,10 @@ public class PublicCareerService : IPublicCareerService
     private readonly IMongoCollection<PublicCompanyProfile> _companyProfiles;
     private readonly IMongoCollection<SavedJob> _savedJobs;
     private readonly IMongoCollection<CareerAnalyticsEvent> _analytics;
-    private readonly IMongoCollection<RecruitmentJobApplication>? _jobApplications;
-    private readonly IPriorityTaskQueue _priorityTaskQueue;
-    private readonly IMiddlewareService _middlewareService;
+    private readonly IMongoCollection<RecruitmentJobApplication> _jobApplications;
+    private readonly IMongoCollection<RecruitmentEnterpriseConfig> _recruitmentConfigs;
+    private readonly IMongoCollection<RecruitmentEmailOutbox> _recruitmentEmailOutbox;
+    private readonly IRecruitmentResumeScanner? _resumeScanner;
 
     public PublicCareerService(
         IMongoDbRepository<JobVacancy> jobVacancyRepository,
@@ -51,9 +50,10 @@ public class PublicCareerService : IPublicCareerService
         IMongoDbRepository<PublicCompanyProfile> companyProfileRepository,
         IMongoDbRepository<SavedJob> savedJobRepository,
         IMongoDbRepository<CareerAnalyticsEvent> analyticsRepository,
-        IPriorityTaskQueue priorityTaskQueue,
-        IMiddlewareService middlewareService,
-        IMongoDbRepository<RecruitmentJobApplication>? jobApplicationRepository = null)
+        IMongoDbRepository<RecruitmentJobApplication> jobApplicationRepository,
+        IMongoDbRepository<RecruitmentEnterpriseConfig> recruitmentConfigRepository,
+        IMongoDbRepository<RecruitmentEmailOutbox> recruitmentEmailOutboxRepository,
+        IRecruitmentResumeScanner? resumeScanner = null)
     {
         _jobs = jobVacancyRepository.GetCollection();
         _companies = companyRepository.GetCollection();
@@ -65,9 +65,10 @@ public class PublicCareerService : IPublicCareerService
         _companyProfiles = companyProfileRepository.GetCollection();
         _savedJobs = savedJobRepository.GetCollection();
         _analytics = analyticsRepository.GetCollection();
-        _jobApplications = jobApplicationRepository?.GetCollection();
-        _priorityTaskQueue = priorityTaskQueue;
-        _middlewareService = middlewareService;
+        _jobApplications = jobApplicationRepository.GetCollection();
+        _recruitmentConfigs = recruitmentConfigRepository.GetCollection();
+        _recruitmentEmailOutbox = recruitmentEmailOutboxRepository.GetCollection();
+        _resumeScanner = resumeScanner;
     }
 
     public async Task<Result<PublicJobSummaryDto>> GetMasterJobs(PublicJobSearchRequest request)
@@ -191,6 +192,27 @@ public class PublicCareerService : IPublicCareerService
         var company = await _companies.Find(c => c.CompanyId == job.CompanyId && c.Status && !c.IsDeleted && c.CareerPortalEnabled).FirstOrDefaultAsync();
         if (company is null) return NotFound<PublicJobApplicationResponse>("Career portal not found.");
 
+        var recruitmentConfig = await _recruitmentConfigs.Find(x => x.CompanyId == job.CompanyId && !x.IsDeleted).FirstOrDefaultAsync();
+        var candidateSourceOptions = PublicCareerApplicationRules.EffectiveCandidateSourceOptions(recruitmentConfig?.CandidateSourceOptions);
+        if (!PublicCareerApplicationRules.IsValidSourceAttribution(request, candidateSourceOptions))
+            return BadRequest<PublicJobApplicationResponse>("Candidate source or campaign attribution is invalid or exceeds the allowed length.");
+
+        var submissionKey = request.IdempotencyKey.Trim();
+        string submissionPayloadHash = PublicCareerApplicationRules.HashApplicationSubmission(request, candidateSourceOptions);
+        if (!string.IsNullOrWhiteSpace(submissionKey))
+        {
+            var priorSubmission = await _applicants.Find(a => a.CompanyId == job.CompanyId && a.ApplicationSubmissionIdempotencyKey == submissionKey && !a.IsDeleted).FirstOrDefaultAsync();
+            if (priorSubmission is not null)
+            {
+                if (priorSubmission.VacancyId != job.JobId || !PublicCareerApplicationRules.IsSameApplicationSubmission(priorSubmission, request, candidateSourceOptions))
+                    return new Result<PublicJobApplicationResponse> { Success = false, StatusCode = StatusCodes.Status409Conflict, ErrorCode = RecruitmentErrorCodes.IdempotencyConflict, Message = "This application submission key is already in use." };
+                await EnsureApplicationRecords(priorSubmission, job);
+                var replayResponse = await CreateApplicationResponse(priorSubmission, job, company);
+                await QueueApplicationNotifications(priorSubmission, job, company);
+                return new Result<PublicJobApplicationResponse> { Success = true, StatusCode = StatusCodes.Status200OK, MethodResult = replayResponse, Message = "Application submission already received." };
+            }
+        }
+
         if (IsClosed(job, out string? closedReason))
         {
             return new Result<PublicJobApplicationResponse> { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = closedReason ?? "This job is closed." };
@@ -202,13 +224,45 @@ public class PublicCareerService : IPublicCareerService
         }
 
         string email = request.Email.Trim().ToLowerInvariant();
+        string privacyNotice = recruitmentConfig?.CandidatePrivacyNoticeText?.Trim() ?? string.Empty;
+        string privacyVersion = recruitmentConfig?.CandidatePrivacyNoticeVersion?.Trim() ?? string.Empty;
+        if (!PublicCareerApplicationRules.IsPrivacyNoticeConfigured(privacyNotice, privacyVersion))
+        {
+            return new Result<PublicJobApplicationResponse> { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "This company has not finished setting up its candidate privacy notice. Please contact the company for help." };
+        }
+        if (!request.PrivacyAcknowledged)
+        {
+            return new Result<PublicJobApplicationResponse> { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Please acknowledge the candidate privacy notice before applying." };
+        }
+        if (!PublicCareerApplicationRules.AcknowledgesCurrentPrivacyNotice(true, request.PrivacyNoticeVersion, privacyVersion))
+        {
+            return new Result<PublicJobApplicationResponse> { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "The candidate privacy notice changed. Refresh this job page to review the current notice before applying." };
+        }
+        var nowUtc = DateTime.UtcNow;
+        var retentionDays = recruitmentConfig?.DefaultCandidateRetentionDays is >= 30 and <= 3650
+            ? recruitmentConfig.DefaultCandidateRetentionDays
+            : 730;
+        var allowMultiVacancyApplications = recruitmentConfig?.AllowMultiVacancyApplications ?? true;
         var existingFilter = Builders<Applicant>.Filter.Eq(a => a.CompanyId, job.CompanyId)
             & Builders<Applicant>.Filter.Eq(a => a.IsDeleted, false)
             & Builders<Applicant>.Filter.Regex(a => a.Email, new BsonRegularExpression($"^{Regex.Escape(email)}$", "i"));
-        var existing = await _applicants.Find(existingFilter).SortByDescending(a => a.CreatedDate).FirstOrDefaultAsync();
-        if (existing?.CreatedDate is DateTime createdDate && createdDate > DateTime.UtcNow.AddMonths(-6))
+        if (allowMultiVacancyApplications)
         {
-            return new Result<PublicJobApplicationResponse> { Success = false, StatusCode = CustomStatusCode.ApplyAfterWaitingPeriod, Message = "Applicant can apply again after the waiting period." };
+            // A candidate may be considered for another role at the same company.
+            // When this company setting is disabled, the cooldown is company-wide.
+            existingFilter &= Builders<Applicant>.Filter.Eq(a => a.VacancyId, job.JobId);
+        }
+        var existing = await _applicants.Find(existingFilter).SortByDescending(a => a.CreatedDate).FirstOrDefaultAsync();
+        if (PublicCareerApplicationRules.IsWithinReapplicationCooldown(
+            existing?.CreatedDate,
+            nowUtc,
+            allowMultiVacancyApplications,
+            sameVacancy: existing?.VacancyId == job.JobId))
+        {
+            var message = existing?.VacancyId == job.JobId
+                ? "You can apply to this role again after the six-month waiting period."
+                : "This company accepts one application per candidate every six months. Please contact the hiring team if you need help.";
+            return new Result<PublicJobApplicationResponse> { Success = false, StatusCode = CustomStatusCode.ApplyAfterWaitingPeriod, Message = message };
         }
 
         Applicant applicant = new()
@@ -216,7 +270,7 @@ public class PublicCareerService : IPublicCareerService
             ApplicantId = Guid.NewGuid().ToString(),
             CompanyId = job.CompanyId,
             CreatedBy = "public-career",
-            CreatedDate = DateTime.UtcNow,
+            CreatedDate = nowUtc,
             FirstName = request.FirstName.Trim(),
             LastName = request.LastName.Trim(),
             Email = email,
@@ -229,50 +283,182 @@ public class PublicCareerService : IPublicCareerService
             LinkedInUrl = request.LinkedInUrl?.Trim(),
             PortfolioUrl = request.PortfolioUrl?.Trim(),
             CoverLetter = request.CoverLetter?.Trim(),
+            CandidateReportedSource = PublicCareerApplicationRules.NormalizeCandidateReportedSource(request.CandidateReportedSource, candidateSourceOptions),
+            CandidateReportedSourceDetail = request.CandidateReportedSourceDetail?.Trim(),
+            AttributionSource = request.AttributionSource?.Trim(),
+            AttributionMedium = request.AttributionMedium?.Trim(),
+            AttributionCampaign = request.AttributionCampaign?.Trim(),
+            AttributionContent = request.AttributionContent?.Trim(),
+            AttributionTerm = request.AttributionTerm?.Trim(),
+            ReferrerHost = request.ReferrerHost?.Trim().ToLowerInvariant(),
+            AttributionCapturedAtUtc = new[] { request.AttributionSource, request.AttributionMedium, request.AttributionCampaign, request.AttributionContent, request.AttributionTerm, request.ReferrerHost }.Any(x => !string.IsNullOrWhiteSpace(x)) ? nowUtc : null,
             VacancyId = job.JobId,
             Status = EnumsHelper.ActivityStatus.Active,
             ActivityType = existing is null ? EnumsHelper.ActivityType.New : EnumsHelper.ActivityType.ReApply,
+            RetentionUntilUtc = nowUtc.AddDays(retentionDays),
+            ApplicationSubmissionIdempotencyKey = submissionKey,
+            ApplicationSubmissionPayloadHash = submissionPayloadHash,
             ResumeUrl = string.Empty
         };
-        await _applicants.InsertOneAsync(applicant);
-        if (_jobApplications is not null)
+        PublicCareerApplicationRules.RecordPrivacyNoticeAcknowledgement(applicant, privacyNotice, privacyVersion, nowUtc);
+        try
         {
-            await _jobApplications.InsertOneAsync(new RecruitmentJobApplication
+            await _applicants.InsertOneAsync(applicant);
+        }
+        catch (MongoWriteException exception) when (
+            submissionKey is not null &&
+            exception.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+        {
+            // The unique tenant/key index is the concurrency boundary. If a
+            // simultaneous retry won the insert, return that application safely.
+            var winningSubmission = await _applicants.Find(a =>
+                    a.CompanyId == job.CompanyId &&
+                    a.ApplicationSubmissionIdempotencyKey == submissionKey &&
+                    !a.IsDeleted)
+                .FirstOrDefaultAsync();
+            if (winningSubmission is null) throw;
+            if (winningSubmission.VacancyId != job.JobId ||
+                !PublicCareerApplicationRules.IsSameApplicationSubmission(winningSubmission, request))
             {
-                CompanyId = job.CompanyId,
-                ApplicantId = applicant.ApplicantId,
-                VacancyId = job.JobId,
-                CurrentStage = applicant.ActivityType.ToString(),
-                StageHistory =
-                [
-                    new RecruitmentApplicationStageEvent
-                    {
-                        FromStage = "None",
-                        ToStage = applicant.ActivityType.ToString(),
-                        ActorUserId = applicant.ApplicantId,
-                        Reason = "Initial application submitted from public career portal"
-                    }
-                ],
-                CreatedBy = applicant.ApplicantId,
-                CreatedDate = DateTime.UtcNow,
-                UpdatedBy = applicant.ApplicantId,
-                UpdatedDate = DateTime.UtcNow
-            });
+                return new Result<PublicJobApplicationResponse>
+                {
+                    Success = false,
+                    StatusCode = StatusCodes.Status409Conflict,
+                    ErrorCode = RecruitmentErrorCodes.IdempotencyConflict,
+                    Message = "This application submission key is already in use."
+                };
+            }
+
+            await EnsureApplicationRecords(winningSubmission, job);
+            var replayResponse = await CreateApplicationResponse(winningSubmission, job, company);
+            await QueueApplicationNotifications(winningSubmission, job, company);
+            return new Result<PublicJobApplicationResponse>
+            {
+                Success = true,
+                StatusCode = StatusCodes.Status200OK,
+                MethodResult = replayResponse,
+                Message = "Application submission already received."
+            };
+        }
+        await EnsureApplicationRecords(applicant, job);
+        var applicationResponse = await CreateApplicationResponse(applicant, job, company);
+
+        await QueueApplicationNotifications(applicant, job, company);
+
+        return new Result<PublicJobApplicationResponse>
+        {
+            Success = true,
+            MethodResult = applicationResponse
+        };
+    }
+
+    public async Task<Result<PublicApplicationStatusDto>> GetApplicationStatus(PublicApplicationStatusRequest request)
+    {
+        // A random application reference plus the applicant's email is required. Keep
+        // the response deliberately minimal and return the same 404 for every miss.
+        if (request is null || !Guid.TryParse(request.ApplicationReference?.Trim(), out var reference) ||
+            !new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(request.Email?.Trim()))
+            return NotFound<PublicApplicationStatusDto>("We couldn't find an application with those details. Check them and try again.");
+
+        string applicantId = reference.ToString();
+        string email = request.Email.Trim();
+        var applicant = await _applicants.Find(PublicApplicationStatusRules.BuildApplicantMatchFilter(applicantId, email))
+            .FirstOrDefaultAsync();
+        if (applicant is null)
+            return NotFound<PublicApplicationStatusDto>("We couldn't find an application with those details. Check them and try again.");
+
+        string publicSubmissionKey = $"public-application:{applicant.ApplicantId}:initial";
+        var application = await _jobApplications.Find(a => a.CompanyId == applicant.CompanyId &&
+                a.ApplicantId == applicant.ApplicantId && a.VacancyId == applicant.VacancyId &&
+                a.PublicSubmissionIdempotencyKey == publicSubmissionKey && !a.IsDeleted)
+            .FirstOrDefaultAsync();
+        if (application is null)
+            return NotFound<PublicApplicationStatusDto>("We couldn't find an application with those details. Check them and try again.");
+
+        var job = await _jobs.Find(j => j.CompanyId == applicant.CompanyId && j.JobId == applicant.VacancyId).FirstOrDefaultAsync();
+        var company = await _companies.Find(c => c.CompanyId == applicant.CompanyId).FirstOrDefaultAsync();
+        string stage = application.CurrentStage?.Trim() ?? string.Empty;
+        string candidateStatus = PublicApplicationStatusRules.MapStage(stage);
+        return new Result<PublicApplicationStatusDto>
+        {
+            Success = true,
+            StatusCode = StatusCodes.Status200OK,
+            MethodResult = new PublicApplicationStatusDto
+            {
+                Status = candidateStatus,
+                JobTitle = job?.Title ?? "Applied role",
+                CompanyName = company?.CompanyName ?? "Company",
+                LastUpdatedAtUtc = application.UpdatedDate ?? application.CreatedDate
+            }
+        };
+    }
+
+    private async Task EnsureApplicationRecords(Applicant applicant, JobVacancy job)
+    {
+        string applicationKey = $"public-application:{applicant.ApplicantId}:initial";
+        var applicationFilter = Builders<RecruitmentJobApplication>.Filter.Eq(x => x.CompanyId, job.CompanyId)
+            & Builders<RecruitmentJobApplication>.Filter.Eq(x => x.PublicSubmissionIdempotencyKey, applicationKey);
+        var applicationUpdate = Builders<RecruitmentJobApplication>.Update
+            .SetOnInsert(x => x.ApplicationId, Guid.NewGuid().ToString())
+            .SetOnInsert(x => x.CompanyId, job.CompanyId)
+            .SetOnInsert(x => x.ApplicantId, applicant.ApplicantId)
+            .SetOnInsert(x => x.VacancyId, job.JobId)
+            .SetOnInsert(x => x.CurrentStage, applicant.ActivityType.ToString())
+            .SetOnInsert(x => x.PipelineVersion, 1)
+            .SetOnInsert(x => x.StageHistory, new List<RecruitmentApplicationStageEvent>
+            {
+                new()
+                {
+                    FromStage = "None",
+                    ToStage = applicant.ActivityType.ToString(),
+                    ActorUserId = applicant.ApplicantId,
+                    ChangedAtUtc = applicant.CreatedDate ?? DateTime.UtcNow,
+                    Reason = "Initial application submitted from public career portal"
+                }
+            })
+            .SetOnInsert(x => x.PublicSubmissionIdempotencyKey, applicationKey)
+            .SetOnInsert(x => x.CreatedBy, applicant.ApplicantId)
+            .SetOnInsert(x => x.CreatedDate, applicant.CreatedDate ?? DateTime.UtcNow)
+            .SetOnInsert(x => x.UpdatedBy, applicant.ApplicantId)
+            .SetOnInsert(x => x.UpdatedDate, applicant.CreatedDate ?? DateTime.UtcNow);
+        try
+        {
+            await _jobApplications.UpdateOneAsync(applicationFilter, applicationUpdate, new UpdateOptions { IsUpsert = true });
+        }
+        catch (MongoWriteException exception) when (exception.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+        {
+            if (!await _jobApplications.Find(applicationFilter).AnyAsync()) throw;
         }
 
-        await _applicantLogs.InsertOneAsync(new ApplicantLogs
+        string logKey = $"{applicationKey}:activity";
+        var logFilter = Builders<ApplicantLogs>.Filter.Eq(x => x.CompanyId, job.CompanyId)
+            & Builders<ApplicantLogs>.Filter.Eq(x => x.IdempotencyKey, logKey);
+        var logUpdate = Builders<ApplicantLogs>.Update
+            .SetOnInsert(x => x.Id, Guid.NewGuid().ToString())
+            .SetOnInsert(x => x.CompanyId, job.CompanyId)
+            .SetOnInsert(x => x.CreatedBy, applicant.ApplicantId)
+            .SetOnInsert(x => x.CreatedDate, applicant.CreatedDate ?? DateTime.UtcNow)
+            .SetOnInsert(x => x.ApplicantId, applicant.ApplicantId)
+            .SetOnInsert(x => x.UserId, applicant.ApplicantId)
+            .SetOnInsert(x => x.ActivityCategory, 0)
+            .SetOnInsert(x => x.Description, "New application submitted from public career portal")
+            .SetOnInsert(x => x.JobRole, job.Title)
+            .SetOnInsert(x => x.ApplicantName, $"{applicant.FirstName} {applicant.LastName}".Trim())
+            .SetOnInsert(x => x.EventType, "ApplicationSubmitted")
+            .SetOnInsert(x => x.CurrentStage, applicant.ActivityType.ToString())
+            .SetOnInsert(x => x.IdempotencyKey, logKey);
+        try
         {
-            CompanyId = job.CompanyId,
-            CreatedBy = applicant.ApplicantId,
-            CreatedDate = DateTime.UtcNow,
-            ApplicantId = applicant.ApplicantId,
-            UserId = applicant.ApplicantId,
-            ActivityCategory = 0,
-            Description = "New application submitted from public career portal",
-            JobRole = job.Title,
-            ApplicantName = $"{applicant.FirstName} {applicant.LastName}"
-        });
+            await _applicantLogs.UpdateOneAsync(logFilter, logUpdate, new UpdateOptions { IsUpsert = true });
+        }
+        catch (MongoWriteException exception) when (exception.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+        {
+            if (!await _applicantLogs.Find(logFilter).AnyAsync()) throw;
+        }
+    }
 
+    private async Task<PublicJobApplicationResponse> CreateApplicationResponse(Applicant applicant, JobVacancy job, Company company)
+    {
         string rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
         DateTime tokenExpiry = DateTime.UtcNow.AddHours(2);
         await _tokens.InsertOneAsync(new PublicApplicationToken
@@ -286,20 +472,13 @@ public class PublicCareerService : IPublicCareerService
             JobId = job.JobId,
             ExpiresAt = tokenExpiry
         });
-
-        await QueueApplicationNotifications(applicant, job, company);
-
-        return new Result<PublicJobApplicationResponse>
+        return new PublicJobApplicationResponse
         {
-            Success = true,
-            MethodResult = new PublicJobApplicationResponse
-            {
-                ApplicationReference = applicant.ApplicantId,
-                ResumeUploadToken = rawToken,
-                TokenExpiresAt = tokenExpiry,
-                JobTitle = job.Title,
-                CompanyName = company.CompanyName
-            }
+            ApplicationReference = applicant.ApplicantId,
+            ResumeUploadToken = rawToken,
+            TokenExpiresAt = tokenExpiry,
+            JobTitle = job.Title,
+            CompanyName = company.CompanyName
         };
     }
 
@@ -310,32 +489,257 @@ public class PublicCareerService : IPublicCareerService
         if (resume.Length > 5 * 1024 * 1024) return BadRequest<PublicResumeUploadResult>("Resume file must be 5MB or smaller.");
         if (!string.Equals(Path.GetExtension(resume.FileName), ".pdf", StringComparison.OrdinalIgnoreCase)) return BadRequest<PublicResumeUploadResult>("Only PDF resumes are allowed.");
 
-        var tokenHash = HashToken(token);
-        var uploadToken = await _tokens.Find(t => t.ApplicationReference == applicationReference && t.TokenHash == tokenHash && !t.IsUsed).FirstOrDefaultAsync();
-        if (uploadToken is null || uploadToken.ExpiresAt < DateTime.UtcNow) return BadRequest<PublicResumeUploadResult>("Resume upload token is invalid or expired.");
-
         // Claim the one-use token before writing the file so parallel requests cannot
-        // both consume the same credential. The update filter is the concurrency boundary.
-        var claimed = await _tokens.UpdateOneAsync(
-            t => t.TokenId == uploadToken.TokenId && !t.IsUsed && t.ExpiresAt >= DateTime.UtcNow,
-            Builders<PublicApplicationToken>.Update.Set(t => t.IsUsed, true).Set(t => t.UsedAt, DateTime.UtcNow));
-        if (claimed.ModifiedCount != 1) return BadRequest<PublicResumeUploadResult>("Resume upload token is invalid or already used.");
-
+        // both consume the same credential. The server retains the applicant/file digest
+        // so a lost response can be retried safely without attaching a second resume.
         using MemoryStream memory = new();
         await resume.CopyToAsync(memory);
         byte[] bytes = memory.ToArray();
         if (bytes.Length < 4 || Encoding.ASCII.GetString(bytes, 0, 4) != "%PDF") return BadRequest<PublicResumeUploadResult>("Only valid PDF resumes are allowed.");
+        var fileSha256 = Convert.ToHexString(SHA256.HashData(bytes));
+        var tokenHash = HashToken(token);
+        var uploadToken = await _tokens.Find(t => t.ApplicationReference == applicationReference && t.TokenHash == tokenHash && t.Purpose == "ResumeUpload" && !t.IsDeleted).FirstOrDefaultAsync();
+        if (uploadToken is null) return BadRequest<PublicResumeUploadResult>("Resume upload token is invalid or expired.");
 
-        string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Resume");
-        Directory.CreateDirectory(uploadFolder);
-        string fileName = $"{Guid.NewGuid()}.pdf";
+        var activeApplicant = await _applicants.Find(a =>
+                a.CompanyId == uploadToken.CompanyId && a.ApplicantId == uploadToken.ApplicantId &&
+                !a.IsDeleted && a.ConsentStatus != "Anonymized")
+            .FirstOrDefaultAsync();
+        if (!PublicCareerApplicationRules.CanAcceptPublicResumeUpload(activeApplicant))
+            return new Result<PublicResumeUploadResult> { Success = false, StatusCode = StatusCodes.Status410Gone, Message = "This application can no longer accept resume uploads." };
+
+        if (PublicCareerApplicationRules.IsCompletedResumeUploadReplay(uploadToken, fileSha256))
+            return ResumeUploadSucceeded(applicationReference);
+
+        if (uploadToken.IsUsed)
+        {
+            if (await TryRecoverCompletedResumeUpload(uploadToken, fileSha256))
+                return ResumeUploadSucceeded(applicationReference);
+            return Conflict<PublicResumeUploadResult>("This resume upload was already completed with a different file.");
+        }
+
+        var nowUtc = DateTime.UtcNow;
+        if (await TryRecoverCompletedResumeUpload(uploadToken, fileSha256))
+            return ResumeUploadSucceeded(applicationReference);
+        if (uploadToken.ExpiresAt < nowUtc) return BadRequest<PublicResumeUploadResult>("Resume upload token is invalid or expired.");
+        if (PublicCareerApplicationRules.IsResumeUploadClaimActive(uploadToken, nowUtc))
+            return Conflict<PublicResumeUploadResult>("This resume upload is still processing. Retry in a few moments.");
+
+        string uploadFolder;
+        try
+        {
+            uploadFolder = RecruitmentResumeStorage.PrivateDirectory;
+            Directory.CreateDirectory(uploadFolder);
+        }
+        catch
+        {
+            return new Result<PublicResumeUploadResult> { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, Message = "Private resume storage is not available. Please retry later." };
+        }
+
+        string attemptId = Guid.NewGuid().ToString("N");
+        string fileName = $"{Guid.NewGuid():N}.pdf";
         string filePath = Path.Combine(uploadFolder, fileName);
-        await File.WriteAllBytesAsync(filePath, bytes);
+        var tokenFilter = Builders<PublicApplicationToken>.Filter;
+        var isNotProcessing = tokenFilter.Or(
+            tokenFilter.Eq(t => t.IsProcessing, false),
+            tokenFilter.Exists(t => t.IsProcessing, false));
+        var claimIsAvailable = tokenFilter.Or(
+            isNotProcessing,
+            tokenFilter.Lte(t => t.ProcessingStartedAtUtc, PublicCareerApplicationRules.ResumeUploadClaimExpiry(nowUtc)));
 
-        var applicantFilter = Builders<Applicant>.Filter.Eq(a => a.ApplicantId, uploadToken.ApplicantId) & Builders<Applicant>.Filter.Eq(a => a.CompanyId, uploadToken.CompanyId);
-        await _applicants.UpdateOneAsync(applicantFilter, Builders<Applicant>.Update.Set(a => a.ResumeUrl, fileName).Set(a => a.UpdatedDate, DateTime.UtcNow).Set(a => a.UpdatedBy, "public-career"));
-        return new Result<PublicResumeUploadResult> { Success = true, MethodResult = new PublicResumeUploadResult { ApplicationReference = applicationReference } };
+        var claimed = await _tokens.UpdateOneAsync(
+            tokenFilter.And(
+                tokenFilter.Eq(t => t.TokenId, uploadToken.TokenId),
+                tokenFilter.Eq(t => t.IsUsed, false),
+                tokenFilter.Gte(t => t.ExpiresAt, nowUtc),
+                claimIsAvailable),
+            Builders<PublicApplicationToken>.Update
+                .Set(t => t.IsProcessing, true)
+                .Set(t => t.ProcessingAttemptId, attemptId)
+                .Set(t => t.ProcessingStartedAtUtc, nowUtc)
+                .Set(t => t.ProcessingFileName, fileName)
+                .Set(t => t.ExpiresAt, uploadToken.ExpiresAt > nowUtc.AddMinutes(30) ? uploadToken.ExpiresAt : nowUtc.AddMinutes(30)));
+        if (claimed.ModifiedCount != 1)
+        {
+            var latestToken = await _tokens.Find(t => t.TokenId == uploadToken.TokenId && !t.IsDeleted).FirstOrDefaultAsync();
+            if (latestToken is not null && PublicCareerApplicationRules.IsCompletedResumeUploadReplay(latestToken, fileSha256))
+                return ResumeUploadSucceeded(applicationReference);
+            if (latestToken is not null && await TryRecoverCompletedResumeUpload(latestToken, fileSha256))
+                return ResumeUploadSucceeded(applicationReference);
+            return Conflict<PublicResumeUploadResult>("This resume upload is already being handled or was used with a different file.");
+        }
+
+        bool resumeLinkedToApplicant = false;
+        try
+        {
+            ResumeScanStatus scanStatus;
+            if (_resumeScanner is null) scanStatus = ResumeScanStatus.Unavailable;
+            else
+            {
+                try
+                {
+                    await using var scanStream = new MemoryStream(bytes, writable: false);
+                    var scanResult = await _resumeScanner.ScanAsync(scanStream);
+                    scanStatus = scanResult.Status == ResumeScanStatus.Clean &&
+                        string.Equals(scanResult.Sha256, fileSha256, StringComparison.OrdinalIgnoreCase)
+                            ? ResumeScanStatus.Clean
+                            : scanResult.Status == ResumeScanStatus.Infected ? ResumeScanStatus.Infected : ResumeScanStatus.Unavailable;
+                }
+                catch { scanStatus = ResumeScanStatus.Unavailable; }
+            }
+
+            try
+            {
+                await _applicantLogs.InsertOneAsync(RecruitmentResumeScanAudit.Create(uploadToken.CompanyId, uploadToken.ApplicantId, uploadToken.JobId, "public-career", attemptId, scanStatus));
+            }
+            catch
+            {
+                await ReleaseResumeUploadToken(uploadToken.TokenId, attemptId);
+                return new Result<PublicResumeUploadResult> { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, ErrorCode = RecruitmentErrorCodes.WriteFailed, Message = "The resume scan could not be recorded safely. Please retry later." };
+            }
+            if (scanStatus != ResumeScanStatus.Clean)
+            {
+                await ReleaseResumeUploadToken(uploadToken.TokenId, attemptId);
+                return scanStatus == ResumeScanStatus.Infected
+                    ? new Result<PublicResumeUploadResult> { Success = false, StatusCode = StatusCodes.Status422UnprocessableEntity, ErrorCode = RecruitmentErrorCodes.InvalidResume, Message = "This resume could not be accepted. Upload a clean PDF or contact the hiring team." }
+                    : new Result<PublicResumeUploadResult> { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, ErrorCode = RecruitmentErrorCodes.WriteFailed, Message = "Secure resume scanning is unavailable. Please retry later." };
+            }
+
+            await File.WriteAllBytesAsync(filePath, bytes);
+
+            var applicantFilter = Builders<Applicant>.Filter.Eq(a => a.ApplicantId, uploadToken.ApplicantId)
+                & Builders<Applicant>.Filter.Eq(a => a.CompanyId, uploadToken.CompanyId)
+                & Builders<Applicant>.Filter.Eq(a => a.IsDeleted, false)
+                & Builders<Applicant>.Filter.Ne(a => a.ConsentStatus, "Anonymized")
+                & (Builders<Applicant>.Filter.Eq(a => a.ResumeUrl, string.Empty)
+                    | Builders<Applicant>.Filter.Eq(a => a.ResumeUrl, null));
+            var linked = await _applicants.UpdateOneAsync(applicantFilter, Builders<Applicant>.Update
+                .Set(a => a.ResumeUrl, $"{RecruitmentResumeStorage.PrivatePrefix}{fileName}")
+                .Set(a => a.ResumeScanSha256, fileSha256)
+                .Set(a => a.ResumeScanVerdict, nameof(ResumeScanStatus.Clean))
+                .Set(a => a.ResumeScannedAtUtc, DateTime.UtcNow)
+                .Set(a => a.ResumeQuarantineFileName, null)
+                .Set(a => a.ResumeQuarantinedAtUtc, null)
+                .Set(a => a.PublicResumeUploadTokenId, uploadToken.TokenId)
+                .Set(a => a.PublicResumeUploadSha256, fileSha256)
+                .Inc(a => a.Version, 1)
+                .Set(a => a.UpdatedDate, DateTime.UtcNow)
+                .Set(a => a.UpdatedBy, "public-career"));
+            if (linked.ModifiedCount != 1)
+            {
+                File.Delete(filePath);
+                if (await TryRecoverCompletedResumeUpload(uploadToken, fileSha256))
+                    return ResumeUploadSucceeded(applicationReference);
+                await ReleaseResumeUploadToken(uploadToken.TokenId, attemptId);
+                return Conflict<PublicResumeUploadResult>("A resume is already attached to this application. Contact the hiring team if it needs to be replaced.");
+            }
+            resumeLinkedToApplicant = true;
+
+            var completed = await CompleteResumeUploadToken(uploadToken.TokenId, attemptId, fileSha256, fileName);
+            if (completed.ModifiedCount != 1 && !await TryRecoverCompletedResumeUpload(uploadToken, fileSha256))
+                return new Result<PublicResumeUploadResult> { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, Message = "The resume is attached, but upload confirmation is still processing. Retry the same file shortly." };
+            return ResumeUploadSucceeded(applicationReference);
+        }
+        catch
+        {
+            try
+            {
+                if (await TryRecoverCompletedResumeUpload(uploadToken, fileSha256))
+                    return ResumeUploadSucceeded(applicationReference);
+            }
+            catch
+            {
+                // Recovery is best effort here. A still-processing claim expires
+                // after its lease so the candidate can retry if Mongo is unavailable.
+            }
+            try
+            {
+                if (!resumeLinkedToApplicant && File.Exists(filePath)) File.Delete(filePath);
+            }
+            catch
+            {
+                // The file is private and unlinked; cleanup can be handled by the
+                // scheduled orphan-file sweep without consuming the candidate token.
+            }
+            if (!resumeLinkedToApplicant)
+            {
+                try { await ReleaseResumeUploadToken(uploadToken.TokenId, attemptId); }
+                catch
+                {
+                    // The processing lease provides a bounded recovery path if token
+                    // release cannot reach Mongo during a transient failure.
+                }
+            }
+            return new Result<PublicResumeUploadResult> { Success = false, StatusCode = StatusCodes.Status500InternalServerError, Message = "The resume could not be stored. Please retry the upload." };
+        }
     }
+
+    private async Task<bool> TryRecoverCompletedResumeUpload(PublicApplicationToken uploadToken, string fileSha256)
+    {
+        var applicant = await _applicants.Find(a =>
+                a.CompanyId == uploadToken.CompanyId &&
+                a.ApplicantId == uploadToken.ApplicantId &&
+                a.PublicResumeUploadTokenId == uploadToken.TokenId &&
+                a.PublicResumeUploadSha256 == fileSha256 &&
+                !a.IsDeleted &&
+                a.ConsentStatus != "Anonymized" &&
+                a.ResumeUrl != null &&
+                a.ResumeUrl != string.Empty)
+            .FirstOrDefaultAsync();
+        if (applicant is null) return false;
+
+        string path;
+        try { path = RecruitmentResumeStorage.Resolve(applicant.ResumeUrl); }
+        catch { return false; }
+        if (!File.Exists(path)) return false;
+
+        var update = await CompleteResumeUploadToken(uploadToken.TokenId, null, fileSha256, Path.GetFileName(path));
+        if (update.ModifiedCount == 1) return true;
+
+        var current = await _tokens.Find(t => t.TokenId == uploadToken.TokenId && !t.IsDeleted).FirstOrDefaultAsync();
+        return current is not null && PublicCareerApplicationRules.IsCompletedResumeUploadReplay(current, fileSha256);
+    }
+
+    private Task<UpdateResult> CompleteResumeUploadToken(string tokenId, string? attemptId, string fileSha256, string fileName)
+    {
+        var filter = Builders<PublicApplicationToken>.Filter.Eq(t => t.TokenId, tokenId)
+            & Builders<PublicApplicationToken>.Filter.Eq(t => t.IsUsed, false);
+        if (!string.IsNullOrWhiteSpace(attemptId))
+            filter &= Builders<PublicApplicationToken>.Filter.Eq(t => t.ProcessingAttemptId, attemptId);
+
+        return _tokens.UpdateOneAsync(filter, Builders<PublicApplicationToken>.Update
+            .Set(t => t.IsUsed, true)
+            .Set(t => t.IsProcessing, false)
+            .Set(t => t.UsedAt, DateTime.UtcNow)
+            .Set(t => t.UploadCompletedAtUtc, DateTime.UtcNow)
+            .Set(t => t.UploadSha256, fileSha256)
+            .Set(t => t.UploadedFileName, fileName)
+            .Set(t => t.ProcessingAttemptId, null)
+            .Set(t => t.ProcessingStartedAtUtc, null)
+            .Set(t => t.ProcessingFileName, null));
+    }
+
+    private Task<UpdateResult> ReleaseResumeUploadToken(string tokenId, string attemptId) => _tokens.UpdateOneAsync(
+        t => t.TokenId == tokenId && !t.IsUsed && t.IsProcessing && t.ProcessingAttemptId == attemptId,
+        Builders<PublicApplicationToken>.Update
+            .Set(t => t.IsProcessing, false)
+            .Set(t => t.ProcessingAttemptId, null)
+            .Set(t => t.ProcessingStartedAtUtc, null)
+            .Set(t => t.ProcessingFileName, null));
+
+    private static Result<PublicResumeUploadResult> ResumeUploadSucceeded(string applicationReference) => new()
+    {
+        Success = true,
+        MethodResult = new PublicResumeUploadResult { ApplicationReference = applicationReference }
+    };
+
+    private static Result<T> Conflict<T>(string message) => new()
+    {
+        Success = false,
+        StatusCode = StatusCodes.Status409Conflict,
+        ErrorCode = RecruitmentErrorCodes.IdempotencyConflict,
+        Message = message
+    };
 
     private async Task<Result<PublicJobSummaryDto>> SearchJobs(PublicJobSearchRequest request, List<Company> companies, bool masterOnly)
     {
@@ -402,19 +806,153 @@ public class PublicCareerService : IPublicCareerService
         var sort = sortName switch
         {
             "oldest" => Builders<JobVacancy>.Sort.Ascending(j => j.PublishedAt),
-            "deadline" => Builders<JobVacancy>.Sort.Ascending(j => j.ApplicationDeadline),
             "salary-high" => Builders<JobVacancy>.Sort.Descending(j => j.SalaryMax),
-            "salary-low" => Builders<JobVacancy>.Sort.Ascending(j => j.SalaryMin),
             _ => Builders<JobVacancy>.Sort.Descending(j => j.PublishedAt).Descending(j => j.CreatedDate)
         };
         List<JobVacancy> jobs;
-        if (sortName is "most-saved" or "most-viewed")
+        if (sortName == "relevance" && !string.IsNullOrWhiteSpace(request.Search))
+        {
+            var query = request.Search.Trim()[..Math.Min(200, request.Search.Trim().Length)];
+            var matchingCompanyIds = companies
+                .Where(c => c.CompanyName.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .Select(c => c.CompanyId)
+                .ToHashSet(StringComparer.Ordinal);
+            jobs = await GetRelevantSortedPage(filter, query, matchingCompanyIds, pageNo, pageSize);
+        }
+        else if (sortName is "most-saved" or "most-viewed")
             jobs = await GetEngagementSortedPage(filter, sortName, pageNo, pageSize);
+        else if (sortName == "deadline")
+            jobs = await GetNullLastSortedPage(filter, pageNo, pageSize, j => j.ApplicationDeadline,
+                Builders<JobVacancy>.Sort.Ascending(j => j.ApplicationDeadline));
+        else if (sortName == "salary-low")
+            jobs = await GetNullLastSortedPage(filter, pageNo, pageSize, j => j.SalaryMin,
+                Builders<JobVacancy>.Sort.Ascending(j => j.SalaryMin));
         else
             jobs = await _jobs.Find(filter).Sort(sort).Skip((pageNo - 1) * pageSize).Limit(pageSize).ToListAsync();
-        var page = jobs.Select(j => ToSummary(j, companyMap[j.CompanyId])).ToList();
+        var configs = await _recruitmentConfigs.Find(x => companyIds.Contains(x.CompanyId) && !x.IsDeleted).ToListAsync();
+        var configByCompany = configs
+            .GroupBy(x => x.CompanyId, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderByDescending(x => x.UpdatedDate ?? x.CreatedDate).First(),
+                StringComparer.Ordinal);
+        var page = jobs.Select(j => ToSummary(
+            j,
+            companyMap[j.CompanyId],
+            configByCompany.GetValueOrDefault(j.CompanyId))).ToList();
 
         return new Result<PublicJobSummaryDto> { Success = true, MethodResults = page, TotalRecords = (int)Math.Min(count, int.MaxValue) };
+    }
+
+    private async Task<List<JobVacancy>> GetRelevantSortedPage(
+        FilterDefinition<JobVacancy> filter,
+        string query,
+        HashSet<string> matchingCompanyIds,
+        int pageNo,
+        int pageSize)
+    {
+        var pipeline = _jobs.Aggregate()
+            .Match(filter)
+            .AppendStage<JobVacancy>(BuildRelevanceScoreStage(query, matchingCompanyIds))
+            .Sort(new BsonDocumentSortDefinition<JobVacancy>(new BsonDocument
+            {
+                { "__careerRelevanceScore", -1 },
+                { nameof(JobVacancy.PublishedAt), -1 },
+                { nameof(JobVacancy.CreatedDate), -1 },
+                { "_id", 1 }
+            }))
+            .Skip((pageNo - 1) * pageSize)
+            .Limit(pageSize)
+            // The score is an aggregation-only field, not part of the persisted
+            // JobVacancy model. Remove it before the typed Mongo deserializer runs.
+            .AppendStage<JobVacancy>(BuildRelevanceScoreProjectionStage());
+
+        return await pipeline.ToListAsync();
+    }
+
+    internal static BsonDocument BuildRelevanceScoreStage(string query, IEnumerable<string> matchingCompanyIds)
+    {
+        // JobVacancy uses the default MongoDB convention for its property names;
+        // JobId is stored as the BSON _id field via its BsonId attribute.
+        string Field(string propertyName) => "$" + propertyName;
+        BsonDocument RegexMatch(string input, string term) => new("$regexMatch", new BsonDocument
+        {
+            { "input", new BsonDocument("$ifNull", new BsonArray { input, "" }) },
+            { "regex", Regex.Escape(term) },
+            { "options", "i" }
+        });
+        BsonDocument HasArrayMatch(string propertyName, string term) => new("$gt", new BsonArray
+        {
+            new BsonDocument("$size", new BsonDocument("$filter", new BsonDocument
+            {
+                { "input", new BsonDocument("$ifNull", new BsonArray { Field(propertyName), new BsonArray() }) },
+                { "as", "item" },
+                { "cond", RegexMatch("$$item", term) }
+            })),
+            0
+        });
+
+        string firstTerm = Regex.Matches(query, @"[\p{L}\p{N}+#.]+")
+            .Select(match => match.Value).FirstOrDefault() ?? query;
+        var terms = Regex.Matches(query, @"[\p{L}\p{N}+#.]+")
+            .Select(match => match.Value)
+            .Where(term => term.Length > 1)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToArray();
+        BsonArray scores = [
+            new BsonDocument("$cond", new BsonArray { RegexMatch(Field(nameof(JobVacancy.Title)), query), 100, 0 }),
+            new BsonDocument("$cond", new BsonArray { RegexMatch(Field(nameof(JobVacancy.Title)), firstTerm), 30, 0 }),
+            new BsonDocument("$cond", new BsonArray { new BsonDocument("$in", new BsonArray { Field(nameof(JobVacancy.CompanyId)), new BsonArray(matchingCompanyIds.Select(id => (BsonValue)id)) }), 50, 0 })
+        ];
+        foreach (var term in terms)
+        {
+            scores.Add(new BsonDocument("$cond", new BsonArray { RegexMatch(Field(nameof(JobVacancy.Title)), term), 12, 0 }));
+            scores.Add(new BsonDocument("$cond", new BsonArray { HasArrayMatch(nameof(JobVacancy.RequiredSkills), term), 14, 0 }));
+            scores.Add(new BsonDocument("$cond", new BsonArray { HasArrayMatch(nameof(JobVacancy.Skills), term), 10, 0 }));
+            scores.Add(new BsonDocument("$cond", new BsonArray { HasArrayMatch(nameof(JobVacancy.Keywords), term), 8, 0 }));
+            scores.Add(new BsonDocument("$cond", new BsonArray { RegexMatch(Field(nameof(JobVacancy.Department)), term), 4, 0 }));
+            scores.Add(new BsonDocument("$cond", new BsonArray { RegexMatch(Field(nameof(JobVacancy.Summary)), term), 3, 0 }));
+            scores.Add(new BsonDocument("$cond", new BsonArray { RegexMatch(Field(nameof(JobVacancy.Description)), term), 2, 0 }));
+        }
+        return new BsonDocument("$addFields", new BsonDocument("__careerRelevanceScore", new BsonDocument("$add", scores)));
+    }
+
+    internal static BsonDocument BuildRelevanceScoreProjectionStage() =>
+        new("$project", new BsonDocument("__careerRelevanceScore", 0));
+
+    private async Task<List<JobVacancy>> GetNullLastSortedPage<TValue>(
+        FilterDefinition<JobVacancy> filter,
+        int pageNo,
+        int pageSize,
+        System.Linq.Expressions.Expression<Func<JobVacancy, TValue?>> valueSelector,
+        SortDefinition<JobVacancy> valueSort)
+    {
+        // MongoDB sorts null and missing values first for ascending sorts. Put
+        // jobs with a known deadline/salary first so the labels match the list.
+        var f = Builders<JobVacancy>.Filter;
+        var withValue = filter & f.Ne(valueSelector, default(TValue));
+        var withoutValue = filter & f.Eq(valueSelector, default(TValue));
+        long withValueCount = await _jobs.CountDocumentsAsync(withValue);
+        int offset = (pageNo - 1) * pageSize;
+        if (offset >= withValueCount)
+        {
+            return await _jobs.Find(withoutValue)
+                .Sort(Builders<JobVacancy>.Sort.Descending(j => j.PublishedAt).Descending(j => j.CreatedDate))
+                .Skip((int)Math.Min(offset - withValueCount, int.MaxValue)).Limit(pageSize).ToListAsync();
+        }
+
+        int firstPageCount = (int)Math.Min(pageSize, withValueCount - offset);
+        var page = await _jobs.Find(withValue).Sort(valueSort).Skip(offset).Limit(firstPageCount).ToListAsync();
+        int remaining = pageSize - page.Count;
+        if (remaining > 0)
+        {
+            var noValueJobs = await _jobs.Find(withoutValue)
+                .Sort(Builders<JobVacancy>.Sort.Descending(j => j.PublishedAt).Descending(j => j.CreatedDate))
+                .Limit(remaining).ToListAsync();
+            page.AddRange(noValueJobs);
+        }
+        return page;
     }
 
     private async Task<List<JobVacancy>> GetEngagementSortedPage(
@@ -458,12 +996,18 @@ public class PublicCareerService : IPublicCareerService
         if (job is null || job.IsDeleted || !job.Status || !job.PublishToCareerPortal) return NotFound<PublicJobDetailsDto>("Job not found.");
         var company = await _companies.Find(c => c.CompanyId == job.CompanyId && c.Status && !c.IsDeleted && c.CareerPortalEnabled).FirstOrDefaultAsync();
         if (company is null) return NotFound<PublicJobDetailsDto>("Career portal not found.");
-        return new Result<PublicJobDetailsDto> { Success = true, MethodResult = ToDetails(job, company) };
+        var recruitmentConfig = await _recruitmentConfigs.Find(x => x.CompanyId == job.CompanyId && !x.IsDeleted).FirstOrDefaultAsync();
+        return new Result<PublicJobDetailsDto> { Success = true, MethodResult = ToDetails(job, company, recruitmentConfig) };
     }
 
-    private static PublicJobSummaryDto ToSummary(JobVacancy job, Company company)
+    private static PublicJobSummaryDto ToSummary(JobVacancy job, Company company, RecruitmentEnterpriseConfig? recruitmentConfig = null)
     {
         bool closed = IsClosed(job, out string? reason);
+        string applicationMode = NormalizeApplicationMode(job.ApplicationMode);
+        string? privacyNotice = string.IsNullOrWhiteSpace(recruitmentConfig?.CandidatePrivacyNoticeText) ? null : recruitmentConfig.CandidatePrivacyNoticeText.Trim();
+        string? privacyVersion = string.IsNullOrWhiteSpace(recruitmentConfig?.CandidatePrivacyNoticeVersion) ? null : recruitmentConfig.CandidatePrivacyNoticeVersion.Trim();
+        bool canApply = PublicCareerApplicationRules.CanAcceptApplications(!closed, applicationMode, privacyNotice, privacyVersion);
+        if (!closed && !canApply) reason = "This company is still setting up its candidate privacy notice.";
         return new PublicJobSummaryDto
         {
             PublicJobId = job.PublicJobId,
@@ -483,9 +1027,9 @@ public class PublicCareerService : IPublicCareerService
             Skills = job.Skills ?? [],
             PublishedAt = job.PublishedAt ?? job.CreatedDate,
             ApplicationDeadline = job.ApplicationDeadline,
-            ApplicationMode = NormalizeApplicationMode(job.ApplicationMode),
+            ApplicationMode = applicationMode,
             ExternalApplicationUrl = IsSafeExternalUrl(job.ExternalApplicationUrl) ? job.ExternalApplicationUrl : null,
-            CanApply = !closed,
+            CanApply = canApply,
             ApplicationClosedReason = reason,
             CompanyPublicCode = company.PublicCompanyCode,
             CompanyName = company.CompanyName,
@@ -497,9 +1041,12 @@ public class PublicCareerService : IPublicCareerService
         };
     }
 
-    private static PublicJobDetailsDto ToDetails(JobVacancy job, Company company)
+    private static PublicJobDetailsDto ToDetails(JobVacancy job, Company company, RecruitmentEnterpriseConfig? recruitmentConfig)
     {
-        var summary = ToSummary(job, company);
+        var summary = ToSummary(job, company, recruitmentConfig);
+        string? privacyNotice = string.IsNullOrWhiteSpace(recruitmentConfig?.CandidatePrivacyNoticeText) ? null : recruitmentConfig.CandidatePrivacyNoticeText.Trim();
+        string? privacyVersion = string.IsNullOrWhiteSpace(recruitmentConfig?.CandidatePrivacyNoticeVersion) ? null : recruitmentConfig.CandidatePrivacyNoticeVersion.Trim();
+        bool canApply = summary.CanApply;
         return new PublicJobDetailsDto
         {
             PublicJobId = summary.PublicJobId,
@@ -521,13 +1068,16 @@ public class PublicCareerService : IPublicCareerService
             ApplicationDeadline = summary.ApplicationDeadline,
             ApplicationMode = summary.ApplicationMode,
             ExternalApplicationUrl = summary.ExternalApplicationUrl,
-            CanApply = summary.CanApply,
+            CanApply = canApply,
             ApplicationClosedReason = summary.ApplicationClosedReason,
             CompanyPublicCode = summary.CompanyPublicCode,
             CompanyName = summary.CompanyName,
             CompanySlug = summary.CompanySlug,
             CompanyLogo = summary.CompanyLogo,
             Description = job.Description,
+            CandidatePrivacyNoticeText = privacyNotice,
+            CandidatePrivacyNoticeVersion = privacyVersion,
+            CandidateSourceOptions = PublicCareerApplicationRules.EffectiveCandidateSourceOptions(recruitmentConfig?.CandidateSourceOptions).ToList(),
             ReferenceCode = job.ReferenceCode,
             ExpiresAt = job.ExpiresAt
             ,FunctionalArea = job.FunctionalArea, Responsibilities = job.Responsibilities, RequiredSkills = job.RequiredSkills,
@@ -566,23 +1116,12 @@ public class PublicCareerService : IPublicCareerService
     private static Result<T> BadRequest<T>(string message) => new() { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = message };
     private static bool IsSafeExternalUrl(string? value)
     {
-        if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? uri)) return false;
-        return uri.Scheme == Uri.UriSchemeHttps && !uri.IsLoopback;
+        return PublicCareerApplicationRules.IsSafeExternalUrl(value);
     }
 
     private static string? ValidateApplicationRequest(PublicJobApplicationRequest? request)
     {
-        if (request is null) return "Application details are required.";
-        if (string.IsNullOrWhiteSpace(request.FirstName) || string.IsNullOrWhiteSpace(request.LastName)) return "First and last name are required.";
-        if (!Regex.IsMatch(request.FirstName.Trim(), "^[^=~<>;`%]{1,100}$") || !Regex.IsMatch(request.LastName.Trim(), "^[^=~<>;`%]{1,100}$")) return "Applicant name contains invalid characters.";
-        if (!new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(request.Email?.Trim())) return "A valid email address is required.";
-        if (!Regex.IsMatch(request.Phone?.Trim() ?? string.Empty, "^[6-9]\\d{9}$")) return "A valid Indian phone number is required.";
-        if (request.Experience < 0) return "Experience cannot be negative.";
-        if (request.NoticePeriodDays < 0) return "Notice period cannot be negative.";
-        if (!string.IsNullOrWhiteSpace(request.LinkedInUrl) && !IsSafeExternalUrl(request.LinkedInUrl)) return "LinkedIn URL must be a safe HTTPS URL.";
-        if (!string.IsNullOrWhiteSpace(request.PortfolioUrl) && !IsSafeExternalUrl(request.PortfolioUrl)) return "Portfolio URL must be a safe HTTPS URL.";
-        if (request.CurrentCompany?.Length > 200 || request.CurrentJobTitle?.Length > 200 || request.CoverLetter?.Length > 10000) return "One or more application fields exceed the allowed length.";
-        return null;
+        return PublicCareerApplicationRules.ValidateApplicationRequest(request);
     }
 
     private async Task QueueApplicationNotifications(Applicant applicant, JobVacancy job, Company company)
@@ -594,7 +1133,8 @@ public class PublicCareerService : IPublicCareerService
             $"<p>Hi {System.Net.WebUtility.HtmlEncode(candidateName)},</p><p>Thank you for applying for the <strong>{System.Net.WebUtility.HtmlEncode(job.Title)}</strong> position at {System.Net.WebUtility.HtmlEncode(company.CompanyName)}. Our hiring team will review your application and contact you with an update.</p>" : applicantTemplateBody;
 
         applicantSubject = HtmlTemplate.Render(applicantSubject, new { CandidateName = candidateName, JobTitle = job.Title, CompanyName = company.CompanyName });
-        applicantBody = HtmlTemplate.Render(applicantBody, new { CandidateName = candidateName, JobTitle = job.Title, CompanyName = company.CompanyName });
+        applicantBody = HtmlTemplate.Render(applicantBody, new { CandidateName = candidateName, JobTitle = job.Title, CompanyName = company.CompanyName, ApplicationReference = applicant.ApplicantId });
+        applicantBody += $"<p>Your application reference is <strong>{System.Net.WebUtility.HtmlEncode(applicant.ApplicantId)}</strong>. Keep it safe; you will need it with your email to check your application status.</p>";
 
         RepositoryEmailTemplate.TryGet(EnumsHelper.MailType.ApplyNowMailToHR, out var hrTemplateSubject, out var hrTemplateBody);
         string hrSubject = HtmlTemplate.Render(
@@ -607,33 +1147,63 @@ public class PublicCareerService : IPublicCareerService
 
         var internalRecipients = await GetRecruitmentRecipients(job.CompanyId, job.RecruiterContactEmail);
 
-        _priorityTaskQueue.QueueBackgroundWorkItem(async _ =>
+        await QueueApplicationEmail(
+            job.CompanyId,
+            $"public-application:{applicant.ApplicantId}:candidate",
+            "ApplicationReceivedCandidate",
+            applicant.Email,
+            applicant.ApplicantId,
+            null,
+            applicantSubject,
+            applicantBody);
+        foreach (var recipient in internalRecipients)
         {
-            await _middlewareService.EmailSendAndSave(new EmpEmailLogs
-            {
-                CompanyId = job.CompanyId,
-                UserTo = applicant.ApplicantId,
-                UserFrom = "public-career",
-                Email = applicant.Email,
-                Subject = applicantSubject,
-                Body = applicantBody,
-                EmailLogType = EnumsHelper.MailType.ApplyNowMailToApplicant
-            });
+            await QueueApplicationEmail(
+                job.CompanyId,
+                $"public-application:{applicant.ApplicantId}:hr:{HashToken(recipient.Email.Trim().ToLowerInvariant())}",
+                "ApplicationReceivedRecruiter",
+                recipient.Email,
+                applicant.ApplicantId,
+                recipient.UserId,
+                hrSubject,
+                hrBody);
+        }
+    }
 
-            foreach (var recipient in internalRecipients)
+    private async Task QueueApplicationEmail(
+        string companyId,
+        string dedupeKey,
+        string eventType,
+        string recipientEmail,
+        string applicantId,
+        string? recipientUserId,
+        string subject,
+        string htmlBody)
+    {
+        try
+        {
+            await _recruitmentEmailOutbox.InsertOneAsync(new RecruitmentEmailOutbox
             {
-                await _middlewareService.EmailSendAndSave(new EmpEmailLogs
-                {
-                    CompanyId = job.CompanyId,
-                    UserTo = recipient.UserId,
-                    UserFrom = "public-career",
-                    Email = recipient.Email,
-                    Subject = hrSubject,
-                    Body = hrBody,
-                    EmailLogType = EnumsHelper.MailType.ApplyNowMailToHR
-                });
-            }
-        }, priority: 1);
+                CompanyId = companyId,
+                RelatedApplicantId = applicantId,
+                DedupeKey = dedupeKey,
+                EventType = eventType,
+                RecipientEmail = recipientEmail,
+                RecipientUserId = recipientUserId,
+                Subject = subject,
+                HtmlBody = htmlBody,
+                AvailableAtUtc = DateTime.UtcNow,
+                CreatedBy = "public-career",
+                UpdatedBy = "public-career"
+            });
+        }
+        catch (MongoWriteException exception) when (exception.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+        {
+            bool alreadyQueued = await _recruitmentEmailOutbox
+                .Find(x => x.CompanyId == companyId && x.DedupeKey == dedupeKey)
+                .AnyAsync();
+            if (!alreadyQueued) throw;
+        }
     }
 
     private async Task<List<(string UserId, string Email)>> GetRecruitmentRecipients(string companyId, string? recruiterContactEmail)

@@ -9,6 +9,7 @@ namespace Codeji.CMS.Repository.Entities.Recruitments
         public string PublicJobId { get; set; } = string.Empty;
         public string Slug { get; set; } = string.Empty;
         public string? ReferenceCode { get; set; }
+        public string? HiringManagerUserId { get; set; }
         public string Title { get; set; }
         public int Vacancies { get; set; }
         public int JobType { get; set; }

@@ -25,4 +25,5 @@ public interface
     Task<Result> UpdateAppAccessForRole(string roleId, bool hasAppAccess);
     Task<bool> IsRoleTypeMatch(string roleId, EnumsHelper.Roles roleType, string companyId);
     Task<bool> IsModuleAccessibleForCompany(string moduleConstant, string companyId);
+    Task<Dictionary<string, bool>> GetModuleAvailabilityForCompany(string companyId, IReadOnlyCollection<string> moduleConstants);
 }

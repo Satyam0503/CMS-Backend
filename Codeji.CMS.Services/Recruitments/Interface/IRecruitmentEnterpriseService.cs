@@ -8,6 +8,8 @@ public interface IRecruitmentEnterpriseService
  Task<Result<RecruitmentAnalytics>> Analytics(string? vacancyId);
  Task<Result<List<RecruitmentSelectedCandidateQueueItem>>> SelectedCandidates(string? vacancyId);
  Task<Result<RecruitmentFeedbackSlaReport>> FeedbackSla(string? vacancyId);
+ Task<Result<RecruitmentStageSlaReport>> StageSla(string? vacancyId);
+ Task<Result<List<RecruitmentStageSlaPolicyDto>>> GetSlaPolicies();
  Task<Result<List<RecruitmentOfferPendingQueueItem>>> PendingOffers(string? vacancyId);
  Task<Result<List<RecruitmentPreboardingQueueItem>>> PreboardingQueue();
  Task<Result<string>> UpdatePreboarding(RecruitmentPreboardingUpdateCommand command, string actor);

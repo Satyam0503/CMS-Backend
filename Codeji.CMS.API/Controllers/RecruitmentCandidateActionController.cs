@@ -15,7 +15,13 @@ public sealed class RecruitmentCandidateActionController(IRecruitmentCandidateAc
     public async Task<IActionResult> RecordOfferView(RecruitmentCandidateOfferViewCommand command) => ToHttp(await service.RecordOfferView(command));
 
     [HttpPost("offer/respond"), EnableRateLimiting("career-sensitive")]
-    public async Task<IActionResult> RespondToOffer(RecruitmentCandidateOfferActionCommand command) => ToHttp(await service.RespondToOffer(command));
+    public async Task<IActionResult> RespondToOffer(RecruitmentCandidateOfferActionCommand command)
+    {
+        command.IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var userAgent = Request.Headers.UserAgent.ToString();
+        command.UserAgent = userAgent.Length <= 512 ? userAgent : userAgent[..512];
+        return ToHttp(await service.RespondToOffer(command));
+    }
 
     [HttpPost("interview/confirm"), EnableRateLimiting("career-sensitive")]
     public async Task<IActionResult> ConfirmInterview(RecruitmentCandidateInterviewActionCommand command) => ToHttp(await service.ConfirmInterview(command));

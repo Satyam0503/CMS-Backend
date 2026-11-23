@@ -17,6 +17,9 @@ public sealed class RecruitmentScreeningReview : BaseClass
     public string? Evidence { get; set; }
     public List<RecruitmentScreeningCriterion> Criteria { get; set; } = [];
     public string? LastCommandIdempotencyKey { get; set; }
+    /// <summary>Durable recovery state for the screening-triggered stage update.</summary>
+    public string StageSyncStatus { get; set; } = "NotRequired";
+    public string? StageSyncTargetStage { get; set; }
     public int Version { get; set; } = 1;
 }
 

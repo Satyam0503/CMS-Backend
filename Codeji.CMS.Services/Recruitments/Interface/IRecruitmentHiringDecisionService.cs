@@ -4,4 +4,7 @@ namespace Codeji.CMS.Services.Recruitments.Interface;
 public interface IRecruitmentHiringDecisionService
 {
     Task<Result<string>> Upsert(RecruitmentHiringDecisionCommand command, string actorUserId);
+    Task<Result<List<RecruitmentManagerReviewQueueItem>>> PendingManagerReviews();
+    Task<Result<string>> ReviewAsManager(RecruitmentManagerReviewCommand command, string actorUserId);
+    Task<int> RecoverPending(int batchSize = 50, CancellationToken cancellationToken = default);
 }

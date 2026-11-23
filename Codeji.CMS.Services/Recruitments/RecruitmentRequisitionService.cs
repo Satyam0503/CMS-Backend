@@ -12,12 +12,18 @@ namespace Codeji.CMS.Services.Recruitments;
 public sealed class RecruitmentRequisitionService(
     IMongoDbRepository<JobVacancy> vacancies,
     IMongoDbRepository<RecruitmentRequisition> requisitions,
-    IHttpContextAccessor context) : IRecruitmentRequisitionService
+    IHttpContextAccessor context,
+    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null) : IRecruitmentRequisitionService
 {
     public async Task<Result<string>> Upsert(RecruitmentRequisitionCommand command, string actorUserId)
     {
         var result = new Result<string> { Success = false, StatusCode = StatusCodes.Status400BadRequest };
         var companyId = CurrentContext.CompanyId(context);
+        if (!string.IsNullOrWhiteSpace(companyId))
+        {
+            var gate = await RecruitmentFeatureGate.Require<string>(configs, companyId, c => c.Requisitions, "Requisitions");
+            if (gate is not null) return gate;
+        }
         var key = command.IdempotencyKey?.Trim();
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(command.VacancyId) || string.IsNullOrWhiteSpace(command.PositionTitle))
             return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Company, vacancy, title, and idempotency key are required.");
@@ -51,7 +57,25 @@ public sealed class RecruitmentRequisitionService(
         return updated.Success ? Ok(result, existing.RequisitionId, "Requisition updated.") : Fail(result, RecruitmentErrorCodes.ConcurrencyConflict, "Requisition was changed by another user.", StatusCodes.Status409Conflict);
     }
 
+    public async Task<Result<RecruitmentRequisition>> GetByVacancy(string vacancyId)
+    {
+        var result = new Result<RecruitmentRequisition> { Success = false, StatusCode = StatusCodes.Status404NotFound };
+        var companyId = CurrentContext.CompanyId(context);
+        if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(vacancyId))
+            return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Company and vacancy ID are required.", StatusCodes.Status400BadRequest);
+
+        var requisition = await requisitions.FirstOrDefault(x => x.CompanyId == companyId && x.VacancyId == vacancyId.Trim() && !x.IsDeleted);
+        if (requisition is null)
+            return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Requisition not found for the specified vacancy.", StatusCodes.Status404NotFound);
+
+        result.Success = true;
+        result.StatusCode = StatusCodes.Status200OK;
+        result.MethodResult = requisition;
+        return result;
+    }
+
     private static bool IsAllowedTransition(string current, string next) => current == next || (current, next) switch { (RecruitmentRequisitionStatus.Draft, RecruitmentRequisitionStatus.PendingApproval) => true, (RecruitmentRequisitionStatus.PendingApproval, RecruitmentRequisitionStatus.Approved or RecruitmentRequisitionStatus.Rejected) => true, (RecruitmentRequisitionStatus.Approved, RecruitmentRequisitionStatus.Closed) => true, _ => false };
     private static Result<string> Ok(Result<string> result, string id, string message) { result.Success = true; result.StatusCode = StatusCodes.Status200OK; result.MethodResult = id; result.Message = message; return result; }
     private static Result<string> Fail(Result<string> result, string code, string message, int status = StatusCodes.Status400BadRequest) { result.ErrorCode = code; result.StatusCode = status; result.Message = message; return result; }
+    private static Result<T> Fail<T>(Result<T> result, string code, string message, int status = StatusCodes.Status400BadRequest) { result.Success = false; result.ErrorCode = code; result.StatusCode = status; result.Message = message; return result; }
 }

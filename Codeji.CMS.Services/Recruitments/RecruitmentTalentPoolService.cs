@@ -23,6 +23,16 @@ public sealed class RecruitmentTalentPoolService(IMongoDbRepository<Applicant> a
   var version=existing.Version<=0?1:existing.Version; if(command.ExpectedVersion.HasValue&&command.ExpectedVersion.Value!=version)return Fail(result,RecruitmentErrorCodes.ConcurrencyConflict,"Talent-pool member was changed by another user.",StatusCodes.Status409Conflict); var previousStatus=existing.Status;
   existing.Tags=tags; existing.Notes=command.Notes?.Trim(); existing.Status=status; existing.LastCommandIdempotencyKey=key; existing.Version=version+1; existing.UpdatedBy=actorUserId; existing.UpdatedDate=DateTime.UtcNow; var updated=await members.Update(Builders<RecruitmentTalentPoolMember>.Filter.Where(x=>x.CompanyId==companyId&&x.MemberId==existing.MemberId&&(x.Version==version||x.Version==0)),existing); if(!updated.Success)return Fail(result,RecruitmentErrorCodes.ConcurrencyConflict,"Talent-pool member was changed by another user.",StatusCodes.Status409Conflict); await WriteLog(applicant,companyId,actorUserId,$"Talent pool '{existing.PoolName}' member updated.",previousStatus,status); return Ok(result,existing.MemberId,"Talent-pool member updated.");
  }
+ public async Task<Result<List<RecruitmentTalentPoolMember>>> GetMembers(string? poolName, string? status = null)
+ {
+  var result = new Result<List<RecruitmentTalentPoolMember>> { Success = true, StatusCode = StatusCodes.Status200OK, MethodResult = [] };
+  var companyId = CurrentContext.CompanyId(context);
+  if (string.IsNullOrWhiteSpace(companyId)) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Company is required.");
+  var filterPool = poolName?.Trim(); var filterStatus = status?.Trim();
+  var all = await members.GetAll(x => x.CompanyId == companyId && !x.IsDeleted && (string.IsNullOrEmpty(filterPool) || x.PoolName == filterPool) && (string.IsNullOrEmpty(filterStatus) || x.Status == filterStatus));
+  result.MethodResult = all.ToList(); return result;
+ }
  private async Task WriteLog(Applicant a,string c,string actor,string d,string? p,string cur)=>await applicantLogs.AddOne(new ApplicantLogs{CompanyId=c,ApplicantId=a.ApplicantId,ApplicantName=$"{a.FirstName} {a.LastName}".Trim(),JobRole=a.VacancyId,UserId=actor,ActivityCategory=0,Description=d,EventType="TalentPoolUpdated",PreviousStage=p,CurrentStage=cur,CreatedBy=actor,UpdatedBy=actor});
  private static Result<string> Ok(Result<string> r,string id,string m){r.Success=true;r.StatusCode=StatusCodes.Status200OK;r.MethodResult=id;r.Message=m;return r;} private static Result<string> Fail(Result<string> r,string c,string m,int s=StatusCodes.Status400BadRequest){r.ErrorCode=c;r.StatusCode=s;r.Message=m;return r;}
+ private static Result<T> Fail<T>(Result<T> r, string c, string m, int s = StatusCodes.Status400BadRequest) { r.Success = false; r.ErrorCode = c; r.StatusCode = s; r.Message = m; return r; }
 }

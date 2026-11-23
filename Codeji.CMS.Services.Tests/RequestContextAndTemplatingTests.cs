@@ -46,6 +46,17 @@ public sealed class RequestContextAndTemplatingTests
         Assert.Equal("company-alpha", CurrentContext.CompanyId(Accessor(context)));
     }
 
+    [Fact]
+    public void CompanyId_WithDuplicateTenantClaims_FailsClosedAndIgnoresCallerHeader()
+    {
+        var context = Authenticated(
+            new Claim("company_id", "company-alpha"),
+            new Claim("company_id", "company-beta"));
+        context.Request.Headers["cId"] = "company-gamma";
+
+        Assert.Equal(string.Empty, CurrentContext.CompanyId(Accessor(context)));
+    }
+
     /// <summary>
     /// BUG-03. Anonymous requests should not be able to choose the tenant from a caller-
     /// supplied header. The repository should only use tenant context that was resolved from

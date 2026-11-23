@@ -58,6 +58,15 @@ namespace Codeji.CMS.API.App_Start
             }
             #endregion
 
+            // Authorization middleware should reject anonymous protected requests before
+            // tenant/user activity checks touch the database. Besides avoiding needless
+            // lookups, this preserves a reliable 401 when MongoDB is unavailable.
+            if (context.User?.Identity?.IsAuthenticated != true)
+            {
+                await next(context);
+                return;
+            }
+
             var con = await CompanyIdMiddleware.AuthenticateUserRequest(_httpContextAccessor);
             if (con == null)
             {

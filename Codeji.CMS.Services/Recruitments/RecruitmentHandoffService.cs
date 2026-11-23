@@ -62,6 +62,14 @@ public sealed class RecruitmentHandoffService(
             return result;
         }
 
+        if (applicant.ConsentStatus == "Anonymized")
+        {
+            result.ErrorCode = RecruitmentErrorCodes.InvalidTransition;
+            result.StatusCode = StatusCodes.Status409Conflict;
+            result.Message = "Anonymized candidate records cannot be used to create an employee. Reopen the hiring process with the candidate's current application and required privacy notice.";
+            return result;
+        }
+
         var canonicalApplication = applications is null
             ? null
             : await applications.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.VacancyId == applicant.VacancyId && !x.IsDeleted);
@@ -96,58 +104,17 @@ public sealed class RecruitmentHandoffService(
         var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
         var vacancy = vacancies is null ? null : await vacancies.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == applicant.VacancyId && !x.IsDeleted);
         var allowCustomWorkflows = config is null || config.AllowJobWorkflowCustomization;
-
         var isDirectVacancy = allowCustomWorkflows && string.Equals(vacancy?.WorkflowMode, "Direct", StringComparison.OrdinalIgnoreCase);
-        var requirePreboarding = (allowCustomWorkflows ? vacancy?.RequirePreboarding : null) ?? (allowCustomWorkflows ? vacancy?.WorkflowMode switch
-        {
-            "Direct" => false,
-            "Enterprise" => true,
-            _ => (bool?)null
-        } : null) ?? ((config is null || config.RequirePreboardingBeforeHandoff) && !string.Equals(config?.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase));
-        var startupFastTrack = isDirectVacancy || (config is not null && (!config.RequirePreboardingBeforeHandoff || string.Equals(config.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase)));
+        var requirePreboarding = RecruitmentPreboardingPolicy.Requires(config, vacancy);
         RecruitmentOffer? acceptedOffer = null;
 
+        var requireCandidateOfferAcceptance = offers is not null
+            && !isDirectVacancy
+            && !string.Equals(config?.RecruitmentMode, "Simple", StringComparison.OrdinalIgnoreCase);
         if (offers is not null)
         {
             acceptedOffer = await offers.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.Status == RecruitmentOfferStatus.Accepted && !x.IsDeleted);
-            if (acceptedOffer is null && (request.AutoCompletePreboarding || startupFastTrack))
-            {
-                // If an offer is Sent, Approved, or Draft and HR confirms handoff with fast-track, mark it Accepted automatically
-                var latestOffer = (await offers.GetAll(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted))
-                    ?.OrderByDescending(x => x.UpdatedDate ?? x.CreatedDate)
-                    .FirstOrDefault(x => x.Status is RecruitmentOfferStatus.Sent or RecruitmentOfferStatus.Approved or RecruitmentOfferStatus.Draft or RecruitmentOfferStatus.PendingApproval);
-                if (latestOffer is not null)
-                {
-                    latestOffer.Status = RecruitmentOfferStatus.Accepted;
-                    latestOffer.RespondedAtUtc = DateTime.UtcNow;
-                    latestOffer.UpdatedBy = actorUserId;
-                    latestOffer.UpdatedDate = DateTime.UtcNow;
-                    await offers.Update(MongoDB.Driver.Builders<RecruitmentOffer>.Filter.Where(x => x.CompanyId == companyId && x.OfferId == latestOffer.OfferId), latestOffer);
-                    acceptedOffer = latestOffer;
-                }
-            }
-            if (acceptedOffer is null && isDirectVacancy)
-            {
-                var salary = vacancy?.SalaryMin ?? 0;
-                var currency = string.IsNullOrWhiteSpace(vacancy?.Currency) ? (config?.CompensationCurrency ?? "INR") : vacancy.Currency;
-                acceptedOffer = new RecruitmentOffer
-                {
-                    CompanyId = companyId,
-                    ApplicantId = applicant.ApplicantId,
-                    VacancyId = applicant.VacancyId,
-                    Salary = salary,
-                    TotalCtc = salary,
-                    Currency = currency.ToUpperInvariant(),
-                    Status = RecruitmentOfferStatus.Accepted,
-                    SentAtUtc = DateTime.UtcNow,
-                    RespondedAtUtc = DateTime.UtcNow,
-                    LastCommandIdempotencyKey = $"fast-track-offer-{applicant.ApplicantId}",
-                    CreatedBy = actorUserId,
-                    UpdatedBy = actorUserId
-                };
-                await offers.AddOne(acceptedOffer);
-            }
-            if (acceptedOffer is null)
+            if (acceptedOffer is null && requireCandidateOfferAcceptance)
             {
                 result.ErrorCode = RecruitmentErrorCodes.InvalidTransition;
                 result.StatusCode = StatusCodes.Status409Conflict;
@@ -157,43 +124,33 @@ public sealed class RecruitmentHandoffService(
         }
 
         RecruitmentPreboardingCase? existingPreboarding = null;
-        if (preboardingCases is not null)
+        if (preboardingCases is not null && requirePreboarding)
         {
             existingPreboarding = await preboardingCases.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted);
-            if (request.AutoCompletePreboarding || startupFastTrack)
+            if (existingPreboarding is null)
             {
-                var codes = config?.PreboardingChecklist is { Count: > 0 } ? config.PreboardingChecklist : ["candidate-details", "documents", "verification"];
-                if (existingPreboarding is null)
+                var checklist = config?.PreboardingChecklist is { Count: > 0 } ? config.PreboardingChecklist : ["candidate-details", "documents", "verification"];
+                var created = new RecruitmentPreboardingCase
                 {
-                    existingPreboarding = new RecruitmentPreboardingCase
-                    {
-                        CompanyId = companyId,
-                        ApplicantId = applicant.ApplicantId,
-                        OfferId = string.Empty,
-                        Status = "ReadyForHire",
-                        OwnerUserId = actorUserId,
-                        LastCommandIdempotencyKey = request.IdempotencyKey.Trim(),
-                        Tasks = codes.Select(code => new RecruitmentPreboardingTask { Code = code, Title = code.Replace("-", " "), Status = "Completed", CompletedAtUtc = DateTime.UtcNow }).ToList(),
-                        CreatedBy = actorUserId,
-                        UpdatedBy = actorUserId
-                    };
-                    await preboardingCases.AddOne(existingPreboarding);
-                }
-                else if (existingPreboarding.Tasks.Any(x => x.Status is not ("Completed" or "Skipped")))
-                {
-                    foreach (var task in existingPreboarding.Tasks.Where(x => x.Status is not ("Completed" or "Skipped")))
-                    {
-                        task.Status = "Completed";
-                        task.CompletedAtUtc = DateTime.UtcNow;
-                    }
-                    existingPreboarding.Status = "ReadyForHire";
-                    existingPreboarding.UpdatedBy = actorUserId;
-                    existingPreboarding.UpdatedDate = DateTime.UtcNow;
-                    await preboardingCases.Update(MongoDB.Driver.Builders<RecruitmentPreboardingCase>.Filter.Where(x => x.CompanyId == companyId && x.CaseId == existingPreboarding.CaseId), existingPreboarding);
-                }
+                    CompanyId = companyId,
+                    ApplicantId = applicant.ApplicantId,
+                    OfferId = acceptedOffer?.OfferId ?? string.Empty,
+                    Status = RecruitmentPreboardingStatus.PendingCandidateDetails,
+                    OwnerUserId = actorUserId,
+                    LastCommandIdempotencyKey = $"handoff-checklist:{request.IdempotencyKey.Trim()}",
+                    Tasks = checklist.Select(code => new RecruitmentPreboardingTask { Code = code, Title = code.Replace("-", " "), Status = "Pending" }).ToList(),
+                    CreatedBy = actorUserId,
+                    UpdatedBy = actorUserId
+                };
+                var added = await preboardingCases.AddOne(created);
+                result.ErrorCode = added.Success ? RecruitmentErrorCodes.InvalidTransition : RecruitmentErrorCodes.ConcurrencyConflict;
+                result.StatusCode = StatusCodes.Status409Conflict;
+                result.Message = added.Success
+                    ? "A preboarding checklist was created. Verify each task, save the checklist, and retry the handoff."
+                    : "The preboarding checklist could not be created. Please retry.";
+                return result;
             }
-
-            if (existingPreboarding is null || existingPreboarding.Tasks.Any(x => x.Status is not ("Completed" or "Skipped")))
+            if (existingPreboarding.Tasks.Any(x => !RecruitmentPreboardingTaskRules.IsResolved(x)))
             {
                 result.ErrorCode = RecruitmentErrorCodes.InvalidTransition;
                 result.StatusCode = StatusCodes.Status409Conflict;
@@ -462,6 +419,72 @@ public sealed class RecruitmentHandoffService(
             CreatedBy = actorUserId,
             UpdatedBy = actorUserId
         });
+
+        // Sibling Application Auto-Cascade: Auto-withdraw any other active applications for this candidate in the same company
+        try
+        {
+            var candidateEmail = (applicant.Email ?? request.Email)?.Trim().ToLowerInvariant();
+            if (!string.IsNullOrEmpty(candidateEmail))
+            {
+                var siblings = await applicants.GetAll(x =>
+                    x.CompanyId == companyId &&
+                    x.ApplicantId != applicant.ApplicantId &&
+                    !x.IsDeleted &&
+                    x.ActivityType != ActivityType.Selected &&
+                    x.ActivityType != ActivityType.Rejected &&
+                    x.ActivityType != ActivityType.ReApply);
+
+                foreach (var sibling in siblings.Where(s => string.Equals(s.Email?.Trim(), candidateEmail, StringComparison.OrdinalIgnoreCase)))
+                {
+                    var prevStage = sibling.ActivityType.ToString();
+                    sibling.ActivityType = ActivityType.Rejected;
+                    sibling.UpdatedBy = actorUserId;
+                    sibling.UpdatedDate = DateTime.UtcNow;
+                    await applicants.Update(Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == sibling.ApplicantId), sibling);
+
+                    if (applications is not null)
+                    {
+                        var siblingApp = await applications.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == sibling.ApplicantId && !x.IsDeleted);
+                        if (siblingApp is not null)
+                        {
+                            siblingApp.StageHistory.Add(new RecruitmentApplicationStageEvent
+                            {
+                                FromStage = siblingApp.CurrentStage,
+                                ToStage = "Withdrawn",
+                                ActorUserId = actorUserId,
+                                Reason = $"Auto-withdrawn: Candidate accepted offer and was hired for vacancy {applicant.VacancyId} with Employee ID {assignedEmployeeId}."
+                            });
+                            siblingApp.CurrentStage = "Withdrawn";
+                            siblingApp.Version = (siblingApp.Version <= 0 ? 1 : siblingApp.Version) + 1;
+                            siblingApp.UpdatedBy = actorUserId;
+                            siblingApp.UpdatedDate = DateTime.UtcNow;
+                            await applications.Update(Builders<RecruitmentJobApplication>.Filter.Where(x => x.CompanyId == companyId && x.ApplicationId == siblingApp.ApplicationId), siblingApp);
+                        }
+                    }
+
+                    await applicantLogs.AddOne(new ApplicantLogs
+                    {
+                        CompanyId = companyId,
+                        ApplicantId = sibling.ApplicantId,
+                        ApplicantName = $"{sibling.FirstName} {sibling.LastName}".Trim(),
+                        JobRole = sibling.VacancyId,
+                        UserId = actorUserId,
+                        ActivityCategory = 0,
+                        Description = $"Application auto-withdrawn: Candidate accepted offer and was hired for vacancy {applicant.VacancyId}.",
+                        EventType = "SiblingApplicationAutoWithdrawn",
+                        PreviousStage = prevStage,
+                        CurrentStage = "Withdrawn",
+                        CreatedBy = actorUserId,
+                        UpdatedBy = actorUserId
+                    });
+                }
+            }
+        }
+        catch
+        {
+            // Defensive isolation: Sibling cascade errors must not roll back or block the primary handoff.
+        }
+
         result.Success = true;
         result.StatusCode = StatusCodes.Status200OK;
         result.MethodResult = handoff.EmployeeUserId;

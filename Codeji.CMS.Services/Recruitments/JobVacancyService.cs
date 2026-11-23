@@ -4,6 +4,7 @@ using Codeji.CMS.Domain.Models;
 using Codeji.CMS.DTO.RequestModels;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Recruitments;
+using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Services.Recruitments.Interface;
 using MongoDB.Driver;
 using System.Text.RegularExpressions;
@@ -21,15 +22,21 @@ namespace Codeji.CMS.Services.Recruitments
         readonly IMapper _mapper;
         readonly ICareerNotificationService _careerNotifications;
         readonly IHttpContextAccessor _httpContextAccessor;
+        readonly IMongoDbRepository<EmpUser>? _employeeRepository;
+        readonly IMongoDbRepository<RecruitmentEnterpriseConfig>? _recruitmentConfigRepository;
 
         public JobVacancyService(IMongoDbRepository<JobVacancy> jobVacancyRepo, IMongoDbRepository<Applicant> applicantRepo, IMapper mapper,
-            ICareerNotificationService careerNotifications, IHttpContextAccessor httpContextAccessor)
+            ICareerNotificationService careerNotifications, IHttpContextAccessor httpContextAccessor,
+            IMongoDbRepository<EmpUser>? employeeRepository = null,
+            IMongoDbRepository<RecruitmentEnterpriseConfig>? recruitmentConfigRepository = null)
         {
             _jobVacancyRepo = jobVacancyRepo;
             _mapper = mapper;
             _applicantRepository = applicantRepo;
             _careerNotifications = careerNotifications;
             _httpContextAccessor = httpContextAccessor;
+            _employeeRepository = employeeRepository;
+            _recruitmentConfigRepository = recruitmentConfigRepository;
         }
 
         public async Task<Result<JobVacancyModel>> AddJobVacancy(JobVacancyModel jobVacancy)
@@ -38,6 +45,10 @@ namespace Codeji.CMS.Services.Recruitments
             if (!validation.Success) return new Result<JobVacancyModel> { Success = false, Message = validation.Message, ErrorCode = RecruitmentErrorCodes.InvalidRequest };
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
             if (string.IsNullOrWhiteSpace(companyId)) return new Result<JobVacancyModel> { Success = false, Message = "A valid company context is required.", ErrorCode = RecruitmentErrorCodes.PermissionDenied };
+            if (await RequiresHiringManagerReview(companyId) && string.IsNullOrWhiteSpace(jobVacancy.HiringManagerUserId))
+                return new Result<JobVacancyModel> { Success = false, Message = "Assign an active hiring manager before saving this vacancy; manager review is enabled for the company.", ErrorCode = RecruitmentErrorCodes.InvalidRequest, StatusCode = 400 };
+            if (!string.IsNullOrWhiteSpace(jobVacancy.HiringManagerUserId) && !await IsActiveCompanyManager(companyId, jobVacancy.HiringManagerUserId.Trim()))
+                return new Result<JobVacancyModel> { Success = false, Message = "Hiring manager must be an active employee in the current company.", ErrorCode = RecruitmentErrorCodes.InvalidRequest, StatusCode = 400 };
             JobVacancy vacancy = new JobVacancy()
             {
                 CompanyId = companyId,
@@ -49,6 +60,7 @@ namespace Codeji.CMS.Services.Recruitments
                 PublicJobId = string.IsNullOrWhiteSpace(jobVacancy.PublicJobId) ? $"JOB-{Guid.NewGuid():N}" : jobVacancy.PublicJobId.Trim(),
                 Slug = await BuildUniqueSlug(string.IsNullOrWhiteSpace(jobVacancy.Slug) ? jobVacancy.Title : jobVacancy.Slug),
                 ReferenceCode = jobVacancy.ReferenceCode,
+                HiringManagerUserId = string.IsNullOrWhiteSpace(jobVacancy.HiringManagerUserId) ? null : jobVacancy.HiringManagerUserId.Trim(),
                 PublishToCareerPortal = jobVacancy.PublishToCareerPortal ?? true,
                 PublishToMasterPortal = jobVacancy.PublishToMasterPortal ?? false,
                 ApplicationMode = NormalizeApplicationMode(jobVacancy.ApplicationMode),
@@ -82,6 +94,8 @@ namespace Codeji.CMS.Services.Recruitments
             };
 
             Result saved = await _jobVacancyRepo.AddOne(vacancy);
+            if (!saved.Success)
+                return new Result<JobVacancyModel> { Success = false, StatusCode = saved.StatusCode is > 0 and < 400 ? 500 : saved.StatusCode, ErrorCode = saved.ErrorCode ?? RecruitmentErrorCodes.WriteFailed, Message = "The vacancy could not be saved. Please retry." };
             if (saved.Success)
                 await _careerNotifications.HandleJobSaved(null, vacancy);
 
@@ -96,8 +110,14 @@ namespace Codeji.CMS.Services.Recruitments
             var validation = ValidateJob(jobVacancy);
             if (!validation.Success) return new Result<JobVacancyModel> { Success = false, Message = validation.Message, ErrorCode = RecruitmentErrorCodes.InvalidRequest };
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (string.IsNullOrWhiteSpace(companyId)) return new Result<JobVacancyModel> { Success = false, Message = "A valid company context is required.", ErrorCode = RecruitmentErrorCodes.PermissionDenied };
             JobVacancy? existing = await _jobVacancyRepo.FirstOrDefault(x => x.JobId == jobId && x.CompanyId == companyId, WithDeletedObjects: true);
             if (existing is null) return new Result<JobVacancyModel> { Success = false, Message = "Job vacancy was not found.", ErrorCode = RecruitmentErrorCodes.JobNotFound };
+            var managerId = jobVacancy.HiringManagerUserId is null ? existing.HiringManagerUserId : jobVacancy.HiringManagerUserId.Trim();
+            if (await RequiresHiringManagerReview(companyId) && string.IsNullOrWhiteSpace(managerId))
+                return new Result<JobVacancyModel> { Success = false, Message = "Assign an active hiring manager before saving this vacancy; manager review is enabled for the company.", ErrorCode = RecruitmentErrorCodes.InvalidRequest, StatusCode = 400 };
+            if (!string.IsNullOrWhiteSpace(managerId) && !await IsActiveCompanyManager(companyId, managerId))
+                return new Result<JobVacancyModel> { Success = false, Message = "Hiring manager must be an active employee in the current company.", ErrorCode = RecruitmentErrorCodes.InvalidRequest, StatusCode = 400 };
             JobVacancy editedJob = new JobVacancy()
             {
                 JobId = jobId,
@@ -110,6 +130,7 @@ namespace Codeji.CMS.Services.Recruitments
                 PublicJobId = string.IsNullOrWhiteSpace(existing?.PublicJobId) ? $"JOB-{Guid.NewGuid():N}" : existing.PublicJobId,
                 Slug = string.IsNullOrWhiteSpace(existing?.Slug) ? await BuildUniqueSlug(jobVacancy.Title, jobId) : existing.Slug,
                 ReferenceCode = jobVacancy.ReferenceCode ?? existing?.ReferenceCode,
+                HiringManagerUserId = string.IsNullOrWhiteSpace(managerId) ? null : managerId,
                 PublishToCareerPortal = jobVacancy.PublishToCareerPortal ?? existing?.PublishToCareerPortal ?? true,
                 PublishToMasterPortal = jobVacancy.PublishToMasterPortal ?? existing?.PublishToMasterPortal ?? false,
                 ApplicationMode = NormalizeApplicationMode(jobVacancy.ApplicationMode ?? existing?.ApplicationMode),
@@ -151,6 +172,8 @@ namespace Codeji.CMS.Services.Recruitments
             };
             Expression<Func<JobVacancy, bool>> whereCondition = x => x.JobId == jobId && x.CompanyId == companyId;
             Result saved = await _jobVacancyRepo.Update(whereCondition, editedJob);
+            if (!saved.Success)
+                return new Result<JobVacancyModel> { Success = false, StatusCode = saved.StatusCode is > 0 and < 400 ? 500 : saved.StatusCode, ErrorCode = saved.ErrorCode ?? RecruitmentErrorCodes.WriteFailed, Message = "The vacancy changes could not be saved. Please retry." };
             if (saved.Success)
                 await _careerNotifications.HandleJobSaved(existing, editedJob);
             return new Result<JobVacancyModel>
@@ -280,6 +303,19 @@ namespace Codeji.CMS.Services.Recruitments
         {
             if (!string.Equals(NormalizeApplicationMode(mode), "External", StringComparison.OrdinalIgnoreCase)) return null;
             return Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri.Scheme == Uri.UriSchemeHttps && !uri.IsLoopback ? url : null;
+        }
+
+        private async Task<bool> IsActiveCompanyManager(string companyId, string managerUserId)
+        {
+            if (_employeeRepository is null) return false;
+            return await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == managerUserId && x.Status && !x.IsDeleted) is not null;
+        }
+
+        private async Task<bool> RequiresHiringManagerReview(string companyId)
+        {
+            if (_recruitmentConfigRepository is null) return false;
+            var config = await _recruitmentConfigRepository.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
+            return config?.HiringManagerReview == true;
         }
 
         private static Result ValidateJob(JobVacancyModel model)

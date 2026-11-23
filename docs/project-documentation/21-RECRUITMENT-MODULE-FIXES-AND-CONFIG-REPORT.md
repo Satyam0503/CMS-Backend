@@ -60,8 +60,9 @@ Modern Applicant Tracking Systems (**Ashby, Lever, Greenhouse, Workday**) separa
 - **Root Cause**: `RecruitmentHandoffService.HandoffApplicantToEmployee` required both a `RecruitmentPreboardingCase` in `ReadyForHandoff` status (`candidate-details`, `documents`, `verification` all `Completed`) and `offer.Status == Accepted`, yet no service automatically initialized the `RecruitmentPreboardingCase` upon offer acceptance and the Lifecycle Drawer had no Preboarding checklist UI.
 - **Fix Applied**:
   - Updated [`RecruitmentOfferService.cs`](../../CMS-Backend-Core/Codeji.CMS.Services/Recruitments/RecruitmentOfferService.cs) to automatically provision a `RecruitmentPreboardingCase` populated with the tenant's configured `PreboardingChecklist` tasks as soon as an offer transitions to `Accepted`.
-  - Updated [`RecruitmentHandoffService.cs`](../../CMS-Backend-Core/Codeji.CMS.Services/Recruitments/RecruitmentHandoffService.cs) to honor `request.AutoCompletePreboarding` and `RequirePreboardingBeforeHandoff == false` (Startup mode), auto-completing the preboarding tasks and marking `Sent`/`Approved` offers `Accepted` during HR handoff.
-  - Added an interactive **Preboarding Readiness Checklist** + **Auto-verify on handoff** toggle directly inside the `Employee Handoff` step in [`RecruitmentLifecycleDrawer.tsx`](../../CMS-React/src/app/modules/recruitment/applications/components/RecruitmentLifecycleDrawer.tsx).
+  - Removed the prior behavior that treated an HR handoff request as candidate offer acceptance or marked unverified preboarding tasks complete.
+  - The handoff API now creates a missing configured checklist with all tasks Pending and stops before employee creation. The recruiter must save each real task status and retry.
+  - The Lifecycle Drawer now loads persisted preboarding task statuses and exposes explicit status choices. Direct/Simple workflows explain that the checklist is skipped by configuration; there is no auto-verify switch.
 
 ---
 
@@ -116,25 +117,22 @@ Modern Applicant Tracking Systems (**Ashby, Lever, Greenhouse, Workday**) separa
 
 Administrators can switch between presets or customize individual flags at any time in **Recruitment $\rightarrow$ Settings**:
 
+**Customization status:** the config API stores these choices, but source inspection found several flags without consistent service-side enforcement (including requisitions, negotiation, SLA tracking, automation, internal mobility/rehire, and hiring-manager review). Treat the matrix as intended policy, not proof that every plan gate is production-complete. See the current release gates report before enabling paid plan entitlements.
+
 | Governance Flag | Startup (`Simple`) | Mid-Market (`Standard`) | Enterprise (`Enterprise`) | Effect on Pipeline |
 | :--- | :---: | :---: | :---: | :--- |
 | `applicationReview` | `false` | `true` | `true` | Requires screening review before interview scheduling |
 | `autoAdvanceOnScreening` | `true` | `true` | `true` | Automatically moves `Pass -> Shortlisted`, `Hold -> OnHold`, `Reject -> Rejected` |
 | `interviewScheduling` | `false` | `true` | `true` | Enables structured multi-round interview scheduling |
 | `requireInterviewBeforeDecision` | `false` | `true` | `true` | When `false`, startups can approve candidates directly after resume review |
-| `offerApproval` | `false` | `true` | `true` | When `false`, allows direct `Draft -> Sent/Accepted` offers without approval reference |
+| `offerApproval` | `false` | `true` | `true` | When `false`, an offer may be sent without internal approval; candidate acceptance still requires a candidate response |
 | `preboarding` | `false` | `true` | `true` | Enables preboarding checklist tracking |
-| `requirePreboardingBeforeHandoff` | `false` | `false` | `true` | When `false`, Employee Handoff auto-completes preboarding & offer acceptance in one click |
-| `allowMultiVacancyApplications` | `true` | `true` | `true` | Allows a candidate email to apply to multiple distinct vacancies |
+| `requirePreboardingBeforeHandoff` | `false` | `false` | `true` | When `false`, the checklist is not required; the system never marks checks complete or fabricates candidate offer acceptance |
+| `allowMultiVacancyApplications` | `true` | `true` | `true` | When enabled, a recent application only blocks reapplying to that same vacancy; when disabled, the six-month cooldown is company-wide |
 
 ---
 
 ## 5. Verification Results
 
-1. **Backend Unit & Integration Test Suites**:
-   - `Codeji.CMS.Services.Tests`: **74 / 74 Passed** (0 failed, 0 skipped)
-   - `Codeji.CMS.API.Tests`: **31 / 31 Passed** (0 failed, 0 skipped)
-2. **Frontend TypeScript Build & Unit Test Suite**:
-   - `npm run build` (`tsc && vite build`): **Succeeded with 0 errors**
-   - `npx vitest run`: **40 / 40 Passed** across 9 test suites
+The initial counts above were an earlier implementation snapshot. Current verification is recorded in [the ATS implementation and release gates report](../../../docs/ats-audit/implementation-and-release-gates.md). That report distinguishes passing unit tests from the still-required production-like Mongo, API integration, security, and end-to-end checks; these results do not certify the full ATS as production ready.
 

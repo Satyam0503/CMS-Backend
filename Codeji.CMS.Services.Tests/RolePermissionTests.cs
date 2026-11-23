@@ -303,6 +303,38 @@ public class RolePermissionTests
     }
 
     [Fact]
+    public async Task GetModuleAvailabilityForCompany_ReturnsRequestedModulesAndFailsClosedForMissingOrDisabledModules()
+    {
+        var fixture = new RoleFixture();
+        fixture.ModuleRepository.Setup(x => x.GetAll(null, false, true)).ReturnsAsync(
+        [
+            new Module { ModuleId = 1, ModuleConstant = "Attendance", ModuleName = "Attendance" },
+            new Module { ModuleId = 2, ModuleConstant = "Leave_Management", ModuleName = "Leave" },
+        ]);
+        fixture.ModulePermissionRepository.Setup(x => x.GetAll(null, false, true)).ReturnsAsync(
+        [
+            new ModulePermission { ModulePermissionId = 10, ModuleId = 1, PermissionId = 1 },
+            new ModulePermission { ModulePermissionId = 20, ModuleId = 2, PermissionId = 1 },
+        ]);
+        var companyPermissions = new[]
+        {
+            new RolePermission { CompanyId = "company-1", RoleId = "role-1", ModulePermissionId = 10, IsAccessible = true },
+            new RolePermission { CompanyId = "company-1", RoleId = "role-1", ModulePermissionId = 20, IsAccessible = false },
+            new RolePermission { CompanyId = "company-2", RoleId = "role-2", ModulePermissionId = 20, IsAccessible = true },
+        };
+        fixture.RolePermissionRepository.Setup(x => x.Get(It.IsAny<Expression<Func<RolePermission, bool>>>(), null, false))
+            .Returns((Expression<Func<RolePermission, bool>> predicate, object? _, bool _) => companyPermissions.Where(predicate.Compile()).AsQueryable());
+
+        var availability = await fixture.Service.GetModuleAvailabilityForCompany(
+            "company-1", ["Attendance", "Leave_Management", "Missing"]);
+
+        Assert.True(availability["Attendance"]);
+        Assert.False(availability["Leave_Management"]);
+        Assert.False(availability["Missing"]);
+        Assert.Equal(3, availability.Count);
+    }
+
+    [Fact]
     public async Task AddDefaultRole_CopiesOnlyOneActiveTemplatePerTypeAndWaitsForDistinctPermissions()
     {
         var fixture = new RoleFixture();

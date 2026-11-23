@@ -102,21 +102,34 @@ public sealed class RecruitmentScreeningService(
             return Fail(RecruitmentErrorCodes.InvalidRequest, "A rejection reason is required.");
         var applicant = await applicants.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && !x.IsDeleted);
         if (applicant is null) return Fail(RecruitmentErrorCodes.InvalidRequest, "Applicant was not found in the current company.");
-        if (applicant.ActivityType == ActivityType.Rejected) return Fail(RecruitmentErrorCodes.InvalidTransition, "Rejected applications cannot be screened.", StatusCodes.Status409Conflict);
-
         var existing = string.IsNullOrWhiteSpace(command.ReviewId)
             ? await reviews.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.ReviewerUserId == reviewer && x.LastCommandIdempotencyKey == key && !x.IsDeleted)
             : await reviews.FirstOrDefault(x => x.CompanyId == companyId && x.ReviewId == command.ReviewId && !x.IsDeleted);
-        if (existing is not null && existing.LastCommandIdempotencyKey == key) return Ok(existing.ReviewId, "Screening command already applied.");
+        if (existing is not null && existing.LastCommandIdempotencyKey == key)
+        {
+            // Pending work is also processed by a hosted worker; replay gives an immediate recovery attempt.
+            var synchronized = await ProcessPendingStageSync(existing, applicant, actorUserId);
+            return synchronized
+                ? Ok(existing.ReviewId, "Screening command already applied.")
+                : Fail(RecruitmentErrorCodes.StageSyncPending, "Screening was saved, and its stage update is queued for recovery.", StatusCodes.Status503ServiceUnavailable);
+        }
+        if (applicant.ActivityType == ActivityType.Rejected)
+            return Fail(RecruitmentErrorCodes.InvalidTransition, "Rejected applications cannot be screened.", StatusCodes.Status409Conflict);
 
         if (existing is null)
         {
-            var entity = new RecruitmentScreeningReview { CompanyId = companyId, ApplicantId = applicant.ApplicantId, VacancyId = command.VacancyId, ReviewerUserId = reviewer, ResumeVersion = command.ResumeVersion?.Trim(), Score = command.Score, Decision = decision!, RejectionReason = command.RejectionReason?.Trim(), Evidence = command.Evidence?.Trim(), Criteria = criteriaToSave.Select(Map).ToList(), LastCommandIdempotencyKey = key, CreatedBy = actorUserId, UpdatedBy = actorUserId };
+            var targetStage = DetermineNextStage(applicant.ActivityType, decision!, config);
+            var entity = new RecruitmentScreeningReview { CompanyId = companyId, ApplicantId = applicant.ApplicantId, VacancyId = command.VacancyId, ReviewerUserId = reviewer, ResumeVersion = command.ResumeVersion?.Trim(), Score = command.Score, Decision = decision!, RejectionReason = command.RejectionReason?.Trim(), Evidence = command.Evidence?.Trim(), Criteria = criteriaToSave.Select(Map).ToList(), LastCommandIdempotencyKey = key, StageSyncTargetStage = targetStage?.ToString(), StageSyncStatus = targetStage.HasValue ? "Pending" : "NotRequired", CreatedBy = actorUserId, UpdatedBy = actorUserId };
             if (string.IsNullOrWhiteSpace(entity.ReviewId))
                 entity.ReviewId = Guid.NewGuid().ToString("N");
             var saved = await reviews.AddOne(entity);
             if (!saved.Success) return Fail(RecruitmentErrorCodes.ConcurrencyConflict, "Screening review could not be saved.", StatusCodes.Status409Conflict);
-            await AutoAdvanceApplicantStage(companyId, applicant, decision!, config, actorUserId);
+            var synchronized = await ProcessPendingStageSync(entity, applicant, actorUserId);
+            if (!synchronized)
+            {
+                await WriteLog(applicant, entity, actorUserId, null);
+                return Fail(RecruitmentErrorCodes.StageSyncPending, "Screening was saved, and its stage update is queued for recovery.", StatusCodes.Status503ServiceUnavailable);
+            }
             await WriteLog(applicant, entity, actorUserId, null);
             return Ok(entity.ReviewId, "Screening review saved.");
         }
@@ -124,72 +137,157 @@ public sealed class RecruitmentScreeningService(
         var version = existing.Version <= 0 ? 1 : existing.Version;
         if (command.ExpectedVersion.HasValue && command.ExpectedVersion.Value != version) return Fail(RecruitmentErrorCodes.ConcurrencyConflict, "Screening review was changed by another user.", StatusCodes.Status409Conflict);
         var previous = existing.Decision;
+        var updateTargetStage = DetermineNextStage(applicant.ActivityType, decision!, config);
         existing.VacancyId = command.VacancyId; existing.ResumeVersion = command.ResumeVersion?.Trim(); existing.Score = command.Score; existing.Decision = decision!; existing.RejectionReason = command.RejectionReason?.Trim(); existing.Evidence = command.Evidence?.Trim(); existing.Criteria = criteriaToSave.Select(Map).ToList(); existing.LastCommandIdempotencyKey = key; existing.Version = version + 1; existing.UpdatedBy = actorUserId; existing.UpdatedDate = DateTime.UtcNow;
+        existing.StageSyncTargetStage = updateTargetStage?.ToString(); existing.StageSyncStatus = updateTargetStage.HasValue ? "Pending" : "NotRequired";
         var updated = await reviews.Update(Builders<RecruitmentScreeningReview>.Filter.Where(x => x.CompanyId == companyId && x.ReviewId == existing.ReviewId && (x.Version == version || x.Version == 0)), existing);
         if (!updated.Success) return Fail(RecruitmentErrorCodes.ConcurrencyConflict, "Screening review was changed by another user.", StatusCodes.Status409Conflict);
-        await AutoAdvanceApplicantStage(companyId, applicant, decision!, config, actorUserId);
+        var stageSynchronized = await ProcessPendingStageSync(existing, applicant, actorUserId);
+        if (!stageSynchronized)
+        {
+            await WriteLog(applicant, existing, actorUserId, previous);
+            return Fail(RecruitmentErrorCodes.StageSyncPending, "Screening was saved, and its stage update is queued for recovery.", StatusCodes.Status503ServiceUnavailable);
+        }
         await WriteLog(applicant, existing, actorUserId, previous);
         return Ok(existing.ReviewId, "Screening review updated.");
     }
 
-    private async Task AutoAdvanceApplicantStage(string companyId, Applicant applicant, string decision, RecruitmentEnterpriseConfig? config, string actorUserId)
+    private async Task<bool> ProcessPendingStageSync(RecruitmentScreeningReview review, Applicant applicant, string actorUserId)
     {
-        // REC-BUG-06 Fix: Automatically advance Applicant.ActivityType and canonical RecruitmentJobApplication.CurrentStage when AutoAdvanceOnScreening is enabled (default true)
-        if (!(config?.AutoAdvanceOnScreening ?? true)) return;
+        if (!string.Equals(review.StageSyncStatus, "Pending", StringComparison.OrdinalIgnoreCase) ||
+            !Enum.TryParse<ActivityType>(review.StageSyncTargetStage, true, out var targetStage) || !Enum.IsDefined(targetStage)) return true;
 
-        ActivityType? nextStage = decision switch
+        if (!await ApplyScreeningStage(companyId: review.CompanyId, applicant, targetStage, review.Decision, actorUserId)) return false;
+        return await SetStageSyncStatus(review, "Resolved", actorUserId);
+    }
+
+    private async Task<bool> ApplyScreeningStage(string companyId, Applicant applicant, ActivityType targetStage, string decision, string actorUserId)
+    {
+        var previousApplicantStage = applicant.ActivityType;
+        var nextStage = targetStage;
+
+        var canonical = applications is null ? null : await applications.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.VacancyId == applicant.VacancyId && !x.IsDeleted);
+        if (canonical is not null && !string.Equals(canonical.CurrentStage, nextStage.ToString(), StringComparison.OrdinalIgnoreCase))
         {
-            RecruitmentScreeningDecision.Pass when applicant.ActivityType is ActivityType.New or ActivityType.InProgress or ActivityType.OnHold => ActivityType.Shortlisted,
-            RecruitmentScreeningDecision.Hold when applicant.ActivityType is ActivityType.New or ActivityType.InProgress or ActivityType.Shortlisted => ActivityType.OnHold,
-            RecruitmentScreeningDecision.Reject when applicant.ActivityType is not ActivityType.Selected => ActivityType.Rejected,
-            _ => null
-        };
+            // Custom workflow stages are opaque here. Never overwrite one, or any
+            // recognized later stage, with an automatic screening transition.
+            if (!TryGetStageRank(canonical.CurrentStage, out var currentRank) || currentRank > StageRank(nextStage))
+                return true;
 
-        if (!nextStage.HasValue || applicant.ActivityType == nextStage.Value) return;
+            var fromStage = canonical.CurrentStage;
+            var previousVersion = canonical.Version;
+            canonical.StageHistory.Add(new RecruitmentApplicationStageEvent { FromStage = fromStage, ToStage = nextStage.ToString(), ActorUserId = actorUserId, Reason = $"Screening decision: {decision}" });
+            canonical.CurrentStage = nextStage.ToString();
+            canonical.Version = (previousVersion <= 0 ? 1 : previousVersion) + 1;
+            canonical.UpdatedBy = actorUserId;
+            canonical.UpdatedDate = DateTime.UtcNow;
+            var canonicalUpdated = await applications.Update(Builders<RecruitmentJobApplication>.Filter.Where(x => x.CompanyId == companyId && x.ApplicationId == canonical.ApplicationId && !x.IsDeleted && (x.Version == previousVersion || x.Version == 0)), canonical);
+            if (!canonicalUpdated.Success) return false;
+        }
 
-        applicant.ActivityType = nextStage.Value;
-        applicant.UpdatedBy = actorUserId;
-        applicant.UpdatedDate = DateTime.UtcNow;
-        await applicants.Update(Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId), applicant);
-
-        if (applications is not null)
+        if (applicant.ActivityType != nextStage)
         {
-            var canonical = await applications.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.VacancyId == applicant.VacancyId && !x.IsDeleted);
-            if (canonical is not null && !string.Equals(canonical.CurrentStage, nextStage.Value.ToString(), StringComparison.OrdinalIgnoreCase))
+            var previousActivity = applicant.ActivityType;
+            applicant.ActivityType = nextStage;
+            applicant.UpdatedBy = actorUserId;
+            applicant.UpdatedDate = DateTime.UtcNow;
+            var applicantUpdated = await applicants.Update(Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted), applicant);
+            if (!applicantUpdated.Success)
             {
-                canonical.StageHistory.Add(new RecruitmentApplicationStageEvent { FromStage = canonical.CurrentStage, ToStage = nextStage.Value.ToString(), ActorUserId = actorUserId, Reason = $"Screening decision: {decision}" });
-                canonical.CurrentStage = nextStage.Value.ToString();
-                canonical.Version = (canonical.Version <= 0 ? 1 : canonical.Version) + 1;
-                canonical.UpdatedBy = actorUserId;
-                canonical.UpdatedDate = DateTime.UtcNow;
-                await applications.Update(Builders<RecruitmentJobApplication>.Filter.Where(x => x.CompanyId == companyId && x.ApplicationId == canonical.ApplicationId && !x.IsDeleted), canonical);
-            }
-            else if (canonical is null)
-            {
-                var newCanonical = new RecruitmentJobApplication
-                {
-                    CompanyId = companyId,
-                    ApplicantId = applicant.ApplicantId,
-                    VacancyId = applicant.VacancyId ?? string.Empty,
-                    CurrentStage = nextStage.Value.ToString(),
-                    CreatedBy = actorUserId,
-                    CreatedDate = DateTime.UtcNow,
-                    UpdatedBy = actorUserId,
-                    UpdatedDate = DateTime.UtcNow,
-                    StageHistory =
-                    [
-                        new RecruitmentApplicationStageEvent
-                        {
-                            FromStage = applicant.ActivityType.ToString(),
-                            ToStage = nextStage.Value.ToString(),
-                            ActorUserId = actorUserId,
-                            Reason = $"Screening decision: {decision}"
-                        }
-                    ]
-                };
-                await applications.AddOne(newCanonical);
+                applicant.ActivityType = previousActivity;
+                return false;
             }
         }
+
+        if (applications is not null && canonical is null)
+        {
+            var added = await applications.AddOne(new RecruitmentJobApplication
+            {
+                CompanyId = companyId,
+                ApplicantId = applicant.ApplicantId,
+                VacancyId = applicant.VacancyId ?? string.Empty,
+                CurrentStage = nextStage.ToString(),
+                CreatedBy = actorUserId,
+                CreatedDate = DateTime.UtcNow,
+                UpdatedBy = actorUserId,
+                UpdatedDate = DateTime.UtcNow,
+                StageHistory = previousApplicantStage == nextStage
+                    ? []
+                    : [new RecruitmentApplicationStageEvent { FromStage = previousApplicantStage.ToString(), ToStage = nextStage.ToString(), ActorUserId = actorUserId, Reason = $"Screening decision: {decision}" }]
+            });
+            if (!added.Success) return false;
+        }
+
+        return true;
+    }
+
+    private static ActivityType? DetermineNextStage(ActivityType currentStage, string decision, RecruitmentEnterpriseConfig? config)
+    {
+        if (!(config?.AutoAdvanceOnScreening ?? true)) return null;
+        return decision switch
+        {
+            RecruitmentScreeningDecision.Pass when currentStage is ActivityType.New or ActivityType.InProgress or ActivityType.OnHold or ActivityType.Shortlisted => ActivityType.Shortlisted,
+            RecruitmentScreeningDecision.Hold when currentStage is ActivityType.New or ActivityType.InProgress or ActivityType.Shortlisted or ActivityType.OnHold => ActivityType.OnHold,
+            RecruitmentScreeningDecision.Reject when currentStage is not ActivityType.Selected => ActivityType.Rejected,
+            _ => null
+        };
+    }
+
+    public async Task<int> RecoverPending(string? reviewId = null, int batchSize = 50, CancellationToken cancellationToken = default)
+    {
+        var pending = string.IsNullOrWhiteSpace(reviewId)
+            ? await reviews.GetCollection().Find(x => x.StageSyncStatus == "Pending" && !x.IsDeleted).SortBy(x => x.CreatedDate).Limit(Math.Clamp(batchSize, 1, 200)).ToListAsync(cancellationToken)
+            : [await reviews.FirstOrDefault(x => x.ReviewId == reviewId && x.StageSyncStatus == "Pending" && !x.IsDeleted)];
+        var recovered = 0;
+        foreach (var review in pending.Where(x => x is not null))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var applicant = await applicants.FirstOrDefault(x => x.CompanyId == review!.CompanyId && x.ApplicantId == review.ApplicantId && !x.IsDeleted);
+            var actor = review!.UpdatedBy ?? review.CreatedBy ?? "screening-recovery";
+            if (applicant is null || string.Equals(applicant.ConsentStatus, "Anonymized", StringComparison.OrdinalIgnoreCase))
+            {
+                if (await SetStageSyncStatus(review, "Cancelled", actor)) recovered++;
+                continue;
+            }
+            if (await ProcessPendingStageSync(review, applicant, actor)) recovered++;
+        }
+        return recovered;
+    }
+
+    private async Task<bool> SetStageSyncStatus(RecruitmentScreeningReview review, string status, string actorUserId)
+    {
+        var previousVersion = review.Version <= 0 ? 1 : review.Version;
+        review.StageSyncStatus = status;
+        // Queue bookkeeping is guarded by the current review version but does not
+        // advance the reviewer-facing version for an unchanged evaluation.
+        review.UpdatedBy = actorUserId;
+        review.UpdatedDate = DateTime.UtcNow;
+        var result = await reviews.Update(
+            Builders<RecruitmentScreeningReview>.Filter.Where(x => x.CompanyId == review.CompanyId && x.ReviewId == review.ReviewId && x.StageSyncStatus == "Pending" && (x.Version == previousVersion || x.Version == 0)),
+            review);
+        return result?.Success == true;
+    }
+
+    private static int StageRank(ActivityType stage) => stage switch
+    {
+        ActivityType.New => 0,
+        ActivityType.InProgress => 1,
+        ActivityType.OnHold => 2,
+        ActivityType.Shortlisted => 3,
+        ActivityType.Selected => 4,
+        ActivityType.Rejected => 5,
+        _ => 1
+    };
+
+    private static bool TryGetStageRank(string? stage, out int rank)
+    {
+        if (Enum.TryParse<ActivityType>(stage, true, out var parsed))
+        {
+            rank = StageRank(parsed);
+            return true;
+        }
+        rank = 0;
+        return false;
     }
 
     public async Task<Result<RecruitmentScreeningBulkResult>> Bulk(RecruitmentScreeningBulkCommand command, string actorUserId)

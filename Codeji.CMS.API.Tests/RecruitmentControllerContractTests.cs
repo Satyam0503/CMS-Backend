@@ -1,11 +1,44 @@
 using System.Reflection;
+using System.Security.Claims;
 using Codeji.CMS.API.App_Start;
 using Codeji.CMS.API.Controllers;
+using Codeji.CMS.Domain.Models;
+using Codeji.CMS.DTO.RequestModels;
+using Codeji.CMS.Services.Recruitments.Interface;
 using Codeji.CMS.Utility.Constraints;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Moq;
 namespace Codeji.CMS.API.Tests;
 public sealed class RecruitmentControllerContractTests
 {
+    [Fact]
+    public async Task Add_comment_returns_the_service_failure_instead_of_replacing_it_with_success()
+    {
+        var service = new Mock<IApplicantsService>();
+        service.Setup(x => x.AddComment("user-1", It.IsAny<CommentRequestModel>()))
+            .ReturnsAsync(new Result { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, Message = "Comment could not be saved." });
+        var context = new HttpContextAccessor
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("user_id", "user-1")], "test")),
+            },
+        };
+        var controller = new ApplicantsController(
+            service.Object,
+            new Mock<IRecruitmentHandoffService>().Object,
+            new Mock<IRecruitmentInterviewService>().Object,
+            new Mock<IRecruitmentOfferService>().Object,
+            context);
+
+        var result = await controller.AddComment(new CommentRequestModel());
+
+        Assert.False(result.Success);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, result.StatusCode);
+        Assert.Equal("Comment could not be saved.", result.Message);
+    }
+
     [Theory]
     [InlineData(nameof(ApplicantsController.HandoffToPreboarding))]
     [InlineData(nameof(ApplicantsController.UpsertInterview))]
@@ -110,6 +143,7 @@ public sealed class RecruitmentResumeUploadContractTests
         Assert.NotNull(method!.GetCustomAttribute<AllowAnonymousAttribute>());
         Assert.NotNull(method.GetCustomAttribute<ObsoleteAttribute>());
         Assert.Equal("UploadResume", method.GetCustomAttribute<Microsoft.AspNetCore.Mvc.RouteAttribute>()?.Template);
+        AssertResumeUploadLimits(method);
     }
 
     [Fact]
@@ -120,6 +154,21 @@ public sealed class RecruitmentResumeUploadContractTests
         var permission = method!.GetCustomAttributes<ModulePermissionAttribute>().Single();
         Assert.Equal(AppModule.Applications, permission.Module);
         Assert.Contains(Permission.Edit, permission.Permissions);
+        AssertResumeUploadLimits(method);
+    }
+
+    private static void AssertResumeUploadLimits(MethodInfo? method)
+    {
+        Assert.NotNull(method);
+        var requestLimit = method!.GetCustomAttribute<Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute>();
+        Assert.NotNull(requestLimit);
+        Assert.Equal(6 * 1024 * 1024, ((Microsoft.AspNetCore.Http.Metadata.IRequestSizeLimitMetadata)requestLimit!).MaxRequestBodySize);
+        var formLimits = method.GetCustomAttribute<Microsoft.AspNetCore.Mvc.RequestFormLimitsAttribute>();
+        Assert.NotNull(formLimits);
+        Assert.Equal(6 * 1024 * 1024, formLimits!.MultipartBodyLengthLimit);
+        Assert.Equal(8, formLimits.ValueCountLimit);
+        Assert.Equal(16, formLimits.MultipartHeadersCountLimit);
+        Assert.Equal(8192, formLimits.MultipartHeadersLengthLimit);
     }
 }
 public sealed class RecruitmentCandidateActionContractTests

@@ -16,12 +16,15 @@ public interface IPayrollReportsService
     Task<Result<byte[]>> ExportStatutoryRegister(string companyId, PayrollReportQueryDto query);
     Task<Result<byte[]>> ExportEpfoEcrText(string companyId, PayrollReportQueryDto query);
     Task<Result<byte[]>> ExportEsicReturnCsv(string companyId, PayrollReportQueryDto query);
+    Task<Result<List<Form16CertificateDto>>> GetForm16Certificates(string companyId, string financialYear, string? employeeId = null);
+    Task<Result<byte[]>> ExportForm16SummaryCsv(string companyId, string financialYear);
 }
 
 public sealed class PayrollReportsService(
     IMongoDbRepository<PayrollRun> runs,
     IMongoDbRepository<PayrollRunEmployee> employees,
-    IMongoDbRepository<EmpUser>? userRepo = null) : IPayrollReportsService
+    IMongoDbRepository<EmpUser>? userRepo = null,
+    IMongoDbRepository<EmployeeTaxDeclaration>? declarations = null) : IPayrollReportsService
 {
     public async Task<Result<PayrollReportSummaryDto>> GetSummary(string companyId, PayrollReportQueryDto query)
     {
@@ -296,6 +299,216 @@ public sealed class PayrollReportsService(
             Success = true,
             MethodResult = Encoding.UTF8.GetBytes(builder.ToString()),
             TotalRecords = runEmployees.Count
+        };
+    }
+
+    public async Task<Result<List<Form16CertificateDto>>> GetForm16Certificates(string companyId, string financialYear, string? employeeId = null)
+    {
+        if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(financialYear))
+            return new Result<List<Form16CertificateDto>> { Success = false, StatusCode = 400, Message = "CompanyId and FinancialYear are required." };
+
+        var taxPeriod = PayrollTaxPeriod.TryResolveFinancialYear(financialYear.Trim());
+        if (taxPeriod is null)
+            return new Result<List<Form16CertificateDto>> { Success = false, StatusCode = 400, Message = "FinancialYear must use the YYYY-YY format." };
+
+        var fyStart = taxPeriod.StartDate.Date;
+        var fyEnd = taxPeriod.EndDateExclusive.Date;
+
+        var allRuns = (await runs.GetAll(x => x.CompanyId == companyId))
+            .Where(x => x.PeriodStart.Date >= fyStart && x.PeriodStart.Date < fyEnd)
+            .Where(x => string.Equals(x.Status, "APPROVED", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(x.Status, "COMPLETED", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(x.Status, "CONFIRMED", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var runIds = allRuns.Select(x => x.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var employeeLines = (await employees.GetAll(x => x.CompanyId == companyId && runIds.Contains(x.PayrollRunId)))
+            .Where(x => string.IsNullOrWhiteSpace(employeeId) || string.Equals(x.EmployeeId, employeeId.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(x => !string.Equals(x.Status, "BLOCKED", StringComparison.OrdinalIgnoreCase) && !string.Equals(x.Status, "SKIPPED", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var userMap = userRepo is not null
+            ? (await userRepo.GetAll(x => x.CompanyId == companyId))
+                .Where(u => !string.IsNullOrWhiteSpace(u.EmployeeId))
+                .GroupBy(u => u.EmployeeId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, EmpUser>(StringComparer.OrdinalIgnoreCase);
+
+        var declarationMap = declarations is not null
+            ? (await declarations.GetAll(x => x.CompanyId == companyId && x.FinancialYear == financialYear.Trim() && x.Status == "APPROVED"))
+                .GroupBy(x => x.EmployeeId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(d => d.Version).First(), StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, EmployeeTaxDeclaration>(StringComparer.OrdinalIgnoreCase);
+
+        var groupedByEmp = employeeLines.GroupBy(x => x.EmployeeId, StringComparer.OrdinalIgnoreCase);
+        var certificates = new List<Form16CertificateDto>();
+
+        var parts = financialYear.Split('-');
+        int startYear = int.Parse(parts[0], CultureInfo.InvariantCulture);
+        var assessmentYear = $"{startYear + 1}-{String.Format(CultureInfo.InvariantCulture, "{0:D2}", (startYear + 2) % 100)}";
+
+        foreach (var empGroup in groupedByEmp)
+        {
+            var empId = empGroup.Key;
+            userMap.TryGetValue(empId, out var user);
+            declarationMap.TryGetValue(empId, out var declaration);
+
+            var grossSalary = Round(empGroup.Sum(x => x.GrossAmount));
+            var ptDeducted = Round(empGroup.Sum(x => x.StatutorySnapshot?.ProfessionalTax ?? 0m));
+            var tdsDeducted = Round(empGroup.Sum(x => x.StatutorySnapshot?.IncomeTax ?? 0m));
+
+            var regime = declaration?.Regime ?? "NEW_115BAC";
+            var isNewRegime = regime == "NEW_115BAC";
+
+            var stdDeduction = isNewRegime
+                ? (taxPeriod.TaxRuleSet?.NewRegimeStandardDeduction ?? 75000m)
+                : (taxPeriod.TaxRuleSet?.OldRegimeStandardDeduction ?? 50000m);
+            stdDeduction = Math.Min(grossSalary, stdDeduction);
+
+            var hraExemption = isNewRegime ? 0m : Round(declaration?.ApprovedHraExemption ?? 0m);
+            var totalSalaryAfterSec10 = Math.Max(0m, grossSalary - hraExemption);
+
+            var totalSec16 = Round(stdDeduction + ptDeducted);
+            var incomeFromSalaries = Math.Max(0m, totalSalaryAfterSec10 - totalSec16);
+
+            var otherIncome = Round((declaration?.OtherIncomeSavingsInterest ?? 0m) + (declaration?.OtherIncomeOther ?? 0m));
+            var previousEmployerSalary = Round(declaration?.PreviousEmployerGrossSalary ?? 0m);
+            var grossTotalIncome = incomeFromSalaries + otherIncome + previousEmployerSalary;
+
+            var sec80C = isNewRegime ? 0m : Math.Min(150000m, Round(declaration?.ApprovedSection80C ?? 0m));
+            var sec80Ccd1B = isNewRegime ? 0m : Math.Min(50000m, Round(declaration?.ApprovedSection80Ccd1B ?? 0m));
+            var sec80D = isNewRegime ? 0m : Math.Min(100000m, Round(declaration?.ApprovedSection80D ?? 0m));
+            var sec24Loss = isNewRegime ? 0m : Math.Min(200000m, Round(declaration?.ApprovedSection24HomeLoanInterest ?? 0m));
+            var sec80E = isNewRegime ? 0m : Round(declaration?.ApprovedSection80E ?? 0m);
+            var otherDeductions = isNewRegime ? 0m : Round(declaration?.ApprovedOtherDeductions ?? 0m);
+
+            var totalChapterVIA = Round(sec80C + sec80Ccd1B + sec80D + sec24Loss + sec80E + otherDeductions);
+            var totalTaxableIncome = Math.Max(0m, grossTotalIncome - totalChapterVIA);
+
+            decimal totalTaxPayable = 0m;
+            decimal rebate87A = 0m;
+            decimal cess = 0m;
+            decimal taxOnIncome = 0m;
+
+            if (taxPeriod.TaxRuleSet is not null)
+            {
+                totalTaxPayable = PayrollCalculationRules.CalculateAnnualIncomeTaxWithCess(
+                    grossSalary,
+                    isNewRegime ? "AUTO_NEW_REGIME" : "AUTO_OLD_REGIME",
+                    previousEmployerSalary,
+                    otherIncome,
+                    sec80C,
+                    sec80Ccd1B,
+                    sec80D,
+                    sec24Loss,
+                    hraExemption,
+                    sec80E + otherDeductions,
+                    taxPeriod.TaxRuleSet);
+
+                cess = Round(totalTaxPayable * 4m / 104m);
+                taxOnIncome = totalTaxPayable - cess;
+                if (totalTaxPayable == 0m && grossTotalIncome > 0m)
+                {
+                    rebate87A = taxOnIncome;
+                }
+            }
+
+            var periodMin = empGroup.Min(x => allRuns.First(r => r.Id == x.PayrollRunId).PeriodStart);
+            var periodMax = empGroup.Max(x => allRuns.First(r => r.Id == x.PayrollRunId).PeriodEnd);
+
+            certificates.Add(new Form16CertificateDto
+            {
+                EmployeeId = empId,
+                EmployeeName = string.Join(" ", new[] { user?.FirstName, user?.LastName }.Where(s => !string.IsNullOrWhiteSpace(s))),
+                Pan = user?.PanNumber ?? string.Empty,
+                FinancialYear = financialYear.Trim(),
+                AssessmentYear = assessmentYear,
+                Regime = regime,
+                PeriodFrom = periodMin,
+                PeriodTo = periodMax,
+                GrossSalarySection17_1 = grossSalary,
+                TotalGrossSalary = grossSalary,
+                ExemptionHraSection10_13A = hraExemption,
+                TotalExemptionsSection10 = hraExemption,
+                TotalSalaryAfterSection10 = totalSalaryAfterSec10,
+                StandardDeductionSection16_ia = stdDeduction,
+                ProfessionalTaxSection16_iii = ptDeducted,
+                TotalDeductionsSection16 = totalSec16,
+                IncomeChargeableUnderSalaries = incomeFromSalaries,
+                OtherIncomeReported = otherIncome,
+                GrossTotalIncome = grossTotalIncome,
+                Section80C = sec80C,
+                Section80Ccd1B = sec80Ccd1B,
+                Section80D = sec80D,
+                Section24HomeLoanInterest = sec24Loss,
+                Section80E = sec80E,
+                OtherDeductionsChapterVIA = otherDeductions,
+                TotalChapterVIADeductions = totalChapterVIA,
+                TotalTaxableIncome = totalTaxableIncome,
+                TaxOnTotalIncome = taxOnIncome,
+                RebateSection87A = rebate87A,
+                HealthAndEducationCess = cess,
+                TotalTaxPayable = totalTaxPayable,
+                NetTaxPayable = totalTaxPayable,
+                TotalTdsDeducted = tdsDeducted,
+                TotalTdsDeposited = tdsDeducted
+            });
+        }
+
+        return new Result<List<Form16CertificateDto>>
+        {
+            Success = true,
+            MethodResult = certificates.OrderBy(x => x.EmployeeId, StringComparer.OrdinalIgnoreCase).ToList(),
+            TotalRecords = certificates.Count
+        };
+    }
+
+    public async Task<Result<byte[]>> ExportForm16SummaryCsv(string companyId, string financialYear)
+    {
+        var certsResult = await GetForm16Certificates(companyId, financialYear);
+        if (!certsResult.Success)
+            return new Result<byte[]> { Success = false, StatusCode = certsResult.StatusCode, Message = certsResult.Message };
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Employee ID,Employee Name,PAN,Financial Year,Assessment Year,Tax Regime,Gross Salary (17(1)),Exemptions (Sec 10),Standard Deduction (Sec 16(ia)),Professional Tax (Sec 16(iii)),Income from Salaries,Other Income,Gross Total Income,Section 80C,Section 80CCD(1B),Section 80D,Section 24,Other Chapter VI-A,Total Chapter VI-A Deductions,Total Taxable Income,Tax on Income,Rebate 87A,Cess (4%),Total Tax Payable,TDS Deducted,TDS Deposited");
+
+        foreach (var c in certsResult.MethodResult ?? [])
+        {
+            sb.AppendLine(string.Join(",",
+                Csv(c.EmployeeId),
+                Csv(c.EmployeeName),
+                Csv(c.Pan),
+                Csv(c.FinancialYear),
+                Csv(c.AssessmentYear),
+                Csv(c.Regime),
+                c.GrossSalarySection17_1.ToString("F2", CultureInfo.InvariantCulture),
+                c.TotalExemptionsSection10.ToString("F2", CultureInfo.InvariantCulture),
+                c.StandardDeductionSection16_ia.ToString("F2", CultureInfo.InvariantCulture),
+                c.ProfessionalTaxSection16_iii.ToString("F2", CultureInfo.InvariantCulture),
+                c.IncomeChargeableUnderSalaries.ToString("F2", CultureInfo.InvariantCulture),
+                c.OtherIncomeReported.ToString("F2", CultureInfo.InvariantCulture),
+                c.GrossTotalIncome.ToString("F2", CultureInfo.InvariantCulture),
+                c.Section80C.ToString("F2", CultureInfo.InvariantCulture),
+                c.Section80Ccd1B.ToString("F2", CultureInfo.InvariantCulture),
+                c.Section80D.ToString("F2", CultureInfo.InvariantCulture),
+                c.Section24HomeLoanInterest.ToString("F2", CultureInfo.InvariantCulture),
+                c.OtherDeductionsChapterVIA.ToString("F2", CultureInfo.InvariantCulture),
+                c.TotalChapterVIADeductions.ToString("F2", CultureInfo.InvariantCulture),
+                c.TotalTaxableIncome.ToString("F2", CultureInfo.InvariantCulture),
+                c.TaxOnTotalIncome.ToString("F2", CultureInfo.InvariantCulture),
+                c.RebateSection87A.ToString("F2", CultureInfo.InvariantCulture),
+                c.HealthAndEducationCess.ToString("F2", CultureInfo.InvariantCulture),
+                c.TotalTaxPayable.ToString("F2", CultureInfo.InvariantCulture),
+                c.TotalTdsDeducted.ToString("F2", CultureInfo.InvariantCulture),
+                c.TotalTdsDeposited.ToString("F2", CultureInfo.InvariantCulture)
+            ));
+        }
+
+        return new Result<byte[]>
+        {
+            Success = true,
+            MethodResult = Encoding.UTF8.GetBytes(sb.ToString())
         };
     }
 

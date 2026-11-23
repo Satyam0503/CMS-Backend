@@ -21,6 +21,11 @@ public class LeavePolicyRequest : IValidatableObject
     public bool HalfDayAllowed { get; set; } = false;
     public bool WeekendInclusive { get; set; } = false;
     public bool HolidayInclusive { get; set; } = false;
+    public bool EnableSandwichRules { get; set; } = false;
+    public bool IncludeWeekendsInSandwich { get; set; } = false;
+    public bool IncludeHolidaysInSandwich { get; set; } = false;
+    public bool EnableCompOffEarning { get; set; } = false;
+    public int CompOffValidityDays { get; set; } = 60;
     public string? AttendanceStatusCode { get; set; }
     public string? FullDayAttendanceStatusCode { get; set; }
     public string? HalfDayAttendanceStatusCode { get; set; }

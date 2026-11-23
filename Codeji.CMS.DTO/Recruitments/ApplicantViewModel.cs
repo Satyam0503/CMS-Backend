@@ -17,6 +17,12 @@ namespace Codeji.CMS.DTO.Recruitments
         public decimal Experience { get; set; }
         public DateTime? ApplyDate { get; set; }
         public string? ResumeUrl { get; set; }
+        public string? CandidateReportedSource { get; set; }
+        public string? CandidateReportedSourceDetail { get; set; }
+        public string? AttributionSource { get; set; }
+        public string? AttributionMedium { get; set; }
+        public string? AttributionCampaign { get; set; }
+        public string? ReferrerHost { get; set; }
         public bool IsHired { get; set; }
         public string? EmployeeUserId { get; set; }
         public string? EmployeeId { get; set; }

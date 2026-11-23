@@ -1,4 +1,5 @@
 using ClosedXML.Excel;
+using Codeji.CMS.DTO.Attendance;
 using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Attendance;
 using Codeji.CMS.Repository.Entities.Calendar;
@@ -52,6 +53,12 @@ namespace Codeji.CMS.Services.Attendance
             string? search = null,
             string? employmentStatus = null,
             bool onlyEmployed = true
+        );
+
+        Task<BiometricSyncResultDto> IngestBiometricPunches(
+            string companyId,
+            string actorUserId,
+            BiometricSyncRequestDto request
         );
     }
 
@@ -1456,6 +1463,139 @@ namespace Codeji.CMS.Services.Attendance
         private static bool IsHexColor(string? value) =>
             !string.IsNullOrWhiteSpace(value)
             && System.Text.RegularExpressions.Regex.IsMatch(value, "^#[0-9A-Fa-f]{6}$");
+
+        public async Task<BiometricSyncResultDto> IngestBiometricPunches(
+            string companyId,
+            string actorUserId,
+            BiometricSyncRequestDto request
+        )
+        {
+            if (request == null || request.Punches == null || request.Punches.Count == 0)
+                return new BiometricSyncResultDto { Success = true, Message = "No punches received to process." };
+
+            var result = new BiometricSyncResultDto
+            {
+                TotalReceived = request.Punches.Count
+            };
+
+            var companyEmployees = (await _employees.GetAll(x => x.CompanyId == companyId && x.Status && !x.IsDeleted))
+                .ToList();
+            var empMap = companyEmployees
+                .Where(e => !string.IsNullOrWhiteSpace(e.EmployeeId))
+                .GroupBy(e => e.EmployeeId.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            var userMap = companyEmployees
+                .Where(e => !string.IsNullOrWhiteSpace(e.UserId))
+                .GroupBy(e => e.UserId.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var punch in request.Punches)
+            {
+                if (string.IsNullOrWhiteSpace(punch.EmployeeId))
+                {
+                    result.UnmatchedEmployeeCount++;
+                    result.Errors.Add("Punch missing EmployeeId.");
+                    continue;
+                }
+
+                var empKey = punch.EmployeeId.Trim();
+                EmpUser? matchedEmployee = null;
+                if (!empMap.TryGetValue(empKey, out matchedEmployee))
+                {
+                    userMap.TryGetValue(empKey, out matchedEmployee);
+                }
+
+                if (matchedEmployee == null)
+                {
+                    result.UnmatchedEmployeeCount++;
+                    result.Errors.Add($"Employee {punch.EmployeeId} not found in company {companyId}.");
+                    continue;
+                }
+
+                var punchTimeUtc = punch.TimestampUtc.Kind == DateTimeKind.Utc
+                    ? punch.TimestampUtc
+                    : DateTime.SpecifyKind(punch.TimestampUtc, DateTimeKind.Utc);
+                var punchDate = DateTime.SpecifyKind(punchTimeUtc.Date, DateTimeKind.Utc);
+
+                var existing = await _attendanceRepository.GetByUserAndDateAsync(
+                    companyId,
+                    matchedEmployee.UserId,
+                    punchDate
+                );
+
+                if (existing != null)
+                {
+                    bool isDuplicate = false;
+                    if (existing.CheckInTime.HasValue && Math.Abs((existing.CheckInTime.Value - punchTimeUtc).TotalSeconds) < 60)
+                        isDuplicate = true;
+                    if (existing.CheckOutTime.HasValue && Math.Abs((existing.CheckOutTime.Value - punchTimeUtc).TotalSeconds) < 60)
+                        isDuplicate = true;
+
+                    if (isDuplicate)
+                    {
+                        result.DuplicateCount++;
+                        continue;
+                    }
+
+                    var punchType = punch.PunchType?.ToUpperInvariant() ?? "AUTO";
+                    if (punchType == "CHECK_IN" || (punchType == "AUTO" && (!existing.CheckInTime.HasValue || punchTimeUtc < existing.CheckInTime.Value)))
+                    {
+                        if (!existing.CheckInTime.HasValue || punchTimeUtc < existing.CheckInTime.Value)
+                            existing.CheckInTime = punchTimeUtc;
+                    }
+                    else if (punchType == "CHECK_OUT" || (punchType == "AUTO" && (!existing.CheckOutTime.HasValue || punchTimeUtc > existing.CheckOutTime.Value)))
+                    {
+                        if (!existing.CheckOutTime.HasValue || punchTimeUtc > existing.CheckOutTime.Value)
+                            existing.CheckOutTime = punchTimeUtc;
+                    }
+
+                    if (existing.CheckInTime.HasValue && existing.CheckOutTime.HasValue && existing.CheckOutTime.Value > existing.CheckInTime.Value)
+                    {
+                        existing.TotalHours = Math.Round((decimal)(existing.CheckOutTime.Value - existing.CheckInTime.Value).TotalHours, 2);
+                        existing.Status = existing.TotalHours >= 4.0m ? "P" : "HD";
+                    }
+
+                    existing.SourceType = "BIOMETRIC";
+                    existing.OperatorRemark = $"Biometric Device {punch.DeviceId} [{punch.VerifyMode ?? "AUTO"}]";
+                    existing.ModifiedByUserId = actorUserId;
+                    existing.ModifiedAtUtc = DateTime.UtcNow;
+                    existing.Version++;
+
+                    await _attendanceRepository.UpdateAsync(companyId, matchedEmployee.UserId, punchDate, existing);
+                    await _auditWriter.WriteMutationAsync(companyId, actorUserId, "UPDATED", existing);
+                    result.ProcessedCount++;
+                }
+                else
+                {
+                    var isCheckout = string.Equals(punch.PunchType, "CHECK_OUT", StringComparison.OrdinalIgnoreCase);
+                    var newRecord = new AttendanceModel
+                    {
+                        CompanyId = companyId,
+                        UserId = matchedEmployee.UserId,
+                        EmployeeId = matchedEmployee.EmployeeId,
+                        Date = punchDate,
+                        Status = "P",
+                        SourceType = "BIOMETRIC",
+                        CheckInTime = isCheckout ? null : punchTimeUtc,
+                        CheckOutTime = isCheckout ? punchTimeUtc : null,
+                        TotalHours = 0,
+                        Remarks = $"Biometric punch from {punch.DeviceId}",
+                        OperatorRemark = $"Biometric Device {punch.DeviceId} [{punch.VerifyMode ?? "AUTO"}]",
+                        MarkedByUserId = actorUserId,
+                        MarkedAtUtc = DateTime.UtcNow,
+                        Version = 1
+                    };
+
+                    await _attendanceRepository.AddAsync(newRecord);
+                    await _auditWriter.WriteMutationAsync(companyId, actorUserId, "CREATED", newRecord);
+                    result.ProcessedCount++;
+                }
+            }
+
+            result.Message = $"Processed {result.ProcessedCount} punches. {result.DuplicateCount} duplicates skipped. {result.UnmatchedEmployeeCount} unmatched.";
+            return result;
+        }
 
         private static string FormatAttendanceTime(DateTime? time) =>
             time.HasValue ? IndiaTime.ToIndiaTime(time.Value).ToString("HH:mm") : "--:--";

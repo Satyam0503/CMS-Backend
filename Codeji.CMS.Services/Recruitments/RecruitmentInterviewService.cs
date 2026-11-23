@@ -10,6 +10,7 @@ using Codeji.CMS.Utility.middlewares;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
 using Codeji.CMS.Utility;
+using Codeji.CMS.Utility.Helpers;
 using static Codeji.CMS.Utility.Enums.EnumsHelper;
 
 namespace Codeji.CMS.Services.Recruitments;
@@ -31,14 +32,20 @@ public sealed class RecruitmentInterviewService(
         var companyId = CurrentContext.CompanyId(context);
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(command.IdempotencyKey))
             return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Company and idempotency key are required.");
+        if (command.RoundNumber is < 1 or > 50) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Interview round must be between 1 and 50.");
+        var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
+        if (command.RoundNumber > 1 && config?.InterviewRounds != true)
+            return Fail(result, RecruitmentErrorCodes.FeatureDisabled, "Multiple interview rounds are not enabled for this company.", StatusCodes.Status403Forbidden);
+
+        var panelists = (command.PanelistUserIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (panelists.Length > 12) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "An interview panel cannot contain more than 12 interviewers.");
+        if (panelists.Length > 1 && config?.ParallelPanels != true)
+            return Fail(result, RecruitmentErrorCodes.FeatureDisabled, "Panel interviews are not enabled for this company. Select one interviewer or ask your recruitment administrator to enable panel interviews.", StatusCodes.Status403Forbidden);
 
         var applicant = await applicants.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && x.VacancyId == command.VacancyId && !x.IsDeleted);
         if (applicant is null)
             return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Applicant was not found in the current company.");
 
-        var panelists = (command.PanelistUserIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        if (panelists.Length > 12) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "An interview panel cannot contain more than 12 interviewers.");
-        if (command.RoundNumber is < 1 or > 50) return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Interview round must be between 1 and 50.");
         if (panelists.Length > 0 && employees is not null)
         {
             var eligible = await employees.GetAll(x => x.CompanyId == companyId && x.Status && panelists.Contains(x.UserId));
@@ -55,14 +62,53 @@ public sealed class RecruitmentInterviewService(
         if (!RecruitmentInterviewRules.IsValidSchedule(startsAtUtc, endsAtUtc))
             return Fail(result, RecruitmentErrorCodes.InvalidRequest, "Interview end must be after start and both timestamps must be UTC.");
 
+        if (requestedStatus is RecruitmentInterviewStatus.Scheduled or RecruitmentInterviewStatus.Confirmed && panelists.Length > 0)
+        {
+            var overlappingInterviews = (await interviews.GetAll(x =>
+                x.CompanyId == companyId &&
+                x.InterviewId != command.InterviewId &&
+                !x.IsDeleted &&
+                (x.Status == RecruitmentInterviewStatus.Scheduled || x.Status == RecruitmentInterviewStatus.Confirmed) &&
+                x.StartsAtUtc < endsAtUtc &&
+                x.EndsAtUtc > startsAtUtc)).ToList();
+
+            var conflict = overlappingInterviews.FirstOrDefault(x => x.PanelistUserIds.Any(p => panelists.Contains(p)));
+            if (conflict != null)
+            {
+                var conflictingPanelist = conflict.PanelistUserIds.FirstOrDefault(p => panelists.Contains(p));
+                return Fail(result, RecruitmentErrorCodes.InvalidRequest, $"Interviewer schedule conflict: Panelist '{conflictingPanelist}' already has another interview ('{conflict.Title}') scheduled between {conflict.StartsAtUtc:HH:mm} and {conflict.EndsAtUtc:HH:mm} UTC.", StatusCodes.Status409Conflict);
+            }
+        }
+
+        var meetingProvider = !string.IsNullOrWhiteSpace(command.MeetingProvider) ? command.MeetingProvider.Trim() : "GoogleMeet";
+        var calendarSyncProvider = !string.IsNullOrWhiteSpace(command.CalendarSyncProvider) ? command.CalendarSyncProvider.Trim() : "GoogleCalendar";
+
+        var meetingUrl = !string.IsNullOrWhiteSpace(command.MeetingUrl)
+            ? command.MeetingUrl.Trim()
+            : (command.Location?.Trim().StartsWith("http", StringComparison.OrdinalIgnoreCase) == true ? command.Location.Trim() : null);
+
+        if (string.IsNullOrWhiteSpace(meetingUrl) && (command.AutoGenerateMeetingLink || string.Equals(meetingProvider, "GoogleMeet", StringComparison.OrdinalIgnoreCase) || string.Equals(meetingProvider, "MSTeams", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (string.Equals(meetingProvider, "MSTeams", StringComparison.OrdinalIgnoreCase))
+            {
+                meetingUrl = GenerateMSTeamsMeetingUrl(Guid.NewGuid().ToString("N"));
+            }
+            else
+            {
+                meetingUrl = GenerateGoogleMeetUrl();
+            }
+        }
+
+        var location = !string.IsNullOrWhiteSpace(command.Location) && !command.Location.Trim().StartsWith("http", StringComparison.OrdinalIgnoreCase)
+            ? command.Location.Trim()
+            : (!string.IsNullOrWhiteSpace(command.Location) ? command.Location.Trim() : (meetingUrl != null ? $"Virtual ({meetingProvider})" : null));
+
         var idempotencyKey = command.IdempotencyKey.Trim();
         var existing = string.IsNullOrWhiteSpace(command.InterviewId)
             ? await interviews.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && x.LastCommandIdempotencyKey == idempotencyKey && !x.IsDeleted)
             : await interviews.FirstOrDefault(x => x.CompanyId == companyId && x.InterviewId == command.InterviewId && !x.IsDeleted);
 
-        var config = configs is null ? null : await configs.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
-        var allowParallel = config?.ParallelPanels ?? false;
-        if (existing is null && command.RoundNumber > 1 && !allowParallel)
+        if (existing is null && command.RoundNumber > 1)
         {
             var priorRounds = (await interviews.GetAll(x => x.CompanyId == companyId && x.ApplicantId == command.ApplicantId && x.VacancyId == command.VacancyId && !x.IsDeleted && x.RoundNumber < command.RoundNumber)).ToList();
             for (var round = 1; round < command.RoundNumber; round++)
@@ -100,12 +146,10 @@ public sealed class RecruitmentInterviewService(
                 StartsAtUtc = startsAtUtc,
                 EndsAtUtc = endsAtUtc,
                 TimeZoneId = (command.TimeZoneId ?? "UTC").Trim(),
-                Location = !string.IsNullOrWhiteSpace(command.Location) && !command.Location.Trim().StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                    ? command.Location.Trim()
-                    : (!string.IsNullOrWhiteSpace(command.Location) ? command.Location.Trim() : (command.MeetingUrl != null ? "Virtual (Video Call)" : null)),
-                MeetingUrl = !string.IsNullOrWhiteSpace(command.MeetingUrl)
-                    ? command.MeetingUrl.Trim()
-                    : (command.Location?.Trim().StartsWith("http", StringComparison.OrdinalIgnoreCase) == true ? command.Location.Trim() : null),
+                Location = location,
+                MeetingUrl = meetingUrl,
+                MeetingProvider = meetingProvider,
+                CalendarSyncProvider = calendarSyncProvider,
                 PanelistUserIds = panelists,
                 QuorumRequired = Math.Max(1, (panelists.Length + 1) / 2),
                 Status = status,
@@ -137,12 +181,10 @@ public sealed class RecruitmentInterviewService(
         existing.StartsAtUtc = startsAtUtc;
         existing.EndsAtUtc = endsAtUtc;
         existing.TimeZoneId = (command.TimeZoneId ?? "UTC").Trim();
-        existing.Location = !string.IsNullOrWhiteSpace(command.Location) && !command.Location.Trim().StartsWith("http", StringComparison.OrdinalIgnoreCase)
-            ? command.Location.Trim()
-            : (!string.IsNullOrWhiteSpace(command.Location) ? command.Location.Trim() : (command.MeetingUrl != null ? "Virtual (Video Call)" : existing.Location));
-        existing.MeetingUrl = !string.IsNullOrWhiteSpace(command.MeetingUrl)
-            ? command.MeetingUrl.Trim()
-            : (command.Location?.Trim().StartsWith("http", StringComparison.OrdinalIgnoreCase) == true ? command.Location.Trim() : existing.MeetingUrl);
+        existing.Location = location ?? existing.Location;
+        existing.MeetingUrl = meetingUrl ?? existing.MeetingUrl;
+        if (!string.IsNullOrWhiteSpace(command.MeetingProvider)) existing.MeetingProvider = command.MeetingProvider.Trim();
+        if (!string.IsNullOrWhiteSpace(command.CalendarSyncProvider)) existing.CalendarSyncProvider = command.CalendarSyncProvider.Trim();
         existing.PanelistUserIds = panelists;
         existing.QuorumRequired = Math.Max(1, (panelists.Length + 1) / 2);
         existing.Status = nextStatus;
@@ -242,9 +284,7 @@ public sealed class RecruitmentInterviewService(
             {
                 if (!string.IsNullOrWhiteSpace(applicant.ResumeUrl))
                 {
-                    resumeUrl = applicant.ResumeUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                        ? applicant.ResumeUrl
-                        : (Common.GetApplicantResumeFullPath(applicant.ResumeUrl) ?? applicant.ResumeUrl);
+                    resumeUrl = $"{ConfigManager.AppSettings.APIUrl}api/Applicants/Resume/{Uri.EscapeDataString(applicant.ApplicantId)}";
                 }
             }
             catch
@@ -305,6 +345,7 @@ public sealed class RecruitmentInterviewService(
 
                     await externalActions.QueueEmail(new RecruitmentEmailQueueCommand
                     {
+                        RelatedApplicantId = applicant.ApplicantId,
                         DedupeKey = $"interview-panelist:{interview.InterviewId}:{panelist.UserId}:{interview.Version}",
                         EventType = "InterviewPanelistInvited",
                         RecipientEmail = panelist.Email.Trim(),
@@ -352,6 +393,7 @@ public sealed class RecruitmentInterviewService(
 
                 await externalActions.QueueEmail(new RecruitmentEmailQueueCommand
                 {
+                    RelatedApplicantId = applicant.ApplicantId,
                     DedupeKey = $"interview-candidate:{interview.InterviewId}:{interview.Version}",
                     EventType = "InterviewCandidateInvited",
                     RecipientEmail = applicant.Email.Trim(),
@@ -393,6 +435,23 @@ public sealed class RecruitmentInterviewService(
         result.MethodResult = id;
         result.Message = message;
         return result;
+    }
+
+    public static string GenerateGoogleMeetUrl()
+    {
+        var rand = new Random();
+        string Segment(int len)
+        {
+            const string chars = "abcdefghijklmnopqrstuvwxyz";
+            return new string(Enumerable.Range(0, len).Select(_ => chars[rand.Next(chars.Length)]).ToArray());
+        }
+        return $"https://meet.google.com/{Segment(3)}-{Segment(4)}-{Segment(3)}";
+    }
+
+    public static string GenerateMSTeamsMeetingUrl(string? threadId = null)
+    {
+        var id = !string.IsNullOrWhiteSpace(threadId) ? threadId : Guid.NewGuid().ToString("N");
+        return $"https://teams.microsoft.com/l/meetup-join/19%3ameeting_{id}%40thread.v2/0?context=%7b%22Tid%22%3a%22codeji-hrms%22%7d";
     }
 
     private static Result<string> Fail(Result<string> result, string code, string message, int status = StatusCodes.Status400BadRequest)

@@ -127,6 +127,25 @@ public sealed class SecurityAuditRemediationTests
         Assert.Equal("Career portal not found.", result.Message);
     }
 
+    [Fact]
+    public async Task PublicCareer_Apply_WhenSubmissionKeyIsMissing_RejectsBeforeDatabaseAccess()
+    {
+        var publicService = CreatePublicCareerService();
+
+        var result = await publicService.Apply("public-job", new PublicJobApplicationRequest
+        {
+            IdempotencyKey = "",
+            FirstName = "Ada",
+            LastName = "Lovelace",
+            Email = "ada@example.com",
+            Phone = "1234567890",
+            Experience = 2
+        });
+
+        Assert.False(result.Success);
+        Assert.Contains("submission key is required", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static PublicCareerService CreatePublicCareerService()
     {
         var jobRepo = new Mock<IMongoDbRepository<JobVacancy>>();
@@ -159,8 +178,14 @@ public sealed class SecurityAuditRemediationTests
         var analyticsRepo = new Mock<IMongoDbRepository<Codeji.CMS.Repository.Entities.CareerPortal.CareerAnalyticsEvent>>();
         analyticsRepo.Setup(r => r.GetCollection()).Returns(new Mock<IMongoCollection<Codeji.CMS.Repository.Entities.CareerPortal.CareerAnalyticsEvent>>().Object);
 
-        var tasks = new Mock<IPriorityTaskQueue>();
-        var middleware = new Mock<IMiddlewareService>();
+        var applicationRepo = new Mock<IMongoDbRepository<RecruitmentJobApplication>>();
+        applicationRepo.Setup(r => r.GetCollection()).Returns(new Mock<IMongoCollection<RecruitmentJobApplication>>().Object);
+
+        var configRepo = new Mock<IMongoDbRepository<RecruitmentEnterpriseConfig>>();
+        configRepo.Setup(r => r.GetCollection()).Returns(new Mock<IMongoCollection<RecruitmentEnterpriseConfig>>().Object);
+
+        var emailOutboxRepo = new Mock<IMongoDbRepository<RecruitmentEmailOutbox>>();
+        emailOutboxRepo.Setup(r => r.GetCollection()).Returns(new Mock<IMongoCollection<RecruitmentEmailOutbox>>().Object);
 
         return new PublicCareerService(
             jobRepo.Object,
@@ -173,8 +198,9 @@ public sealed class SecurityAuditRemediationTests
             profileRepo.Object,
             savedJobRepo.Object,
             analyticsRepo.Object,
-            tasks.Object,
-            middleware.Object);
+            applicationRepo.Object,
+            configRepo.Object,
+            emailOutboxRepo.Object);
     }
 
     private static EmployeeServiceFixture CreateEmployeeFixture()

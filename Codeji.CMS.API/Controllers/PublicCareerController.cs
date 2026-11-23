@@ -19,6 +19,7 @@ public class PublicCareerController : ControllerBase
     }
 
     [HttpGet("jobs")]
+    [EnableRateLimiting("career-search")]
     public async Task<IActionResult> GetJobs([FromQuery] PublicJobSearchRequest request)
     {
         var result = await _publicCareerService.GetMasterJobs(request);
@@ -26,6 +27,7 @@ public class PublicCareerController : ControllerBase
     }
 
     [HttpGet("jobs/{publicJobId}")]
+    [EnableRateLimiting("career-search")]
     public async Task<IActionResult> GetJobByPublicId(string publicJobId)
     {
         var result = await _publicCareerService.GetJobByPublicId(publicJobId);
@@ -33,6 +35,7 @@ public class PublicCareerController : ControllerBase
     }
 
     [HttpGet("jobs/by-slug/{jobSlug}")]
+    [EnableRateLimiting("career-search")]
     public async Task<IActionResult> GetJobBySlug(string jobSlug)
     {
         var result = await _publicCareerService.GetJobBySlug(jobSlug);
@@ -40,6 +43,7 @@ public class PublicCareerController : ControllerBase
     }
 
     [HttpGet("companies/{companyCode}/jobs")]
+    [EnableRateLimiting("career-search")]
     public async Task<IActionResult> GetCompanyJobs(string companyCode, [FromQuery] PublicJobSearchRequest request)
     {
         var result = await _publicCareerService.GetCompanyJobs(companyCode, request);
@@ -47,6 +51,7 @@ public class PublicCareerController : ControllerBase
     }
 
     [HttpGet("job-locations")]
+    [EnableRateLimiting("career-search")]
     public async Task<IActionResult> GetLocations([FromQuery] string? companyCode, [FromQuery] string? search)
     {
         var result = await _publicCareerService.GetLocations(companyCode, search);
@@ -61,8 +66,18 @@ public class PublicCareerController : ControllerBase
         return StatusCode(result.StatusCode, result);
     }
 
+    [HttpPost("applications/status")]
+    [EnableRateLimiting("career-sensitive")]
+    public async Task<IActionResult> GetApplicationStatus([FromBody] PublicApplicationStatusRequest request)
+    {
+        var result = await _publicCareerService.GetApplicationStatus(request);
+        return StatusCode(result.StatusCode, result);
+    }
+
     [HttpPost("applications/{applicationReference}/resume")]
     [EnableRateLimiting("career-sensitive")]
+    [RequestSizeLimit(6 * 1024 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 6 * 1024 * 1024, ValueCountLimit = 8, MultipartHeadersCountLimit = 16, MultipartHeadersLengthLimit = 8192)]
     public async Task<IActionResult> UploadResume(string applicationReference, [FromForm] string token, [FromForm] IFormFile resume)
     {
         var result = await _publicCareerService.UploadResume(applicationReference, token, resume);

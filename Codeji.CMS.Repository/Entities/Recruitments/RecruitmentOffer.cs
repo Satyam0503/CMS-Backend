@@ -22,6 +22,14 @@ public sealed class RecruitmentOffer : BaseClass
     public DateTime? RespondedAtUtc { get; set; }
     public DateTime? ViewedAtUtc { get; set; }
     public string? LastCommandIdempotencyKey { get; set; }
+    public string? LastCandidateResponseFingerprint { get; set; }
+    public string? LastCandidateResponseMessage { get; set; }
+    public string? LastCandidateResponsePreviousStage { get; set; }
+    public string? SignatureDataUrl { get; set; }
+    public string? SignerLegalName { get; set; }
+    public DateTime? SignedAtUtc { get; set; }
+    public string? SignerIpAddress { get; set; }
+    public string? SignerUserAgent { get; set; }
     public int Version { get; set; } = 1;
 }
 

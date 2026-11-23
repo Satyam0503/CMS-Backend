@@ -58,6 +58,16 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
                 AutoReplenishment = true
             }));
+    options.AddPolicy("career-search", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 120,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
     options.AddPolicy("account-sensitive", context =>
         RateLimitPartition.GetFixedWindowLimiter(
             context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -89,11 +99,7 @@ builder.Services.AddCors(option => option.AddPolicy(corsName, builder =>
 {
     builder
     .AllowCredentials()
-    .SetIsOriginAllowed(origin =>
-    {
-        string host = new Uri(origin).Host;
-        return host == "localhost" || host.EndsWith(".codeji.in");
-    })
+    .SetIsOriginAllowed(CorsOriginPolicy.IsAllowed)
     .AllowAnyHeader()
     .AllowAnyMethod();
 }));
@@ -212,9 +218,14 @@ builder.Services.AddAuthorization(option =>
 {
     option.AddPolicy("AdminOnly", policy =>
     {
+        policy.RequireAuthenticatedUser();
         policy.Requirements.Add(new RoleRequirement(EnumsHelper.Roles.Administrator));
     });
-    option.AddPolicy("HrExitOverride", policy => policy.Requirements.Add(new AnyRoleRequirement(EnumsHelper.Roles.Administrator, EnumsHelper.Roles.HR, EnumsHelper.Roles.HRExecutive)));
+    option.AddPolicy("HrExitOverride", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.Requirements.Add(new AnyRoleRequirement(EnumsHelper.Roles.Administrator, EnumsHelper.Roles.HR, EnumsHelper.Roles.HRExecutive));
+    });
 });
 builder.Services.AddSingleton<IAuthorizationHandler, AnyRoleHandler>();
 
@@ -267,6 +278,18 @@ if (!Directory.Exists(uploadsPath))
 // works for static-file responses.
 app.UseCors(corsName);
 
+// Candidate resumes are sensitive personal data. Never serve the Resume subtree
+// anonymously; recruiter access goes through the authenticated Applicants API.
+app.Use(async (context, next) =>
+{
+    if (RecruitmentResumeStaticFileGuard.IsPrivateResumePath(context.Request.Path))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+    await next();
+});
+
 // Serve static files
 app.UseStaticFiles(new StaticFileOptions
 {
@@ -278,20 +301,11 @@ app.UseStaticFiles(new StaticFileOptions
         // top of this file. Keep the two predicates in sync.
         var origin = ctx.Context.Request.Headers.Origin.ToString();
         if (string.IsNullOrEmpty(origin)) return;
-        try
+        if (CorsOriginPolicy.IsAllowed(origin))
         {
-            var host = new Uri(origin).Host;
-            if (host == "localhost" || host.EndsWith(".codeji.in"))
-            {
-                ctx.Context.Response.Headers["Access-Control-Allow-Origin"] = origin;
-                ctx.Context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
-                ctx.Context.Response.Headers["Vary"] = "Origin";
-            }
-        }
-        catch (UriFormatException)
-        {
-            // Malformed Origin header â€” silently skip, response gets no CORS
-            // headers and the browser blocks (correct behavior).
+            ctx.Context.Response.Headers["Access-Control-Allow-Origin"] = origin;
+            ctx.Context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
+            ctx.Context.Response.Headers["Vary"] = "Origin";
         }
     }
 });

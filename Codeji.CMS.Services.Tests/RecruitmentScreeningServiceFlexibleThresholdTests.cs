@@ -26,6 +26,8 @@ public sealed class RecruitmentScreeningServiceFlexibleThresholdTests
     {
         _reviewsMock.Setup(x => x.AddOne(It.IsAny<RecruitmentScreeningReview>()))
             .ReturnsAsync(new Result { Success = true });
+        _reviewsMock.Setup(x => x.Update(It.IsAny<FilterDefinition<RecruitmentScreeningReview>>(), It.IsAny<RecruitmentScreeningReview>()))
+            .ReturnsAsync(new Result { Success = true });
         _reviewsMock.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentScreeningReview, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
             .ReturnsAsync((RecruitmentScreeningReview?)null);
         _applicantsMock.Setup(x => x.Update(It.IsAny<FilterDefinition<Applicant>>(), It.IsAny<Applicant>()))

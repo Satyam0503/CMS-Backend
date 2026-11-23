@@ -16,7 +16,8 @@ public sealed class RecruitmentOfferNegotiationService(
     IMongoDbRepository<RecruitmentOfferVersion> versions,
     IMongoDbRepository<RecruitmentOfferCounterRequest> counters,
     IMongoDbRepository<ApplicantLogs> logs,
-    IHttpContextAccessor context) : IRecruitmentOfferNegotiationService
+    IHttpContextAccessor context,
+    IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null) : IRecruitmentOfferNegotiationService
 {
     private static readonly HashSet<string> VersionStatuses = ["Draft", "PendingApproval", "Approved", "Sent", "RevisedSent"];
     private static readonly Regex CurrencyPattern = new("^[A-Z]{3}$", RegexOptions.Compiled);
@@ -25,6 +26,7 @@ public sealed class RecruitmentOfferNegotiationService(
     public async Task<Result<List<RecruitmentOfferVersion>>> GetVersions(string offerId)
     {
         var companyId = CurrentContext.CompanyId(context);
+        if (!string.IsNullOrWhiteSpace(companyId)) { var gate = await RecruitmentFeatureGate.Require<List<RecruitmentOfferVersion>>(configs, companyId, c => c.OfferNegotiation, "Offer negotiation"); if (gate is not null) return gate; }
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(offerId)) return Fail<List<RecruitmentOfferVersion>>(RecruitmentErrorCodes.InvalidRequest, "Company and offer are required.");
         var offer = await offers.FirstOrDefault(x => x.CompanyId == companyId && x.OfferId == offerId.Trim() && !x.IsDeleted);
         if (offer is null) return Fail<List<RecruitmentOfferVersion>>(RecruitmentErrorCodes.InvalidRequest, "Offer was not found in the current company.");
@@ -34,6 +36,7 @@ public sealed class RecruitmentOfferNegotiationService(
     public async Task<Result<List<RecruitmentOfferCounterRequest>>> GetCounters(string offerId)
     {
         var companyId = CurrentContext.CompanyId(context);
+        if (!string.IsNullOrWhiteSpace(companyId)) { var gate = await RecruitmentFeatureGate.Require<List<RecruitmentOfferCounterRequest>>(configs, companyId, c => c.OfferNegotiation, "Offer negotiation"); if (gate is not null) return gate; }
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(offerId)) return Fail<List<RecruitmentOfferCounterRequest>>(RecruitmentErrorCodes.InvalidRequest, "Company and offer are required.");
         var offer = await offers.FirstOrDefault(x => x.CompanyId == companyId && x.OfferId == offerId.Trim() && !x.IsDeleted);
         if (offer is null) return Fail<List<RecruitmentOfferCounterRequest>>(RecruitmentErrorCodes.InvalidRequest, "Offer was not found in the current company.");
@@ -43,6 +46,7 @@ public sealed class RecruitmentOfferNegotiationService(
     public async Task<Result<string>> CreateVersion(RecruitmentOfferVersionCommand command, string actor)
     {
         var companyId = CurrentContext.CompanyId(context);
+        if (!string.IsNullOrWhiteSpace(companyId)) { var gate = await RecruitmentFeatureGate.Require<string>(configs, companyId, c => c.OfferNegotiation, "Offer negotiation"); if (gate is not null) return gate; }
         if (string.IsNullOrWhiteSpace(companyId) || !ValidKey(command.IdempotencyKey)) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Company and an idempotency key of at least 12 characters are required.");
         if (!ValidMoney(command.Salary, command.Currency) || !VersionStatuses.Contains(command.Status.Trim())) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Salary, currency, and offer status are invalid."); if (command.CompensationComponents is null || command.CompensationComponents.Count > 30 || command.CompensationComponents.Any(x => string.IsNullOrWhiteSpace(x.Key) || x.Value < 0) || command.CompensationComponents.GroupBy(x => x.Key.Trim(), StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1)) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Compensation components must have unique names, non-negative values, and no more than 30 entries.");
         if (command.ExpiresAtUtc.HasValue && command.ExpiresAtUtc.Value <= DateTime.UtcNow) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Offer expiry must be in the future."); if (command.StartDateUtc.HasValue && command.StartDateUtc.Value.Date < DateTime.UtcNow.Date) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Offer start date cannot be in the past.");
@@ -64,6 +68,7 @@ public sealed class RecruitmentOfferNegotiationService(
     public async Task<Result<string>> RequestCounter(RecruitmentOfferCounterCommand command, string actor)
     {
         var companyId = CurrentContext.CompanyId(context);
+        if (!string.IsNullOrWhiteSpace(companyId)) { var gate = await RecruitmentFeatureGate.Require<string>(configs, companyId, c => c.OfferNegotiation, "Offer negotiation"); if (gate is not null) return gate; }
         if (string.IsNullOrWhiteSpace(companyId) || !ValidKey(command.IdempotencyKey)) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Company and an idempotency key of at least 12 characters are required.");
         if (!ValidMoney(command.RequestedSalary, command.RequestedCurrency)) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Requested salary and currency are invalid.");
         if (command.RequestedStartDateUtc.HasValue && command.RequestedStartDateUtc.Value <= DateTime.UtcNow) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Requested start date must be in the future.");
@@ -83,6 +88,7 @@ public sealed class RecruitmentOfferNegotiationService(
     public async Task<Result<string>> DecideCounter(RecruitmentOfferCounterDecisionCommand command, string actor)
     {
         var companyId = CurrentContext.CompanyId(context);
+        if (!string.IsNullOrWhiteSpace(companyId)) { var gate = await RecruitmentFeatureGate.Require<string>(configs, companyId, c => c.OfferNegotiation, "Offer negotiation"); if (gate is not null) return gate; }
         if (string.IsNullOrWhiteSpace(companyId) || !ValidKey(command.IdempotencyKey)) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Company and an idempotency key of at least 12 characters are required.");
         var counter = await counters.FirstOrDefault(x => x.CompanyId == companyId && x.CounterRequestId == command.CounterRequestId.Trim() && !x.IsDeleted);
         if (counter is null) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Counter request was not found.");

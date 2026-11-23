@@ -41,6 +41,16 @@ public sealed class PayrollWorkflowSecurityTests
     [InlineData(typeof(PayrollPaymentBatchController), "Create", Permission.Edit)]
     [InlineData(typeof(PayrollPaymentBatchController), "Submit", Permission.Edit)]
     [InlineData(typeof(PayrollPaymentBatchController), "Reconcile", Permission.Edit)]
+    [InlineData(typeof(PayrollPaymentBatchController), "ExportCsv", Permission.View)]
+    [InlineData(typeof(PayrollReportsController), "Summary", Permission.View)]
+    [InlineData(typeof(PayrollReportsController), "Register", Permission.View)]
+    [InlineData(typeof(PayrollReportsController), "StatutoryRegister", Permission.View)]
+    [InlineData(typeof(PayrollReportsController), "StatutoryRegisterCsv", Permission.View)]
+    [InlineData(typeof(PayrollReportsController), "RegisterCsv", Permission.View)]
+    [InlineData(typeof(PayrollReportsController), "EpfoEcrText", Permission.View)]
+    [InlineData(typeof(PayrollReportsController), "EsicReturnCsv", Permission.View)]
+    [InlineData(typeof(PayrollReportsController), "Form16", Permission.View)]
+    [InlineData(typeof(PayrollReportsController), "Form16Csv", Permission.View)]
     public void Payroll_workflow_action_has_the_expected_module_permission(Type controllerType, string methodName, string permissionName)
     {
         Assert.NotNull(controllerType.GetCustomAttribute<AuthorizeAttribute>());

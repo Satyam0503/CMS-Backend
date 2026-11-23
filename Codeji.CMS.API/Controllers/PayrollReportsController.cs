@@ -32,6 +32,7 @@ public sealed class PayrollReportsController(
         if (!result.Success) return BadRequest(result);
         return File(result.MethodResult, "text/csv; charset=utf-8", "payroll-statutory-register.csv");
     }
+
     [HttpGet("register.csv"), ModulePermission(AppModule.PayRoll, Permission.View)]
     public async Task<IActionResult> RegisterCsv([FromQuery] PayrollReportQueryDto query)
     {
@@ -55,6 +56,18 @@ public sealed class PayrollReportsController(
         if (!result.Success) return BadRequest(result);
         return File(result.MethodResult, "text/csv; charset=utf-8", "esic-monthly-return.csv");
     }
+
+    [HttpGet("form16"), ModulePermission(AppModule.PayRoll, Permission.View)]
+    public Task<Codeji.CMS.Domain.Models.Result<List<Form16CertificateDto>>> Form16(
+        [FromQuery] string financialYear,
+        [FromQuery] string? employeeId = null) =>
+        service.GetForm16Certificates(CurrentContext.CompanyId(context), financialYear, employeeId);
+
+    [HttpGet("form16/export.csv"), ModulePermission(AppModule.PayRoll, Permission.View)]
+    public async Task<IActionResult> Form16Csv([FromQuery] string financialYear)
+    {
+        var result = await service.ExportForm16SummaryCsv(CurrentContext.CompanyId(context), financialYear);
+        if (!result.Success) return BadRequest(result);
+        return File(result.MethodResult, "text/csv; charset=utf-8", $"form16-part-b-{financialYear}.csv");
+    }
 }
-
-

@@ -5,6 +5,7 @@ using Codeji.CMS.GenericRepository.Interfaces;
 using Codeji.CMS.Repository.Entities.Employees;
 using Codeji.CMS.Repository.Entities.Recruitments;
 using Codeji.CMS.Services.Recruitments;
+using Codeji.CMS.Services.Recruitments.Interface;
 using Microsoft.AspNetCore.Http;
 using MongoDB.Driver;
 using Moq;
@@ -21,7 +22,8 @@ public sealed class RecruitmentTenantAuthorizationMatrixTests
             applicants.Object,
             new Mock<IMongoDbRepository<ApplicantLogs>>().Object,
             new Mock<IMongoDbRepository<RecruitmentEnterpriseConfig>>().Object,
-            TenantContext());
+            TenantContext(),
+            new Mock<IRecruitmentCandidateDataRedactor>().Object);
 
         var result = await service.Apply(new RecruitmentCandidatePrivacyCommand
         {

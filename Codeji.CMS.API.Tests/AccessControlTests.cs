@@ -8,33 +8,46 @@ public class AccessControlTests : ApiTestBase
     public AccessControlTests(TestWebAppFactory factory) : base(factory) { }
 
     [Theory]
-    [InlineData("api/User/GetAllEmployees")]
-    [InlineData("api/Roles/GetRoles")]
-    [InlineData("api/PayRoll/ProcessPayrollMonth")]
-    [InlineData("api/PayRoll/RecordPayrollPayment")]
-    [InlineData("api/PayRoll/ClosePayrollMonth")]
-    [InlineData("api/PayRoll/ValidatePayrollData")]
-    [InlineData("api/PayRoll/GetPayrollAuditHistory")]
-    [InlineData("api/Salary/GetCompanySalaries")]
-    [InlineData("api/attendance/GetAttendance")]
-    [InlineData("api/LeaveManagement/GetAllLeaveRequests")]
-    [InlineData("api/Dashboard/GetDashboardData")]
-    public async Task ProtectedEndpoints_RequireAuth(string endpoint)
+    [InlineData("GET", "api/Roles/GetRoles")]
+    [InlineData("POST", "api/User/GetAllEmployees")]
+    [InlineData("POST", "api/PayRoll/ProcessPayrollMonth")]
+    [InlineData("POST", "api/PayRoll/RecordPayrollPayment")]
+    [InlineData("POST", "api/PayRoll/ClosePayrollMonth")]
+    [InlineData("POST", "api/PayRoll/ValidatePayrollData")]
+    [InlineData("POST", "api/PayRoll/GetPayrollAuditHistory")]
+    [InlineData("POST", "api/Salary/GetCompanySalaries")]
+    [InlineData("GET", "api/admin/attendance/test-user")]
+    [InlineData("POST", "api/LeaveManagement/GetLeaveRequests")]
+    [InlineData("GET", "api/Dashboard/GetApplicationStatusData")]
+    [InlineData("GET", "api/Dashboard/GetDashboardOverview")]
+    public async Task ProtectedEndpoints_RequireAuth(string method, string endpoint)
     {
-        var response = await UnauthenticatedGetAsync(endpoint);
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        var response = await UnauthenticatedRequestAsync(method, endpoint);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.Unauthorized,
+            $"Protected endpoint {endpoint} returned {response.StatusCode}: {body}");
     }
 
     [Theory]
-    [InlineData("api/Roles/AddEditRole")]
-    [InlineData("api/CompanyMaster/UpdateModuleAccess")]
-    [InlineData("api/AutoPayroll/GeneratePayRollMonthly")]
-    public async Task AdminOnlyEndpoints_RejectUnauthenticated(string endpoint)
+    [InlineData("POST", "api/Roles/AddEditRole")]
+    [InlineData("PATCH", "api/CompanyMaster/UpdateModuleAccess/Applications")]
+    [InlineData("POST", "api/AutoPayroll/GeneratePayRollMonthly")]
+    public async Task AdminOnlyEndpoints_RejectUnauthenticated(string method, string endpoint)
     {
-        var response = await UnauthenticatedGetAsync(endpoint);
+        var response = await UnauthenticatedRequestAsync(method, endpoint);
+        var body = await response.Content.ReadAsStringAsync();
         Assert.True(
             response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.MethodNotAllowed,
-            $"Admin endpoint {endpoint} returned {response.StatusCode} without auth");
+            $"Admin endpoint {endpoint} returned {response.StatusCode} without auth: {body}");
+    }
+
+    private async Task<HttpResponseMessage> UnauthenticatedRequestAsync(string method, string endpoint)
+    {
+        Client.DefaultRequestHeaders.Authorization = null;
+        using var request = new HttpRequestMessage(new HttpMethod(method), endpoint);
+        if (!string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
+            request.Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
+        return await Client.SendAsync(request);
     }
 
     [Fact]

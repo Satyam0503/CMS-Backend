@@ -47,7 +47,7 @@ public class AuthEndpointTests : ApiTestBase
     [Fact]
     public async Task ProtectedEndpoint_WithoutToken_Returns401()
     {
-        var response = await UnauthenticatedGetAsync("api/User/GetAllEmployees");
+        var response = await UnauthenticatedGetAsync("api/User/GetOrganizationChart");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
@@ -56,7 +56,7 @@ public class AuthEndpointTests : ApiTestBase
     {
         Client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "expired.jwt.token");
-        var response = await Client.GetAsync("api/User/GetAllEmployees");
+        var response = await Client.GetAsync("api/User/GetOrganizationChart");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
@@ -65,7 +65,7 @@ public class AuthEndpointTests : ApiTestBase
     {
         Client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "not-a-jwt");
-        var response = await Client.GetAsync("api/User/GetAllEmployees");
+        var response = await Client.GetAsync("api/User/GetOrganizationChart");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 }

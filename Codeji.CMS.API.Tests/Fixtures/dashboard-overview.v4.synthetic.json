@@ -1,0 +1,52 @@
+{
+  "success": true,
+  "statusCode": 200,
+  "methodResult": {
+    "definitionVersion": "dashboard-overview.v4",
+    "asOfDate": "2026-11-17",
+    "timeZone": "Asia/Kolkata",
+    "generatedAtUtc": "2026-11-17T08:00:00Z",
+    "sourceAvailability": {
+      "employees": true,
+      "attendance": true,
+      "leaveManagement": true,
+      "jobs": false,
+      "offboarding": true
+    },
+    "totalEmployees": 6,
+    "totalEmployeesChangePercent": null,
+    "presentToday": 4,
+    "onLeaveToday": 2,
+    "absentToday": 1,
+    "attendanceBreakdown": {
+      "definitionVersion": "attendance-breakdown.v1",
+      "expectedEmployees": 6,
+      "presentOnly": 3,
+      "leaveOnly": 1,
+      "presentAndOnLeave": 1,
+      "explicitlyAbsent": 1,
+      "otherStatus": 0,
+      "unreported": 0
+    },
+    "isWorkingDay": true,
+    "openPositions": 3,
+    "headcountTrend": [
+      { "month": "2026-11", "count": 6 }
+    ],
+    "workforceMovementTrend": [
+      { "month": "2026-11", "hires": 2, "exits": 1, "netChange": 1 }
+    ],
+    "leaveRequestCohortTrend": [
+      { "month": "2026-11", "totalRequests": 4, "pending": 1, "approved": 1, "rejected": 1, "withdrawn": 1, "otherStatus": 0 }
+    ],
+    "recentActivities": [
+      {
+        "type": "joined",
+        "employeeId": "synthetic-employee-01",
+        "employeeName": "Synthetic Employee",
+        "detail": "Engineering",
+        "occurredAt": "2026-11-16T08:30:00Z"
+      }
+    ]
+  }
+}

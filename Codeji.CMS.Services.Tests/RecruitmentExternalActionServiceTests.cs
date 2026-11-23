@@ -18,9 +18,11 @@ public sealed class RecruitmentExternalActionServiceTests
         RecruitmentExternalActionToken? saved = null;
         tokens.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentExternalActionToken, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync((RecruitmentExternalActionToken?)null);
         tokens.Setup(x => x.AddOne(It.IsAny<RecruitmentExternalActionToken>())).Callback<RecruitmentExternalActionToken>(x => saved = x).ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
-        var service = new RecruitmentExternalActionService(tokens.Object, new Mock<IMongoDbRepository<RecruitmentEmailOutbox>>().Object, TenantContext("company-a"));
+        var offers = new Mock<IMongoDbRepository<RecruitmentOffer>>();
+        offers.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentOffer, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync(new RecruitmentOffer { CompanyId = "company-a", OfferId = "offer-1", ApplicantId = "app-1", Status = RecruitmentOfferStatus.Sent, Version = 2 });
+        var service = new RecruitmentExternalActionService(tokens.Object, new Mock<IMongoDbRepository<RecruitmentEmailOutbox>>().Object, TenantContext("company-a"), offers: offers.Object);
 
-        var result = await service.Issue(new RecruitmentExternalActionIssueCommand { ApplicantId = "app-1", OfferId = "offer-1", ActionType = "AcceptOffer", RecipientEmail = "Candidate@Example.com", IssuanceKey = "issuance-key-001" }, "actor-1");
+        var result = await service.Issue(new RecruitmentExternalActionIssueCommand { ApplicantId = "app-1", OfferId = "offer-1", ResourceVersion = 2, ActionType = "AcceptOffer", RecipientEmail = "Candidate@Example.com", IssuanceKey = "issuance-key-001" }, "actor-1");
 
         Assert.True(result.Success);
         Assert.NotNull(saved);
@@ -29,6 +31,30 @@ public sealed class RecruitmentExternalActionServiceTests
         Assert.Equal(64, saved.TokenHash.Length);
         Assert.NotEqual("Candidate@Example.com", saved.TokenHash);
         Assert.NotEqual(saved.TokenHash, saved.RecipientEmailHash);
+    }
+
+    [Theory]
+    [InlineData(null, 400)]
+    [InlineData(2, 409)]
+    public async Task Offer_action_link_requires_the_current_offer_version(int? requestedVersion, int expectedStatus)
+    {
+        var tokens = new Mock<IMongoDbRepository<RecruitmentExternalActionToken>>();
+        tokens.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentExternalActionToken, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync((RecruitmentExternalActionToken?)null);
+        var offers = new Mock<IMongoDbRepository<RecruitmentOffer>>();
+        offers.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentOffer, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync(new RecruitmentOffer { CompanyId = "company-a", OfferId = "offer-1", ApplicantId = "app-1", Status = RecruitmentOfferStatus.Sent, Version = 3 });
+        var service = new RecruitmentExternalActionService(tokens.Object, new Mock<IMongoDbRepository<RecruitmentEmailOutbox>>().Object, TenantContext("company-a"), offers: offers.Object);
+
+        var result = await service.Issue(new RecruitmentExternalActionIssueCommand
+        {
+            ApplicantId = "app-1", OfferId = "offer-1", ActionType = "AcceptOffer", RecipientEmail = "candidate@example.com",
+            ResourceVersion = requestedVersion, IssuanceKey = "offer-version-key-001"
+        }, "actor-1");
+
+        Assert.False(result.Success);
+        Assert.Equal(expectedStatus, result.StatusCode);
+        tokens.Verify(x => x.AddOne(It.IsAny<RecruitmentExternalActionToken>()), Times.Never);
     }
 
     [Fact]
@@ -43,6 +69,38 @@ public sealed class RecruitmentExternalActionServiceTests
         Assert.False(result.Success);
         Assert.Equal(RecruitmentErrorCodes.InvalidRequest, result.ErrorCode);
         Assert.Equal(410, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task ValidateForIdempotentReplay_accepts_only_a_previously_consumed_unrevoked_token()
+    {
+        var token = new RecruitmentExternalActionToken
+        {
+            CompanyId = "company-a",
+            TokenHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("raw-token"))).ToLowerInvariant(),
+            ActionType = "OfferResponse",
+            ApplicantId = "app-1",
+            OfferId = "offer-1",
+            ResourceVersion = 3,
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(-1),
+            ConsumedAtUtc = DateTime.UtcNow.AddDays(-2)
+        };
+        var tokens = new Mock<IMongoDbRepository<RecruitmentExternalActionToken>>();
+        tokens.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentExternalActionToken, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .ReturnsAsync((Expression<Func<RecruitmentExternalActionToken, bool>> filter, bool _, bool __) => filter.Compile()(token) ? token : null);
+        var service = new RecruitmentExternalActionService(tokens.Object, new Mock<IMongoDbRepository<RecruitmentEmailOutbox>>().Object, TenantContext("company-a"));
+
+        var recovered = await service.ValidateForIdempotentReplay("raw-token");
+        token.RevokedAtUtc = DateTime.UtcNow;
+        var revoked = await service.ValidateForIdempotentReplay("raw-token");
+        token.RevokedAtUtc = null;
+        token.ConsumedAtUtc = null;
+        var unused = await service.ValidateForIdempotentReplay("raw-token");
+
+        Assert.True(recovered.Success);
+        Assert.Equal(3, recovered.MethodResult!.ResourceVersion);
+        Assert.False(revoked.Success);
+        Assert.False(unused.Success);
     }
 
     [Fact]
@@ -78,9 +136,11 @@ public sealed class RecruitmentExternalActionServiceTests
         tokens.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentExternalActionToken, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
             .ReturnsAsync((Expression<Func<RecruitmentExternalActionToken, bool>> filter, bool _, bool __) => seed.AsQueryable().FirstOrDefault(filter));
         tokens.Setup(x => x.AddOne(It.IsAny<RecruitmentExternalActionToken>())).ReturnsAsync(new Codeji.CMS.Domain.Models.Result { Success = true });
-        var service = new RecruitmentExternalActionService(tokens.Object, new Mock<IMongoDbRepository<RecruitmentEmailOutbox>>().Object, TenantContext("company-a"));
+        var offers = new Mock<IMongoDbRepository<RecruitmentOffer>>();
+        offers.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentOffer, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>())).ReturnsAsync(new RecruitmentOffer { CompanyId = "company-a", OfferId = "offer-1", ApplicantId = "app-1", Status = RecruitmentOfferStatus.Sent, Version = 1 });
+        var service = new RecruitmentExternalActionService(tokens.Object, new Mock<IMongoDbRepository<RecruitmentEmailOutbox>>().Object, TenantContext("company-a"), offers: offers.Object);
 
-        var result = await service.Issue(new RecruitmentExternalActionIssueCommand { ApplicantId = "app-1", OfferId = "offer-1", ActionType = "AcceptOffer", RecipientEmail = "candidate@example.com", IssuanceKey = "issuance-key-003" }, "actor-1");
+        var result = await service.Issue(new RecruitmentExternalActionIssueCommand { ApplicantId = "app-1", OfferId = "offer-1", ResourceVersion = 1, ActionType = "AcceptOffer", RecipientEmail = "candidate@example.com", IssuanceKey = "issuance-key-003" }, "actor-1");
 
         Assert.True(result.Success);
         tokens.Verify(x => x.AddOne(It.Is<RecruitmentExternalActionToken>(item => item.CompanyId == "company-a")), Times.Once);

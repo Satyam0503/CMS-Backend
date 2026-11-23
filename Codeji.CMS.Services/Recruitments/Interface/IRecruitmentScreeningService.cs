@@ -7,4 +7,5 @@ public interface IRecruitmentScreeningService
 {
     Task<Result<string>> Upsert(RecruitmentScreeningReviewCommand command, string actorUserId);
     Task<Result<RecruitmentScreeningBulkResult>> Bulk(RecruitmentScreeningBulkCommand command, string actorUserId);
+    Task<int> RecoverPending(string? reviewId = null, int batchSize = 50, CancellationToken cancellationToken = default);
 }

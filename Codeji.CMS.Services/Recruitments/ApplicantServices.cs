@@ -45,6 +45,8 @@ namespace Codeji.CMS.Services.Recruitments
         private readonly IMongoDbRepository<RecruitmentHandoff>? _handoffRepository;
         private readonly IMongoDbRepository<RecruitmentScorecard>? _scorecardRepository;
         private readonly IMongoDbRepository<RecruitmentInterview>? _interviewRepository;
+        private readonly IMongoDbRepository<RecruitmentCandidateShare>? _candidateShareRepository;
+        private readonly IRecruitmentResumeScanner? _resumeScanner;
 
         public ApplicantServices(IMongoDbRepository<Applicant> applicantDbRepository,
             IMapper mapper,
@@ -63,7 +65,9 @@ namespace Codeji.CMS.Services.Recruitments
             IMongoDbRepository<RecruitmentEnterpriseConfig>? configRepository = null,
             IMongoDbRepository<RecruitmentHandoff>? handoffRepository = null,
             IMongoDbRepository<RecruitmentScorecard>? scorecardRepository = null,
-            IMongoDbRepository<RecruitmentInterview>? interviewRepository = null
+            IMongoDbRepository<RecruitmentInterview>? interviewRepository = null,
+            IRecruitmentResumeScanner? resumeScanner = null,
+            IMongoDbRepository<RecruitmentCandidateShare>? candidateShareRepository = null
             )
         {
             _applicantRepository = applicantDbRepository;
@@ -84,6 +88,60 @@ namespace Codeji.CMS.Services.Recruitments
             _handoffRepository = handoffRepository;
             _scorecardRepository = scorecardRepository;
             _interviewRepository = interviewRepository;
+            _resumeScanner = resumeScanner;
+            _candidateShareRepository = candidateShareRepository;
+        }
+
+        public async Task<bool> CanAccessResume(string applicantId, string actorUserId)
+        {
+            var access = await ResolveResumeAccess(applicantId, actorUserId);
+            return access.Allowed;
+        }
+
+        private async Task<(Applicant? Applicant, bool Allowed)> ResolveResumeAccess(string applicantId, string actorUserId)
+        {
+            var companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var normalizedApplicantId = applicantId?.Trim();
+            var normalizedActorId = actorUserId?.Trim();
+            if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(normalizedApplicantId) || string.IsNullOrWhiteSpace(normalizedActorId))
+                return (null, false);
+
+            var actor = await _employeeRepository.FirstOrDefault(x => x.CompanyId == companyId && x.UserId == normalizedActorId && x.Status && !x.IsDeleted);
+            if (actor is null || string.IsNullOrWhiteSpace(actor.RoleId)) return (null, false);
+            var role = await _rolesRepository.FirstOrDefault(x => x.CompanyId == companyId && x.RolesId == actor.RoleId && !x.IsDeleted);
+            if (role is null) return (null, false);
+
+            var applicant = await _applicantRepository.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == normalizedApplicantId && !x.IsDeleted && !x.AnonymizationCleanupPending);
+            if (applicant is null) return (null, false);
+
+            if (role.RoleType is (int)EnumsHelper.Roles.Administrator or (int)EnumsHelper.Roles.HR or (int)EnumsHelper.Roles.HRExecutive)
+                return (applicant, true);
+
+            var vacancy = string.IsNullOrWhiteSpace(applicant.VacancyId) ? null : await _jobVacancyRepository.FirstOrDefault(
+                x => x.CompanyId == companyId && x.JobId == applicant.VacancyId && !x.IsDeleted);
+            if (vacancy is not null &&
+                (string.Equals(vacancy.HiringManagerUserId, normalizedActorId, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(vacancy.CreatedBy, normalizedActorId, StringComparison.OrdinalIgnoreCase)))
+                return (applicant, true);
+
+            if (_interviewRepository is not null)
+            {
+                var assignedInterview = await _interviewRepository.FirstOrDefault(x =>
+                    x.CompanyId == companyId && x.ApplicantId == normalizedApplicantId && !x.IsDeleted &&
+                    x.Status != RecruitmentInterviewStatus.Cancelled && x.PanelistUserIds.Contains(normalizedActorId));
+                if (assignedInterview is not null) return (applicant, true);
+            }
+
+            if (_candidateShareRepository is not null)
+            {
+                var share = await _candidateShareRepository.FirstOrDefault(x =>
+                    x.CompanyId == companyId && x.ApplicantId == normalizedApplicantId &&
+                    x.SharedWithUserId == normalizedActorId && x.Scope == "View" && !x.IsDeleted &&
+                    x.RevokedAtUtc == null && (!x.ExpiresAtUtc.HasValue || x.ExpiresAtUtc > DateTime.UtcNow));
+                if (share is not null) return (applicant, true);
+            }
+
+            return (applicant, string.Equals(applicant.CreatedBy, normalizedActorId, StringComparison.OrdinalIgnoreCase));
         }
         /// <summary>
         /// For Annonymous add and update applicants
@@ -92,33 +150,46 @@ namespace Codeji.CMS.Services.Recruitments
         /// <returns></returns>
         public async Task<Result> RegisterApplicants(ApplicantAddEditModel applicantRegisterModel)
         {
-            Result result = new();
+            if (applicantRegisterModel is null)
+                return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Applicant details are required.", ErrorCode = RecruitmentErrorCodes.InvalidRequest };
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (string.IsNullOrWhiteSpace(companyId))
+                return new Result { Success = false, StatusCode = StatusCodes.Status403Forbidden, Message = "A valid company context is required." };
+            string email = applicantRegisterModel.Email?.Trim().ToLowerInvariant() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(email) || !new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(email) ||
+                string.IsNullOrWhiteSpace(applicantRegisterModel.LastName) || applicantRegisterModel.LastName.Trim().Length > 100 ||
+                (applicantRegisterModel.FirstName?.Trim().Length ?? 0) > 100 || applicantRegisterModel.Experience < 0)
+                return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Valid applicant details are required.", ErrorCode = RecruitmentErrorCodes.InvalidRequest };
+            string? vacancyId = string.IsNullOrWhiteSpace(applicantRegisterModel.VacancyId) ? null : applicantRegisterModel.VacancyId.Trim();
+            if (vacancyId is not null && await _jobVacancyRepository.FirstOrDefault(x =>
+                    x.CompanyId == companyId && x.JobId == vacancyId && !x.IsDeleted) is null)
+                return new Result { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "The vacancy was not found in the current company.", ErrorCode = RecruitmentErrorCodes.JobNotFound };
             var config = _configRepository is null ? null : await _configRepository.FirstOrDefault(x => x.CompanyId == companyId && !x.IsDeleted);
             var allowMultiVacancy = config?.AllowMultiVacancyApplications ?? true;
 
             // REC-BUG-07 Fix: Scope duplicate check to !ap.IsDeleted and to the specific VacancyId when AllowMultiVacancyApplications is enabled.
-            bool isApplicantExist = allowMultiVacancy && !string.IsNullOrWhiteSpace(applicantRegisterModel.VacancyId)
-                ? await _applicantRepository.Exist(ap => ap.CompanyId == companyId && ap.VacancyId == applicantRegisterModel.VacancyId && ap.Email == applicantRegisterModel.Email && !ap.IsDeleted)
-                : await _applicantRepository.Exist(ap => ap.CompanyId == companyId && ap.Email == applicantRegisterModel.Email && !ap.IsDeleted);
+            bool isApplicantExist = allowMultiVacancy && vacancyId is not null
+                ? await _applicantRepository.Exist(ap => ap.CompanyId == companyId && ap.VacancyId == vacancyId && ap.Email == email && !ap.IsDeleted)
+                : await _applicantRepository.Exist(ap => ap.CompanyId == companyId && ap.Email == email && !ap.IsDeleted);
             if (isApplicantExist)
             {
-                result.StatusCode = CustomStatusCode.ApplicantAlreadyExist;
-                return result;
+                return new Result { Success = false, StatusCode = CustomStatusCode.ApplicantAlreadyExist, Message = "An applicant with this email already exists for the selected scope.", ErrorCode = RecruitmentErrorCodes.DuplicateApplication };
             }
 
+            Result result = new();
             Applicant applicant = new Applicant()
             {
                 ApplicantId = Guid.NewGuid().ToString(),
                 CompanyId = companyId,
-                FirstName = applicantRegisterModel.FirstName,
-                LastName = applicantRegisterModel.LastName,
+                FirstName = applicantRegisterModel.FirstName?.Trim() ?? string.Empty,
+                LastName = applicantRegisterModel.LastName.Trim(),
                 Experience = applicantRegisterModel.Experience,
-                VacancyId = applicantRegisterModel.VacancyId,
-                Phone = applicantRegisterModel.Phone,
-                Email = applicantRegisterModel.Email,
-                Status = applicantRegisterModel.Status,
-                State = applicantRegisterModel.State,
+                VacancyId = vacancyId ?? string.Empty,
+                Phone = applicantRegisterModel.Phone?.Trim() ?? string.Empty,
+                Email = email,
+                Status = EnumsHelper.ActivityStatus.Active,
+                ActivityType = EnumsHelper.ActivityType.New,
+                State = applicantRegisterModel.State?.Trim() ?? string.Empty,
                 PipelineVersion = 1,
                 WorkflowSnapshot = RecruitmentWorkflowSnapshot.LegacyV1,
             };
@@ -178,6 +249,13 @@ namespace Codeji.CMS.Services.Recruitments
         public async Task<Result> UpdateApplicants(ApplicantAddEditModel model, string actorUserId)
         {
             Result result = new();
+            if (model is null || string.IsNullOrWhiteSpace(model.ApplicantId) || string.IsNullOrWhiteSpace(model.Email) ||
+                !new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(model.Email.Trim()) ||
+                string.IsNullOrWhiteSpace(model.LastName) || model.LastName.Trim().Length > 100 ||
+                (model.FirstName?.Trim().Length ?? 0) > 100 || model.Experience < 0 ||
+                (model.Phone?.Trim().Length ?? 0) > 30 || (model.State?.Trim().Length ?? 0) > 100 ||
+                !Enum.IsDefined(model.ActivityType) || !Enum.IsDefined(model.Status))
+                return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Applicant identity is required.", ErrorCode = RecruitmentErrorCodes.InvalidRequest };
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
             if (string.IsNullOrWhiteSpace(actorUserId))
             {
@@ -194,9 +272,14 @@ namespace Codeji.CMS.Services.Recruitments
             }
 
             Expression<Func<Applicant, bool>> whereCondition = x =>
-                x.CompanyId == companyId && x.ApplicantId == model.ApplicantId && x.Email == model.Email;
+                x.CompanyId == companyId && x.ApplicantId == model.ApplicantId && x.Email == model.Email && !x.IsDeleted;
             Applicant? entity = await _applicantRepository.FirstOrDefault(whereCondition);
             if (entity == null) return result;
+
+            string? requestedVacancyId = string.IsNullOrWhiteSpace(model.VacancyId) ? null : model.VacancyId.Trim();
+            if (requestedVacancyId is not null && requestedVacancyId != entity.VacancyId &&
+                await _jobVacancyRepository.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == requestedVacancyId && !x.IsDeleted) is null)
+                return new Result { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "The vacancy was not found in the current company.", ErrorCode = RecruitmentErrorCodes.JobNotFound };
 
             if (!string.IsNullOrWhiteSpace(model.IdempotencyKey) && string.Equals(entity.LastCommandIdempotencyKey, model.IdempotencyKey, StringComparison.Ordinal))
                 return new Result { Success = true, StatusCode = StatusCodes.Status200OK };
@@ -211,11 +294,10 @@ namespace Codeji.CMS.Services.Recruitments
             }
 
             entity.Experience = model.Experience;
-            entity.VacancyId = model.VacancyId;
-            entity.FirstName = model.FirstName;
-            entity.LastName = model.LastName;
-            entity.Phone = model.Phone;
-            entity.VacancyId = model.VacancyId;
+            entity.VacancyId = requestedVacancyId ?? string.Empty;
+            entity.FirstName = model.FirstName?.Trim() ?? string.Empty;
+            entity.LastName = model.LastName.Trim();
+            entity.Phone = model.Phone?.Trim() ?? string.Empty;
             entity.ActivityType = model.ActivityType;
             entity.Status = model.Status;
             entity.State = model.State;
@@ -229,6 +311,7 @@ namespace Codeji.CMS.Services.Recruitments
                 x.CompanyId == companyId &&
                 x.ApplicantId == model.ApplicantId &&
                 x.Email == model.Email &&
+                !x.IsDeleted &&
                 x.ActivityType == previousActivityType &&
                 (x.Version == currentVersion || x.Version == 0);
             result = await _applicantRepository.Update(updateCondition, entity);
@@ -376,66 +459,244 @@ namespace Codeji.CMS.Services.Recruitments
             return result;
         }
 
-        public async Task<Result> UploadResume(IFormFile resume, string email)
-        {
-            Result result = new();
-            if (resume is null || resume.Length == 0 || resume.Length > 5 * 1024 * 1024 || !string.Equals(Path.GetExtension(resume.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
-                return new Result { Success = false, StatusCode = CustomStatusCode.InvalidFileFormat, Message = "A PDF resume up to 5 MB is required.", ErrorCode = RecruitmentErrorCodes.InvalidResume };
-            Applicant? applicant = await _applicantRepository.FirstOrDefault(a => a.Email == email);
-            if (applicant is null) return result;
-
-            // upload folder path 
-            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Resume");
-            if (!Directory.Exists(uploadFolder))
+        public Task<Result> UploadResume(IFormFile resume, string email) =>
+            Task.FromResult(new Result
             {
-                Directory.CreateDirectory(uploadFolder);
-            }
-            string fileName = $"{Guid.NewGuid():N}.pdf";
-            string filePath = Path.Combine(uploadFolder, fileName);
-            using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
-            {
-                await resume.CopyToAsync(fileStream);
-            }
-
-            // check if applicant already has resume uploaded
-            if (!string.IsNullOrEmpty(applicant.ResumeUrl))
-            {
-                string oldPath = Path.Combine(uploadFolder, applicant.ResumeUrl);
-                if (File.Exists(oldPath))
-                {
-                    FileInfo fileInfo = new(oldPath);
-                    fileInfo.Delete();
-                }
-            }
-            // upload resume
-            Expression<Func<Applicant, bool>> expression = a => a.ApplicantId == applicant.ApplicantId;
-            return await _applicantRepository.UpdateMany(expression, Builders<Applicant>.Update.Set(a => a.ResumeUrl, fileName).Set(a => a.UpdatedDate, DateTime.UtcNow));
-        }
+                Success = false,
+                StatusCode = StatusCodes.Status410Gone,
+                ErrorCode = RecruitmentErrorCodes.InvalidResume,
+                Message = "Email-only resume uploads are retired. Use the application-bound candidate upload flow or an authenticated recruiter upload."
+            });
 
         public async Task<Result> UploadResumeForApplicant(string applicantId, IFormFile resume, string actorUserId)
         {
             if (string.IsNullOrWhiteSpace(applicantId)) return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, Message = "Applicant ID is required.", ErrorCode = RecruitmentErrorCodes.InvalidResume };
             if (resume is null || resume.Length == 0 || resume.Length > 5 * 1024 * 1024 || !string.Equals(Path.GetExtension(resume.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
                 return new Result { Success = false, StatusCode = CustomStatusCode.InvalidFileFormat, Message = "A PDF resume up to 5 MB is required.", ErrorCode = RecruitmentErrorCodes.InvalidResume };
+            if (!await RecruitmentResumeStorage.HasPdfSignature(resume))
+                return new Result { Success = false, StatusCode = CustomStatusCode.InvalidFileFormat, Message = "The resume file is not a valid PDF.", ErrorCode = RecruitmentErrorCodes.InvalidResume };
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
             Applicant? applicant = await _applicantRepository.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicantId && !x.IsDeleted);
             if (applicant is null) return new Result { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "Applicant was not found in the current company." };
-            string uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Resume");
+            var scan = await ScanUploadedResume(resume, applicant, actorUserId);
+            if (scan.Error is not null) return scan.Error;
+            string uploadFolder = RecruitmentResumeStorage.PrivateDirectory;
             Directory.CreateDirectory(uploadFolder);
             string fileName = $"{Guid.NewGuid():N}.pdf";
             string filePath = Path.Combine(uploadFolder, fileName);
             using (FileStream fileStream = new(filePath, FileMode.CreateNew)) await resume.CopyToAsync(fileStream);
-            if (!string.IsNullOrEmpty(applicant.ResumeUrl))
-            {
-                string oldPath = Path.Combine(uploadFolder, Path.GetFileName(applicant.ResumeUrl));
-                if (File.Exists(oldPath)) File.Delete(oldPath);
-            }
             var updated = await _applicantRepository.UpdateMany(
-                Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == applicantId),
-                Builders<Applicant>.Update.Set(x => x.ResumeUrl, fileName).Set(x => x.UpdatedDate, DateTime.UtcNow).Set(x => x.UpdatedBy, actorUserId));
-            if (!updated.Success) return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "Resume could not be saved." };
+                Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == applicantId && !x.IsDeleted),
+                Builders<Applicant>.Update
+                    .Set(x => x.ResumeUrl, $"{RecruitmentResumeStorage.PrivatePrefix}{fileName}")
+                    .Set(x => x.ResumeScanSha256, scan.Sha256)
+                    .Set(x => x.ResumeScanVerdict, scan.Sha256 is null ? null : nameof(ResumeScanStatus.Clean))
+                    .Set(x => x.ResumeScannedAtUtc, scan.Sha256 is null ? null : DateTime.UtcNow)
+                    .Set(x => x.ResumeQuarantineFileName, null)
+                    .Set(x => x.ResumeQuarantinedAtUtc, null)
+                    .Set(x => x.PublicResumeUploadTokenId, null)
+                    .Set(x => x.PublicResumeUploadSha256, null)
+                    .Set(x => x.UpdatedDate, DateTime.UtcNow)
+                    .Set(x => x.UpdatedBy, actorUserId));
+            if (!updated.Success)
+            {
+                File.Delete(filePath);
+                return new Result { Success = false, StatusCode = StatusCodes.Status409Conflict, Message = "Resume could not be saved." };
+            }
+            DeleteStoredResume(applicant.ResumeUrl);
             return updated;
         }
+
+        private static void DeleteStoredResume(string? resumeUrl)
+        {
+            if (string.IsNullOrWhiteSpace(resumeUrl)) return;
+            var path = RecruitmentResumeStorage.Resolve(resumeUrl);
+            if (File.Exists(path)) File.Delete(path);
+        }
+
+        private async Task<(Result? Error, string? Sha256)> ScanUploadedResume(IFormFile resume, Applicant applicant, string actorUserId)
+        {
+            ResumeScanResult scanResult;
+            try
+            {
+                if (_resumeScanner is null) scanResult = new ResumeScanResult(ResumeScanStatus.Unavailable);
+                else
+                {
+                    await using var stream = resume.OpenReadStream();
+                    scanResult = await _resumeScanner.ScanAsync(stream);
+                }
+            }
+            catch
+            {
+                scanResult = new ResumeScanResult(ResumeScanStatus.Unavailable);
+            }
+
+            if (scanResult.Status == ResumeScanStatus.Clean && NormalizeScanSha256(scanResult.Sha256) is null)
+                scanResult = new ResumeScanResult(ResumeScanStatus.Unavailable);
+
+            try
+            {
+                var audit = await _ApplicantLogsRepository.AddOne(RecruitmentResumeScanAudit.Create(
+                    applicant.CompanyId, applicant.ApplicantId, applicant.VacancyId, actorUserId,
+                    Guid.NewGuid().ToString("N"), scanResult.Status));
+                if (audit is null || !audit.Success) return (ResumeScanAuditUnavailable(), null);
+            }
+            catch { return (ResumeScanAuditUnavailable(), null); }
+
+            var error = scanResult.Status switch
+            {
+                ResumeScanStatus.Clean => null,
+                ResumeScanStatus.Infected => ResumeRejectedByScanner(),
+                _ => ResumeScanUnavailable()
+            };
+            return (error, error is null ? NormalizeScanSha256(scanResult.Sha256) : null);
+        }
+
+        private static string? NormalizeScanSha256(string? sha256) =>
+            sha256 is { Length: 64 } && sha256.All(Uri.IsHexDigit) ? sha256.ToUpperInvariant() : null;
+
+        private static Result ResumeScanUnavailable() => new()
+        {
+            Success = false,
+            StatusCode = StatusCodes.Status503ServiceUnavailable,
+            ErrorCode = RecruitmentErrorCodes.WriteFailed,
+            Message = "Secure resume scanning is unavailable. Please retry later."
+        };
+
+        private static Result ResumeRejectedByScanner() => new()
+        {
+            Success = false,
+            StatusCode = StatusCodes.Status422UnprocessableEntity,
+            ErrorCode = RecruitmentErrorCodes.InvalidResume,
+            Message = "This resume could not be accepted. Upload a clean PDF or contact the hiring team."
+        };
+
+        private static Result ResumeScanAuditUnavailable() => new()
+        {
+            Success = false,
+            StatusCode = StatusCodes.Status503ServiceUnavailable,
+            ErrorCode = RecruitmentErrorCodes.WriteFailed,
+            Message = "The resume scan could not be recorded safely. Please retry later."
+        };
+
+        public async Task<Result<RecruitmentResumeDownload>> GetScannedResumeForDownload(string applicantId, string actorUserId)
+        {
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            var access = await ResolveResumeAccess(applicantId, actorUserId);
+            if (!access.Allowed || access.Applicant is null)
+                return ResumeDownloadFailure(StatusCodes.Status403Forbidden, "You do not have permission to access this resume.");
+            var applicant = access.Applicant;
+            if (string.IsNullOrWhiteSpace(applicant.ResumeUrl))
+                return ResumeDownloadFailure(StatusCodes.Status404NotFound, "Applicant or resume was not found.");
+
+            byte[] bytes;
+            try
+            {
+                string path = RecruitmentResumeStorage.Resolve(applicant.ResumeUrl);
+                var info = new FileInfo(path);
+                if (!info.Exists) return ResumeDownloadFailure(StatusCodes.Status404NotFound, "Resume file was not found.");
+                if (info.Length < 4 || info.Length > 5 * 1024 * 1024)
+                    return ResumeDownloadFailure(StatusCodes.Status422UnprocessableEntity, "Resume file is invalid or exceeds the 5 MB limit.");
+                bytes = await File.ReadAllBytesAsync(path);
+            }
+            catch (FileNotFoundException) { return ResumeDownloadFailure(StatusCodes.Status404NotFound, "Resume file was not found."); }
+            catch (DirectoryNotFoundException) { return ResumeDownloadFailure(StatusCodes.Status404NotFound, "Resume file was not found."); }
+            catch { return ResumeDownloadFailure(StatusCodes.Status503ServiceUnavailable, "Resume storage is temporarily unavailable."); }
+
+            if (bytes.Length < 4 || bytes[0] != '%' || bytes[1] != 'P' || bytes[2] != 'D' || bytes[3] != 'F')
+                return ResumeDownloadFailure(StatusCodes.Status422UnprocessableEntity, "The stored resume is not a valid PDF.");
+
+            string sha256 = Convert.ToHexString(SHA256.HashData(bytes));
+            if (RecruitmentResumeVerdictRules.IsCachedInfected(applicant.ResumeScanVerdict, applicant.ResumeScanSha256, sha256))
+                return ResumeDownloadFailure(StatusCodes.Status422UnprocessableEntity, "This resume was blocked by malware scanning.");
+
+            bool cachedClean = RecruitmentResumeVerdictRules.IsCachedClean(
+                applicant.ResumeScanVerdict, applicant.ResumeScanSha256, sha256, applicant.ResumeScannedAtUtc, DateTime.UtcNow);
+            if (!cachedClean)
+            {
+                ResumeScanResult scan;
+                try
+                {
+                    if (_resumeScanner is null) scan = new ResumeScanResult(ResumeScanStatus.Unavailable);
+                    else
+                    {
+                        await using var content = new MemoryStream(bytes, writable: false);
+                        scan = await _resumeScanner.ScanAsync(content);
+                    }
+                }
+                catch { scan = new ResumeScanResult(ResumeScanStatus.Unavailable); }
+
+                try
+                {
+                    var audit = await _ApplicantLogsRepository.AddOne(RecruitmentResumeScanAudit.Create(
+                        companyId, applicant.ApplicantId, applicant.VacancyId, actorUserId, Guid.NewGuid().ToString("N"), scan.Status));
+                    if (audit is null || !audit.Success)
+                        return ResumeDownloadFailure(StatusCodes.Status503ServiceUnavailable, "Resume scan could not be recorded safely.");
+                }
+                catch { return ResumeDownloadFailure(StatusCodes.Status503ServiceUnavailable, "Resume scan could not be recorded safely."); }
+
+                if (scan.Status == ResumeScanStatus.Infected)
+                {
+                    await SaveResumeVerdict(companyId, applicant, sha256, nameof(ResumeScanStatus.Infected));
+                    return ResumeDownloadFailure(StatusCodes.Status422UnprocessableEntity, "This resume was blocked by malware scanning.");
+                }
+                if (scan.Status != ResumeScanStatus.Clean)
+                    return ResumeDownloadFailure(StatusCodes.Status503ServiceUnavailable, "Secure resume scanning is unavailable. Please retry later.");
+
+                if (!string.Equals(NormalizeScanSha256(scan.Sha256), sha256, StringComparison.Ordinal))
+                    return ResumeDownloadFailure(StatusCodes.Status503ServiceUnavailable, "The scanned file could not be verified. Please retry later.");
+                if (!await SaveResumeVerdict(companyId, applicant, sha256, nameof(ResumeScanStatus.Clean)))
+                    return ResumeDownloadFailure(StatusCodes.Status503ServiceUnavailable, "Resume scan result could not be saved safely.");
+            }
+
+            Result accessAudit;
+            try { accessAudit = await RecordResumeAccess(applicantId, actorUserId); }
+            catch { return ResumeDownloadFailure(StatusCodes.Status503ServiceUnavailable, "Resume access could not be recorded. Try again later."); }
+            if (!accessAudit.Success)
+                return ResumeDownloadFailure(accessAudit.StatusCode is >= 400 and <= 599 ? accessAudit.StatusCode : StatusCodes.Status503ServiceUnavailable, accessAudit.Message);
+
+            return new Result<RecruitmentResumeDownload>
+            {
+                Success = true,
+                StatusCode = StatusCodes.Status200OK,
+                MethodResult = new RecruitmentResumeDownload(bytes, $"{applicant.FirstName}_{applicant.LastName}_Resume.pdf")
+            };
+        }
+
+        private async Task<bool> SaveResumeVerdict(string companyId, Applicant applicant, string sha256, string verdict)
+        {
+            string? quarantineFileName = null;
+            if (verdict == nameof(ResumeScanStatus.Infected))
+                quarantineFileName = RecruitmentResumeVerdictRules.Matches(applicant.ResumeScanSha256, sha256) &&
+                    !string.IsNullOrWhiteSpace(applicant.ResumeQuarantineFileName)
+                        ? applicant.ResumeQuarantineFileName
+                        : $"{Guid.NewGuid():N}.quarantine";
+            try
+            {
+                var saved = await _applicantRepository.UpdateMany(
+                    Builders<Applicant>.Filter.Where(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId &&
+                        !x.IsDeleted && x.ResumeUrl == applicant.ResumeUrl),
+                    Builders<Applicant>.Update.Set(x => x.ResumeScanSha256, sha256)
+                        .Set(x => x.ResumeScanVerdict, verdict).Set(x => x.ResumeScannedAtUtc, DateTime.UtcNow)
+                        .Set(x => x.ResumeQuarantineFileName, quarantineFileName)
+                        .Set(x => x.ResumeQuarantinedAtUtc, null));
+                if (!saved.Success) return false;
+                var current = await _applicantRepository.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && !x.IsDeleted);
+                return current is not null && current.ResumeUrl == applicant.ResumeUrl &&
+                       string.Equals(current.ResumeScanSha256, sha256, StringComparison.OrdinalIgnoreCase) &&
+                       string.Equals(current.ResumeScanVerdict, verdict, StringComparison.Ordinal) &&
+                       current.ResumeQuarantineFileName == quarantineFileName;
+            }
+            catch { return false; }
+        }
+
+        private static Result<RecruitmentResumeDownload> ResumeDownloadFailure(int statusCode, string message) => new()
+        {
+            Success = false,
+            StatusCode = statusCode,
+            Message = message
+        };
+
         //Get Applicant List Using Filter Change this logic in Future
         public async Task<Result<ApplicantViewModel>> GetApplicantsList(ApplicantResultFilters? filters)
         {
@@ -483,7 +744,13 @@ namespace Codeji.CMS.Services.Recruitments
                                                  State = applicant.State,
                                                  Experience = applicant.Experience,
                                                  ApplyDate = applicant.CreatedDate,
-                                                 ResumeUrl = Common.GetApplicantResumeFullPath(applicant.ResumeUrl),
+                                                 ResumeUrl = string.IsNullOrWhiteSpace(applicant.ResumeUrl) ? null : $"{ConfigManager.AppSettings.APIUrl}api/Applicants/Resume/{Uri.EscapeDataString(applicant.ApplicantId)}",
+                                                 CandidateReportedSource = applicant.CandidateReportedSource,
+                                                 CandidateReportedSourceDetail = applicant.CandidateReportedSourceDetail,
+                                                 AttributionSource = applicant.AttributionSource,
+                                                 AttributionMedium = applicant.AttributionMedium,
+                                                 AttributionCampaign = applicant.AttributionCampaign,
+                                                 ReferrerHost = applicant.ReferrerHost,
                                                  FinalInterviewScore = applicant.FinalInterviewScore,
                                                  FinalInterviewRating = applicant.FinalInterviewRating,
                                                  FinalInterviewRecommendation = applicant.FinalInterviewRecommendation,
@@ -501,7 +768,7 @@ namespace Codeji.CMS.Services.Recruitments
         {
             Result<ApplicantViewModel> result = new Result<ApplicantViewModel>();
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-            Applicant? applicant = await _applicantRepository.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicantId);
+            Applicant? applicant = await _applicantRepository.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicantId && !x.IsDeleted);
             JobVacancy? vacancy = await _jobVacancyRepository.FirstOrDefault(x => applicant != null && x.CompanyId == companyId && applicant.VacancyId == x.JobId);
             if (applicant is not null)
             {
@@ -548,7 +815,13 @@ namespace Codeji.CMS.Services.Recruitments
                     State = applicant.State,
                     Experience = applicant.Experience,
                     ApplyDate = applicant.CreatedDate,
-                    ResumeUrl = Common.GetApplicantResumeFullPath(applicant.ResumeUrl),
+                    ResumeUrl = string.IsNullOrWhiteSpace(applicant.ResumeUrl) ? null : $"{ConfigManager.AppSettings.APIUrl}api/Applicants/Resume/{Uri.EscapeDataString(applicant.ApplicantId)}",
+                    CandidateReportedSource = applicant.CandidateReportedSource,
+                    CandidateReportedSourceDetail = applicant.CandidateReportedSourceDetail,
+                    AttributionSource = applicant.AttributionSource,
+                    AttributionMedium = applicant.AttributionMedium,
+                    AttributionCampaign = applicant.AttributionCampaign,
+                    ReferrerHost = applicant.ReferrerHost,
                     FinalInterviewScore = applicant.FinalInterviewScore,
                     FinalInterviewRating = applicant.FinalInterviewRating,
                     FinalInterviewRecommendation = applicant.FinalInterviewRecommendation,
@@ -597,33 +870,76 @@ namespace Codeji.CMS.Services.Recruitments
             return result;
         }
 
+        public async Task<Result> RecordResumeAccess(string applicantId, string actorUserId)
+        {
+            string companyId = CurrentContext.CompanyId(_httpContextAccessor);
+            if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(actorUserId))
+                return new Result { Success = false, StatusCode = StatusCodes.Status403Forbidden, Message = "Resume access is not authorized." };
+
+            Applicant? applicant = await _applicantRepository.FirstOrDefault(x =>
+                x.CompanyId == companyId && x.ApplicantId == applicantId && !x.IsDeleted);
+            if (applicant is null || string.IsNullOrWhiteSpace(applicant.ResumeUrl))
+                return new Result { Success = false, StatusCode = StatusCodes.Status404NotFound, Message = "Applicant or resume was not found." };
+
+            Result audit = await _ApplicantLogsRepository.AddOne(new ApplicantLogs
+            {
+                CompanyId = companyId,
+                ApplicantId = applicant.ApplicantId,
+                ApplicantName = "Recruitment resume access",
+                JobRole = applicant.VacancyId,
+                UserId = actorUserId,
+                ActivityCategory = 0,
+                EventType = "ResumeViewed",
+                CurrentStage = applicant.ActivityType.ToString(),
+                Description = "Resume was requested by an authorized recruitment user.",
+                CreatedBy = actorUserId,
+                UpdatedBy = actorUserId,
+                CreatedDate = DateTime.UtcNow
+            });
+
+            if (!audit.Success)
+                return new Result { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, Message = "Resume access could not be recorded. Try again later." };
+
+            return new Result { Success = true, StatusCode = StatusCodes.Status200OK };
+        }
+
         //Logic For Addig Comment on Applicant By Employee (Admin And HR Manager )
 
         public async Task<Result> AddComment(string userId, CommentRequestModel model)
         {
             string companyId = CurrentContext.CompanyId(_httpContextAccessor);
-            var applicant = await _applicantRepository.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == model.ApplicantId);
-            if (applicant is null) return new Result { Message = "Applicant was not found." };
+            if (model is null || string.IsNullOrWhiteSpace(companyId))
+                return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, ErrorCode = RecruitmentErrorCodes.InvalidRequest, Message = "Company and applicant details are required." };
+            var applicantId = model.ApplicantId?.Trim();
+            var description = model.Description?.Trim();
+            if (string.IsNullOrWhiteSpace(applicantId) || string.IsNullOrWhiteSpace(description) || description.Length > 10000)
+                return new Result { Success = false, StatusCode = StatusCodes.Status400BadRequest, ErrorCode = RecruitmentErrorCodes.InvalidRequest, Message = "A comment between 1 and 10000 characters is required." };
+
+            var applicant = await _applicantRepository.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicantId && !x.IsDeleted && !x.AnonymizationCleanupPending);
+            if (applicant is null || string.Equals(applicant.ConsentStatus, "Anonymized", StringComparison.OrdinalIgnoreCase))
+                return new Result { Success = false, StatusCode = StatusCodes.Status404NotFound, ErrorCode = RecruitmentErrorCodes.InvalidRequest, Message = "Applicant was not found in the current company." };
+
+            var sanitizedDescription = Sanitizer.EncodingHtmlText(description);
+            var vacancy = await _jobVacancyRepository.FirstOrDefault(x => x.CompanyId == companyId && x.JobId == applicant.VacancyId && !x.IsDeleted);
 
             ApplicantLogs comments = new()
             {
                 CompanyId = companyId,
-                UserId = userId,
-                ApplicantId = model.ApplicantId,
+                UserId = userId?.Trim() ?? string.Empty,
+                ApplicantId = applicant.ApplicantId,
                 ActivityCategory = model.ActivityCategory,
-                Description = model.Description,
+                Description = sanitizedDescription,
                 CreatedDate = DateTime.UtcNow,
-                CreatedBy = userId,
-                JobRole = model.JobTitle,
-                ApplicantName = $"{applicant.FirstName} {applicant.LastName}"
+                CreatedBy = userId?.Trim() ?? string.Empty,
+                UpdatedBy = userId?.Trim() ?? string.Empty,
+                JobRole = vacancy?.Title ?? string.Empty,
+                ApplicantName = $"{applicant.FirstName} {applicant.LastName}".Trim()
             };
-            await _ApplicantLogsRepository.AddOne(comments);
-            Result result = new()
-            {
-                Success = true,
-                StatusCode = StatusCodes.Status200OK,
-            };
-            return result;
+            var saved = await _ApplicantLogsRepository.AddOne(comments);
+            if (!saved.Success)
+                return new Result { Success = false, StatusCode = StatusCodes.Status503ServiceUnavailable, ErrorCode = RecruitmentErrorCodes.WriteFailed, Message = "Comment could not be saved. Please try again." };
+
+            return new Result { Success = true, StatusCode = StatusCodes.Status200OK, Message = "Comment saved." };
         }
         public async Task<Result<RecruitmentWorkflowViewModel>> GetWorkflow(string applicantId)
         {

@@ -42,4 +42,12 @@ public interface ILeaveManagementService
 
     // service for leave accrual based on leave policy
     Task EmployeeLeaveBalanceAccrual();
+
+    // Comp-Off management
+    Task<Result<string>> RequestCompOffCredit(CompOffCreditRequestDto dto, string userId, string companyId);
+    Task<Result<List<CompOffCreditResponseDto>>> GetCompOffCreditRequests(string companyId, string? userId = null);
+    Task<Result<string>> ReviewCompOffCredit(ReviewCompOffCreditDto dto, string reviewerUserId, string companyId);
+
+    // Sandwich Evaluation Preview
+    Task<Result<SandwichEvaluationResult>> EvaluateSandwichPreview(string companyId, string leavePolicyId, DateTime startDate, DateTime endDate);
 }

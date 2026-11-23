@@ -15,4 +15,12 @@ public sealed class RecruitmentHiringDecisionController(IRecruitmentHiringDecisi
     [HttpPost("Upsert")]
     [ModulePermission(AppModule.Applications, Permission.Edit)]
     public Task<Result<string>> Upsert([FromBody] RecruitmentHiringDecisionCommand command) => decisionService.Upsert(command, CurrentContext.UserId(context));
+
+    [HttpGet("PendingManagerReviews")]
+    [ModulePermission(AppModule.Applications, Permission.View)]
+    public Task<Result<List<RecruitmentManagerReviewQueueItem>>> PendingManagerReviews() => decisionService.PendingManagerReviews();
+
+    [HttpPost("ReviewAsManager")]
+    [ModulePermission(AppModule.Applications, Permission.Edit)]
+    public Task<Result<string>> ReviewAsManager([FromBody] RecruitmentManagerReviewCommand command) => decisionService.ReviewAsManager(command, CurrentContext.UserId(context));
 }

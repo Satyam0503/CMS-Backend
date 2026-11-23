@@ -52,8 +52,16 @@ public sealed class RecruitmentApplicationSnapshotTests
             new() { CompanyId = "company-1", ApplicantId = "a-1", VacancyId = "v-1", ActivityType = ActivityType.Selected, Phone = "1" },
             new() { CompanyId = "company-2", ApplicantId = "a-2", VacancyId = "v-1", ActivityType = ActivityType.New, Phone = "2" }
         };
-        applicants.Setup(x => x.GetAll(It.IsAny<Expression<Func<Applicant, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
-            .ReturnsAsync((Expression<Func<Applicant, bool>> filter, bool _, bool __) => seed.AsQueryable().Where(filter).ToArray());
+        applicants.Setup(x => x.GetAggregateDataAsync<Applicant>(
+                It.IsAny<Expression<Func<Applicant, bool>>>(),
+                It.IsAny<ProjectionDefinition<Applicant, Applicant>?>(),
+                It.IsAny<bool>(), It.IsAny<bool?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<string?>()))
+            .Returns((Expression<Func<Applicant, bool>> filter, ProjectionDefinition<Applicant, Applicant>? _, bool _, bool? _, string? _, int? pageNo, int? pageSize, string? _) =>
+            {
+                var matching = seed.AsQueryable().Where(filter).ToArray();
+                var page = matching.Skip(((pageNo ?? 1) - 1) * (pageSize ?? 200)).Take(pageSize ?? 200).ToArray();
+                return Task.FromResult<IEnumerable<Applicant>>(page);
+            });
         var existing = new List<RecruitmentJobApplication>();
         applications.Setup(x => x.FirstOrDefault(It.IsAny<Expression<Func<RecruitmentJobApplication, bool>>>(), It.IsAny<bool>(), It.IsAny<bool>()))
             .ReturnsAsync((Expression<Func<RecruitmentJobApplication, bool>> filter, bool _, bool __) => existing.AsQueryable().FirstOrDefault(filter));

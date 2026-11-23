@@ -167,6 +167,32 @@ public sealed class UserControllerSecurityAuditTests
         Assert.Equal("No image file provided.", result.Message);
     }
 
+    [Fact]
+    public async Task GetOrganizationChart_PassesCompanyIdFromContext_AndReturnsResult()
+    {
+        var fixture = CreateFixture();
+        var expectedResponse = new Result<OrgChartResponseDto>
+        {
+            Success = true,
+            Data = new OrgChartResponseDto
+            {
+                TotalEmployeesCount = 10,
+                TotalDepartmentsCount = 3
+            }
+        };
+
+        fixture.OrgChartService
+            .Setup(s => s.GetOrganizationChartAsync(CurrentCompanyId, "dept-1", "search-term"))
+            .ReturnsAsync(expectedResponse);
+
+        var result = await fixture.Controller.GetOrganizationChart("dept-1", "search-term");
+
+        Assert.True(result.Success);
+        Assert.Equal(10, result.Data.TotalEmployeesCount);
+        Assert.Equal(3, result.Data.TotalDepartmentsCount);
+        fixture.OrgChartService.Verify(s => s.GetOrganizationChartAsync(CurrentCompanyId, "dept-1", "search-term"), Times.Once);
+    }
+
     [Theory]
     [InlineData("exploit.svg")]
     [InlineData("payload.html")]
@@ -207,7 +233,8 @@ public sealed class UserControllerSecurityAuditTests
             fixture.OfficeScheduleSettingsService.Object,
             fixture.EmployeeExitEvidenceStorage.Object,
             fixture.FormerEmployeePortalService.Object,
-            fixture.RoleService.Object);
+            fixture.RoleService.Object,
+            fixture.OrgChartService.Object);
 
         return fixture;
     }
@@ -223,5 +250,6 @@ public sealed class UserControllerSecurityAuditTests
         public Mock<IEmployeeExitEvidenceStorage> EmployeeExitEvidenceStorage { get; } = new();
         public Mock<IFormerEmployeePortalService> FormerEmployeePortalService { get; } = new();
         public Mock<IRoleService> RoleService { get; } = new();
+        public Mock<IOrgChartService> OrgChartService { get; } = new();
     }
 }

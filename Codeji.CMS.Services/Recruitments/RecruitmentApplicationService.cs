@@ -15,6 +15,8 @@ public sealed class RecruitmentApplicationService(
     IMongoDbRepository<RecruitmentEnterpriseConfig>? configs = null,
     IMongoDbRepository<ApplicantLogs>? logs = null) : IRecruitmentApplicationService
 {
+    private const int LegacyBackfillBatchSize = 200;
+
     public async Task<Result<string>> UpsertStage(RecruitmentApplicationStageCommand command, string actorUserId)
     {
         var companyId = CurrentContext.CompanyId(context);
@@ -59,19 +61,52 @@ public sealed class RecruitmentApplicationService(
     {
         var companyId = CurrentContext.CompanyId(context);
         if (string.IsNullOrWhiteSpace(companyId) || string.IsNullOrWhiteSpace(actorUserId)) return new Result<int> { Success = false, StatusCode = 400, ErrorCode = "REC_INVALID_REQUEST", Message = "Company and actor are required." };
-        var tenantApplicants = (await applicants.GetAll(x => x.CompanyId == companyId && !x.IsDeleted)).ToList();
         var created = 0;
-        foreach (var applicant in tenantApplicants)
+        for (var pageNo = 1; ; pageNo++)
         {
-            var existing = await applications.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.VacancyId == applicant.VacancyId && !x.IsDeleted);
-            if (existing is not null) continue;
-            var stage = applicant.ActivityType.ToString();
-            if (!RecruitmentApplicationStageCatalog.IsSupported(stage)) stage = nameof(ActivityType.New);
-            var snapshot = string.IsNullOrWhiteSpace(applicant.WorkflowSnapshot) ? RecruitmentWorkflowSnapshot.LegacyV1 : applicant.WorkflowSnapshot;
-            var entity = new RecruitmentJobApplication { CompanyId = companyId, ApplicantId = applicant.ApplicantId, VacancyId = applicant.VacancyId, CurrentStage = stage, PipelineVersion = applicant.PipelineVersion > 0 ? applicant.PipelineVersion : 1, PipelineSnapshot = snapshot, CreatedBy = actorUserId, UpdatedBy = actorUserId };
-            entity.StageHistory.Add(new RecruitmentApplicationStageEvent { FromStage = string.Empty, ToStage = stage, ActorUserId = actorUserId, Reason = "Legacy applicant backfill" });
-            var added = await applications.AddOne(entity);
-            if (added.Success) created++;
+            var page = await applicants.GetAggregateDataAsync<Applicant>(
+                x => x.CompanyId == companyId && !x.IsDeleted,
+                projection: null,
+                WithDeletedObjects: false,
+                isAscending: true,
+                orderedKey: nameof(Applicant.ApplicantId),
+                pageNo: pageNo,
+                pageSize: LegacyBackfillBatchSize);
+            if (page is null)
+                return new Result<int>
+                {
+                    Success = false,
+                    StatusCode = 503,
+                    ErrorCode = "REC_BACKFILL_READ_FAILED",
+                    Message = "Legacy application backfill stopped because a candidate page could not be read. Retry the operation.",
+                    MethodResult = created,
+                    Data = created,
+                    TotalRecords = created
+                };
+
+            var batch = page.ToList();
+            if (batch.Count == 0) break;
+
+            foreach (var applicant in batch)
+            {
+                var existing = await applications.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicant.ApplicantId && x.VacancyId == applicant.VacancyId && !x.IsDeleted);
+                if (existing is not null) continue;
+                var stage = applicant.ActivityType.ToString();
+                if (!RecruitmentApplicationStageCatalog.IsSupported(stage)) stage = nameof(ActivityType.New);
+                var snapshot = string.IsNullOrWhiteSpace(applicant.WorkflowSnapshot) ? RecruitmentWorkflowSnapshot.LegacyV1 : applicant.WorkflowSnapshot;
+                var entity = new RecruitmentJobApplication { CompanyId = companyId, ApplicantId = applicant.ApplicantId, VacancyId = applicant.VacancyId, CurrentStage = stage, PipelineVersion = applicant.PipelineVersion > 0 ? applicant.PipelineVersion : 1, PipelineSnapshot = snapshot, CreatedBy = actorUserId, UpdatedBy = actorUserId };
+                entity.StageHistory.Add(new RecruitmentApplicationStageEvent
+                {
+                    FromStage = string.Empty,
+                    ToStage = stage,
+                    ActorUserId = actorUserId,
+                    Reason = "Legacy applicant backfill"
+                });
+                var added = await applications.AddOne(entity);
+                if (added.Success) created++;
+            }
+
+            if (batch.Count < LegacyBackfillBatchSize) break;
         }
         return new Result<int> { Success = true, StatusCode = 200, MethodResult = created, Data = created, TotalRecords = created, Message = $"Created {created} canonical application record(s)." };
     }

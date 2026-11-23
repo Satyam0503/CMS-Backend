@@ -14,4 +14,15 @@ public sealed class RecruitmentPreboardingQueueItem
     public int PendingTaskCount { get; set; }
     public bool ReadyForHire { get; set; }
     public string? FirstBlockerCode { get; set; }
+    public List<RecruitmentPreboardingTaskQueueItem> Tasks { get; set; } = [];
+}
+
+public sealed class RecruitmentPreboardingTaskQueueItem
+{
+    public string Code { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Status { get; set; } = "Pending";
+    public string? SkipReason { get; set; }
+    public string? AssigneeUserId { get; set; }
+    public DateTime? CompletedAtUtc { get; set; }
 }

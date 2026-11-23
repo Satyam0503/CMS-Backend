@@ -11,6 +11,7 @@ namespace Codeji.CMS.DTO.RequestModels
         public string? PublicJobId { get; set; }
         public string? Slug { get; set; }
         public string? ReferenceCode { get; set; }
+        public string? HiringManagerUserId { get; set; }
         public bool? PublishToCareerPortal { get; set; }
         public bool? PublishToMasterPortal { get; set; }
         public string? ApplicationMode { get; set; }

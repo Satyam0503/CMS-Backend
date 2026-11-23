@@ -1,6 +1,8 @@
 using Codeji.CMS.DTO;
 using Codeji.CMS.Repository.Entities.Company;
+using Codeji.CMS.Repository.Entities.Leave;
 using Codeji.CMS.Utility.Constraints;
+using Codeji.CMS.Utility.Enums;
 
 namespace Codeji.CMS.Services.Companies;
 
@@ -173,6 +175,88 @@ public static class DefaultCompanySeeds
             })
             .ToList();
     }
+
+    public static List<LeavePolicy> BuildDefaultLeavePolicies(string companyId, string? createdBy = null)
+    {
+        var now = DateTime.UtcNow;
+        return
+        [
+            new LeavePolicy
+            {
+                Id = string.Empty,
+                CompanyId = companyId,
+                Name = "Casual Leave",
+                Code = "CL",
+                NormalizedName = "CASUAL LEAVE",
+                NormalizedCode = "CL",
+                AttendanceStatusCode = "CL",
+                FullDayAttendanceStatusCode = "CL",
+                HalfDayAttendanceStatusCode = "CL-HALF",
+                PolicyType = EnumsHelper.LeavePolicyType.Leave,
+                Description = "Standard statutory casual leave for personal reasons and short absences.",
+                Status = true,
+                Paid = true,
+                AccrualPeriod = EnumsHelper.LeaveAccrualPeriod.Monthly,
+                AccrualAmount = 1.0m,
+                MaxBalance = 12m,
+                CarryOverAllowed = false,
+                HalfDayAllowed = true,
+                IsDeleted = false,
+                CreatedBy = createdBy ?? "System",
+                CreatedDate = now,
+            },
+            new LeavePolicy
+            {
+                Id = string.Empty,
+                CompanyId = companyId,
+                Name = "Sick Leave",
+                Code = "SL",
+                NormalizedName = "SICK LEAVE",
+                NormalizedCode = "SL",
+                AttendanceStatusCode = "SL",
+                FullDayAttendanceStatusCode = "SL",
+                HalfDayAttendanceStatusCode = "SL-HALF",
+                PolicyType = EnumsHelper.LeavePolicyType.Leave,
+                Description = "Standard statutory medical / sick leave for employee wellness and illness recovery.",
+                Status = true,
+                Paid = true,
+                AccrualPeriod = EnumsHelper.LeaveAccrualPeriod.Monthly,
+                AccrualAmount = 1.0m,
+                MaxBalance = 12m,
+                CarryOverAllowed = false,
+                HalfDayAllowed = true,
+                IsDeleted = false,
+                CreatedBy = createdBy ?? "System",
+                CreatedDate = now,
+            },
+            new LeavePolicy
+            {
+                Id = string.Empty,
+                CompanyId = companyId,
+                Name = "Privilege Leave",
+                Code = "PL",
+                NormalizedName = "PRIVILEGE LEAVE",
+                NormalizedCode = "PL",
+                AttendanceStatusCode = "PL",
+                FullDayAttendanceStatusCode = "PL",
+                HalfDayAttendanceStatusCode = "PL",
+                PolicyType = EnumsHelper.LeavePolicyType.Leave,
+                Description = "Annual earned leave under Factories Act / Shops and Establishments Act, accruable and carry-forward eligible.",
+                Status = true,
+                Paid = true,
+                AccrualPeriod = EnumsHelper.LeaveAccrualPeriod.Monthly,
+                AccrualAmount = 1.25m,
+                MaxBalance = 30m,
+                CarryOverAllowed = true,
+                CarryOverLimit = 30m,
+                HalfDayAllowed = true,
+                IsDeleted = false,
+                CreatedBy = createdBy ?? "System",
+                CreatedDate = now,
+            }
+        ];
+    }
+
 
     private static List<string> NormalizeLanguages(IEnumerable<string>? languages)
     {

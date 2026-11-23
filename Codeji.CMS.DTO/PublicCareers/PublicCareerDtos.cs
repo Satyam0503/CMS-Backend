@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace Codeji.CMS.DTO.PublicCareers;
 
 public sealed class PublicJobSearchRequest
@@ -70,6 +72,9 @@ public class PublicJobSummaryDto
 public sealed class PublicJobDetailsDto : PublicJobSummaryDto
 {
     public required string Description { get; init; }
+    public string? CandidatePrivacyNoticeText { get; init; }
+    public string? CandidatePrivacyNoticeVersion { get; init; }
+    public List<string> CandidateSourceOptions { get; init; } = [];
     public string? ReferenceCode { get; init; }
     public DateTime? ExpiresAt { get; init; }
     public string? FunctionalArea { get; init; }
@@ -88,18 +93,53 @@ public sealed class PublicJobDetailsDto : PublicJobSummaryDto
 
 public sealed class PublicJobApplicationRequest
 {
+    [StringLength(100, MinimumLength = 12)]
+    public required string IdempotencyKey { get; init; }
+    [StringLength(100, MinimumLength = 1)]
     public required string FirstName { get; init; }
+    [StringLength(100, MinimumLength = 1)]
     public required string LastName { get; init; }
+    [StringLength(320, MinimumLength = 3)]
+    [EmailAddress]
     public required string Email { get; init; }
+    [StringLength(25)]
     public required string Phone { get; init; }
+    [StringLength(120)]
     public string? State { get; init; }
+    [Range(0, 80)]
     public decimal Experience { get; init; }
+    [StringLength(200)]
     public string? CurrentCompany { get; init; }
+    [StringLength(200)]
     public string? CurrentJobTitle { get; init; }
+    [Range(0, 3650)]
     public int? NoticePeriodDays { get; init; }
+    [StringLength(2048)]
     public string? LinkedInUrl { get; init; }
+    [StringLength(2048)]
     public string? PortfolioUrl { get; init; }
+    [StringLength(10000)]
     public string? CoverLetter { get; init; }
+    /// <summary>Candidate-reported answer; analytics must not treat it as verified attribution.</summary>
+    [StringLength(60)]
+    public string? CandidateReportedSource { get; init; }
+    [StringLength(250)]
+    public string? CandidateReportedSourceDetail { get; init; }
+    [StringLength(200)]
+    public string? AttributionSource { get; init; }
+    [StringLength(200)]
+    public string? AttributionMedium { get; init; }
+    [StringLength(200)]
+    public string? AttributionCampaign { get; init; }
+    [StringLength(200)]
+    public string? AttributionContent { get; init; }
+    [StringLength(200)]
+    public string? AttributionTerm { get; init; }
+    [StringLength(253)]
+    public string? ReferrerHost { get; init; }
+    public bool PrivacyAcknowledged { get; init; }
+    [StringLength(40)]
+    public string? PrivacyNoticeVersion { get; init; }
 }
 
 public sealed class PublicJobApplicationResponse
@@ -109,6 +149,20 @@ public sealed class PublicJobApplicationResponse
     public DateTime TokenExpiresAt { get; init; }
     public required string JobTitle { get; init; }
     public required string CompanyName { get; init; }
+}
+
+public sealed class PublicApplicationStatusRequest
+{
+    public required string ApplicationReference { get; init; }
+    public required string Email { get; init; }
+}
+
+public sealed class PublicApplicationStatusDto
+{
+    public required string Status { get; init; }
+    public required string JobTitle { get; init; }
+    public required string CompanyName { get; init; }
+    public DateTime? LastUpdatedAtUtc { get; init; }
 }
 
 public sealed class PublicResumeUploadResult

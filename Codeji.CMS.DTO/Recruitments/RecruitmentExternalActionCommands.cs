@@ -44,6 +44,7 @@ public sealed class RecruitmentEmailQueueCommand
     public string? RecipientUserId { get; set; }
     [Required] public string Subject { get; set; } = string.Empty;
     [Required] public string HtmlBody { get; set; } = string.Empty;
+    [JsonIgnore] public string? RelatedApplicantId { get; set; }
 }
 
 public sealed class RecruitmentCandidateInterviewActionCommand
@@ -62,6 +63,7 @@ public sealed class RecruitmentCandidateOfferViewCommand { [System.ComponentMode
 public sealed class RecruitmentCandidateOfferDetailsDto
 {
     public string OfferId { get; set; } = string.Empty;
+    public int Version { get; set; }
     public string CandidateName { get; set; } = string.Empty;
     public string JobTitle { get; set; } = string.Empty;
     public string Currency { get; set; } = string.Empty;
@@ -71,14 +73,22 @@ public sealed class RecruitmentCandidateOfferDetailsDto
     public DateTime? ExpiresAtUtc { get; set; }
     public string Status { get; set; } = string.Empty;
     public string ActionType { get; set; } = string.Empty;
+    public string? SignatureDataUrl { get; set; }
+    public string? SignerLegalName { get; set; }
+    public DateTime? SignedAtUtc { get; set; }
 }
 
 public sealed class RecruitmentCandidateOfferActionCommand
 {
     [System.ComponentModel.DataAnnotations.Required] public string Token { get; set; } = string.Empty;
     [System.ComponentModel.DataAnnotations.Required] public string Decision { get; set; } = string.Empty;
-    public string? Message { get; set; }
+    [System.ComponentModel.DataAnnotations.StringLength(4000)] public string? Message { get; set; }
     [System.ComponentModel.DataAnnotations.Required] public string IdempotencyKey { get; set; } = string.Empty;
+    public string? SignatureDataUrl { get; set; }
+    public string? SignerLegalName { get; set; }
+    public bool? LegalConsent { get; set; }
+    public string? IpAddress { get; set; }
+    public string? UserAgent { get; set; }
 }
 
 

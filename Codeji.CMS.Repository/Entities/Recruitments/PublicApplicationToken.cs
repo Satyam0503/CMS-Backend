@@ -14,4 +14,11 @@ public class PublicApplicationToken : BaseClass
     public DateTime ExpiresAt { get; set; }
     public bool IsUsed { get; set; }
     public DateTime? UsedAt { get; set; }
+    public bool IsProcessing { get; set; }
+    public string? ProcessingAttemptId { get; set; }
+    public DateTime? ProcessingStartedAtUtc { get; set; }
+    public string? ProcessingFileName { get; set; }
+    public string? UploadSha256 { get; set; }
+    public DateTime? UploadCompletedAtUtc { get; set; }
+    public string? UploadedFileName { get; set; }
 }

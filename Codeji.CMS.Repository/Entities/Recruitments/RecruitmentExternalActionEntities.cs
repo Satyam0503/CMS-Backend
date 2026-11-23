@@ -28,6 +28,7 @@ public sealed class RecruitmentEmailOutbox : BaseClass
 {
     [BsonId(IdGenerator = typeof(UniqueIdGenerator))] public string OutboxId { get; set; } = string.Empty;
     public string DedupeKey { get; set; } = string.Empty;
+    public string? RelatedApplicantId { get; set; }
     public string EventType { get; set; } = string.Empty;
     public string RecipientEmail { get; set; } = string.Empty;
     public string? RecipientUserId { get; set; }

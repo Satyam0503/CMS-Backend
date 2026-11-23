@@ -16,6 +16,8 @@ public class LeaveRequest : BaseClass
     public DateTime StartDate { get; set; }
     public DateTime EndDate { get; set; }
     public decimal TotalDays { get; set; }
+    public bool IsSandwichApplied { get; set; }
+    public int SandwichedDaysCount { get; set; }
     public required string Reason { get; set; }
     public string? ReviewedBy { get; set; }
     public string Comment { get; set; } = "";

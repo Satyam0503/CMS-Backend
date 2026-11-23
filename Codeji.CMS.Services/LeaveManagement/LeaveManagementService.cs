@@ -1,4 +1,4 @@
-using System.Linq.Expressions;
+﻿using System.Linq.Expressions;
 using System.Net;
 using MapsterMapper;
 using Codeji.CMS.Domain.Models;
@@ -56,6 +56,7 @@ public class LeaveManagementService : ILeaveManagementService
     private readonly IMongoDbRepository<EmployeeLifecyclePolicy>? _lifecyclePolicyRepository;
     private readonly IEmployeeLifecyclePolicyService? _lifecyclePolicyService;
     private readonly IRoleService? _roleService;
+    private readonly IMongoDbRepository<CompOffCreditRequest>? _compOffCreditRepo;
     public LeaveManagementService(
     IMongoDbRepository<EmpUser> employeeRepository,
     IMongoDbRepository<LeaveRequest> leave,
@@ -78,7 +79,8 @@ public class LeaveManagementService : ILeaveManagementService
     IEmployeeLifecycleCaseService? lifecycleCases = null,
     IMongoDbRepository<EmployeeLifecyclePolicy>? lifecyclePolicyRepository = null,
     IEmployeeLifecyclePolicyService? lifecyclePolicyService = null,
-    IRoleService? roleService = null
+    IRoleService? roleService = null,
+    IMongoDbRepository<CompOffCreditRequest>? compOffCreditRepo = null
     )
     {
         _httpContextAccessor = httpContextAccessor;
@@ -104,6 +106,7 @@ public class LeaveManagementService : ILeaveManagementService
         _lifecyclePolicyRepository = lifecyclePolicyRepository;
         _lifecyclePolicyService = lifecyclePolicyService;
         _roleService = roleService;
+        _compOffCreditRepo = compOffCreditRepo;
     }
 
     // updated services
@@ -432,7 +435,21 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         }
         Expression<Func<LeavePolicy, bool>> expression = status.HasValue ? lp => lp.CompanyId == companyId && lp.Status == status.Value : lp => lp.CompanyId == companyId;
         IEnumerable<LeavePolicy> leavePolicies = await _leavePolicyRepo.GetAll(expression);
-        var list = _mapper.Map<List<UpdateLeavePolicyRequest>>(leavePolicies);
+        var leavePoliciesList = leavePolicies.ToList();
+        if (leavePoliciesList.Count == 0 && (!status.HasValue || status.Value))
+        {
+            var anyExisting = await _leavePolicyRepo.FirstOrDefault(lp => lp.CompanyId == companyId, WithDeletedObjects: false, withDefaultFilter: false);
+            if (anyExisting is null)
+            {
+                var defaults = Companies.DefaultCompanySeeds.BuildDefaultLeavePolicies(companyId, "AutoBootstrap");
+                foreach (var d in defaults)
+                {
+                    await _leavePolicyRepo.AddOne(d);
+                }
+                leavePoliciesList = (await _leavePolicyRepo.GetAll(expression)).ToList();
+            }
+        }
+        var list = _mapper.Map<List<UpdateLeavePolicyRequest>>(leavePoliciesList) ?? [];
         if (_lifecyclePolicyRepository is not null)
         {
             var lifecycleLinks = (await _lifecyclePolicyRepository.GetAll(x =>
@@ -659,9 +676,8 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
             return result;
         }
 
-        var leaveDates = await _workingCalendar.GetLeaveDatesAsync(companyId,
-            requestStartDate, requestEndDate,
-            leavePolicy.WeekendInclusive, leavePolicy.HolidayInclusive);
+        var (leaveDates, sandwichedDaysCount, isSandwichApplied) = await ResolveLeaveDatesWithSandwichAsync(
+            companyId, requestStartDate, requestEndDate, leavePolicy);
         decimal totalRequestedDays = leaveDates.Count;
         if (leaveRequest.IsHalfDay)
         {
@@ -703,6 +719,8 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
             StartDate = requestStartDateTime,
             EndDate = requestEndDateTime,
             TotalDays = totalRequestedDays,
+            IsSandwichApplied = !leaveRequest.IsHalfDay && isSandwichApplied,
+            SandwichedDaysCount = !leaveRequest.IsHalfDay ? sandwichedDaysCount : 0,
             IsHalfDay = leavePolicy.HalfDayAllowed && leaveRequest.IsHalfDay,
             HalfDayPeriod = leaveRequest.IsHalfDay ? NormalizeHalfDayPeriod(leaveRequest.HalfDayPeriod) : null,
             Reason = leaveRequest.Reason,
@@ -824,9 +842,8 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
             return result;
         }
 
-        var leaveDates = await _workingCalendar.GetLeaveDatesAsync(companyId,
-            requestStartDate, requestEndDate,
-            leavePolicyEntity.WeekendInclusive, leavePolicyEntity.HolidayInclusive);
+        var (leaveDates, sandwichedDaysCount, isSandwichApplied) = await ResolveLeaveDatesWithSandwichAsync(
+            companyId, requestStartDate, requestEndDate, leavePolicyEntity);
         decimal totalRequestedDays = leaveDates.Count;
         if (leaveRequestDto.IsHalfDay)
         {
@@ -841,6 +858,7 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
         {
             result.Success = false;
             result.StatusCode = CustomStatusCode.InsufficientLeaveBalance;
+            result.Message = $"Insufficient leave balance. You have {employeeLeaveBalance?.Remaining ?? 0:0.#} remaining.";
             return result;
         }
         if (await HasActiveEmployeeAbsenceAsync(companyId, leaveRequestDto.UserId, requestStartDateTime, requestEndDateTime, leaveRequestDto.LeaveRequestId))
@@ -871,6 +889,8 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
                 .Set(lr => lr.StartDate, requestStartDateTime)
                 .Set(lr => lr.EndDate, requestEndDateTime)
                 .Set(lr => lr.TotalDays, totalRequestedDays)
+                .Set(lr => lr.IsSandwichApplied, !leaveRequestDto.IsHalfDay && isSandwichApplied)
+                .Set(lr => lr.SandwichedDaysCount, !leaveRequestDto.IsHalfDay ? sandwichedDaysCount : 0)
                 .Set(lr => lr.IsHalfDay, leavePolicyEntity.HalfDayAllowed && leaveRequestDto.IsHalfDay)
                 .Set(lr => lr.HalfDayPeriod, leaveRequestDto.IsHalfDay ? NormalizeHalfDayPeriod(leaveRequestDto.HalfDayPeriod) : null)
                 .Set(lr => lr.Reason, leaveRequestDto.Reason)
@@ -2653,6 +2673,238 @@ public async Task<Result> DeleteLeavePolicy(string policyId, string companyId)
                 }
             }
         }
+    }
+
+    public async Task<Result<SandwichEvaluationResult>> EvaluateSandwichPreview(string companyId, string leavePolicyId, DateTime startDate, DateTime endDate)
+    {
+        var result = new Result<SandwichEvaluationResult> { Success = false };
+        var leavePolicy = await _leavePolicyRepo.FirstOrDefault(lp => lp.CompanyId == companyId && lp.Id == leavePolicyId);
+        if (leavePolicy is null)
+        {
+            result.Message = "Leave policy not found.";
+            return result;
+        }
+
+        var start = DateOnly.FromDateTime(startDate);
+        var end = DateOnly.FromDateTime(endDate);
+        if (end < start)
+        {
+            result.Message = "End date cannot be earlier than start date.";
+            return result;
+        }
+
+        if (_workingCalendar == null)
+        {
+            result.Success = true;
+            result.MethodResult = new SandwichEvaluationResult { LeaveDates = [start] };
+            return result;
+        }
+
+        var evaluation = await _workingCalendar.EvaluateSandwichLeaveDatesAsync(
+            companyId, start, end,
+            leavePolicy.WeekendInclusive, leavePolicy.HolidayInclusive,
+            leavePolicy.EnableSandwichRules, leavePolicy.IncludeWeekendsInSandwich, leavePolicy.IncludeHolidaysInSandwich);
+
+        result.Success = true;
+        result.MethodResult = evaluation ?? new SandwichEvaluationResult { LeaveDates = [start] };
+        return result;
+    }
+
+    private async Task<(IReadOnlyList<DateOnly> LeaveDates, int SandwichedDaysCount, bool IsSandwichApplied)> ResolveLeaveDatesWithSandwichAsync(
+        string companyId,
+        DateOnly requestStartDate,
+        DateOnly requestEndDate,
+        LeavePolicy policy)
+    {
+        if (_workingCalendar != null)
+        {
+            if (policy.EnableSandwichRules)
+            {
+                var res = await _workingCalendar.EvaluateSandwichLeaveDatesAsync(
+                    companyId,
+                    requestStartDate, requestEndDate,
+                    policy.WeekendInclusive, policy.HolidayInclusive,
+                    policy.EnableSandwichRules, policy.IncludeWeekendsInSandwich, policy.IncludeHolidaysInSandwich);
+                if (res != null)
+                {
+                    return (res.LeaveDates, res.SandwichedDaysCount, res.IsSandwichApplied);
+                }
+            }
+            else
+            {
+                var baseDates = await _workingCalendar.GetLeaveDatesAsync(
+                    companyId,
+                    requestStartDate, requestEndDate,
+                    policy.WeekendInclusive, policy.HolidayInclusive);
+                if (baseDates != null)
+                {
+                    return (baseDates, 0, false);
+                }
+            }
+        }
+
+        var dates = new List<DateOnly>();
+        for (var d = requestStartDate; d <= requestEndDate; d = d.AddDays(1))
+        {
+            if (!policy.WeekendInclusive && (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday)) continue;
+            dates.Add(d);
+        }
+        return (dates, 0, false);
+    }
+
+    public async Task<Result<string>> RequestCompOffCredit(CompOffCreditRequestDto dto, string userId, string companyId)
+    {
+        var result = new Result<string> { Success = false };
+        if (dto == null || dto.WorkedDate > DateTime.UtcNow.Date)
+        {
+            result.Message = "Comp-Off credit can only be requested for past worked dates.";
+            return result;
+        }
+
+        if (dto.CreditDays <= 0 || dto.CreditDays > 2)
+        {
+            result.Message = "Credit days must be between 0.5 and 2.0.";
+            return result;
+        }
+
+        var policy = (await _leavePolicyRepo.GetAll(lp => lp.CompanyId == companyId && lp.EnableCompOffEarning && lp.Status)).FirstOrDefault();
+        var validityDays = policy?.CompOffValidityDays > 0 ? policy.CompOffValidityDays : 60;
+
+        var request = new CompOffCreditRequest
+        {
+            Id = Guid.NewGuid().ToString(),
+            CompanyId = companyId,
+            UserId = userId,
+            WorkedDate = dto.WorkedDate,
+            HoursWorked = dto.HoursWorked,
+            CreditDays = dto.CreditDays,
+            Reason = dto.Reason?.Trim() ?? string.Empty,
+            Status = "Pending",
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(validityDays),
+            CreatedDate = DateTime.UtcNow,
+            CreatedBy = userId
+        };
+
+        if (_compOffCreditRepo is not null)
+        {
+            var addResult = await _compOffCreditRepo.AddOne(request);
+            if (!addResult.Success)
+            {
+                result.Message = "Failed to submit Comp-Off request.";
+                return result;
+            }
+        }
+
+        result.Success = true;
+        result.MethodResult = request.Id;
+        result.Message = "Comp-Off credit request submitted successfully.";
+        return result;
+    }
+
+    public async Task<Result<List<CompOffCreditResponseDto>>> GetCompOffCreditRequests(string companyId, string? userId = null)
+    {
+        var result = new Result<List<CompOffCreditResponseDto>> { Success = true, MethodResult = [] };
+        if (_compOffCreditRepo is null) return result;
+
+        Expression<Func<CompOffCreditRequest, bool>> expr = string.IsNullOrWhiteSpace(userId)
+            ? r => r.CompanyId == companyId && !r.IsDeleted
+            : r => r.CompanyId == companyId && r.UserId == userId && !r.IsDeleted;
+
+        var list = (await _compOffCreditRepo.GetAll(expr)).OrderByDescending(r => r.CreatedDate).ToList();
+        var userIds = list.Select(x => x.UserId).Distinct().ToList();
+        var employees = (await _employeeRepository.GetAll(u => u.CompanyId == companyId && userIds.Contains(u.UserId)))
+            .ToDictionary(u => u.UserId, u => $"{u.FirstName} {u.LastName}".Trim());
+
+        result.MethodResult = list.Select(r => new CompOffCreditResponseDto
+        {
+            Id = r.Id,
+            UserId = r.UserId,
+            EmployeeName = employees.TryGetValue(r.UserId, out var name) ? name : r.UserId,
+            WorkedDate = r.WorkedDate,
+            HoursWorked = r.HoursWorked,
+            CreditDays = r.CreditDays,
+            Reason = r.Reason,
+            Status = r.Status,
+            ReviewedBy = r.ReviewedBy,
+            ReviewedAtUtc = r.ReviewedAtUtc,
+            ReviewRemarks = r.ReviewRemarks,
+            ExpiresAtUtc = r.ExpiresAtUtc,
+            CreatedDate = r.CreatedDate
+        }).ToList();
+
+        result.TotalRecords = result.MethodResult.Count;
+        return result;
+    }
+
+    public async Task<Result<string>> ReviewCompOffCredit(ReviewCompOffCreditDto dto, string reviewerUserId, string companyId)
+    {
+        var result = new Result<string> { Success = false };
+        if (_compOffCreditRepo is null)
+        {
+            result.Message = "Comp-Off repository not configured.";
+            return result;
+        }
+
+        var request = await _compOffCreditRepo.FirstOrDefault(r => r.CompanyId == companyId && r.Id == dto.RequestId && !r.IsDeleted);
+        if (request is null)
+        {
+            result.Message = "Comp-Off request not found.";
+            return result;
+        }
+
+        if (request.Status != "Pending")
+        {
+            result.Message = $"Comp-Off request is already {request.Status}.";
+            return result;
+        }
+
+        request.Status = dto.IsApproved ? "Approved" : "Rejected";
+        request.ReviewedBy = reviewerUserId;
+        request.ReviewedAtUtc = DateTime.UtcNow;
+        request.ReviewRemarks = dto.ReviewRemarks?.Trim();
+        request.UpdatedDate = DateTime.UtcNow;
+        request.UpdatedBy = reviewerUserId;
+
+        await _compOffCreditRepo.Update(Builders<CompOffCreditRequest>.Filter.Where(r => r.CompanyId == companyId && r.Id == request.Id), request);
+
+        if (dto.IsApproved)
+        {
+            var compOffPolicy = await _leavePolicyRepo.FirstOrDefault(lp => lp.CompanyId == companyId && (lp.EnableCompOffEarning || lp.Code == "COMP_OFF") && lp.Status);
+            if (compOffPolicy != null)
+            {
+                var balance = await _employeeLeaveBalanceRepo.FirstOrDefault(b => b.CompanyId == companyId && b.UserId == request.UserId && b.LeavePolicyId == compOffPolicy.Id);
+                if (balance is not null)
+                {
+                    balance.TotalAllocated += request.CreditDays;
+                    balance.Remaining += request.CreditDays;
+                    balance.UpdatedDate = DateTime.UtcNow;
+                    balance.UpdatedBy = reviewerUserId;
+                    await _employeeLeaveBalanceRepo.Update(Builders<EmployeeLeaveBalance>.Filter.Where(b => b.CompanyId == companyId && b.Id == balance.Id), balance);
+                }
+                else
+                {
+                    var newBalance = new EmployeeLeaveBalance
+                    {
+                        Id = Guid.NewGuid().ToString(),
+                        CompanyId = companyId,
+                        UserId = request.UserId,
+                        LeavePolicyId = compOffPolicy.Id,
+                        TotalAllocated = request.CreditDays,
+                        Taken = 0,
+                        Remaining = request.CreditDays,
+                        IsManualAllocation = true,
+                        CreatedDate = DateTime.UtcNow,
+                        CreatedBy = reviewerUserId
+                    };
+                    await _employeeLeaveBalanceRepo.AddOne(newBalance);
+                }
+            }
+        }
+
+        result.Success = true;
+        result.MethodResult = request.Id;
+        result.Message = $"Comp-Off request has been {(dto.IsApproved ? "approved and credited" : "rejected")}.";
+        return result;
     }
 }
 

@@ -38,6 +38,12 @@ public class RoleHandler : AuthorizationHandler<RoleRequirement>
             context.Fail();
             return;
         }
+        if (context.User?.Identity?.IsAuthenticated != true)
+        {
+            // Authentication middleware / the policy produces the correct challenge.
+            // Do not resolve tenant roles for an anonymous request.
+            return;
+        }
         // Get current user role id 
         string roleId = CurrentContext.UserRoleId(_httpContextAccessor);
         string companyId = CurrentContext.CompanyId(_httpContextAccessor);
@@ -62,6 +68,7 @@ public sealed class AnyRoleHandler(IHttpContextAccessor httpContextAccessor) : A
 {
     protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, AnyRoleRequirement requirement)
     {
+        if (context.User?.Identity?.IsAuthenticated != true) return;
         var httpContext = httpContextAccessor.HttpContext;
         var roleService = httpContext?.RequestServices.GetService(typeof(IRoleService)) as IRoleService;
         var roleId = CurrentContext.UserRoleId(httpContextAccessor);

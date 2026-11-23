@@ -34,11 +34,12 @@ public sealed class RecruitmentExternalActionService(
         var applicantId = command.ApplicantId?.Trim();
         if (string.IsNullOrWhiteSpace(applicantId)) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "Applicant is required.");
         var email = command.RecipientEmail.Trim().ToLowerInvariant();
-        var minutes = Math.Clamp(command.ExpiresInMinutes, 5, 24 * 60);
+        var isOfferAction = action is "OfferResponse" or "AcceptOffer" or "DeclineOffer" or "RequestOfferChange";
+        var minutes = Math.Clamp(command.ExpiresInMinutes, isOfferAction ? 1 : 5, isOfferAction ? 30 * 24 * 60 : 24 * 60);
         var issuanceKey = command.IssuanceKey.Trim();
         if (issuanceKey.Length < 12) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "Issuance key must be at least 12 characters.");
         var applicant = applicants is null ? null : await applicants.FirstOrDefault(x => x.CompanyId == companyId && x.ApplicantId == applicantId && !x.IsDeleted);
-        if (applicants is not null && applicant is null) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "Applicant does not belong to this company.", 404);
+        if (applicants is not null && (applicant is null || applicant.ConsentStatus == "Anonymized")) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "Applicant does not belong to this company or no longer accepts candidate actions.", 404);
         if (applicant is not null && !string.Equals(applicant.Email?.Trim(), email, StringComparison.OrdinalIgnoreCase)) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "Recipient email does not match the candidate.");
         var vacancyId = command.VacancyId?.Trim();
         if (applicant is not null && !string.IsNullOrWhiteSpace(vacancyId) && !string.Equals(applicant.VacancyId, vacancyId, StringComparison.Ordinal)) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "Vacancy does not belong to the candidate.", 404);
@@ -54,10 +55,14 @@ public sealed class RecruitmentExternalActionService(
         if (action is "OfferResponse" or "AcceptOffer" or "DeclineOffer" or "RequestOfferChange")
         {
             if (string.IsNullOrWhiteSpace(offerId)) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "Offer is required for this action.");
+            if (!command.ResourceVersion.HasValue || command.ResourceVersion.Value <= 0)
+                return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "The current offer version is required to issue a candidate response link.");
+            if (offers is null)
+                return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "Offer verification is unavailable. A candidate action link cannot be issued.", StatusCodes.Status503ServiceUnavailable);
             var offer = offers is null ? null : await offers.FirstOrDefault(x => x.CompanyId == companyId && x.OfferId == offerId && x.ApplicantId == applicantId && !x.IsDeleted);
             if (offers is not null && offer is null) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "Offer does not belong to the candidate.", 404);
             if (offer is not null && offer.Status is not (RecruitmentOfferStatus.Sent or RecruitmentOfferStatus.Approved)) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidTransition, "Only an active offer can receive an external action link.", 409);
-            if (offer is not null && command.ResourceVersion.HasValue && command.ResourceVersion.Value != offer.Version) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.ConcurrencyConflict, "Offer has changed. Refresh and issue a new link.", 409);
+            if (offer is null || command.ResourceVersion.Value != offer.Version) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.ConcurrencyConflict, "Offer has changed. Refresh and issue a new link.", 409);
         }
         var existing = await tokens.FirstOrDefault(x => x.CompanyId == companyId && x.IssuanceKey == issuanceKey && x.ActionType == action && x.ApplicantId == applicantId && !x.IsDeleted);
         if (existing is not null)
@@ -82,12 +87,33 @@ public sealed class RecruitmentExternalActionService(
         var item = await tokens.FirstOrDefault(x => x.TokenHash == hash && !x.IsDeleted);
         if (item is null || item.RevokedAtUtc is not null || item.ExpiresAtUtc <= DateTime.UtcNow || item.ConsumedAtUtc is not null)
             return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "This action link is invalid or expired.", 410);
+        if (applicants is not null && !await applicants.GetCollection().Find(x =>
+                x.CompanyId == item.CompanyId && x.ApplicantId == item.ApplicantId &&
+                !x.IsDeleted && x.ConsentStatus != "Anonymized").AnyAsync())
+            return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "This action link is no longer available.", 410);
         if (consume)
         {
             var consumed = await tokens.UpdateMany(Builders<RecruitmentExternalActionToken>.Filter.Where(x => x.ActionTokenId == item.ActionTokenId && x.TokenHash == hash && x.ConsumedAtUtc == null && x.RevokedAtUtc == null && x.ExpiresAtUtc > DateTime.UtcNow), Builders<RecruitmentExternalActionToken>.Update.Set(x => x.ConsumedAtUtc, DateTime.UtcNow).Set(x => x.LastAttemptAtUtc, DateTime.UtcNow).Inc(x => x.AttemptCount, 1));
             if (!consumed.Success) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.ConcurrencyConflict, "This action link was already used.", 409);
         }
         return Ok(ToDto(item), "Action link validated.");
+    }
+
+    public async Task<Result<RecruitmentExternalActionTokenDto>> ValidateForIdempotentReplay(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "Action token is required.");
+        var hash = Hash(token.Trim());
+        var item = await tokens.FirstOrDefault(x => x.TokenHash == hash && !x.IsDeleted);
+        // Expiry does not block recovery of a response that was already accepted
+        // before expiry. The candidate-action service still requires an exact
+        // idempotency key, payload fingerprint, offer version, and terminal state.
+        if (item is null || item.ConsumedAtUtc is null || item.RevokedAtUtc is not null)
+            return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "This action link is invalid or has not been used.", 410);
+        if (applicants is not null && !await applicants.GetCollection().Find(x =>
+                x.CompanyId == item.CompanyId && x.ApplicantId == item.ApplicantId &&
+                !x.IsDeleted && x.ConsentStatus != "Anonymized").AnyAsync())
+            return Fail<RecruitmentExternalActionTokenDto>(RecruitmentErrorCodes.InvalidRequest, "This action link is no longer available.", 410);
+        return Ok(ToDto(item), "Consumed action link loaded for idempotent response recovery.");
     }
 
     public async Task<Result<string>> Revoke(string actionTokenId, string actor)
@@ -106,7 +132,7 @@ public sealed class RecruitmentExternalActionService(
         if (key.Length < 8) return Fail<string>(RecruitmentErrorCodes.InvalidRequest, "Dedupe key is required.");
         var existing = await outbox.FirstOrDefault(x => x.CompanyId == companyId && x.DedupeKey == key && !x.IsDeleted);
         if (existing is not null) return Ok(existing.OutboxId, "Email already queued.");
-        var entity = new RecruitmentEmailOutbox { CompanyId = companyId, DedupeKey = key, EventType = command.EventType.Trim(), RecipientEmail = command.RecipientEmail.Trim(), RecipientUserId = command.RecipientUserId?.Trim(), Subject = command.Subject.Trim(), HtmlBody = command.HtmlBody, CreatedBy = actor, UpdatedBy = actor, AvailableAtUtc = DateTime.UtcNow };
+        var entity = new RecruitmentEmailOutbox { CompanyId = companyId, RelatedApplicantId = command.RelatedApplicantId, DedupeKey = key, EventType = command.EventType.Trim(), RecipientEmail = command.RecipientEmail.Trim(), RecipientUserId = command.RecipientUserId?.Trim(), Subject = command.Subject.Trim(), HtmlBody = command.HtmlBody, CreatedBy = actor, UpdatedBy = actor, AvailableAtUtc = DateTime.UtcNow };
         var added = await outbox.AddOne(entity);
         return added.Success ? Ok(entity.OutboxId, "Recruitment email queued.") : Fail<string>(RecruitmentErrorCodes.ConcurrencyConflict, "Recruitment email could not be queued.", 409);
     }

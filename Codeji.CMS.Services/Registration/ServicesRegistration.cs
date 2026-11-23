@@ -41,6 +41,8 @@ public static class ServicesRegistration
         services.AddScoped<IRecruitmentScreeningQueueService, RecruitmentScreeningQueueService>();
         services.AddScoped<IRecruitmentHiringDecisionService, RecruitmentHiringDecisionService>();
         services.AddScoped<IRecruitmentCandidatePrivacyService, RecruitmentCandidatePrivacyService>();
+        services.AddScoped<IRecruitmentCandidateDataRedactor, RecruitmentCandidateDataRedactor>();
+        services.AddScoped<IRecruitmentResumeOperationsService, RecruitmentResumeOperationsService>();
         services.AddScoped<IRecruitmentResumeExtractionService, RecruitmentResumeExtractionService>();
         services.AddScoped<IRecruitmentAuditExportService, RecruitmentAuditExportService>();
         services.AddScoped<IRecruitmentTalentPoolService, RecruitmentTalentPoolService>();
@@ -51,6 +53,7 @@ public static class ServicesRegistration
         services.AddScoped<IRecruitmentEmailOutboxProcessor, RecruitmentEmailOutboxProcessor>();
         services.AddScoped<IRecruitmentOfferNegotiationService, RecruitmentOfferNegotiationService>();
         services.AddScoped<IPublicCareerService, PublicCareerService>();
+        services.AddSingleton<IRecruitmentResumeScanner>(_ => ClamAvRecruitmentResumeScanner.FromEnvironment());
         services.AddScoped<IPublicCompanyProfileService, PublicCompanyProfileService>();
         services.AddScoped<ICareerSubscriptionService, CareerSubscriptionService>();
         services.AddScoped<ICareerEngagementService, CareerEngagementService>();
@@ -58,6 +61,7 @@ public static class ServicesRegistration
         services.AddScoped<IRoleService, RoleServices>();
         services.AddScoped<ICompanyService, CompanyService>();
         services.AddScoped<IEmployeeService, EmployeeService>();
+        services.AddScoped<IOrgChartService, OrgChartService>();
         services.AddScoped<IEmployeeExitOutboxProcessor, EmployeeExitOutboxProcessor>();
         services.AddScoped<IJobVacancy, JobVacancyService>();
         services.AddScoped<ICompanyMasterService, CompanyMasterService>();
